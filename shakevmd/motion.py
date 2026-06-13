@@ -84,7 +84,11 @@ def detect_stops(
 
     speeds[i-1] >= threshold かつ speeds[i] < threshold となる i を停止点とする。
     """
-    raise NotImplementedError
+    s = np.asarray(normalized_speeds, dtype=float)
+    return [
+        i for i in range(1, s.shape[0])
+        if s[i - 1] >= threshold and s[i] < threshold
+    ]
 
 
 def settle_oscillation(
@@ -99,7 +103,9 @@ def settle_oscillation(
     包絡初期値が amp(初期振幅)、settle_time 経過で概ね収束(exp(-4)≈0.018)。
     t=0 では 0(sin)から立ち上がってオーバーシュートし減衰する。
     """
-    raise NotImplementedError
+    t = np.asarray(t_sec, dtype=float)
+    tau = settle_time / 4.0
+    return amp * np.exp(-t / tau) * np.sin(2.0 * np.pi * freq * t)
 
 
 def impulse_envelope(
@@ -110,4 +116,9 @@ def impulse_envelope(
     frame より前は 0。Δt = (i - frame)/fps 秒。長さ n_frames。
     実際の揺れはこの包絡 × 高周波ノイズ(§6.1の帯域制限に従う)で、本関数は包絡のみ。
     """
-    raise NotImplementedError
+    env = np.zeros(n_frames)
+    idx = np.arange(n_frames)
+    mask = idx >= frame
+    dt = (idx[mask] - frame) / fps
+    env[mask] = strength * np.exp(-dt / decay_sec)
+    return env
