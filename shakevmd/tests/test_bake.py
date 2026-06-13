@@ -312,6 +312,24 @@ class TestBake:
         assert max(world_dev(f) for f in range(10, 51)) > 1e-2   # 位置揺れが効いている
         assert world_dev(0) < 1e-4 and world_dev(60) < 1e-4      # 端は0(フェード)
 
+    # --- モーション適応(§6.2 角速度＋移動速度) ---------------------------
+    def test_motion_adaptation_responds_to_rotation_only(self):
+        # その場回転(中心固定・角度のみ変化)でも motion_scale が効く(§6.2 角速度)。
+        # カメラ中心位置だけで速度を測る実装は静止扱いになり、ここで落ちる。
+        keys = [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-30.0),
+                kf(60, center=(0.0, 0.0, 0.0), rotation=(0.0, 1.0, 0.0), distance=-30.0)]
+        a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=0.0, fade_sec=0.2))
+        b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=10.0, fade_sec=0.2))
+        assert a[30].rotation != pytest.approx(b[30].rotation, abs=1e-4)
+
+    def test_motion_adaptation_responds_to_distance_only(self):
+        # ズーム(中心・角度固定・距離のみ変化)でも motion_scale が効く(§6.2 移動速度)。
+        keys = [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-50.0),
+                kf(60, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-10.0)]
+        a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=0.0, fade_sec=0.2))
+        b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=10.0, fade_sec=0.2))
+        assert a[30].rotation != pytest.approx(b[30].rotation, abs=1e-4)
+
     # --- 視野角・パース(§3.1 / §7.3) --------------------------------------
     def test_fov_equals_rounded_sample_even_with_shake(self):
         # 視野角は揺れ対象外。非ゼロ揺れでも各フレームの視野角=元曲線サンプルの四捨五入
@@ -367,6 +385,14 @@ class TestBake:
         out = {k.frame: k for k in res.camera_keys if k.frame > 30}
         assert list(out) == [60]
         assert key_tuple(out[60]) == key_tuple(SEQ[2])
+
+    def test_output_is_frame_ordered(self):
+        # 出力はフレーム昇順。範囲[30,60]の先頭 frame0(範囲外原本)がベイク群の後ろに
+        # 紛れず先頭に来る(§3.2 の出力。dict/sorted では順序崩れを検出できないため明示)。
+        res = bake.bake(SEQ, ranges=[(30, 60)], seed=1)
+        frames = [k.frame for k in res.camera_keys]
+        assert frames == sorted(frames)          # 出力リスト自体が昇順
+        assert frames[0] == 0                    # 先頭の範囲外原本が先頭に来る
 
     def test_range_snaps_to_nearest_existing_key(self):
         # 既存キー上にない範囲端は最近接の既存キーへスナップ(§5.2)。

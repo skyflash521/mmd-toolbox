@@ -1,7 +1,6 @@
-"""ベイクループ・視線揺れ変換(shakevmd.md §3, §4)。
+"""ベイクループ・視線揺れ変換(shakevmd.md §3, §4, §5)。
 
-サブステップA(本コミット)は §4.2 の視線揺れ変換 apply_gaze_shake のみを実装対象とする。
-ベイクループ本体 bake() はサブステップBで実装する(現状スタブ)。
+§4.2 の視線揺れ変換 apply_gaze_shake と、ベイクループ本体 bake() を実装する。
 
 §4.2 の実現方針: 揺れ角度は「元の角度 + ノイズ」のオイラー加算とし、カメラの
 ワールド位置が固定される(位置ノイズ分だけシフトする)ように新しいカメラ中心を
@@ -14,8 +13,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from mmd_toolbox.vmd import camera
+from mmd_toolbox.vmd import camera, interp
 from mmd_toolbox.vmd.types import CameraKey
+from shakevmd import cuts, motion, noise
 
 
 def round_half_up(x) -> int:
@@ -56,6 +56,10 @@ LINEAR_CAMERA_INTERP = bytes([20, 107, 20, 107]) * 6
 # ベイクは30fps・1フレーム間隔固定(§4.1)。間隔変更オプションは持たない。
 FPS = 30.0
 
+# 視線揺れノイズの6チャンネル(セグメント別にシード派生する)
+_ROT_CHANNELS = ("rot_x", "rot_y", "rot_z")
+_POS_CHANNELS = ("pos_x", "pos_y", "pos_z")
+
 
 @dataclass
 class BakeResult:
@@ -63,6 +67,31 @@ class BakeResult:
 
     camera_keys: list   # ベイク後の全カメラキー(範囲内=高密度、範囲外=原本)
     warnings: list
+
+
+def _working_view(camera_keys):
+    """正規化作業ビュー(フレーム昇順・同一フレーム重複は後勝ち)と破棄件数を返す(§3.1)。"""
+    by_frame = {}
+    for k in camera_keys:
+        by_frame[k.frame] = k   # 同一フレームは後勝ち(入力順で後のものが残る)
+    wv = [by_frame[f] for f in sorted(by_frame)]
+    return wv, len(camera_keys) - len(wv)
+
+
+def _snap(frame, wv_frames):
+    """frame を最近接の既存キーフレームへスナップする(§5.2)。等距離は小さい側。"""
+    return min(wv_frames, key=lambda f: (abs(f - frame), f))
+
+
+def _governing_perspective(wv, frame):
+    """当該フレーム以前で最も近いキーのパースペクティブをホールドする(§3.1)。"""
+    persp = wv[0].perspective
+    for k in wv:
+        if k.frame <= frame:
+            persp = k.perspective
+        else:
+            break
+    return persp
 
 
 def bake(
@@ -91,4 +120,122 @@ def bake(
     - ノイズ位相はセグメントごとに独立(derive_seed)
     - 視野角は四捨五入、パースは直前キーをホールド
     """
-    raise NotImplementedError
+    if not camera_keys:
+        raise ValueError("カメラキーが空(§3.1: 終了コード1相当)")
+
+    warnings: list = []
+    wv, dropped = _working_view(camera_keys)
+    if dropped:
+        warnings.append(f"正規化: 同一フレーム重複 {dropped} 件を後勝ちで破棄した(§3.1)")
+    wv_frames = [k.frame for k in wv]
+    first, last = wv_frames[0], wv_frames[-1]
+
+    # --- 範囲解決(既定=全範囲、端は最近接キーへスナップ、重複/接触はエラー) ---
+    if ranges is None:
+        resolved = [(first, last)]
+    else:
+        resolved = []
+        for s, e in ranges:
+            a, b = _snap(s, wv_frames), _snap(e, wv_frames)
+            if a > b:
+                a, b = b, a
+            resolved.append((a, b))
+    resolved.sort()
+    for i in range(1, len(resolved)):
+        if resolved[i][0] <= resolved[i - 1][1]:
+            raise ValueError(
+                f"範囲が重複/接触している: {resolved[i - 1]} と {resolved[i]}(§5.2)"
+            )
+
+    # --- カット検出(作業ビュー全体)+ 手動指定 ---
+    detected = cuts.detect_cuts(wv, cut_pos_threshold, cut_rot_threshold)
+    cut_frames = cuts.resolve_cuts(
+        detected, list(manual_cuts_add), list(manual_cuts_remove)
+    )
+
+    fade_frames = int(round(fade_sec * FPS))
+    baked: list = []
+
+    for a, b in resolved:
+        n = b - a + 1
+        fade = motion.fade_envelope(n, fade_sec, FPS)  # 範囲レベル(端で0)
+        if n < 2 * fade_frames:
+            warnings.append(
+                f"範囲[{a},{b}](長さ{n}f)が 2×fade({2 * fade_frames}f)未満。"
+                f"フェードを自動短縮した(§5.1)"
+            )
+        for si, seg in enumerate(cuts.segment_bounds(a, b, cut_frames)):
+            sframes = list(range(seg.start, seg.end + 1))
+            t = np.array([f / FPS for f in sframes], dtype=float)
+
+            # チャンネル別ノイズ(セグメント別シード派生=位相独立。§5.3-1)
+            rot_n = []
+            for ch in _ROT_CHANNELS:
+                vals, warns = noise.band_limited_noise(
+                    noise.derive_seed(seed, si, ch), t, freq
+                )
+                rot_n.append(vals)
+                warnings.extend(warns)
+            pos_n = []
+            for ch in _POS_CHANNELS:
+                vals, warns = noise.band_limited_noise(
+                    noise.derive_seed(seed, si, ch), t, freq
+                )
+                pos_n.append(vals)
+                warnings.extend(warns)
+
+            # 速度解析(セグメント単位。カットをまたがない。§6.2 角速度＋移動速度)。
+            # カメラ中心位置だけでは、その場回転(パン/チルト/ロール)や距離のみのズームを
+            # 静止と誤判定する。カメラのワールド位置(中心+R·(0,0,距離))は回転・ズーム・移動を
+            # すべて反映し、角度差分が角速度を補う。両者の正規化速度の大きい方を採る。
+            samples = [interp.sample_camera(wv, f) for f in sframes]
+            world = np.array([
+                camera.to_world(CameraKey(
+                    0, s["distance"], s["position"], s["rotation"],
+                    LINEAR_CAMERA_INTERP, 0, 0,
+                )).position
+                for s in samples
+            ], dtype=float)
+            angles = np.array([s["rotation"] for s in samples], dtype=float)
+            speeds = np.maximum(motion.frame_speeds(world), motion.frame_speeds(angles))
+
+            for idx, f in enumerate(sframes):
+                s = samples[idx]
+                # 振幅 = 基本 × 適応(1+motion_scale×速度) × 範囲フェード
+                amp_factor = (1.0 + motion_scale * speeds[idx]) * fade[f - a]
+                rot_noise = tuple(
+                    rot_n[i][idx] * math.radians(amp_rot * rot_weights[i]) * amp_factor
+                    for i in range(3)
+                )
+                pos_noise = tuple(
+                    pos_n[i][idx] * amp_pos * amp_factor for i in range(3)
+                )
+                persp = _governing_perspective(wv, f)
+                fov = round_half_up(s["fov"])
+                probe = CameraKey(
+                    f, s["distance"], s["position"], s["rotation"],
+                    LINEAR_CAMERA_INTERP, fov, persp,
+                )
+                shaken = apply_gaze_shake(probe, rot_noise, pos_noise)
+                baked.append(CameraKey(
+                    f, s["distance"], shaken["position"], shaken["rotation"],
+                    LINEAR_CAMERA_INTERP, fov, persp,
+                ))
+
+    # --- 範囲外は原本レコードをそのまま透過(バイト保持。§3.2) ---
+    # 原本キーはそのまま(同一オブジェクト=バイト同一)。出力はフレーム昇順に整列して、
+    # 範囲外キー(例: 範囲[30,60]に対する先頭 frame0)がベイク群の後ろに紛れないようにする。
+    def _in_range(fr):
+        return any(a <= fr <= b for a, b in resolved)
+
+    out_keys = [k for k in camera_keys if not _in_range(k.frame)]
+
+    # 警告の重複を畳む(同一帯域制限警告がチャンネル/セグメントで繰り返されるため)
+    seen, uniq = set(), []
+    for w in warnings:
+        if w not in seen:
+            seen.add(w)
+            uniq.append(w)
+
+    result_keys = sorted(baked + out_keys, key=lambda k: k.frame)
+    return BakeResult(camera_keys=result_keys, warnings=uniq)
