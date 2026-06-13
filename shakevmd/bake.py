@@ -104,6 +104,7 @@ def bake(
     rot_weights=(1.0, 1.0, 0.3),  # Pitch/Yaw/Roll = rx/ry/rz 個別重み
     freq: float = 1.2,
     motion_scale: float = 0.5,
+    settle: float = 0.3,         # 度。停止後の減衰振動の初期振幅(§6.2)。0で無効
     fade_sec: float = 0.7,
     cut_pos_threshold: float = 5.0,
     cut_rot_threshold: float = 20.0,

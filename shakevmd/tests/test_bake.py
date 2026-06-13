@@ -139,6 +139,37 @@ SEQ_CUT = [
     kf(60, center=(50.0, 0.0, -3.0), rotation=(-0.1, 0.3, 0.05)),
 ]
 
+# パン→停止: ry を [0,30] で 0→0.5 にパンし、[30,60] はホールド(frame30 付近で停止)。
+# settle(§6.2 停止後の減衰振動)の検証用。
+PAN_STOP = [
+    kf(0, rotation=(0.0, 0.0, 0.0)),
+    kf(30, rotation=(0.0, 0.5, 0.0)),
+    kf(60, rotation=(0.0, 0.5, 0.0)),
+]
+
+# カット直前まで角速度大・カット直後は角速度ゼロ。カットをまたいで停止検出すると
+# frame30 で誤発動するが、セグメント単位なら発動しない(§5.3-3)の検証用。
+CUT_THEN_STOP = [
+    kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),
+    kf(29, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0)),   # [0,29] 高速パン
+    kf(30, center=(40.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0)),  # frame30: 中心40ジャンプ=カット
+    kf(60, center=(40.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0)),  # [30,60] 角度ホールド(角速度0)
+]
+
+# 位置のみパン→停止(角度は不変)。settle は角速度ベース(§6.2)なので発動しないことの検証用。
+POS_PAN_STOP = [
+    kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),
+    kf(30, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),  # 位置パン
+    kf(60, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),  # 停止
+]
+
+# 範囲端近く(frame50)で停止。settle が範囲端でフェード(§5.1)で0になることの検証用。
+LATE_STOP = [
+    kf(0, rotation=(0.0, 0.0, 0.0)),
+    kf(50, rotation=(0.0, 0.5, 0.0)),   # [0,50] パン
+    kf(60, rotation=(0.0, 0.5, 0.0)),   # frame50 付近で停止(範囲端に近い)
+]
+
 
 def by_frame(result):
     return {k.frame: k for k in result.camera_keys}
@@ -329,6 +360,107 @@ class TestBake:
         a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=0.0, fade_sec=0.2))
         b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=10.0, fade_sec=0.2))
         assert a[30].rotation != pytest.approx(b[30].rotation, abs=1e-4)
+
+    # --- settle 停止後の減衰振動(§6.2) -----------------------------------
+    def _settle_rdev(self, fixture, res, f):
+        s = interp.sample_camera(fixture, f)
+        return np.array(res[f].rotation) - np.array(s["rotation"])   # 回転残差ベクトル(rad)
+
+    def test_settle_adds_decaying_oscillation_after_stop(self):
+        # パン(ry)→停止後、settle が直前の回転方向(ry)に減衰振動を加える(§6.2)。
+        # base ノイズを切る(amp_rot=0/amp_pos=0)ことで settle 成分だけを観測する。
+        res = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                 settle=5.0, fade_sec=0.1))
+        dev = {f: self._settle_rdev(PAN_STOP, res, f) for f in range(0, 61)}
+
+        def mag(rng):
+            return max(float(np.linalg.norm(dev[f])) for f in rng)
+
+        # 停止後に揺れが出る(settle 発動)
+        assert mag(range(33, 50)) > 1e-3
+        # 直前の回転方向(ry=index1)が主成分: ry 残差が rx/rz よりはるかに大きい
+        peak_f = max(range(33, 50), key=lambda f: abs(dev[f][1]))
+        assert abs(dev[peak_f][1]) > 5 * max(abs(dev[peak_f][0]), abs(dev[peak_f][2]))
+        # 方向(符号): 停止直後の最初の山は +ry(直前のパン方向と同符号。逆方向なら落ちる)
+        ry = [dev[f][1] for f in range(31, 56)]
+        early_peak_f = max(range(31, 38), key=lambda f: abs(dev[f][1]))
+        assert dev[early_peak_f][1] > 0
+        # 「振動」: ry 残差は両符号をとる(片側減衰でなく sin 振動。逆方向/片側なら落ちる)
+        assert max(ry) > 1e-3 and min(ry) < -1e-3
+        # 初期振幅は settle 度のスケール(≈radians(5)=0.087)。度/ラジアン取り違えや桁違いを排除
+        assert 0.01 < mag(range(31, 45)) < 0.3
+        # 収束: 後半(フェード手前 50-55、fade≈1)は停止直後よりはるかに小さく、ほぼ0へ
+        assert mag(range(33, 43)) > mag(range(50, 56))
+        assert mag(range(50, 56)) < 0.02
+        # 停止前(パン中)は settle 非発動 → base ノイズも0なのでほぼ0
+        assert mag(range(1, 25)) < 1e-4
+
+    def test_settle_zero_disables_only_settle(self):
+        # settle=0 は settle 成分だけを無効化する(base ノイズには影響しない)。
+        # (a) settle=0 + base ノイズ0 → 全フレーム原本一致(settle 無し)
+        res0 = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                  settle=0.0, fade_sec=0.1))
+        for f in range(0, 61):
+            s = interp.sample_camera(PAN_STOP, f)
+            assert res0[f].rotation == pytest.approx(s["rotation"], abs=1e-6)
+        # (b) settle=0 + base ノイズ有り → 通常の揺れは残る(settle=0 が base を殺さない)
+        resn = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=10.0, amp_pos=0.0,
+                                  settle=0.0, fade_sec=0.1))
+        s30 = interp.sample_camera(PAN_STOP, 30)
+        assert resn[30].rotation != pytest.approx(s30["rotation"], abs=1e-3)
+
+    def test_settle_is_additive_to_base_noise(self):
+        # settle は通常の揺れに「加算」される(置換しない。§6.2)。回転は sampled+rot_noise で
+        # 線形なので、回転残差は base 成分と settle 成分の和に厳密一致する。
+        base = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=8.0, amp_pos=0.0, settle=0.0, fade_sec=0.1))
+        only = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0, settle=5.0, fade_sec=0.1))
+        both = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=8.0, amp_pos=0.0, settle=5.0, fade_sec=0.1))
+        settle_seen = False
+        for f in range(33, 50):
+            s = np.array(interp.sample_camera(PAN_STOP, f)["rotation"])
+            dev_base = np.array(base[f].rotation) - s
+            dev_only = np.array(only[f].rotation) - s
+            dev_both = np.array(both[f].rotation) - s
+            assert dev_both == pytest.approx(dev_base + dev_only, abs=1e-9)  # 加算(置換でない)
+            if float(np.linalg.norm(dev_only)) > 1e-3:
+                settle_seen = True
+        assert settle_seen   # settle 成分が実際に効いている(恒真でない)
+
+    def test_settle_faded_at_range_end(self):
+        # settle も範囲端フェードの対象(§5.1: 範囲端で揺れ強度は必ず0)。停止が範囲端近く
+        # (frame50)でも、範囲端(frame60)では fade=0 により settle が0になる。
+        res = by_frame(bake.bake(LATE_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                 settle=10.0, fade_sec=0.2))
+
+        def mag(rng):
+            return max(
+                float(np.linalg.norm(
+                    np.array(res[f].rotation) - np.array(interp.sample_camera(LATE_STOP, f)["rotation"])))
+                for f in rng)
+
+        # 停止直後(フェード手前)は settle が乗っている
+        assert mag(range(51, 55)) > 1e-3
+        # 範囲端(frame60)は fade=0 で settle も0(原本一致)。settle がまだ減衰しきる前でも端は0
+        s60 = interp.sample_camera(LATE_STOP, 60)
+        assert res[60].rotation == pytest.approx(s60["rotation"], abs=1e-4)
+
+    def test_settle_is_angular_not_positional(self):
+        # settle は角速度ベース(§6.2)。位置のみパン→停止(角度不変)では発動しない。
+        res = by_frame(bake.bake(POS_PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                 settle=10.0, fade_sec=0.1))
+        for f in range(0, 61):
+            s = interp.sample_camera(POS_PAN_STOP, f)
+            assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-6)
+
+    def test_settle_not_triggered_at_cut(self):
+        # カット点では settle を発動しない(§5.3-3)。CUT_THEN_STOP は frame30 のカット直前まで
+        # 角速度大・直後ゼロ。カットをまたいで停止検出すると frame30 で誤発動するが、
+        # セグメント単位なら発動しない。base ノイズ0・settle 大でも frame30 以降は原本一致。
+        res = by_frame(bake.bake(CUT_THEN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                 settle=10.0, fade_sec=0.1))
+        for f in range(30, 45):
+            s = interp.sample_camera(CUT_THEN_STOP, f)
+            assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-4)
 
     # --- 視野角・パース(§3.1 / §7.3) --------------------------------------
     def test_fov_equals_rounded_sample_even_with_shake(self):
