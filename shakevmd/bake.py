@@ -110,6 +110,7 @@ def bake(
     cut_rot_threshold: float = 20.0,
     manual_cuts_add=(),
     manual_cuts_remove=(),
+    impulses=(),                 # (F,S,D) の並び。フレームFに強さS度・減衰D秒の衝撃(§6.3)
 ) -> BakeResult:
     """ベイクループ本体(§3, §4, §5)。
 

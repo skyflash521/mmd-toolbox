@@ -174,6 +174,12 @@ LATE_STOP = [
     kf(60, rotation=(0.0, 0.5, 0.0), interp_block=_LIN),   # frame50 で停止(範囲端に近い)
 ]
 
+# 無動(完全静止)。impulse(§6.3)成分だけを観測するための土台(base揺れ・settleを切る)。
+STATIC = [
+    kf(0, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(60, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+]
+
 
 def by_frame(result):
     return {k.frame: k for k in result.camera_keys}
@@ -466,6 +472,83 @@ class TestBake:
         for f in range(30, 45):
             s = interp.sample_camera(CUT_THEN_STOP, f)
             assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-4)
+
+    # --- impulse 衝撃(§6.3) ----------------------------------------------
+    def _imp_dev(self, res, f):
+        s = interp.sample_camera(STATIC, f)
+        return np.array(res[f].rotation) - np.array(s["rotation"])   # 回転残差ベクトル(rad)
+
+    def _imp_mag(self, res, f):
+        return float(np.linalg.norm(self._imp_dev(res, f)))
+
+    def test_impulse_fires_from_frame_and_decays(self):
+        # フレームF以降に S·exp(-t/D) 包絡の高周波揺れ(§6.3)。base/settle を切り impulse だけ観測。
+        res = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                                 impulses=[(30, 10.0, 0.5)], fade_sec=0.1))
+        # 発火前(F=30 より前。F-1=29 まで含める=off-by-one検出)はほぼ0
+        assert max(self._imp_mag(res, f) for f in range(5, 30)) < 1e-4
+        # F以降に揺れが出る
+        assert max(self._imp_mag(res, f) for f in range(30, 45)) > 1e-3
+        # 振幅は S 度スケール(≈radians(10)=0.17)。度/ラジアン取り違え・桁違いを排除
+        peak = max(self._imp_mag(res, f) for f in range(30, 35))
+        assert 0.02 < peak < 0.6
+        # 指数減衰 S·exp(-t/D): F付近とF+D(D=0.5s=15f→frame45)付近の比は ≈e。2〜5倍に収まる
+        near_F = max(self._imp_mag(res, f) for f in range(30, 35))
+        near_FD = max(self._imp_mag(res, f) for f in range(44, 49))
+        assert 2.0 < near_F / max(near_FD, 1e-9) < 5.0
+        # 高周波性: 残差(主軸)が窓内で何度も符号反転する(低周波なら反転は1回程度)
+        ax = int(np.argmax(np.abs(self._imp_dev(res, 31))))
+        comp = [self._imp_dev(res, f)[ax] for f in range(30, 45)]
+        signs = [c > 0 for c in comp if abs(c) > 1e-4]
+        flips = sum(1 for i in range(1, len(signs)) if signs[i] != signs[i - 1])
+        assert flips >= 3
+
+    def test_no_impulse_no_effect(self):
+        # impulses 未指定(既定)でも明示の()でも impulse 成分なし(base/settle も0なら原本一致)
+        for kw in ({}, {"impulses": ()}):
+            res = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                     settle=0.0, fade_sec=0.1, **kw))
+            for f in range(0, 61):
+                s = interp.sample_camera(STATIC, f)
+                assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-9)
+
+    def test_impulse_seed_derived_direction(self):
+        # 方向・揺れはシードから決定(§6.3)。同一シードで再現、異なるシードで変わる。
+        a = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                               impulses=[(30, 10.0, 0.5)], fade_sec=0.1))
+        b = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                               impulses=[(30, 10.0, 0.5)], fade_sec=0.1))
+        c = by_frame(bake.bake(STATIC, seed=2, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                               impulses=[(30, 10.0, 0.5)], fade_sec=0.1))
+        for f in range(30, 45):
+            assert a[f].rotation == pytest.approx(b[f].rotation, abs=1e-12)   # 再現性
+        assert any(a[f].rotation != pytest.approx(c[f].rotation, abs=1e-6) for f in range(30, 45))  # シード依存
+
+    def test_impulses_additive(self):
+        # 複数 impulse は加算合成(§6.3)。重なる2衝撃で残差が各単独の和に一致(max/last-wins を排除)。
+        # 回転は sampled+rot_noise で線形なので和が厳密に成立する。impulse のシードは F 由来
+        # (index 非依存)なので、単独/複合で同一 F の衝撃は同じ揺れになる。
+        A = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                               impulses=[(30, 6.0, 1.0)], fade_sec=0.1))
+        B = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                               impulses=[(36, 6.0, 1.0)], fade_sec=0.1))
+        AB = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                                impulses=[(30, 6.0, 1.0), (36, 6.0, 1.0)], fade_sec=0.1))
+        overlap_seen = False
+        for f in range(36, 50):   # 両衝撃が重なる領域
+            assert self._imp_dev(AB, f) == pytest.approx(
+                self._imp_dev(A, f) + self._imp_dev(B, f), abs=1e-9)   # 加算(max/置換でない)
+            if self._imp_mag(A, f) > 1e-3 and self._imp_mag(B, f) > 1e-3:
+                overlap_seen = True
+        assert overlap_seen   # 実際に重なっている(恒真でない)
+
+    def test_impulse_faded_at_range_end(self):
+        # impulse も範囲端フェード(§5.1)の対象。範囲端近く(F=55)で発火しても frame60 では0。
+        res = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                                 impulses=[(55, 10.0, 0.5)], fade_sec=0.2))
+        assert max(self._imp_mag(res, f) for f in range(55, 58)) > 1e-3   # 発火直後は乗る
+        s60 = interp.sample_camera(STATIC, 60)
+        assert res[60].rotation == pytest.approx(s60["rotation"], abs=1e-4)  # 範囲端は0
 
     # --- 視野角・パース(§3.1 / §7.3) --------------------------------------
     def test_fov_equals_rounded_sample_even_with_shake(self):
