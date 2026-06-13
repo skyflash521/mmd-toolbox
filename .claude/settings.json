@@ -40,7 +40,8 @@
       "Bash(git worktree list)",
       "Bash(git config --get *)",
       "Bash(git config --list)",
-      "Bash(git config -l)"
+      "Bash(git config -l)",
+      "Bash(node \"*/codex-companion.mjs\" *)"
     ]
   }
 }
