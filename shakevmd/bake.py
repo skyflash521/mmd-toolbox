@@ -26,7 +26,18 @@ def apply_gaze_shake(camera_key, rot_noise, pos_noise=(0.0, 0.0, 0.0)) -> dict:
     rot_noise=(drx,dry,drz) ラジアン、pos_noise=(dx,dy,dz)。
     戻り値: {"position": (cx,cy,cz), "rotation": (rx,ry,rz)}
     """
-    raise NotImplementedError
+    new_rot = tuple(camera_key.rotation[i] + rot_noise[i] for i in range(3))
+    # カメラワールド位置(位置ノイズ分シフト)
+    cam_pos = np.array(camera.to_world(camera_key).position, dtype=float)
+    cam_pos = cam_pos + np.array(pos_noise, dtype=float)
+    # offset = R(new_rot)·(0,0,distance) を中心0のプローブから取得(camera 規約を再利用)
+    probe = CameraKey(
+        0, camera_key.distance, (0.0, 0.0, 0.0), new_rot, bytes(24),
+        camera_key.fov, camera_key.perspective,
+    )
+    offset = np.array(camera.to_world(probe).position, dtype=float)
+    center = cam_pos - offset
+    return {"position": tuple(center), "rotation": new_rot}
 
 
 @dataclass
