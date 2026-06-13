@@ -175,3 +175,120 @@ class TestAdaptiveAmplitude:
     def test_array_input(self):
         out = motion.adaptive_amplitude(1.0, np.array([0.0, 0.5, 1.0]), motion_scale=0.4)
         assert np.allclose(out, [1.0, 1.2, 1.4])
+
+
+# ---------------------------------------------------------------------------
+# detect_stops(§6.2 停止検出)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectStops:
+    def test_crossing_below_is_stop(self):
+        # 0.5,0.5 (動) → 0.0,0.0 (停止): index2 で閾値0.1を上から下へ横切る
+        speeds = np.array([0.5, 0.5, 0.0, 0.0])
+        assert motion.detect_stops(speeds, threshold=0.1) == [2]
+
+    def test_no_stop_when_always_moving(self):
+        assert motion.detect_stops(np.full(10, 0.5), threshold=0.1) == []
+
+    def test_no_stop_when_always_stopped(self):
+        assert motion.detect_stops(np.zeros(10), threshold=0.1) == []
+
+    def test_multiple_stops(self):
+        # 動→停→動→停
+        speeds = np.array([0.5, 0.0, 0.0, 0.5, 0.5, 0.0])
+        assert motion.detect_stops(speeds, threshold=0.1) == [1, 5]
+
+    def test_only_downward_crossing(self):
+        # 停→動(下から上)は停止点ではない
+        speeds = np.array([0.0, 0.0, 0.5, 0.5])
+        assert motion.detect_stops(speeds, threshold=0.1) == []
+
+    def test_threshold_boundary(self):
+        # 境界: speeds[i-1] >= threshold かつ speeds[i] < threshold で停止
+        # [0.1, 0.0] (th=0.1): 0.1>=0.1 かつ 0.0<0.1 → 停止 @1
+        assert motion.detect_stops(np.array([0.1, 0.0]), threshold=0.1) == [1]
+        # [0.5, 0.1] (th=0.1): 0.1<0.1 が偽 → 停止でない
+        assert motion.detect_stops(np.array([0.5, 0.1]), threshold=0.1) == []
+
+
+# ---------------------------------------------------------------------------
+# settle_oscillation(§6.2 停止過渡)
+# ---------------------------------------------------------------------------
+
+
+class TestSettleOscillation:
+    def test_zero_at_start(self):
+        assert motion.settle_oscillation(0.0, amp=0.3) == pytest.approx(0.0, abs=1e-9)
+
+    def test_matches_formula(self):
+        # 設計式 amp·exp(-t/(settle_time/4))·sin(2π·freq·t) を既知点で固定。
+        # freq は明示指定(暫定デフォルトに依存しない)。
+        amp, st, freq = 0.3, 1.0, 3.0
+        t = np.linspace(0.0, 2.0, 257)
+        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
+        expected = amp * np.exp(-t / (st / 4.0)) * np.sin(2 * np.pi * freq * t)
+        assert np.allclose(vals, expected, atol=1e-9)
+
+    def test_envelope_upper_bound(self):
+        # |値| <= 包絡 amp·exp(-t/(settle_time/4))(freq に依存しない上限)
+        amp, st, freq = 0.3, 1.0, 3.0
+        t = np.linspace(0.0, 2.0, 400)
+        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
+        env = amp * np.exp(-t / (st / 4.0))
+        assert np.all(np.abs(vals) <= env + 1e-9)
+
+    def test_converged_after_settle_time(self):
+        # settle_time 以降は包絡(exp(-4)≈1.8%)で抑えられ、全点で初期振幅の2%未満。
+        # 位相に依存しないよう [settle_time, 2·settle_time] の範囲で評価する。
+        amp, st, freq = 0.3, 1.0, 3.0
+        t = np.linspace(st, 2 * st, 200)
+        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
+        assert np.all(np.abs(vals) < 0.02 * amp)
+
+    def test_oscillates(self):
+        # 振動する(符号変化が複数回)。freq は明示指定。
+        amp, st, freq = 0.3, 1.0, 3.0
+        t = np.linspace(0.0, 1.0, 600)
+        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
+        nonzero = vals[np.abs(vals) > 1e-6]
+        sign_changes = int(np.sum(np.diff(np.sign(nonzero)) != 0))
+        assert sign_changes >= 2
+
+    def test_deterministic(self):
+        a = motion.settle_oscillation(0.3, amp=0.3, freq=3.0)
+        b = motion.settle_oscillation(0.3, amp=0.3, freq=3.0)
+        assert a == b
+
+
+# ---------------------------------------------------------------------------
+# impulse_envelope(§6.3)
+# ---------------------------------------------------------------------------
+
+
+class TestImpulseEnvelope:
+    def test_zero_before_frame(self):
+        env = motion.impulse_envelope(60, frame=30, strength=2.0, decay_sec=0.5, fps=30.0)
+        assert env.shape == (60,)
+        assert np.allclose(env[:30], 0.0)
+
+    def test_peak_at_frame(self):
+        env = motion.impulse_envelope(60, frame=30, strength=2.0, decay_sec=0.5, fps=30.0)
+        assert env[30] == pytest.approx(2.0, abs=1e-9)
+
+    def test_exponential_decay(self):
+        # decay_sec 経過(= D×fps フレーム後)で strength/e
+        env = motion.impulse_envelope(120, frame=10, strength=2.0, decay_sec=1.0, fps=30.0)
+        assert env[10 + 30] == pytest.approx(2.0 / np.e, rel=1e-6)
+
+    def test_monotonic_decay_after_frame(self):
+        env = motion.impulse_envelope(120, frame=10, strength=2.0, decay_sec=1.0, fps=30.0)
+        assert np.all(np.diff(env[10:]) <= 1e-12)
+
+    def test_matches_exponential_formula(self):
+        # frame 以降の複数点で strength·exp(-Δt/decay_sec) と一致(線形減衰等を排除)
+        F, S, D, fps = 10, 2.0, 0.8, 30.0
+        env = motion.impulse_envelope(120, frame=F, strength=S, decay_sec=D, fps=fps)
+        idx = np.arange(F, 120)
+        dt = (idx - F) / fps
+        assert np.allclose(env[F:], S * np.exp(-dt / D), atol=1e-9)
