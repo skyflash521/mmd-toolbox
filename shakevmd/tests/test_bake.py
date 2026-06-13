@@ -139,35 +139,39 @@ SEQ_CUT = [
     kf(60, center=(50.0, 0.0, -3.0), rotation=(-0.1, 0.3, 0.05)),
 ]
 
-# パン→停止: ry を [0,30] で 0→0.5 にパンし、[30,60] はホールド(frame30 付近で停止)。
-# settle(§6.2 停止後の減衰振動)の検証用。
+# settle 用フィクスチャは**線形補間**(等速パン)を使う。非線形だとパン途中で速度が揺らぎ
+# frame_speeds 正規化で誤った停止が検出され settle が早発するため、停止を遷移点に限定する。
+_LIN = bake.LINEAR_CAMERA_INTERP
+
+
+# パン→停止: ry を [0,30] で 0→0.5 に等速パンし、[30,60] はホールド(frame30 で停止)。
 PAN_STOP = [
-    kf(0, rotation=(0.0, 0.0, 0.0)),
-    kf(30, rotation=(0.0, 0.5, 0.0)),
-    kf(60, rotation=(0.0, 0.5, 0.0)),
+    kf(0, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(30, rotation=(0.0, 0.5, 0.0), interp_block=_LIN),
+    kf(60, rotation=(0.0, 0.5, 0.0), interp_block=_LIN),
 ]
 
 # カット直前まで角速度大・カット直後は角速度ゼロ。カットをまたいで停止検出すると
 # frame30 で誤発動するが、セグメント単位なら発動しない(§5.3-3)の検証用。
 CUT_THEN_STOP = [
-    kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),
-    kf(29, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0)),   # [0,29] 高速パン
-    kf(30, center=(40.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0)),  # frame30: 中心40ジャンプ=カット
-    kf(60, center=(40.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0)),  # [30,60] 角度ホールド(角速度0)
+    kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(29, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0), interp_block=_LIN),   # [0,29] 等速パン
+    kf(30, center=(40.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0), interp_block=_LIN),  # frame30: 中心40ジャンプ=カット
+    kf(60, center=(40.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0), interp_block=_LIN),  # [30,60] 角度ホールド(角速度0)
 ]
 
 # 位置のみパン→停止(角度は不変)。settle は角速度ベース(§6.2)なので発動しないことの検証用。
 POS_PAN_STOP = [
-    kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),
-    kf(30, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),  # 位置パン
-    kf(60, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)),  # 停止
+    kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(30, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),  # 位置パン
+    kf(60, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),  # 停止
 ]
 
 # 範囲端近く(frame50)で停止。settle が範囲端でフェード(§5.1)で0になることの検証用。
 LATE_STOP = [
-    kf(0, rotation=(0.0, 0.0, 0.0)),
-    kf(50, rotation=(0.0, 0.5, 0.0)),   # [0,50] パン
-    kf(60, rotation=(0.0, 0.5, 0.0)),   # frame50 付近で停止(範囲端に近い)
+    kf(0, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(50, rotation=(0.0, 0.5, 0.0), interp_block=_LIN),   # [0,50] 等速パン
+    kf(60, rotation=(0.0, 0.5, 0.0), interp_block=_LIN),   # frame50 で停止(範囲端に近い)
 ]
 
 
@@ -253,8 +257,9 @@ class TestBake:
 
     # --- 揺れ0忠実性(§7.2 全チャンネル) -----------------------------------
     def test_zero_amplitude_matches_sampled_all_channels(self):
-        # 振幅0 → ベイク結果は原本の再サンプリングと一致(全チャンネル+補間線形+パース)
-        res = by_frame(bake.bake(SEQ, seed=1, amp_rot=0.0, amp_pos=0.0))
+        # 全揺れ0(amp_rot=amp_pos=settle=0)→ ベイク結果は原本の再サンプリングと一致
+        # (全チャンネル+補間線形+パース)。settle は別成分なので明示的に0にする。
+        res = by_frame(bake.bake(SEQ, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0))
         for f in range(0, 61):
             s = interp.sample_camera(SEQ, f)
             assert res[f].position == pytest.approx(s["position"], abs=1e-6)

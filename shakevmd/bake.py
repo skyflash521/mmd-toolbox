@@ -198,14 +198,36 @@ def bake(
                 for s in samples
             ], dtype=float)
             angles = np.array([s["rotation"] for s in samples], dtype=float)
-            speeds = np.maximum(motion.frame_speeds(world), motion.frame_speeds(angles))
+            angle_speed = motion.frame_speeds(angles)
+            speeds = np.maximum(motion.frame_speeds(world), angle_speed)
+
+            # settle(§6.2): 角速度の停止点で、停止直前の回転移動方向へ減衰振動を加算する。
+            # 停止時刻のΔ角度は0なので「直前の角速度ベクトル」angles[i-1]-angles[i-2] を方向に使う。
+            # detect_stops/settle_oscillation はセグメントの angle_speed に対して行うため、
+            # カットをまたがず(セグメント分割)、カット点では発動しない(§5.3-3)。
+            settle_rot = np.zeros((len(sframes), 3))
+            if settle > 0.0:
+                for si in motion.detect_stops(angle_speed):
+                    if si < 2:
+                        continue
+                    d = angles[si - 1] - angles[si - 2]   # 停止直前の角速度ベクトル
+                    nrm = float(np.linalg.norm(d))
+                    if nrm < 1e-9:
+                        continue
+                    direction = d / nrm
+                    for j in range(si, len(sframes)):
+                        val = motion.settle_oscillation((j - si) / FPS, math.radians(settle))
+                        settle_rot[j] += val * direction
 
             for idx, f in enumerate(sframes):
                 s = samples[idx]
-                # 振幅 = 基本 × 適応(1+motion_scale×速度) × 範囲フェード
-                amp_factor = (1.0 + motion_scale * speeds[idx]) * fade[f - a]
+                fade_v = fade[f - a]
+                # 振幅 = 基本 × 適応(1+motion_scale×速度) × 範囲フェード。
+                # settle は別成分(自前の振幅)で、範囲フェードのみ掛けて加算する(§6.2)。
+                amp_factor = (1.0 + motion_scale * speeds[idx]) * fade_v
                 rot_noise = tuple(
                     rot_n[i][idx] * math.radians(amp_rot * rot_weights[i]) * amp_factor
+                    + settle_rot[idx][i] * fade_v
                     for i in range(3)
                 )
                 pos_noise = tuple(
