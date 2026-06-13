@@ -110,6 +110,11 @@ class TestFrameSpeeds:
         speeds = motion.frame_speeds(np.full(50, 3.0))
         assert np.allclose(speeds, 0.0)
 
+    def test_sub_threshold_motion_is_static(self):
+        # 数値ノイズ級(<=1e-12)の微小運動は静止扱いで全0(フルスケール増幅しない)
+        speeds = motion.frame_speeds(np.array([0.0, 1e-13, 2e-13]))
+        assert np.allclose(speeds, 0.0)
+
     def test_normalized_to_unit_max(self):
         # 一定速度で増加 → 差分一定 → 正規化後はほぼ一定の最大1
         vals = np.arange(50, dtype=float) * 2.0
