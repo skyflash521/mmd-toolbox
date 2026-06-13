@@ -1,0 +1,64 @@
+# Base: https://www.toptal.com/developers/gitignore/api/macos,windows,python,visualstudiocode
+# から本プロジェクトに関係する項目のみ抜粋
+
+### macOS ###
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Icon
+*.icloud
+
+### Windows ###
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+*.lnk
+
+### Python ###
+# バイトコード
+__pycache__/
+*.py[cod]
+
+# パッケージング
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# テスト・カバレッジ
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# 型チェック・リンターのキャッシュ
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter(チューニングワークフローで利用)
+.ipynb_checkpoints
+
+# 仮想環境
+.venv/
+venv/
+
+# pyenv のローカルバージョン固定(個人環境の選択)
+.python-version
+
+### VisualStudioCode ###
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+.history/
+
+### Claude Code ###
+# 個人用設定。共有用の CLAUDE.md / .claude/settings.json はコミット対象
+CLAUDE.local.md
+.claude/settings.local.json
