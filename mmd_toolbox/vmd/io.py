@@ -3,7 +3,9 @@
 バイナリレイアウトの正: docs/specs/vmd/VMD_file_format.md
 """
 
+import os
 import struct
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -250,7 +252,27 @@ def write(doc: VmdDocument) -> bytes:
 
 
 def write_file(doc: VmdDocument, path: str | Path) -> None:
-    Path(path).write_bytes(write(doc))
+    """原子的に書き出す(vmd-io.md §4)。
+
+    同ディレクトリの一時ファイルへ書いて fsync し、`os.replace` で原子置換する。
+    書き込み途中の中断・ディスクフルでも、既存の出力先(入力と同一パスへの
+    上書きを含む)を破損させない。
+    """
+    path = Path(path)
+    data = write(doc)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------

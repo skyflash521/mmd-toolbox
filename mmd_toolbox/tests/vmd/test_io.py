@@ -17,6 +17,7 @@ from mmd_toolbox.vmd import (
     normalize,
     read,
     write,
+    write_file,
 )
 
 # ---------------------------------------------------------------------------
@@ -246,6 +247,29 @@ class TestRoundtrip:
     def test_physics_flag_raw_preserved(self):
         doc, _ = read(MODEL_FILE)
         assert write(doc) == MODEL_FILE
+
+
+# ---------------------------------------------------------------------------
+# write_file: 原子書き出し(vmd-io.md §4)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteFile:
+    def test_writes_same_bytes_as_write(self, tmp_path):
+        doc, _ = read(CAMERA_FILE)
+        out = tmp_path / "out.vmd"
+        write_file(doc, out)
+        assert out.read_bytes() == write(doc) == CAMERA_FILE
+
+    def test_overwrite_in_place_replaces_atomically(self, tmp_path):
+        # 既存ファイル(=入力と同一パス)への上書きで内容が置き換わり、
+        # 一時ファイルが残らないこと
+        target = tmp_path / "cam.vmd"
+        target.write_bytes(MODEL_FILE)
+        doc, _ = read(CAMERA_FILE)
+        write_file(doc, target)
+        assert target.read_bytes() == CAMERA_FILE
+        assert list(tmp_path.glob("*.tmp")) == []
 
 
 # ---------------------------------------------------------------------------
