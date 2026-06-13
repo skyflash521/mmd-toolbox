@@ -17,8 +17,8 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*"]
+include = ["mmd_toolbox*", "shakevmd*"]
 
 [tool.pytest.ini_options]
-testpaths = ["mmd_toolbox"]
+testpaths = ["mmd_toolbox", "shakevmd"]
 pythonpath = ["."]
