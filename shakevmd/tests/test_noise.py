@@ -110,6 +110,19 @@ class TestPhaseIndependence:
         corr = np.corrcoef(a, b)[0, 1]
         assert abs(corr) < 0.5  # 位相が連続していない
 
+    def test_no_synchronized_zeros_at_lattice_frames(self):
+        # グラディエントノイズは整数格子点で厳密ゼロ。位相オフセットがないと
+        # 既定 freq=1.2・t=frame/30 で25フレームごとに全チャンネルが同時ゼロになる。
+        # 各チャンネルが別位相を持ち、整列フレームで同期ゼロにならないこと。
+        t = np.arange(300) / 30.0
+        series = np.array(
+            [noise.band_limited_noise(noise.derive_seed(1, ch), t, 1.2)[0]
+             for ch in ("X", "Y", "Z", "rot")]
+        )
+        aligned = np.arange(25, 300, 25)  # f_i*t が整数になるフレーム
+        max_over_channels = np.max(np.abs(series[:, aligned]), axis=0)
+        assert np.all(max_over_channels > 1e-6)
+
 
 # ---------------------------------------------------------------------------
 # スペクトルの帯域制限(FFT)
