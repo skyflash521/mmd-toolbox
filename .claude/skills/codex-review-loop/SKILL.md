@@ -38,8 +38,15 @@ codex:rescue(read-only)にレビューさせ、Claude が各指摘を「修正�
    - `Agent`(codex:codex-rescue)はタイムアウトを指定できないため、**companion を
      直接呼ぶ**: `node "<plugin>/scripts/codex-companion.mjs" task --wait "<prompt>"`
      (`--write` を付けない=read-only)。`dangerouslyDisableSandbox: true` で実行する
-     (サンドボックスのログ書き込み制限で勝手にバックグラウンド化するのを防ぐ)
-   - Bash ツールの `timeout` を指定する(目安 300000ms=5分)
+   - **重要: ジョブはしばしばバックグラウンド化する**(共有ランタイム)。その場合
+     Bash ツールの `timeout` は効かず、完了通知しか来ない。したがってタイムアウトは
+     **能動的に判定**する:
+     - 締切は **約10分**(この共有ランタイムは通常5〜13分かかるため、短い締切は誤検知を生む)
+     - バックグラウンド化したら、締切時刻に
+       `node "<plugin>/scripts/codex-companion.mjs" status --json` で対象ジョブの
+       `elapsed`/`phase` を確認する。締切超過かつ未完了なら **タイムアウトと判定**し
+       `node "<plugin>/scripts/codex-companion.mjs" cancel <job-id>` で打ち切る
+       (phase が進捗していて完了間近なら、もう一度だけ猶予を与えてよい)
    - タイムアウトしたら **`--resume-last` を付けて再実行**し、同じ Codex スレッドを継続する
    - **2回連続でタイムアウトしたら「問題発生」として停止**し、状況をユーザーに報告する
      (自律進行を止める)
