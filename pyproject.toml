@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mmd-toolbox"
+version = "0.0.1"
+description = "MikuMikuDance 向けユーティリティツール群"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+include = ["mmd_toolbox*"]
+
+[tool.pytest.ini_options]
+testpaths = ["mmd_toolbox"]
+pythonpath = ["."]
