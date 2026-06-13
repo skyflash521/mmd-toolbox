@@ -180,6 +180,15 @@ STATIC = [
     kf(60, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
 ]
 
+# 無動だが中間キーを持つ(範囲 [20,40] を既存キーへスナップできる)。
+# F が範囲外のときの impulse の挙動検証用。
+STATIC4 = [
+    kf(0, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(20, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(40, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+    kf(60, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
+]
+
 
 def by_frame(result):
     return {k.frame: k for k in result.camera_keys}
@@ -549,6 +558,28 @@ class TestBake:
         assert max(self._imp_mag(res, f) for f in range(55, 58)) > 1e-3   # 発火直後は乗る
         s60 = interp.sample_camera(STATIC, 60)
         assert res[60].rotation == pytest.approx(s60["rotation"], abs=1e-4)  # 範囲端は0
+
+    def test_impulse_frame_outside_range(self):
+        # impulse の F は絶対フレーム。範囲[20,40]に対し F>b は寄与なし、F<a は減衰した尾を出す。
+        def mags(impulses):
+            res = by_frame(bake.bake(STATIC4, ranges=[(20, 40)], seed=1, amp_rot=0.0,
+                                     amp_pos=0.0, settle=0.0, impulses=impulses, fade_sec=0.1))
+            return [float(np.linalg.norm(
+                np.array(res[f].rotation) - np.array(interp.sample_camera(STATIC4, f)["rotation"])))
+                for f in range(21, 40)]   # 端フェードを避けた範囲内側
+        # F=50 > b=40 → 範囲内に寄与なし
+        assert max(mags([(50, 10.0, 1.0)])) < 1e-4
+        # F=10 < a=20 → 範囲内に減衰した尾が出る
+        assert max(mags([(10, 10.0, 1.0)])) > 1e-3
+
+    def test_impulse_nonpositive_params_no_effect(self):
+        # S<=0 または D<=0 は無効(ガード。div-by-zero回避)
+        for imp in [(30, 0.0, 0.5), (30, 10.0, 0.0), (30, -5.0, 0.5)]:
+            res = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
+                                     impulses=[imp], fade_sec=0.1))
+            for f in range(0, 61):
+                s = interp.sample_camera(STATIC, f)
+                assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-9)
 
     # --- 視野角・パース(§3.1 / §7.3) --------------------------------------
     def test_fov_equals_rounded_sample_even_with_shake(self):

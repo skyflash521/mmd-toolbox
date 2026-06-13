@@ -83,6 +83,23 @@ def _snap(frame, wv_frames):
     return min(wv_frames, key=lambda f: (abs(f - frame), f))
 
 
+def _impulse_direction(seed: int, frame: int) -> np.ndarray:
+    """衝撃(§6.3)の方向をシード(と発火フレーム)から決定する固定単位3ベクトル。
+
+    同一シード・同一フレームで再現、異なるシードで変わる。フレーム由来なので、
+    同じ衝撃が単独でも複合でも同じ方向になる(加算合成の整合)。
+    """
+    comps = [
+        (noise.derive_seed(seed, "impulse_dir", frame, axis) % 2000) / 1000.0 - 1.0
+        for axis in ("x", "y", "z")
+    ]
+    v = np.array(comps, dtype=float)
+    n = float(np.linalg.norm(v))
+    if n < 1e-9:
+        return np.array([0.0, 1.0, 0.0])   # 退避(ほぼ起きない)
+    return v / n
+
+
 def _governing_perspective(wv, frame):
     """当該フレーム以前で最も近いキーのパースペクティブをホールドする(§3.1)。"""
     persp = wv[0].perspective
@@ -220,15 +237,40 @@ def bake(
                         val = motion.settle_oscillation((j - si) / FPS, math.radians(settle))
                         settle_rot[j] += val * direction
 
+            # impulse(§6.3): 各衝撃 (F,S,D) を、フレームF以降に
+            # radians(S)·exp(-Δt/D)(Δt=(f-F)/FPS 秒)の包絡 × 8Hz帯域制限の高周波ノイズ ×
+            # F由来シードの固定方向、で回転ノイズに加算する。絶対フレーム基準でセグメント
+            # 非依存(カットをまたいでよい)。複数指定は加算合成。F以前は0。
+            impulse_rot = np.zeros((len(sframes), 3))
+            for imp in impulses:
+                F, S, D = imp
+                if S <= 0.0 or D <= 0.0:
+                    continue
+                direction = _impulse_direction(seed, F)
+                # 高周波ノイズ。基本周波数=帯域上限8Hz、単一オクターブ(octaves=1)にして
+                # 上位オクターブのクランプを起こさない(§6.1 のクランプ警告が出ないようにする)。
+                # シードは F 由来(index 非依存=加算性)。警告が出れば伝播する(握りつぶさない)。
+                osc, owarns = noise.band_limited_noise(
+                    noise.derive_seed(seed, "impulse_osc", F), t, noise.BANDLIMIT_HZ,
+                    octaves=1,
+                )
+                warnings.extend(owarns)
+                for j, f in enumerate(sframes):
+                    if f < F:
+                        continue
+                    env = math.radians(S) * math.exp(-((f - F) / FPS) / D)
+                    impulse_rot[j] += direction * osc[j] * env
+
             for idx, f in enumerate(sframes):
                 s = samples[idx]
                 fade_v = fade[f - a]
                 # 振幅 = 基本 × 適応(1+motion_scale×速度) × 範囲フェード。
-                # settle は別成分(自前の振幅)で、範囲フェードのみ掛けて加算する(§6.2)。
+                # settle/impulse は別成分(自前の振幅)で、範囲フェードのみ掛けて加算する(§6.2/§6.3)。
                 amp_factor = (1.0 + motion_scale * speeds[idx]) * fade_v
                 rot_noise = tuple(
                     rot_n[i][idx] * math.radians(amp_rot * rot_weights[i]) * amp_factor
                     + settle_rot[idx][i] * fade_v
+                    + impulse_rot[idx][i] * fade_v
                     for i in range(3)
                 )
                 pos_noise = tuple(
