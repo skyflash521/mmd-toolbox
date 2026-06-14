@@ -21,6 +21,7 @@ DEFAULT_STOP_SPEED_THRESHOLD = 0.1  # 正規化速度がこれを下回ると停
 STILL_PROFILE = (1.0, 0.25, 0.0625)
 MOVING_PROFILE = (1.0, 0.6, 0.36)
 BREATHING_HZ = 0.3                  # 完全静止区間の長周期ドリフト周波数(§6.2 呼吸相当、内蔵)
+BREATHING_AMP_FACTOR = 0.5          # 呼吸ドリフト振幅 = amp_pos × この係数(内蔵、暫定)
 
 
 def profile_weights(normalized_speed, still=STILL_PROFILE, moving=MOVING_PROFILE):

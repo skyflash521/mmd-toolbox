@@ -61,6 +61,21 @@ _ROT_CHANNELS = ("rot_x", "rot_y", "rot_z")
 _POS_CHANNELS = ("pos_x", "pos_y", "pos_z")
 
 
+def _crossfaded_channel(seed, si, ch, t, freq, weights):
+    """1チャンネルの帯域制限ノイズを、フレーム毎の静止/移動プロファイル重みで合成する(§6.2)。
+
+    band_limited_noise の固定 persistence に代えて、octave_components(合成前のオクターブ成分)を
+    weights[:, oct](= motion.profile_weights が速度から作るフレーム毎のオクターブ重み)で重み付け
+    合成する。帯域制限でクランプされ成分数が weights の列数より少ない場合は先頭から対応分のみ使う。
+    戻り値: (合成ノイズ (len(t),), 警告コード列)。
+    """
+    comps, warns = noise.octave_components(noise.derive_seed(seed, si, ch), t, freq)
+    acc = np.zeros(len(t))
+    for oct_i, c in enumerate(comps):
+        acc = acc + weights[:, oct_i] * c
+    return acc, warns
+
+
 @dataclass
 class BakeResult:
     """bake() の結果。"""
@@ -187,23 +202,8 @@ def bake(
             sframes = list(range(seg.start, seg.end + 1))
             t = np.array([f / FPS for f in sframes], dtype=float)
 
-            # チャンネル別ノイズ(セグメント別シード派生=位相独立。§5.3-1)
-            rot_n = []
-            for ch in _ROT_CHANNELS:
-                vals, warns = noise.band_limited_noise(
-                    noise.derive_seed(seed, si, ch), t, freq
-                )
-                rot_n.append(vals)
-                warnings.extend(warns)
-            pos_n = []
-            for ch in _POS_CHANNELS:
-                vals, warns = noise.band_limited_noise(
-                    noise.derive_seed(seed, si, ch), t, freq
-                )
-                pos_n.append(vals)
-                warnings.extend(warns)
-
             # 速度解析(セグメント単位。カットをまたがない。§6.2 角速度＋移動速度)。
+            # クロスフェード/呼吸ドリフトがフレーム毎の速度に依存するため、ノイズ合成より先に算出する。
             # カメラ中心位置だけでは、その場回転(パン/チルト/ロール)や距離のみのズームを
             # 静止と誤判定する。カメラのワールド位置(中心+R·(0,0,距離))は回転・ズーム・移動を
             # すべて反映し、角度差分が角速度を補う。両者の正規化速度の大きい方を採る。
@@ -219,22 +219,48 @@ def bake(
             angle_speed = motion.frame_speeds(angles)
             speeds = np.maximum(motion.frame_speeds(world), angle_speed)
 
+            # チャンネル別ノイズ(セグメント別シード派生=位相独立。§5.3-1)。
+            # 静止/移動プロファイルのオクターブ重みをフレーム毎の速度でクロスフェード(§6.2)。
+            weights = motion.profile_weights(speeds)   # (n_frames, n_oct)
+            rot_n = []
+            for ch in _ROT_CHANNELS:
+                vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights)
+                rot_n.append(vals)
+                warnings.extend(warns)
+            pos_n = []
+            for ch in _POS_CHANNELS:
+                vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights)
+                pos_n.append(vals)
+                warnings.extend(warns)
+
+            # 呼吸ドリフト(§6.2「完全静止区間: 長周期ドリフト 0.3Hz 相当」)。位置のみに、
+            # フレーム毎の (1-speed) スケールで加算する(回転=向きには載せない)。軸ごとに独立位相。
+            breath = np.zeros((len(sframes), 3))
+            breath_amp = amp_pos * motion.BREATHING_AMP_FACTOR
+            if breath_amp > 0.0:
+                for axis in range(3):
+                    ph_seed = noise.derive_seed(seed, si, "breath", axis)
+                    phase_sec = (ph_seed % 100000) / 100000.0 / motion.BREATHING_HZ
+                    breath[:, axis] = (1.0 - speeds) * motion.breathing_drift(
+                        t + phase_sec, breath_amp
+                    )
+
             # settle(§6.2): 角速度の停止点で、停止直前の回転移動方向へ減衰振動を加算する。
             # 停止時刻のΔ角度は0なので「直前の角速度ベクトル」angles[i-1]-angles[i-2] を方向に使う。
             # detect_stops/settle_oscillation はセグメントの angle_speed に対して行うため、
             # カットをまたがず(セグメント分割)、カット点では発動しない(§5.3-3)。
             settle_rot = np.zeros((len(sframes), 3))
             if settle > 0.0:
-                for si in motion.detect_stops(angle_speed):
-                    if si < 2:
+                for stop_idx in motion.detect_stops(angle_speed):
+                    if stop_idx < 2:
                         continue
-                    d = angles[si - 1] - angles[si - 2]   # 停止直前の角速度ベクトル
+                    d = angles[stop_idx - 1] - angles[stop_idx - 2]   # 停止直前の角速度ベクトル
                     nrm = float(np.linalg.norm(d))
                     if nrm < 1e-9:
                         continue
                     direction = d / nrm
-                    for j in range(si, len(sframes)):
-                        val = motion.settle_oscillation((j - si) / FPS, math.radians(settle))
+                    for j in range(stop_idx, len(sframes)):
+                        val = motion.settle_oscillation((j - stop_idx) / FPS, math.radians(settle))
                         settle_rot[j] += val * direction
 
             # impulse(§6.3): 各衝撃 (F,S,D) を、フレームF以降に
@@ -273,8 +299,10 @@ def bake(
                     + impulse_rot[idx][i] * fade_v
                     for i in range(3)
                 )
+                # 位置 = クロスフェードノイズ × 適応振幅 + 呼吸ドリフト(範囲フェードのみ)
                 pos_noise = tuple(
-                    pos_n[i][idx] * amp_pos * amp_factor for i in range(3)
+                    pos_n[i][idx] * amp_pos * amp_factor + breath[idx][i] * fade_v
+                    for i in range(3)
                 )
                 persp = _governing_perspective(wv, f)
                 fov = round_half_up(s["fov"])
