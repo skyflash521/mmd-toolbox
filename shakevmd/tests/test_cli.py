@@ -704,8 +704,9 @@ class TestCliOps:
     # --- プリセット定義(presets.py) -------------------------------------
     PUBLIC_PARAMS = {"amp_rot", "amp_pos", "rot_weights", "freq",
                      "motion_scale", "settle", "cut_threshold"}
-    # 内蔵パラメーター(CLI 非公開、プリセット/コアAPIのみ。§8)。現状は walking 歩調成分。
-    INTERNAL_PARAMS = {"gait_freq", "gait_amp"}
+    # 内蔵パラメーター(CLI 非公開、プリセット/コアAPIのみ。§8)。許可集合は presets の
+    # 単一の真実源から導出する(ハードコードしない。新規内蔵パラメータ追加時に自動で同期)。
+    INTERNAL_PARAMS = set(presets.INTERNAL_PARAM_NAMES)
 
     def test_presets_defined_for_all_names(self):
         # §2.7 の4プリセットが定義され、各々が公開引数の完全な束を含む(一括設定)。
@@ -728,6 +729,60 @@ class TestCliOps:
             assert q.get("gait_freq", 0.0) == 0.0, name
             assert q.get("gait_amp", 0.0) == 0.0, name
 
+    def test_internal_params_forwardable_and_are_bake_kwargs(self):
+        # §8: 内蔵パラメータはプリセット定義から bake へ転送可能(coreAPI かつ preset 調整可能)。
+        # INTERNAL_PARAM_NAMES は全て bake() のキーワード引数(転送先が実在)で、歩調に加え
+        # 静止/移動プロファイル・settle収束時間・素朴な角度加算モードを含む(転送ループの実効は
+        # walking 歩調の等価テストで担保済み=同一機構)。
+        import inspect
+        from shakevmd.bake import bake
+        params = inspect.signature(bake).parameters
+        for name in presets.INTERNAL_PARAM_NAMES:
+            assert name in params, name
+        assert {"gait_freq", "gait_amp", "still_profile", "moving_profile",
+                "settle_time", "naive_rotation"} <= set(presets.INTERNAL_PARAM_NAMES)
+
+    def test_preset_internal_params_forward_without_collision(self, tmp_path, monkeypatch):
+        # 実際の転送経路で重複キーワード衝突がないことを検証する(cli が明示渡しする引数名を
+        # ハードコードして列挙すると漏れる=drift)。全内蔵パラメータをプリセットへ入れ、
+        # cli を通して例外なく exit 0 になることを確認する。衝突があれば **internal で TypeError。
+        p = dict(presets.get_preset("handheld"))
+        p.update(still_profile=(1.0, 0.5, 0.25), moving_profile=(1.0, 0.7, 0.4),
+                 settle_time=2.0, naive_rotation=True, gait_freq=1.5, gait_amp=0.1)
+        # 全内蔵パラメータを実際に行使する(将来の追加で取りこぼさない)。
+        assert set(presets.INTERNAL_PARAM_NAMES) <= set(p)
+        monkeypatch.setitem(presets._PRESETS, "handheld", p)
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--preset", "handheld"]) == 0
+
+    def test_all_internal_params_forwarded_and_effective(self, tmp_path, monkeypatch):
+        # 内蔵パラメータが「すべて実際に転送され出力に効く」ことを behavioral に検証する(no-collision の
+        # exit0 や settle_time 1つだけでは、他を黙って落とす実装を排除できない)。
+        # 全内蔵を既定と異なる値でプリセットへ入れ、cli 出力が同値の直接 bake と一致することを確認する。
+        # PAN_STOP_KEYS は移動区間・停止・静止区間を含むので、profiles/settle_time/naive/gait すべてが
+        # 出力に効く → どれか1つでも転送漏れがあれば直接 bake と不一致で落ちる。
+        from shakevmd.bake import bake
+        internal = dict(still_profile=(1.0, 0.5, 0.25), moving_profile=(1.0, 0.7, 0.4),
+                        settle_time=2.5, naive_rotation=True, gait_freq=1.5, gait_amp=0.1)
+        assert set(internal) >= set(presets.INTERNAL_PARAM_NAMES)   # 全内蔵を網羅(将来追加も強制)
+        p = dict(presets.get_preset("handheld"))
+        p.update(internal)
+        monkeypatch.setitem(presets._PRESETS, "handheld", p)
+        inp = write_input(tmp_path / "in.vmd", PAN_STOP_KEYS)
+        src = read_camera(inp)
+        out, exp = tmp_path / "cli.vmd", tmp_path / "exp.vmd"
+        assert cli.main([inp, "-o", str(out), "--preset", "handheld"]) == 0
+        hp = presets.get_preset("handheld")
+        baked = bake(
+            list(src), seed=1,
+            amp_rot=hp["amp_rot"], amp_pos=hp["amp_pos"], rot_weights=hp["rot_weights"],
+            freq=hp["freq"], motion_scale=hp["motion_scale"], settle=hp["settle"],
+            cut_pos_threshold=hp["cut_threshold"][0], cut_rot_threshold=hp["cut_threshold"][1],
+            fade_sec=0.7, impulses=(), **internal,
+        )
+        io.write_file(VmdDocument(camera=baked.camera_keys), str(exp))
+        assert read_camera(out) == read_camera(exp)
+
     def test_walking_preset_forwards_gait_to_bake(self, tmp_path):
         # §95: --preset walking が gait_freq/gait_amp を bake へ配線する。CLI 出力が、同じ公開引数+
         # 歩調引数で直接 bake した結果と一致することで検証する(歩調を渡さない実装は不一致で落ちる)。
@@ -742,7 +797,7 @@ class TestCliOps:
             amp_rot=p["amp_rot"], amp_pos=p["amp_pos"], rot_weights=p["rot_weights"],
             freq=p["freq"], motion_scale=p["motion_scale"], settle=p["settle"],
             cut_pos_threshold=p["cut_threshold"][0], cut_rot_threshold=p["cut_threshold"][1],
-            fade_sec=0.7, gait_freq=p["gait_freq"], gait_amp=p["gait_amp"],
+            fade_sec=0.7, impulses=(), gait_freq=p["gait_freq"], gait_amp=p["gait_amp"],
         )
         io.write_file(VmdDocument(camera=baked.camera_keys), str(exp))
         assert read_camera(out) == read_camera(exp)
