@@ -120,6 +120,14 @@ class TestCli:
         # 1フレーム間隔の高密度キー(0..60 全61)
         assert sorted(k.frame for k in baked) == list(range(0, 61))
 
+    def test_default_output_always_vmd_extension(self, tmp_path):
+        # §2.2: 既定出力は拡張子に依らず `<入力名>_shake.vmd`。非 .vmd 入力でも .vmd で出す。
+        inp = write_input(tmp_path / "take.dat")     # 中身は有効な VMD、拡張子のみ .dat
+        rc = cli.main([inp])
+        assert rc == 0
+        assert (tmp_path / "take_shake.vmd").exists()
+        assert not (tmp_path / "take_shake.dat").exists()
+
     def test_explicit_output(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "sub" / "out.vmd"
@@ -168,6 +176,17 @@ class TestCli:
         assert cli.main([inp, "-o", str(out)]) == 0
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
+    def test_overwrite_guard_via_symlink_exit2(self, tmp_path):
+        # 入力へのシンボリックリンク経由の出力も「同一ファイル」として上書きガードが効く
+        # (§2.2)。abspath 文字列比較だと取りこぼすので samefile/realpath で判定する。
+        p = tmp_path / "in.vmd"
+        inp = write_input(p)
+        before = p.read_bytes()
+        link = tmp_path / "link.vmd"
+        link.symlink_to(p)                        # link は入力と同一実体
+        assert cli.main([inp, "-o", str(link)]) == 2
+        assert p.read_bytes() == before           # ガード時は原本を書き換えない
+
     def test_overlapping_ranges_exit2(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "--range", "0:60", "--range", "30:60"]) == 2
@@ -188,6 +207,13 @@ class TestCli:
         # START>END は不正(§2 引数エラー)
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "--range", "60:0"]) == 2
+
+    def test_open_ended_start_beyond_end_exit2(self, tmp_path):
+        # START が(省略された)END より後になる範囲は引数エラー(§2.2 START>END)。
+        # 末尾キー60の入力で `999:` は END=60 に解決され 999>60 → exit 2。
+        # 省略端の解決「後」にも逆順検査することを保証する(parse 時は END=None で素通り)。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "--range", "999:"]) == 2
 
     def test_colon_only_range_is_full(self, tmp_path):
         # `:`(両端省略)は全範囲 = 範囲指定なしと同じ(有効)
@@ -527,6 +553,102 @@ class TestCli:
         inp = write_input(tmp_path / "in.vmd")
         for opt in ("--amp-rot", "--amp-pos", "--freq", "--fade", "--motion-scale", "--settle"):
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), opt, "xyz"]) == 2
+
+    def test_non_finite_numeric_exit2(self, tmp_path):
+        # inf/nan は有限数でない → 引数エラー(exit 2)。bake へ渡すと OverflowError 等で
+        # クラッシュしうるため、CLI 境界で弾く(スカラー・複合フォーマット双方)。
+        inp = write_input(tmp_path / "in.vmd")
+        for opt, val in (("--fade", "inf"), ("--amp-rot", "nan"), ("--freq", "inf"),
+                         ("--motion-scale", "-inf"), ("--rot-weights", "1,inf,1"),
+                         ("--cut-threshold", "inf,20"), ("--impulse", "20:inf:0.5")):
+            assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), opt, val]) == 2
+
+    def test_overflowing_numeric_exit2(self, tmp_path):
+        # 有限でも過大な値は下流(int(round(fade*FPS)))で OverflowError になりうる。
+        # CLI はこれも引数エラー(exit 2)として扱い、Python 例外を漏らさない(§9)。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--fade", "1e308"]) == 2
+
+    def test_out_of_domain_numeric_exit2(self, tmp_path):
+        # 物理量の定義域違反は引数エラー(exit 2)。振幅/秒数/係数は非負、周波数は正、
+        # cut-threshold(感度)は非負、--impulse の S は非負・D は正(§2.3-2.6)。
+        # 0 が有効な無効化値である項目(amp/motion-scale/settle/cut-threshold)は別途 0 許容。
+        inp = write_input(tmp_path / "in.vmd")
+        o = str(tmp_path / "o.vmd")
+        cases = [
+            ["--fade", "-0.7"], ["--amp-rot", "-1"], ["--amp-pos", "-0.1"],
+            ["--motion-scale", "-1"], ["--settle", "-1"],
+            ["--freq", "0"], ["--freq", "-1"],
+            ["--cut-threshold", "-5,20"], ["--cut-threshold", "5,-20"],
+            ["--impulse", "20:-1:0.5"],   # S(強さ)が負
+            ["--impulse", "20:10:0"],     # D(減衰秒)が 0
+            ["--impulse", "20:10:-0.5"],  # D が負
+        ]
+        for args in cases:
+            assert cli.main([inp, "-o", o, *args]) == 2, args
+
+    def test_zero_disable_values_allowed(self, tmp_path):
+        # 0 が有効な無効化/中立値である項目は exit 0(過剰拒否しない)。
+        inp = write_input(tmp_path / "in.vmd")
+        o = str(tmp_path / "o.vmd")
+        for args in (["--amp-rot", "0"], ["--amp-pos", "0"], ["--motion-scale", "0"],
+                     ["--settle", "0"], ["--fade", "0"], ["--cut-threshold", "0,0"],
+                     ["--impulse", "20:0:0.5"]):
+            assert cli.main([inp, "-o", o, *args]) == 0, args
+
+    def test_negative_impulse_frame_exit2(self, tmp_path):
+        # --impulse の F はフレーム=非負(§2.4)。負フレームは引数エラー(exit 2)。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--impulse=-5:10:0.5"]) == 2
+
+    def test_read_warnings_propagated(self, tmp_path, capsys, monkeypatch):
+        # io.read() の継続可能警告(名前デコード不可・旧版セクション欠落など)もユーザーへ
+        # 伝播する(VMD I/O は mmd_toolbox へ委譲する設計、§3.1)。捨てる実装を排除する。
+        # 実トリガは write/read の round-trip 依存で脆いため、io.read に警告を注入して
+        # 「CLI が io.read の警告を surface する」配線そのものを検証する。
+        from mmd_toolbox.vmd.types import VmdWarning
+        inp = write_input(tmp_path / "in.vmd")
+        real_read = io.read
+
+        def fake_read(path):
+            doc, warns = real_read(path)
+            warns.append(VmdWarning(code="decode-error", message="注入した読込警告"))
+            return doc, warns
+
+        monkeypatch.setattr(cli.io, "read", fake_read)
+        assert cli.main([str(inp), "-o", str(tmp_path / "out.vmd")]) == 0
+        cap = capsys.readouterr()
+        text = (cap.out + cap.err).lower()
+        assert "warning:" in text and "decode-error" in text
+
+    def test_negative_range_endpoint_exit2(self, tmp_path):
+        # フレーム番号は非負(VMD は uint)。負の範囲端は引数エラー(exit 2)。
+        # `=`形式で渡し argparse がオプションと誤認しないようにする。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "--range=-10:0"]) == 2
+        assert cli.main([inp, "--range=0:-5"]) == 2
+
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")  # 意図的に bake 内で overflow させる
+    def test_non_finite_baked_output_exit2(self, tmp_path):
+        # 引数は有限でも bake 内の乗算で出力が inf 化しうる(amp-pos×motion-scale)。
+        # float32 は inf を例外なく pack するため、焼き後の有限性検査で exit 2 に倒す(§9)。
+        inp = write_input(tmp_path / "in.vmd")
+        rc = cli.main([inp, "-o", str(tmp_path / "o.vmd"),
+                       "--amp-pos", "1e308", "--motion-scale", "1e308"])
+        assert rc == 2
+
+    def test_serialization_overflow_is_arg_error_exit2(self, tmp_path):
+        # 有限でも過大な振幅は bake で巨大な回転値となり、VMD の float32 書き出しで
+        # OverflowError になる。これは引数起因なので「出力書き込み失敗(3)」ではなく
+        # 引数エラー(2)に分類する(§9)。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--amp-rot", "1e308"]) == 2
+
+    def test_abbreviated_flag_rejected_exit2(self, tmp_path):
+        # 仕様外の前置き省略形(--over 等)は受理しない(allow_abbrev=False)→ exit 2。
+        # 省略形がフラグとして通ると非仕様の挙動(ガード回避等)を招くため。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--over"]) == 2
 
     def test_missing_option_operand_exit2(self, tmp_path):
         # §9: 値を要するオプションに値が無い(オペランド欠落)も引数エラー(exit 2)。
