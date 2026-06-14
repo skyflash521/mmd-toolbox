@@ -29,12 +29,19 @@ def profile_weights(normalized_speed, still=STILL_PROFILE, moving=MOVING_PROFILE
     weight_i = (1 - s)·still_i + s·moving_i。s はスカラーまたは配列([0,1] 想定)。
     戻り値: スカラー入力なら (n_oct,) の np.ndarray、配列入力なら (n_frames, n_oct)。
     """
-    raise NotImplementedError
+    s = np.asarray(normalized_speed, dtype=float)
+    still = np.asarray(still, dtype=float)
+    moving = np.asarray(moving, dtype=float)
+    if s.ndim == 0:
+        return (1.0 - s) * still + s * moving
+    # 配列入力: 各フレーム s[k] で全オクターブをブレンド → (n_frames, n_oct)
+    return (1.0 - s)[:, None] * still[None, :] + s[:, None] * moving[None, :]
 
 
 def breathing_drift(t_sec, amp: float, freq: float = BREATHING_HZ):
     """完全静止区間の長周期ドリフト(呼吸相当、§6.2)。amp·sin(2π·freq·t)。t_sec は秒。"""
-    raise NotImplementedError
+    t = np.asarray(t_sec, dtype=float)
+    return amp * np.sin(2.0 * np.pi * freq * t)
 
 
 def _smoothstep(t: np.ndarray) -> np.ndarray:

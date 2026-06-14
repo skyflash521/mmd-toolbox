@@ -110,7 +110,21 @@ def octave_components(
     各成分は単一オクターブの _perlin1d(f_i·t + 位相)で値域 [-1,1]。
     Σ persistence^i × components[i] は band_limited_noise(同パラメータ) と一致する。
     """
-    raise NotImplementedError
+    t = np.asarray(t, dtype=float)
+    freq = abs(freq)  # Hz は大きさ
+    n = effective_octaves(freq, octaves, bandlimit_hz)
+    warns: list[str] = []
+    if n < octaves:
+        warns.append(
+            f"octave-clamped: {octaves}->{n} (effective freq > {bandlimit_hz}Hz)"
+        )
+    comps = []
+    for i in range(n):
+        f_i = freq * (2.0**i)
+        oct_seed = derive_seed(seed, "octave", i)
+        phase = _seed_phase(oct_seed)   # band_limited_noise と同一の per-octave シード/位相
+        comps.append(_perlin1d(oct_seed, f_i * t + phase))
+    return comps, warns
 
 
 def band_limited_noise(
