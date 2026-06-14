@@ -12,9 +12,12 @@
 # 公開プリセット名(§2.7)。
 PRESET_NAMES = ("handheld", "telephoto", "walking", "earthquake")
 
-# 内蔵パラメーター名(CLI 非公開、プリセット/コアAPIのみ。§8)。bake() が受ける引数名と一致させる。
-# cli はこの名前のキーがプリセットにあれば bake へ転送する。
-INTERNAL_PARAM_NAMES = ("gait_freq", "gait_amp")
+# 内蔵パラメーター名(CLI 非公開、プリセット/コアAPIのみ。§8)。bake() が受ける引数名と一致させ、
+# cli が明示渡しする引数とは重複させない。cli はこの名前のキーがプリセットにあれば bake へ転送する。
+# 歩調成分・静止/移動プロファイル(オクターブ重み構成)・settle収束時間・素朴な角度加算モード。
+INTERNAL_PARAM_NAMES = (
+    "gait_freq", "gait_amp", "still_profile", "moving_profile", "settle_time", "naive_rotation",
+)
 
 # 各プリセット = 公開引数(amp_rot/amp_pos/rot_weights/freq/motion_scale/settle/cut_threshold)の束。
 # walking は加えて内蔵の歩調成分(gait_freq/gait_amp)を持つ(§95)。
