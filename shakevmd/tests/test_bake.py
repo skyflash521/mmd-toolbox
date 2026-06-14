@@ -889,3 +889,120 @@ class TestProfileCrossfadeAndBreathing:
             return self._e03_sum(res, src, "pos", END, win)
 
         assert e03_sum(s0) > e03_sum(shalf) > e03_sum(sfull)
+
+
+class TestWalkingGait:
+    """walking プリセットの歩調周期成分(§2.7/§95): 乱数ノイズに加え、位置の左右(pos_x)へ
+    歩調周波数 f、上下(pos_y)へ 2f の周期成分を混合する。コア引数 gait_freq/gait_amp で制御
+    (既定 0=無効)。奥行(pos_z)・回転には載せない。"""
+
+    N = 99
+    _LIN = bytes([20, 107, 20, 107]) * 6
+
+    def _static(self):
+        # 完全静止の土台。位置揺れ・回転揺れを切り、歩調成分だけを観測する。
+        return [kf(0, center=(0.0, 0.0, 0.0), interp_block=self._LIN),
+                kf(self.N, center=(0.0, 0.0, 0.0), interp_block=self._LIN)]
+
+    def _pos(self, res, src, axis):
+        return np.array([res[f].position[axis] - interp.sample_camera(src, f)["position"][axis]
+                         for f in range(self.N + 1)])
+
+    def _rot(self, res, src, axis):
+        return np.array([res[f].rotation[axis] - interp.sample_camera(src, f)["rotation"][axis]
+                         for f in range(self.N + 1)])
+
+    @staticmethod
+    def _dom_freq(series):
+        # DC を除く最大振幅ビンの周波数。
+        spec = np.abs(np.fft.rfft(series))
+        freqs = np.fft.rfftfreq(series.size, d=1.0 / 30.0)
+        return float(freqs[1 + int(np.argmax(spec[1:]))])
+
+    @staticmethod
+    def _bin_amp(series, freq):
+        # freq 最近傍ビンの振幅。
+        spec = np.abs(np.fft.rfft(series))
+        freqs = np.fft.rfftfreq(series.size, d=1.0 / 30.0)
+        return float(spec[int(np.argmin(np.abs(freqs - freq)))])
+
+    @staticmethod
+    def _maxabs(series):
+        # 最大絶対値。定数オフセット(DC)も検出する(std だと見逃す。round4 指摘)。
+        return float(np.max(np.abs(series)))
+
+    def test_gait_tracks_freq_lr_f_updown_2f(self):
+        # 左右(x)=歩調f、上下(y)=2f、奥行(z)=なし(§95)。gait_freq を無視して固定周波数を
+        # 出力する実装を排除するため、2つの f(1.8/2.4Hz、100サンプルで整数周期)で確認する。
+        # 支配周波数だけでなく軸別成分分離も課す: x は f が 2f を大きく上回り、y は 2f が f を
+        # 大きく上回る(両軸に両周波数を載せる実装を排除)。amp_pos=0/amp_rot=0 で歩調のみ分離。
+        src = self._static()
+        for f in (1.8, 2.4):
+            res = by_frame(bake.bake(src, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                     gait_freq=f, gait_amp=1.0, settle=0.0, fade_sec=0.1))
+            x, y, z = (self._pos(res, src, ax) for ax in range(3))
+            assert abs(self._dom_freq(x) - f) < 0.16, (f, "x")
+            assert abs(self._dom_freq(y) - 2 * f) < 0.16, (f, "y")
+            assert self._bin_amp(x, f) > 5.0 * self._bin_amp(x, 2 * f), (f, "x-sep")
+            assert self._bin_amp(y, 2 * f) > 5.0 * self._bin_amp(y, f), (f, "y-sep")
+            assert self._maxabs(z) < 1e-6, (f, "z")   # 奥行に歩調なし(定数オフセットも不可)
+
+    def test_gait_amplitude_scales_with_gait_amp(self):
+        # 振幅は gait_amp(position units)に比例(§95)。gait_amp を無視して固定振幅にする実装を
+        # 排除する。gait_amp=0 は歩調なし、gait_amp=2 は =1 の概ね2倍。左右(x)・上下(y)両軸で確認。
+        src = self._static()
+
+        def res_for(gait_amp):
+            return by_frame(bake.bake(src, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                      gait_freq=1.8, gait_amp=gait_amp, settle=0.0, fade_sec=0.1))
+
+        r0, r1, r2 = res_for(0.0), res_for(1.0), res_for(2.0)
+        for axis in (0, 1):
+            assert self._maxabs(self._pos(r0, src, axis)) < 1e-9, f"axis{axis} zero"  # gait_amp=0→無
+            s1 = float(np.std(self._pos(r1, src, axis)))
+            s2 = float(np.std(self._pos(r2, src, axis)))
+            assert s1 > 1e-6 and abs(s2 - 2.0 * s1) < 0.005 * s1, f"axis{axis} scale"  # 線形
+
+    def test_gait_not_applied_to_rotation(self):
+        # 歩調は位置のみ(§95 左右/上下)。回転には載せない。amp_rot=0 で回転の乱数も切り、
+        # 歩調 ON でも回転揺れがゼロ(定数オフセット含め)のままであることを確認する。
+        src = self._static()
+        res = by_frame(bake.bake(src, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                 gait_freq=1.8, gait_amp=1.0, settle=0.0, fade_sec=0.1))
+        for ax in range(3):
+            assert self._maxabs(self._rot(res, src, ax)) < 1e-9, f"rot{ax}"
+
+    def test_gait_mixed_with_random_noise_not_replacing(self):
+        # 「乱数ノイズに歩調成分を混合」(§95): 歩調は乱数へ加算(置換ではない)。
+        # (1) 差分が左右=f・上下=2f に集中(乱数が相殺=同一 seed で共有 → 混合の証拠)。
+        # (2) 歩調 ON/OFF の時間波形の相関が高い(乱数が保持される。FFT リーケージに依らない)。
+        #     置換実装は on=歩調のみ → 相関≈0 で落ちる。乱数 ≥ 歩調 になるよう振幅を選ぶ。
+        # (3) 歩調を載せない z 位置・回転は ON/OFF で完全一致(歩調が他チャンネルを変えない)。
+        src = self._static()
+        kw = dict(amp_rot=2.0, amp_pos=1.0, settle=0.0, fade_sec=0.1)
+        on = by_frame(bake.bake(src, seed=2, gait_freq=1.8, gait_amp=0.2, **kw))
+        off = by_frame(bake.bake(src, seed=2, gait_freq=0.0, gait_amp=0.2, **kw))
+        on_x, off_x = self._pos(on, src, 0), self._pos(off, src, 0)
+        on_y, off_y = self._pos(on, src, 1), self._pos(off, src, 1)
+        assert abs(self._dom_freq(on_x - off_x) - 1.8) < 0.16, ("x", self._dom_freq(on_x - off_x))
+        assert abs(self._dom_freq(on_y - off_y) - 3.6) < 0.16, ("y", self._dom_freq(on_y - off_y))
+        assert float(np.corrcoef(on_x, off_x)[0, 1]) > 0.5   # x 乱数保持(置換でない)
+        assert float(np.corrcoef(on_y, off_y)[0, 1]) > 0.5   # y 乱数保持
+        # z 位置・回転3軸は歩調対象外 → ON/OFF で完全一致(歩調が抑制/改変しない)
+        assert np.allclose(self._pos(on, src, 2), self._pos(off, src, 2), atol=1e-12)
+        for ax in range(3):
+            assert np.allclose(self._rot(on, src, ax), self._rot(off, src, ax), atol=1e-12), f"rot{ax}"
+
+    def test_gait_off_when_freq_zero(self):
+        # gait_freq=0 → 歩調成分なし(§95「0=off」)。既定省略時と明示 0 の両方で、gait_amp>0 でも
+        # 位置揺れが消える(定数オフセットも不可)。amp_pos=0 で乱数も切り絶対ゼロを検証する。
+        src = self._static()
+        # (a) gait_freq 省略(既定 0)
+        r_default = by_frame(bake.bake(src, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                       gait_amp=1.0, settle=0.0, fade_sec=0.1))
+        # (b) gait_freq=0 を明示
+        r_explicit = by_frame(bake.bake(src, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                        gait_freq=0.0, gait_amp=1.0, settle=0.0, fade_sec=0.1))
+        for res in (r_default, r_explicit):
+            assert self._maxabs(self._pos(res, src, 0)) < 1e-9
+            assert self._maxabs(self._pos(res, src, 1)) < 1e-9
