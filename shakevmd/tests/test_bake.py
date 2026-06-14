@@ -696,3 +696,196 @@ class TestBake:
                                     fade_sec=0.2, manual_cuts_remove=[31]))
         # 後半[31,60]内のフレームで角度が一致しない(位相が独立化している)
         assert with_cut[45].rotation != pytest.approx(no_cut[45].rotation, abs=1e-9)
+
+
+class TestProfileCrossfadeAndBreathing:
+    """§6.2 高度部分の bake 統合: 静止/移動プロファイルのオクターブ重みクロスフェードと
+    完全静止区間の呼吸ドリフト(0.3Hz)。"""
+
+    # N+1=100 サンプル → rfftfreq(100, 1/30) のビン間隔=0.3Hz、bin1 がちょうど 0.3Hz。
+    # かつ 0.3Hz は窓(100/30秒)で整数1周期=リーケージなし。
+    N = 99
+    _LIN = bytes([20, 107, 20, 107]) * 6   # 線形補間ブロック(等速にして速度を一定にする)
+
+    def _static_input(self):
+        # 同一キーの繰り返し → セグメント全域で速度0(完全静止 → 静止プロファイル)。
+        return [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN),
+                kf(self.N, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN)]
+
+    def _moving_input(self):
+        # 線形補間の大きなパン → 等速 → 速度≈1(移動プロファイル)。補間形状由来の速度変動を排除。
+        return [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN),
+                kf(self.N, center=(60.0, 0.0, 0.0), rotation=(0.0, 1.5, 0.0), interp_block=self._LIN)]
+
+    def _rot_shake(self, res, src, axis):
+        return np.array([res[f].rotation[axis] - interp.sample_camera(src, f)["rotation"][axis]
+                         for f in range(1, self.N)])
+
+    def _pos_shake_axis(self, res, src, axis):
+        return np.array([res[f].position[axis] - interp.sample_camera(src, f)["position"][axis]
+                         for f in range(self.N + 1)])
+
+    def _shake_series(self, res, src, kind, axis, end):
+        # 絶対フレーム 0..end の残差(ベイク−サンプリング)。kind は "rot" / "pos"。
+        key = "rotation" if kind == "rot" else "position"
+        return np.array([getattr(res[f], key)[axis] - interp.sample_camera(src, f)[key][axis]
+                         for f in range(end + 1)])
+
+    @staticmethod
+    def _hf_ratio(series):
+        # 相対高周波 = std(隣接差)/std(全体)。振幅差に不変な高周波成分の指標。
+        return float(np.std(np.diff(series)) / (np.std(series) + 1e-12))
+
+    def test_moving_has_more_high_freq_than_still(self):
+        # プロファイルクロスフェード(§6.2): 移動セグメントは静止より高周波成分が多い。
+        # 回転3軸で確認する。クロスフェードの hf 検証は回転チャンネルで行う:
+        # 位置チャンネルは呼吸ドリフト(0.3Hz、位置のみ)が静止窓の hf を下げ、クロスフェード
+        # 無しでも移動>静止を満たしうるため(round6 指摘#1)。位置のクロスフェードは呼吸帯域を
+        # 除いた band-ratio で別途検証する(test_crossfade_applies_to_position_via_octave_band_ratio)。
+        src_s, src_m = self._static_input(), self._moving_input()
+        rst = by_frame(bake.bake(src_s, seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.3))
+        rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.3))
+        hf = self._hf_ratio
+        for ax in range(3):
+            assert (hf(self._rot_shake(rmv, src_m, ax))
+                    > hf(self._rot_shake(rst, src_s, ax))), f"rot{ax}"
+
+    def test_per_frame_crossfade_within_single_segment(self):
+        # 速度クロスフェードは「フレーム毎の速度」で効く(§6.2)。同一ノイズ実現(同一 seed)で
+        # 「同じ時間窓」を移動側/静止側に切り替えて比較し、マジックマージン(round4 指摘#1)を排す。
+        #   decel: 0..50 移動 → 50..99 静止。 accel: 0..50 静止 → 50..99 移動。
+        # キーは 0/50/99 で隣接1フレーム差なし → カット無し → 各々単一セグメント。
+        # 後半窓[58:88]: decel=静止プロファイル、accel=移動プロファイルを「同一ノイズ」に適用する
+        # ので、クロスフェードがあれば accel の高周波が多い(前半窓[12:42]は逆)。
+        # 固定スペクトルなら両者同一重み → 合成完全一致 → strict > で落ちる(マージン不要)。
+        # セグメント単位の二値実装も、accel/decel は速度分布が対称で同一プロファイルを選ぶため落ちる。
+        # 速度はワールド位置パンで駆動されるので回転チャンネルも切り替わる(回転で観測 → 呼吸の
+        # 汚染なし。round6 指摘#1)。3回転軸で確認する。
+        L = self._LIN
+        decel = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(50, center=(60.0, 0.0, 0.0), interp_block=L),
+                 kf(self.N, center=(60.0, 0.0, 0.0), interp_block=L)]
+        accel = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(50, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(self.N, center=(60.0, 0.0, 0.0), interp_block=L)]
+        LATE, EARLY = slice(58, 88), slice(12, 42)  # フェード端と境目(frame50)を避けた内部窓
+        for ax in range(3):
+            late_a, late_d, early_a, early_d = [], [], [], []
+            for seed in range(3):
+                # settle 切(停止過渡の高周波混入を排除)。同一 seed で decel/accel は同一ノイズ。
+                d = by_frame(bake.bake(decel, seed=seed, amp_rot=5.0, amp_pos=0.0,
+                                       settle=0.0, fade_sec=0.3))
+                a = by_frame(bake.bake(accel, seed=seed, amp_rot=5.0, amp_pos=0.0,
+                                       settle=0.0, fade_sec=0.3))
+                ds = self._shake_series(d, decel, "rot", ax, self.N)
+                as_ = self._shake_series(a, accel, "rot", ax, self.N)
+                late_a.append(self._hf_ratio(as_[LATE]))   # accel: 後半は移動
+                late_d.append(self._hf_ratio(ds[LATE]))    # decel: 後半は静止
+                early_a.append(self._hf_ratio(as_[EARLY]))  # accel: 前半は静止
+                early_d.append(self._hf_ratio(ds[EARLY]))   # decel: 前半は移動
+            assert np.mean(late_a) > np.mean(late_d), f"late rot{ax}"
+            assert np.mean(early_d) > np.mean(early_a), f"early rot{ax}"
+
+    def test_crossfade_is_speed_proportional_not_binary(self):
+        # §6.2 のクロスフェードは速度比例 (1-s)·still + s·moving。s=0/1 だけでなく中間 s=0.5 が
+        # 「両端の間」に入ること(厳密単調)を確認し、フレーム毎の二値スイッチ(round5 指摘#1)を排除する。
+        # 同一 seed・同一窓[58:88]に s=0/0.5/1 を与える3経路(同一ノイズの再重み付け = マージン不要):
+        #   s0  : 窓は静止(decel)。 sfull: 窓は全速(accel、唯一の運動 → 正規化1)。
+        #   shalf: 窓の前(0..25)に2倍速のピークを置き、窓は半速 → 正規化0.5。
+        # 二値スイッチは中間が端へ張り付き、固定スペクトルは同一重みで3者一致 → どちらも落ちる。
+        # 回転チャンネルで観測する(呼吸の汚染なし。round6 指摘#1)。
+        L = self._LIN
+        s0 = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+              kf(50, center=(60.0, 0.0, 0.0), interp_block=L),
+              kf(self.N, center=(60.0, 0.0, 0.0), interp_block=L)]
+        shalf = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(25, center=(60.0, 0.0, 0.0), interp_block=L),     # 0..25: 2.4/f がピーク
+                 kf(self.N, center=(148.8, 0.0, 0.0), interp_block=L)]  # 25..99: 1.2/f = 半速
+        sfull = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(50, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(self.N, center=(60.0, 0.0, 0.0), interp_block=L)]
+        W = slice(58, 88)
+
+        def hf_rot(src, seed):
+            res = by_frame(bake.bake(src, seed=seed, amp_rot=5.0, amp_pos=0.0,
+                                     settle=0.0, fade_sec=0.3))
+            return self._hf_ratio(self._shake_series(res, src, "rot", 0, self.N)[W])
+
+        h0 = [hf_rot(s0, s) for s in range(3)]
+        hh = [hf_rot(shalf, s) for s in range(3)]
+        hful = [hf_rot(sfull, s) for s in range(3)]
+        assert np.mean(hful) > np.mean(hh) > np.mean(h0)
+
+    # 呼吸ドリフト(§6.2「完全静止区間: 長周期ドリフト 0.3Hz 相当」)。位置の長周期ドリフトとして
+    # フレーム毎に (1-speed) スケールで加算する(回転=向きの揺れには載せない)。仕様は軸分布を
+    # 規定しないので「位置全体の 0.3Hz」で判別する(軸独立性・等振幅は実装裁量、テストで縛らない)。
+    def _e03(self, res, src, kind, axis, end, win=slice(None)):
+        # 残差の 0.3Hz ビン振幅(win 適用後の長さで 0.3Hz が整数1周期になる窓を渡す)。
+        series = self._shake_series(res, src, kind, axis, end)[win]
+        freqs = np.fft.rfftfreq(series.size, d=1.0 / 30.0)
+        k = int(np.argmin(np.abs(freqs - 0.3)))
+        return float(np.abs(np.fft.rfft(series))[k])
+
+    def _e03_sum(self, res, src, kind, end, win=slice(None)):
+        return float(sum(self._e03(res, src, kind, ax, end, win) for ax in range(3)))
+
+    def _band_ratio(self, res, src, axis, end, kind="pos"):
+        # 残差の「高オクターブ(>1.8Hz)/低オクターブ(0.6–1.8Hz)」振幅比。
+        # 呼吸(0.3Hz)は両帯域外なので影響しない。freq=1.2 でオクターブは 1.2/2.4/4.8Hz。
+        series = self._shake_series(res, src, kind, axis, end)
+        spec = np.abs(np.fft.rfft(series))
+        freqs = np.fft.rfftfreq(series.size, d=1.0 / 30.0)
+        low = spec[(freqs > 0.6) & (freqs <= 1.8)].sum()
+        high = spec[freqs > 1.8].sum()
+        return float(high / (low + 1e-12))
+
+    def test_crossfade_applies_to_position_via_octave_band_ratio(self):
+        # 位置の hf は呼吸(0.3Hz)で汚染されるため(round6 指摘#1)、呼吸帯域を除いた高/低オクターブ
+        # エネルギー比で位置のクロスフェードを直接検証する。移動は MOVING_PROFILE で高オクターブ重みが
+        # 大きい → 比が大きい。同一 seed → 同一ノイズ → 重み差のみ(固定スペクトルは比一致 → red)。
+        src_s, src_m = self._static_input(), self._moving_input()
+        st = by_frame(bake.bake(src_s, seed=1, amp_rot=0.0, amp_pos=1.0, freq=1.2, settle=0.0, fade_sec=0.3))
+        mv = by_frame(bake.bake(src_m, seed=1, amp_rot=0.0, amp_pos=1.0, freq=1.2, settle=0.0, fade_sec=0.3))
+        for ax in range(3):
+            assert self._band_ratio(mv, src_m, ax, self.N) > self._band_ratio(st, src_s, ax, self.N), f"pos{ax}"
+
+    def test_breathing_present_in_static_absent_on_rotation(self):
+        # 完全静止セグメントの位置揺れに 0.3Hz 成分が現れ、移動セグメントでは (1-speed)≈0 で消える。
+        # 位置全体の 0.3Hz が移動を大きく(>3×)上回る。回転には呼吸を載せない(round4 指摘#2)ので
+        # 回転は静止が移動を大きく上回らない(<2×)→ 回転にドリフトを載せる実装はここで落ちる。
+        # N=99 → 100サンプルで 0.3Hz が整数1周期。
+        src_s, src_m = self._static_input(), self._moving_input()
+        pst = by_frame(bake.bake(src_s, seed=1, amp_rot=0.0, amp_pos=1.0, settle=0.0, fade_sec=0.3))
+        pmv = by_frame(bake.bake(src_m, seed=1, amp_rot=0.0, amp_pos=1.0, settle=0.0, fade_sec=0.3))
+        rst = by_frame(bake.bake(src_s, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, settle=0.0, fade_sec=0.3))
+        rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, settle=0.0, fade_sec=0.3))
+        assert self._e03_sum(pst, src_s, "pos", self.N) > 3.0 * self._e03_sum(pmv, src_m, "pos", self.N)
+        assert self._e03_sum(rst, src_s, "rot", self.N) < 2.0 * self._e03_sum(rmv, src_m, "rot", self.N)
+        # §6.2「完全静止区間: 高周波微動+長周期ドリフト」: 静止でも高周波微動が残る(round7 指摘)。
+        # 静止区間の高オクターブを消して呼吸ドリフトだけにする実装はここで落ちる(回転で観測、freq=1.2)。
+        for ax in range(3):
+            assert self._band_ratio(rst, src_s, ax, self.N, "rot") > 0.1, f"tremor rot{ax}"
+
+    def test_breathing_scales_with_inverse_speed_in_single_segment(self):
+        # 呼吸は (1-speed) 比例(§6.2)。同一 seed・同一窓[20:120](100サンプル=0.3Hz整数1周期)に
+        # s=0/0.5/1 を与える3経路で、0.3Hz エネルギー合計が s について厳密単調減少することを確認する。
+        # セグメント単位の静止ゲート実装(混合セグメントで呼吸ゼロ)も二値ゲート(中間で張り付く)も
+        # ここで落ちる。motion_scale=0 でノイズ側の速度依存振幅ブーストを切り、呼吸のみ分離する。
+        END = 119
+        L = self._LIN
+        s0 = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+              kf(19, center=(60.0, 0.0, 0.0), interp_block=L),     # 0..19 移動 → 19..119 静止
+              kf(END, center=(60.0, 0.0, 0.0), interp_block=L)]
+        shalf = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(10, center=(60.0, 0.0, 0.0), interp_block=L),  # 0..10: 6/f がピーク
+                 kf(END, center=(387.0, 0.0, 0.0), interp_block=L)]  # 10..119: 3/f = 半速
+        sfull = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
+                 kf(END, center=(238.0, 0.0, 0.0), interp_block=L)]  # 全域 2/f 等速 = 正規化1
+        win = slice(20, END + 1)  # frame20.. が静止(s0)/半速(shalf)/全速(sfull)、100サンプル
+
+        def e03_sum(src):
+            res = by_frame(bake.bake(src, seed=5, amp_rot=0.0, amp_pos=2.0,
+                                     motion_scale=0.0, settle=0.0, fade_sec=0.3))
+            return self._e03_sum(res, src, "pos", END, win)
+
+        assert e03_sum(s0) > e03_sum(shalf) > e03_sum(sfull)
