@@ -1124,3 +1124,52 @@ class TestCoreApiTuning:
             bake.bake(self._static(), still_profile=(1.0, 0.5), moving_profile=(1.0, 0.5, 0.25))
         with pytest.raises(ValueError):
             bake.bake(self._static(), still_profile=(1.0, 0.5, 0.25), moving_profile=(1.0, 0.5))
+
+
+class TestNaiveRotation:
+    """§4.2/§8: 素朴な角度加算モード。既定の視線揺れは『角度=元+ノイズ』のオイラー加算に加え、
+    カメラのワールド位置が固定されるよう中心を逆算する。naive_rotation=True はその中心逆算を行わず、
+    中心は元のまま(位置ノイズ分だけシフト)に留める素朴加算にする(coreAPI、CLI 非公開)。"""
+
+    N = 60
+    _LIN = bytes([20, 107, 20, 107]) * 6
+    CENTER = (5.0, 3.0, 2.0)
+
+    def _src(self):
+        # 距離≠0・中心≠0 の完全静止(回転ノイズだけで中心逆算の有無を観測する)。
+        return [kf(0, distance=-30.0, center=self.CENTER, rotation=(0.0, 0.0, 0.0), interp_block=self._LIN),
+                kf(self.N, distance=-30.0, center=self.CENTER, rotation=(0.0, 0.0, 0.0), interp_block=self._LIN)]
+
+    def test_naive_skips_center_rederivation(self):
+        # naive: 回転ノイズで中心を逆算しない → 中心は元のまま(amp_pos=0 で位置ノイズも無し)。
+        # 既定: ワールド位置固定のため中心が回転ノイズで動く。回転(オイラー加算)は両者一致。
+        src = self._src()
+        common = dict(seed=1, amp_rot=8.0, amp_pos=0.0, settle=0.0, fade_sec=0.1)
+        nv = by_frame(bake.bake(src, naive_rotation=True, **common))
+        df = by_frame(bake.bake(src, naive_rotation=False, **common))
+        interior = range(12, self.N - 11)
+        for f in interior:
+            assert nv[f].position == pytest.approx(self.CENTER, abs=1e-6), f       # naive=中心固定
+            assert nv[f].rotation == pytest.approx(df[f].rotation, abs=1e-9), f    # 回転は共通(素朴加算)
+        moved = max(sum(abs(df[f].position[i] - self.CENTER[i]) for i in range(3)) for f in interior)
+        assert moved > 1e-3   # 既定は中心が動く(ワールド位置固定で逆算)
+
+    def test_naive_still_applies_position_noise(self):
+        # naive でも位置ノイズは適用される(§8: center = 元中心 + pos_noise)。回転ノイズを切れば
+        # 中心逆算は無関係になり naive/既定は同一の中心(元+pos_noise)になり、かつ中心は元から動く。
+        # naive で pos_noise を落とす実装は「中心が動かない/既定と不一致」で落ちる(round1 指摘)。
+        src = self._src()
+        common = dict(seed=1, amp_rot=0.0, amp_pos=0.5, settle=0.0, fade_sec=0.1)
+        nv = by_frame(bake.bake(src, naive_rotation=True, **common))
+        df = by_frame(bake.bake(src, naive_rotation=False, **common))
+        interior = range(12, self.N - 11)
+        for f in interior:
+            assert nv[f].position == pytest.approx(df[f].position, abs=1e-6), f   # 位置ノイズは同一適用
+        moved = max(sum(abs(nv[f].position[i] - self.CENTER[i]) for i in range(3)) for f in interior)
+        assert moved > 1e-3   # 位置ノイズで中心が動く(naive が pos_noise を落としていない)
+
+    def test_naive_rotation_off_by_default(self):
+        # 既定省略 == naive_rotation=False(ワールド位置固定)。
+        src = self._src()
+        common = dict(seed=1, amp_rot=8.0, amp_pos=0.0, settle=0.0, fade_sec=0.1)
+        assert bake.bake(src, **common).camera_keys == bake.bake(src, naive_rotation=False, **common).camera_keys
