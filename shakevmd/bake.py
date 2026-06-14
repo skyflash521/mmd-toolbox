@@ -61,15 +61,16 @@ _ROT_CHANNELS = ("rot_x", "rot_y", "rot_z")
 _POS_CHANNELS = ("pos_x", "pos_y", "pos_z")
 
 
-def _crossfaded_channel(seed, si, ch, t, freq, weights):
+def _crossfaded_channel(seed, si, ch, t, freq, weights, octaves=noise.DEFAULT_OCTAVES):
     """1チャンネルの帯域制限ノイズを、フレーム毎の静止/移動プロファイル重みで合成する(§6.2)。
 
     band_limited_noise の固定 persistence に代えて、octave_components(合成前のオクターブ成分)を
     weights[:, oct](= motion.profile_weights が速度から作るフレーム毎のオクターブ重み)で重み付け
-    合成する。帯域制限でクランプされ成分数が weights の列数より少ない場合は先頭から対応分のみ使う。
+    合成する。octaves は要求オクターブ数(=プロファイル長)。帯域制限でクランプされ成分数が
+    weights の列数より少ない場合は先頭から対応分のみ使う。
     戻り値: (合成ノイズ (len(t),), 警告コード列)。
     """
-    comps, warns = noise.octave_components(noise.derive_seed(seed, si, ch), t, freq)
+    comps, warns = noise.octave_components(noise.derive_seed(seed, si, ch), t, freq, octaves=octaves)
     acc = np.zeros(len(t))
     for oct_i, c in enumerate(comps):
         acc = acc + weights[:, oct_i] * c
@@ -137,6 +138,10 @@ def bake(
     freq: float = 1.2,
     motion_scale: float = 0.5,
     settle: float = 0.3,         # 度。停止後の減衰振動の初期振幅(§6.2)。0で無効
+    settle_time: float = motion.DEFAULT_SETTLE_TIME_SEC,  # 秒。settle減衰振動の収束時間(§2.5/§8 内蔵)
+    # 静止/移動プロファイル(オクターブ重み構成、§6.2/§8 内蔵)。オクターブ数=プロファイル長。
+    still_profile=motion.STILL_PROFILE,
+    moving_profile=motion.MOVING_PROFILE,
     gait_freq: float = 0.0,      # Hz。歩調周期成分の周波数(§2.7/§95 walking)。0で無効
     gait_amp: float = 0.0,       # 歩調成分の振幅(MMD距離単位)。左右=gait_freq、上下=2×gait_freq
     fade_sec: float = 0.7,
@@ -158,6 +163,12 @@ def bake(
     """
     if not camera_keys:
         raise ValueError("カメラキーが空(§3.1: 終了コード1相当)")
+    if len(still_profile) != len(moving_profile):
+        raise ValueError(
+            f"still_profile と moving_profile の長さが不一致(オクターブ数の整合): "
+            f"{len(still_profile)} != {len(moving_profile)}"
+        )
+    octaves = len(still_profile)
 
     warnings: list = []
     wv, dropped = _working_view(camera_keys)
@@ -223,15 +234,15 @@ def bake(
 
             # チャンネル別ノイズ(セグメント別シード派生=位相独立。§5.3-1)。
             # 静止/移動プロファイルのオクターブ重みをフレーム毎の速度でクロスフェード(§6.2)。
-            weights = motion.profile_weights(speeds)   # (n_frames, n_oct)
+            weights = motion.profile_weights(speeds, still_profile, moving_profile)  # (n_frames, n_oct)
             rot_n = []
             for ch in _ROT_CHANNELS:
-                vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights)
+                vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights, octaves)
                 rot_n.append(vals)
                 warnings.extend(warns)
             pos_n = []
             for ch in _POS_CHANNELS:
-                vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights)
+                vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights, octaves)
                 pos_n.append(vals)
                 warnings.extend(warns)
 
@@ -274,7 +285,9 @@ def bake(
                         continue
                     direction = d / nrm
                     for j in range(stop_idx, len(sframes)):
-                        val = motion.settle_oscillation((j - stop_idx) / FPS, math.radians(settle))
+                        val = motion.settle_oscillation(
+                            (j - stop_idx) / FPS, math.radians(settle), settle_time=settle_time
+                        )
                         settle_rot[j] += val * direction
 
             # impulse(§6.3): 各衝撃 (F,S,D) を、フレームF以降に
