@@ -16,6 +16,9 @@ dev = [
     "pytest",
 ]
 
+[project.scripts]
+shakevmd = "shakevmd.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["mmd_toolbox*", "shakevmd*"]
 
