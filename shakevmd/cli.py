@@ -296,6 +296,9 @@ def main(argv=None) -> int:
     settle = _resolve_param("settle", args, preset)
     cut_threshold = _resolve_param("cut_threshold", args, preset)
     fade = _resolve_param("fade", args, preset)
+    # 内蔵パラメーター(CLI 非公開、プリセットのみ。§8)を bake へ転送する。
+    # 例: walking の歩調成分 gait_freq/gait_amp。bake 既定(無効)を上書きする。
+    internal = {k: preset[k] for k in presets.INTERNAL_PARAM_NAMES if k in preset}
 
     # ベイク。引数由来の異常は §9 コード2 に集約する:
     # - ValueError: 範囲の重複/接触(空カメラは上で弾き済み)。
@@ -315,6 +318,7 @@ def main(argv=None) -> int:
             cut_pos_threshold=cut_threshold[0],
             cut_rot_threshold=cut_threshold[1],
             impulses=tuple(args.impulses or ()),
+            **internal,
         )
     except (ValueError, OverflowError):
         return 2
