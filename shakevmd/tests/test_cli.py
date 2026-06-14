@@ -667,7 +667,8 @@ class TestCli:
         # 内部フラグ名は spec で規定されないため代表確認。網羅の本質は「未知オプション
         # は一律 exit 2」で、これは argparse がすべての未知フラグに対し保証する。
         inp = write_input(tmp_path / "in.vmd")
-        for opt in (["--octaves", "5"], ["--persistence", "0.7"], ["--settle-time", "2"]):
+        for opt in (["--octaves", "5"], ["--persistence", "0.7"], ["--settle-time", "2"],
+                    ["--gait-freq", "2.0"], ["--gait-amp", "0.2"]):
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), *opt]) == 2
 
     # --- 非カメラセクション透過(§3.1) -------------------------------------
@@ -703,16 +704,48 @@ class TestCliOps:
     # --- プリセット定義(presets.py) -------------------------------------
     PUBLIC_PARAMS = {"amp_rot", "amp_pos", "rot_weights", "freq",
                      "motion_scale", "settle", "cut_threshold"}
+    # 内蔵パラメーター(CLI 非公開、プリセット/コアAPIのみ。§8)。現状は walking 歩調成分。
+    INTERNAL_PARAMS = {"gait_freq", "gait_amp"}
 
     def test_presets_defined_for_all_names(self):
-        # §2.7 の4プリセットが定義され、各々が公開引数の「完全な束」を返す(一括設定)。未知名は KeyError。
+        # §2.7 の4プリセットが定義され、各々が公開引数の完全な束を含む(一括設定)。
+        # 余剰キーは内蔵パラメーター(歩調等)に限る。未知名は KeyError。
         assert set(presets.PRESET_NAMES) == {"handheld", "telephoto", "walking", "earthquake"}
         for name in presets.PRESET_NAMES:
             params = presets.get_preset(name)
             assert isinstance(params, dict)
-            assert set(params) == self.PUBLIC_PARAMS   # 全公開引数を一括設定(部分集合でない)
+            assert self.PUBLIC_PARAMS <= set(params), name              # 全公開引数を含む
+            assert set(params) - self.PUBLIC_PARAMS <= self.INTERNAL_PARAMS, name  # 余剰は内蔵のみ
         with pytest.raises(KeyError):
             presets.get_preset("nonexistent-preset")
+
+    def test_only_walking_has_gait_component(self):
+        # §95: 歩調成分は walking のみ。walking は gait_freq>0・gait_amp>0、他は無効(0/未設定)。
+        w = presets.get_preset("walking")
+        assert w["gait_freq"] > 0.0 and w["gait_amp"] > 0.0
+        for name in ("handheld", "telephoto", "earthquake"):
+            q = presets.get_preset(name)
+            assert q.get("gait_freq", 0.0) == 0.0, name
+            assert q.get("gait_amp", 0.0) == 0.0, name
+
+    def test_walking_preset_forwards_gait_to_bake(self, tmp_path):
+        # §95: --preset walking が gait_freq/gait_amp を bake へ配線する。CLI 出力が、同じ公開引数+
+        # 歩調引数で直接 bake した結果と一致することで検証する(歩調を渡さない実装は不一致で落ちる)。
+        from shakevmd.bake import bake
+        inp = write_input(tmp_path / "in.vmd", KEYS)
+        src = read_camera(inp)
+        out, exp = tmp_path / "cli.vmd", tmp_path / "exp.vmd"
+        assert cli.main([inp, "-o", str(out), "--preset", "walking"]) == 0
+        p = presets.get_preset("walking")
+        baked = bake(
+            list(src), seed=1,
+            amp_rot=p["amp_rot"], amp_pos=p["amp_pos"], rot_weights=p["rot_weights"],
+            freq=p["freq"], motion_scale=p["motion_scale"], settle=p["settle"],
+            cut_pos_threshold=p["cut_threshold"][0], cut_rot_threshold=p["cut_threshold"][1],
+            fade_sec=0.7, gait_freq=p["gait_freq"], gait_amp=p["gait_amp"],
+        )
+        io.write_file(VmdDocument(camera=baked.camera_keys), str(exp))
+        assert read_camera(out) == read_camera(exp)
 
     def test_all_presets_run_via_cli(self, tmp_path):
         # 4プリセット名すべてが CLI で受理され正常終了する(earthquake だけでなく全名)。
@@ -760,8 +793,9 @@ class TestCliOps:
 
     def test_preset_matches_explicit_params(self, tmp_path):
         # CLI の --preset は presets.get_preset() の値をそのまま適用する(§8: presets.py が
-        # プリセット定義の境界)。全4プリセットで「--preset NAME == その公開引数の明示指定」を
-        # 検証し、各プリセットが束を実際に適用すること(no-op でない)も同時に保証する。
+        # プリセット定義の境界)。公開引数のみのプリセットは「--preset NAME == その公開引数の
+        # 明示指定」と一致する。内蔵パラメーター(歩調等)を持つプリセットは、公開引数だけの
+        # 明示指定では内蔵分が欠けるため一致しない(=内蔵パラメーターも実際に効いている証拠)。
         inp = write_input(tmp_path / "in.vmd")
         for name in presets.PRESET_NAMES:
             p = presets.get_preset(name)
@@ -775,7 +809,13 @@ class TestCliOps:
             a, b = tmp_path / f"{name}_a.vmd", tmp_path / f"{name}_b.vmd"
             assert cli.main([inp, "-o", str(a), "--preset", name]) == 0, name
             assert cli.main([inp, "-o", str(b), *explicit]) == 0, name
-            assert a.read_bytes() == b.read_bytes(), name
+            # 「効く」内蔵パラメーターを持つか(キーの有無でなく実効値で判定。非 walking が
+            # gait_freq=0 を明示しても無効=公開引数のみと一致、を誤判定しない)。
+            active_gait = p.get("gait_freq", 0.0) > 0.0 and p.get("gait_amp", 0.0) != 0.0
+            if active_gait:
+                assert a.read_bytes() != b.read_bytes(), name   # 内蔵分が効くので不一致
+            else:
+                assert a.read_bytes() == b.read_bytes(), name   # 実効する内蔵なし → 一致
 
     def test_individual_override_is_order_independent(self, tmp_path):
         # 個別引数の優先は指定順に依らない(§2.7)。個別引数を --preset の前に置いても上書きが効く
