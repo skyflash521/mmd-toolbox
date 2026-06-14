@@ -170,3 +170,56 @@ class TestContinuityAndAmplitude:
         vals, _ = noise.band_limited_noise(7, t, 1.2, octaves=1, persistence=1.0)
         deriv = (vals[2:] - vals[:-2]) / (2 * h)
         assert np.max(np.abs(np.diff(deriv))) < 0.5
+
+
+class TestOctaveComponents:
+    """プロファイルクロスフェード用の per-octave 成分(§6.2)。"""
+
+    def test_count_and_amplitude_bound(self):
+        t = np.arange(0, 2, 1 / 30.0)
+        comps, warns = noise.octave_components(123, t, 1.2, octaves=3)
+        assert len(comps) == noise.effective_octaves(1.2, 3)
+        assert not warns                               # 1.2×4=4.8≤8 でクランプなし → 警告なし
+        for c in comps:
+            c = np.asarray(c)
+            assert c.shape == t.shape
+            assert np.max(np.abs(c)) <= 1.0 + 1e-9     # 単一オクターブ perlin は [-1,1]
+
+    def test_each_component_equals_its_octave(self):
+        # 各成分 i が「実際の i 番目のオクターブ」であることを公開APIだけで検証する
+        # (偽の再分配=和は合うが個々が別物、を排除)。band_limited_noise(persistence=1) は
+        # 先頭 i+1 本のオクターブの単純和なので、その階差が i 番目のオクターブそのもの。
+        t = np.arange(0, 3, 1 / 30.0)
+        freq = 1.2
+        comps, _ = noise.octave_components(7, t, freq, octaves=3)
+        for i in range(len(comps)):
+            upto_hi, _ = noise.band_limited_noise(7, t, freq, octaves=i + 1, persistence=1.0)
+            upto_lo, _ = noise.band_limited_noise(7, t, freq, octaves=i, persistence=1.0)
+            assert np.allclose(np.asarray(comps[i]), upto_hi - upto_lo, atol=1e-9)
+
+    def test_persistence_weighted_sum_matches_band_limited(self):
+        # Σ persistence^i × components[i] == band_limited_noise(同パラメータ)。
+        # 成分の per-octave シード派生・位相が band_limited_noise と一致することを担保する。
+        t = np.arange(0, 3, 1 / 30.0)
+        comps, _ = noise.octave_components(7, t, 1.2, octaves=3)
+        ref, _ = noise.band_limited_noise(
+            7, t, 1.2, octaves=3, persistence=noise.DEFAULT_PERSISTENCE)
+        summed = sum((noise.DEFAULT_PERSISTENCE ** i) * np.asarray(comps[i])
+                     for i in range(len(comps)))
+        assert np.allclose(summed, ref, atol=1e-9)
+
+    def test_bandlimit_clamp_reduces_components_with_warning(self):
+        # 高 freq で帯域制限クランプ → 成分数が減り警告が出る(§6.1)。
+        t = np.arange(0, 2, 1 / 30.0)
+        comps, warns = noise.octave_components(1, t, 5.0, octaves=3)
+        assert len(comps) == noise.effective_octaves(5.0, 3) < 3
+        assert warns
+
+    def test_all_octaves_clamped_returns_empty(self):
+        # freq>8Hz は基本オクターブから帯域外 → 成分0本 + 警告(§6.1: 8Hz超は生成しない)。
+        # 帯域外を1本でも強制生成する実装を排除する。
+        t = np.arange(0, 2, 1 / 30.0)
+        comps, warns = noise.octave_components(1, t, 10.0, octaves=3)
+        assert noise.effective_octaves(10.0, 3) == 0
+        assert len(comps) == 0
+        assert warns

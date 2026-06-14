@@ -292,3 +292,60 @@ class TestImpulseEnvelope:
         idx = np.arange(F, 120)
         dt = (idx - F) / fps
         assert np.allclose(env[F:], S * np.exp(-dt / D), atol=1e-9)
+
+
+class TestProfileCrossfade:
+    """静止/移動プロファイルのオクターブ重みクロスフェード(§6.2)。"""
+
+    def test_endpoints_and_midpoint(self):
+        # s=0→still、s=1→moving、s=0.5→中点(線形ブレンド)。
+        assert list(motion.profile_weights(0.0)) == pytest.approx(list(motion.STILL_PROFILE))
+        assert list(motion.profile_weights(1.0)) == pytest.approx(list(motion.MOVING_PROFILE))
+        mid = motion.profile_weights(0.5)
+        expect = [(motion.STILL_PROFILE[i] + motion.MOVING_PROFILE[i]) / 2
+                  for i in range(len(motion.STILL_PROFILE))]
+        assert list(mid) == pytest.approx(expect)
+        # 非対称点(s=0.25)で線形ブレンドを確認(smoothstep 等の非線形対称を排除)。
+        q = motion.profile_weights(0.25)
+        expect_q = [0.75 * motion.STILL_PROFILE[i] + 0.25 * motion.MOVING_PROFILE[i]
+                    for i in range(len(motion.STILL_PROFILE))]
+        assert list(q) == pytest.approx(expect_q)
+
+    def test_array_input_per_frame(self):
+        # 配列入力 → (n_frames, n_oct)。各行が対応速度のブレンド(中間 s=0.5 も式どおり)。
+        s = np.array([0.0, 0.5, 1.0])
+        w = np.asarray(motion.profile_weights(s))
+        assert w.shape == (3, len(motion.STILL_PROFILE))
+        assert list(w[0]) == pytest.approx(list(motion.STILL_PROFILE))
+        assert list(w[-1]) == pytest.approx(list(motion.MOVING_PROFILE))
+        mid = [(motion.STILL_PROFILE[i] + motion.MOVING_PROFILE[i]) / 2
+               for i in range(len(motion.STILL_PROFILE))]
+        assert list(w[1]) == pytest.approx(mid)
+
+    def test_profiles_differ_moving_has_more_high_freq(self):
+        # 2プロファイルは異なり(クロスフェードが意味を持つ)、移動は高オクターブ重みが大きい
+        # (移動時はより細かい=高周波の揺れ)。
+        assert tuple(motion.STILL_PROFILE) != tuple(motion.MOVING_PROFILE)
+        assert motion.MOVING_PROFILE[-1] > motion.STILL_PROFILE[-1]
+        # 完全静止区間も「高周波微動」を残す(§6.2)ため、静止プロファイルの高オクターブ重みは非ゼロ。
+        assert motion.STILL_PROFILE[-1] > 0.0
+
+
+class TestBreathingDrift:
+    """完全静止区間の長周期ドリフト(呼吸 0.3Hz、§6.2)。"""
+
+    def test_frequency_and_amplitude(self):
+        amp = 0.5
+        assert motion.BREATHING_HZ == pytest.approx(0.3)   # §6.2 呼吸0.3Hz相当(被検定数を固定)
+        period = 1.0 / 0.3                                 # spec 値の literal(定数由来にしない)
+        t = np.linspace(0.0, 2.0 * period, 2001)
+        x = np.asarray(motion.breathing_drift(t, amp))
+        assert np.max(np.abs(x)) <= amp + 1e-9                 # 振幅有界
+        q = float(np.asarray(motion.breathing_drift(np.array([period / 4.0]), amp))[0])
+        assert q == pytest.approx(amp, abs=1e-3)               # 1/4周期で最大=amp(sin)
+        z = float(np.asarray(motion.breathing_drift(np.array([period]), amp))[0])
+        assert abs(z) < 1e-3                                   # 1周期で約0
+        assert float(np.asarray(motion.breathing_drift(np.array([0.0]), amp))[0]) == pytest.approx(0.0, abs=1e-9)
+        # 3/4周期で sin=-1 → -amp(負の半周期。abs(sin)/半波整流を排除)。
+        neg = float(np.asarray(motion.breathing_drift(np.array([3.0 * period / 4.0]), amp))[0])
+        assert neg == pytest.approx(-amp, abs=1e-3)

@@ -16,6 +16,26 @@ DEFAULT_SETTLE_TIME_SEC = 1.0       # settle 減衰振動の収束時間(内蔵)
 DEFAULT_SETTLE_FREQ_HZ = 2.5        # settle 振動の周波数(内蔵)
 DEFAULT_STOP_SPEED_THRESHOLD = 0.1  # 正規化速度がこれを下回ると停止とみなす(内蔵)
 
+# 静止/移動プロファイル(§6.2)。オクターブ重みベクトル(長さ=noise.DEFAULT_OCTAVES=3)。
+# 静止: 低周波寄り(急減衰=落ち着いた揺れ)。移動: 高周波寄り(緩減衰=細かい揺れ)。暫定値。
+STILL_PROFILE = (1.0, 0.25, 0.0625)
+MOVING_PROFILE = (1.0, 0.6, 0.36)
+BREATHING_HZ = 0.3                  # 完全静止区間の長周期ドリフト周波数(§6.2 呼吸相当、内蔵)
+
+
+def profile_weights(normalized_speed, still=STILL_PROFILE, moving=MOVING_PROFILE):
+    """正規化速度に応じて静止/移動プロファイルのオクターブ重みをクロスフェードする(§6.2)。
+
+    weight_i = (1 - s)·still_i + s·moving_i。s はスカラーまたは配列([0,1] 想定)。
+    戻り値: スカラー入力なら (n_oct,) の np.ndarray、配列入力なら (n_frames, n_oct)。
+    """
+    raise NotImplementedError
+
+
+def breathing_drift(t_sec, amp: float, freq: float = BREATHING_HZ):
+    """完全静止区間の長周期ドリフト(呼吸相当、§6.2)。amp·sin(2π·freq·t)。t_sec は秒。"""
+    raise NotImplementedError
+
 
 def _smoothstep(t: np.ndarray) -> np.ndarray:
     """3t^2-2t^3。端で値0/1かつ微分0(位置と速度の連続性。§5.1)。"""

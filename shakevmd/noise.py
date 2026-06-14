@@ -92,6 +92,27 @@ def _perlin1d(seed: int, x: np.ndarray) -> np.ndarray:
     return n0 + u * (n1 - n0)
 
 
+def octave_components(
+    seed: int,
+    t,
+    freq: float,
+    *,
+    octaves: int = DEFAULT_OCTAVES,
+    bandlimit_hz: float = BANDLIMIT_HZ,
+) -> tuple[list, list[str]]:
+    """各オクターブのノイズ成分(persistence 重み無し)のリストと警告を返す(§6.2)。
+
+    band_limited_noise が固定 persistence で合成するのに対し、こちらは合成前の
+    オクターブ成分を返す。プロファイルクロスフェード(motion.profile_weights)で
+    フレーム毎にオクターブ重みを変えて合成するために使う。
+
+    戻り値: (components, warns)。components は effective_octaves 本の np.ndarray(各 len(t))。
+    各成分は単一オクターブの _perlin1d(f_i·t + 位相)で値域 [-1,1]。
+    Σ persistence^i × components[i] は band_limited_noise(同パラメータ) と一致する。
+    """
+    raise NotImplementedError
+
+
 def band_limited_noise(
     seed: int,
     t,
