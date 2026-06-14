@@ -53,6 +53,8 @@ codex:rescue(read-only)にレビューさせ、Claude が各指摘を「修正�
      モデル)。テスト実行が要るなら codex とは別に自前シェルで行い、pytest コマンドを
      codex の引数に渡すな」を明記(過去に文中の `pytest` がモデル名と誤解釈され
      `The 'pytest' model is not supported` で起動失敗した)
+   - task は複数行で渡してよい(許可ルールで通ることを実測済み)。ごく稀の権限拒否は
+     一過性なので、その回を失敗扱いにして新しい codex:rescue エージェントで再実行する
    - **【厳守】サンドボックスを無効化するな**: 「`dangerouslyDisableSandbox` を使うな。
      サンドボックス外で codex を実行するな」を必ず明記する。codex companion が状態書き込みで
      サンドボックス制限(EPERM 等)に当たっても、**サンドボックスを切って回避してはならない**。
