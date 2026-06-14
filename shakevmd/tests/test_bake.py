@@ -5,10 +5,12 @@
 中心を逆算」。距離0では素朴な角度加算と一致する。
 """
 
+import inspect
+
 import numpy as np
 import pytest
 
-from shakevmd import bake
+from shakevmd import bake, motion
 from mmd_toolbox.vmd import camera
 from mmd_toolbox.vmd.types import CameraKey
 
@@ -1006,3 +1008,125 @@ class TestWalkingGait:
         for res in (r_default, r_explicit):
             assert self._maxabs(self._pos(res, src, 0)) < 1e-9
             assert self._maxabs(self._pos(res, src, 1)) < 1e-9
+
+
+class TestCoreApiTuning:
+    """§8/§2.5: 内蔵パラメータ(静止/移動プロファイル=オクターブ重み構成、settle 収束時間)を
+    bake() 引数で調整できる(coreAPI)。既定は従来の内蔵定数で挙動不変。
+    オクターブ数はプロファイル長で決まる(別引数を設けず連動を一本化)。"""
+
+    N = 99
+    _LIN = bytes([20, 107, 20, 107]) * 6
+
+    def _static(self):
+        return [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN),
+                kf(self.N, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN)]
+
+    def _moving(self):
+        return [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN),
+                kf(self.N, center=(60.0, 0.0, 0.0), rotation=(0.0, 1.5, 0.0), interp_block=self._LIN)]
+
+    def _rot_hf(self, res, src, axis=0):
+        # 回転チャンネルの相対高周波(呼吸=位置のみなので汚染なし)。内部窓で端のフェードを避ける。
+        r = np.array([res[f].rotation[axis] - interp.sample_camera(src, f)["rotation"][axis]
+                      for f in range(12, self.N - 11)])
+        return float(np.std(np.diff(r)) / (np.std(r) + 1e-12))
+
+    def _rot_bin_amp(self, res, src, freq, axis=0):
+        # 回転残差の freq 最近傍ビン振幅(オクターブ別エネルギー観測)。
+        r = np.array([res[f].rotation[axis] - interp.sample_camera(src, f)["rotation"][axis]
+                      for f in range(self.N + 1)])
+        spec = np.abs(np.fft.rfft(r))
+        freqs = np.fft.rfftfreq(r.size, d=1.0 / 30.0)
+        return float(spec[int(np.argmin(np.abs(freqs - freq)))])
+
+    def _pos_band_ratio(self, res, src, axis=0):
+        # 位置残差の高オクターブ(>1.8Hz)/低オクターブ(0.6–1.8Hz)振幅比。呼吸(0.3Hz)は帯域外。
+        p = np.array([res[f].position[axis] - interp.sample_camera(src, f)["position"][axis]
+                      for f in range(self.N + 1)])
+        spec = np.abs(np.fft.rfft(p))
+        freqs = np.fft.rfftfreq(p.size, d=1.0 / 30.0)
+        low = spec[(freqs > 0.6) & (freqs <= 1.8)].sum()
+        high = spec[freqs > 1.8].sum()
+        return float(high / (low + 1e-12))
+
+    def test_still_profile_tunes_static_octave_weights(self):
+        # 静止セグメントのオクターブ重み = still_profile。moving_profile は固定し still のみ変える。
+        # 静止で moving_profile を使う誤実装は hi==lo になり落ちる(round1 指摘)。
+        src = self._static()
+        common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.1,
+                      moving_profile=motion.MOVING_PROFILE)
+        hi = by_frame(bake.bake(src, still_profile=(1.0, 1.0, 1.0), **common))
+        lo = by_frame(bake.bake(src, still_profile=(1.0, 0.05, 0.01), **common))
+        assert self._rot_hf(hi, src) > self._rot_hf(lo, src)
+
+    def test_moving_profile_tunes_moving_octave_weights(self):
+        # 移動セグメントのオクターブ重み = moving_profile。still_profile は固定し moving のみ変える。
+        # 移動で still_profile を使う誤実装は hi==lo になり落ちる(round1 指摘)。
+        src = self._moving()
+        common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.1,
+                      still_profile=motion.STILL_PROFILE)
+        hi = by_frame(bake.bake(src, moving_profile=(1.0, 1.0, 1.0), **common))
+        lo = by_frame(bake.bake(src, moving_profile=(1.0, 0.05, 0.01), **common))
+        assert self._rot_hf(hi, src) > self._rot_hf(lo, src)
+
+    def test_profiles_apply_to_position_channels(self):
+        # プロファイルは回転だけでなく位置チャンネルにも適用される(§2.5 は generic。round2#1)。
+        # 静止(still_profile)・移動(moving_profile)の両レジームで確認する(片レジームのみ位置に効く
+        # 実装を排除。round3#1)。呼吸帯域外の高/低オクターブ band-ratio(振幅不変・呼吸非依存)で判別。
+        for src, vary in ((self._static(), "still_profile"), (self._moving(), "moving_profile")):
+            common = dict(seed=1, amp_rot=0.0, amp_pos=1.0, freq=1.2, settle=0.0, fade_sec=0.1)
+            hi_kw = {"still_profile": motion.STILL_PROFILE, "moving_profile": motion.MOVING_PROFILE}
+            lo_kw = dict(hi_kw)
+            hi_kw[vary] = (1.0, 1.0, 1.0)
+            lo_kw[vary] = (1.0, 0.05, 0.01)
+            hi = by_frame(bake.bake(src, **common, **hi_kw))
+            lo = by_frame(bake.bake(src, **common, **lo_kw))
+            assert self._pos_band_ratio(hi, src) > self._pos_band_ratio(lo, src), vary
+
+    def test_octave_count_follows_profile_length(self):
+        # オクターブ数 = プロファイル長。長さ2は第3オクターブ(freq=1.2 → 4.8Hz)を持たず、長さ3は持つ。
+        # DEFAULT_OCTAVES=3 固定の誤実装は長さ2でも 4.8Hz を出して落ちる(round1#5)。静止(still 長)と
+        # 移動(moving 長)の両レジームで確認する(移動側固定3オクターブの実装も排除。round2#2)。
+        common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, settle=0.0, fade_sec=0.1)
+        for src in (self._static(), self._moving()):
+            o2 = by_frame(bake.bake(src, still_profile=(1.0, 1.0), moving_profile=(1.0, 1.0), **common))
+            o3 = by_frame(bake.bake(src, still_profile=(1.0, 1.0, 1.0),
+                                    moving_profile=(1.0, 1.0, 1.0), **common))
+            assert self._rot_bin_amp(o3, src, 4.8) > 5.0 * self._rot_bin_amp(o2, src, 4.8)   # 第3=長さ3のみ
+
+    def test_settle_time_tunes_decay_rate_not_gain(self):
+        # settle 収束時間: 長いほど減衰が遅い。後半/前半エネルギー比で判別する(振幅ゲインだと比は
+        # 不変=落ちる。round1 指摘#3)。amp_rot=0 で基本ノイズを切り settle 成分(回転)だけ観測。
+        # PAN_STOP は frame30 で停止。
+        def late_over_early(settle_time):
+            res = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
+                                     settle=2.0, settle_time=settle_time, fade_sec=0.1))
+            dev = [res[f].rotation[1] - interp.sample_camera(PAN_STOP, f)["rotation"][1]
+                   for f in range(31, 58)]
+            early = float(np.sum(np.array(dev[:13]) ** 2))   # frames 31..43(停止直後)
+            late = float(np.sum(np.array(dev[14:]) ** 2))    # frames 45..57(後半)
+            return late / (early + 1e-15)
+        assert late_over_early(2.0) > late_over_early(0.3)
+
+    def test_defaults_match_internal_constants(self):
+        # 既定省略 == 内蔵定数を明示、で出力一致(引数化が挙動を変えない保証)。PAN_STOP は移動区間・
+        # 静止区間・停止を全て含むので still_profile/moving_profile/settle_time 既定をすべて行使する。
+        a = bake.bake(PAN_STOP, seed=1, settle=2.0).camera_keys
+        b = bake.bake(PAN_STOP, seed=1, settle=2.0, still_profile=motion.STILL_PROFILE,
+                      moving_profile=motion.MOVING_PROFILE,
+                      settle_time=motion.DEFAULT_SETTLE_TIME_SEC).camera_keys
+        assert a == b
+        # 既定は内蔵定数そのものに束縛されている(別値を既定にする誤配線を排除。round3#2)。
+        sig = inspect.signature(bake.bake).parameters
+        assert sig["still_profile"].default is motion.STILL_PROFILE
+        assert sig["moving_profile"].default is motion.MOVING_PROFILE
+        assert sig["settle_time"].default == motion.DEFAULT_SETTLE_TIME_SEC
+
+    def test_profile_length_mismatch_raises(self):
+        # still/moving のプロファイル長は一致が必要(オクターブ数の整合)。両方向の不一致で ValueError
+        # (片方向だけ検証する非対称バリデータを排除。round2 指摘#3)。
+        with pytest.raises(ValueError):
+            bake.bake(self._static(), still_profile=(1.0, 0.5), moving_profile=(1.0, 0.5, 0.25))
+        with pytest.raises(ValueError):
+            bake.bake(self._static(), still_profile=(1.0, 0.5, 0.25), moving_profile=(1.0, 0.5))
