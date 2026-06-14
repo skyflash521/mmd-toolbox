@@ -1032,23 +1032,11 @@ class TestCoreApiTuning:
                       for f in range(12, self.N - 11)])
         return float(np.std(np.diff(r)) / (np.std(r) + 1e-12))
 
-    def _rot_bin_amp(self, res, src, freq, axis=0):
-        # 回転残差の freq 最近傍ビン振幅(オクターブ別エネルギー観測)。
-        r = np.array([res[f].rotation[axis] - interp.sample_camera(src, f)["rotation"][axis]
-                      for f in range(self.N + 1)])
-        spec = np.abs(np.fft.rfft(r))
-        freqs = np.fft.rfftfreq(r.size, d=1.0 / 30.0)
-        return float(spec[int(np.argmin(np.abs(freqs - freq)))])
-
-    def _pos_band_ratio(self, res, src, axis=0):
-        # 位置残差の高オクターブ(>1.8Hz)/低オクターブ(0.6–1.8Hz)振幅比。呼吸(0.3Hz)は帯域外。
+    def _pos_hf(self, res, src, axis=0):
+        # 位置残差の相対高周波。移動レジーム(呼吸≈0)で使う(静止は呼吸が std を汚染するため不可)。
         p = np.array([res[f].position[axis] - interp.sample_camera(src, f)["position"][axis]
-                      for f in range(self.N + 1)])
-        spec = np.abs(np.fft.rfft(p))
-        freqs = np.fft.rfftfreq(p.size, d=1.0 / 30.0)
-        low = spec[(freqs > 0.6) & (freqs <= 1.8)].sum()
-        high = spec[freqs > 1.8].sum()
-        return float(high / (low + 1e-12))
+                      for f in range(12, self.N - 11)])
+        return float(np.std(np.diff(p)) / (np.std(p) + 1e-12))
 
     def test_still_profile_tunes_static_octave_weights(self):
         # 静止セグメントのオクターブ重み = still_profile。moving_profile は固定し still のみ変える。
@@ -1058,7 +1046,8 @@ class TestCoreApiTuning:
                       moving_profile=motion.MOVING_PROFILE)
         hi = by_frame(bake.bake(src, still_profile=(1.0, 1.0, 1.0), **common))
         lo = by_frame(bake.bake(src, still_profile=(1.0, 0.05, 0.01), **common))
-        assert self._rot_hf(hi, src) > self._rot_hf(lo, src)
+        for ax in range(3):   # 全回転軸(x のみ効かせる実装を排除。round6)
+            assert self._rot_hf(hi, src, ax) > self._rot_hf(lo, src, ax), ax
 
     def test_moving_profile_tunes_moving_octave_weights(self):
         # 移動セグメントのオクターブ重み = moving_profile。still_profile は固定し moving のみ変える。
@@ -1068,32 +1057,37 @@ class TestCoreApiTuning:
                       still_profile=motion.STILL_PROFILE)
         hi = by_frame(bake.bake(src, moving_profile=(1.0, 1.0, 1.0), **common))
         lo = by_frame(bake.bake(src, moving_profile=(1.0, 0.05, 0.01), **common))
-        assert self._rot_hf(hi, src) > self._rot_hf(lo, src)
+        for ax in range(3):   # 全回転軸
+            assert self._rot_hf(hi, src, ax) > self._rot_hf(lo, src, ax), ax
 
-    def test_profiles_apply_to_position_channels(self):
+    def test_profiles_apply_to_position_channels(self, monkeypatch):
         # プロファイルは回転だけでなく位置チャンネルにも適用される(§2.5 は generic。round2#1)。
-        # 静止(still_profile)・移動(moving_profile)の両レジームで確認する(片レジームのみ位置に効く
-        # 実装を排除。round3#1)。呼吸帯域外の高/低オクターブ band-ratio(振幅不変・呼吸非依存)で判別。
+        # 静止(still_profile)・移動(moving_profile)両レジームで確認する(位置を片側に固定する実装を
+        # 排除。round5)。呼吸を切って(BREATHING_AMP_FACTOR=0)位置 std の汚染を除き、相対高周波で判別。
+        monkeypatch.setattr(motion, "BREATHING_AMP_FACTOR", 0.0)
         for src, vary in ((self._static(), "still_profile"), (self._moving(), "moving_profile")):
-            common = dict(seed=1, amp_rot=0.0, amp_pos=1.0, freq=1.2, settle=0.0, fade_sec=0.1)
+            common = dict(seed=1, amp_rot=0.0, amp_pos=1.0, settle=0.0, fade_sec=0.1)
             hi_kw = {"still_profile": motion.STILL_PROFILE, "moving_profile": motion.MOVING_PROFILE}
             lo_kw = dict(hi_kw)
             hi_kw[vary] = (1.0, 1.0, 1.0)
             lo_kw[vary] = (1.0, 0.05, 0.01)
             hi = by_frame(bake.bake(src, **common, **hi_kw))
             lo = by_frame(bake.bake(src, **common, **lo_kw))
-            assert self._pos_band_ratio(hi, src) > self._pos_band_ratio(lo, src), vary
+            for ax in range(3):   # 全位置軸(x のみ効かせる実装を排除。round6)
+                assert self._pos_hf(hi, src, ax) > self._pos_hf(lo, src, ax), (vary, ax)
 
     def test_octave_count_follows_profile_length(self):
-        # オクターブ数 = プロファイル長。長さ2は第3オクターブ(freq=1.2 → 4.8Hz)を持たず、長さ3は持つ。
-        # DEFAULT_OCTAVES=3 固定の誤実装は長さ2でも 4.8Hz を出して落ちる(round1#5)。静止(still 長)と
-        # 移動(moving 長)の両レジームで確認する(移動側固定3オクターブの実装も排除。round2#2)。
+        # オクターブ数 = プロファイル長。長さ3(オクターブ 1.2/2.4/4.8Hz)は長さ2(1.2/2.4Hz)より
+        # 高周波成分が多い。相対高周波(std(diff)/std、勾配ノイズの分散に頑健)で判別する。
+        # オクターブ数をプロファイル長に追従させる実装でのみ成立(DEFAULT_OCTAVES=3 固定だと長さ2の
+        # 重み列(2列)と不整合でクラッシュする)。静止(still 長)・移動(moving 長)の両レジームで確認。
         common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, settle=0.0, fade_sec=0.1)
         for src in (self._static(), self._moving()):
             o2 = by_frame(bake.bake(src, still_profile=(1.0, 1.0), moving_profile=(1.0, 1.0), **common))
             o3 = by_frame(bake.bake(src, still_profile=(1.0, 1.0, 1.0),
                                     moving_profile=(1.0, 1.0, 1.0), **common))
-            assert self._rot_bin_amp(o3, src, 4.8) > 5.0 * self._rot_bin_amp(o2, src, 4.8)   # 第3=長さ3のみ
+            for ax in range(3):   # 全回転軸で 3オクターブ > 2オクターブ
+                assert self._rot_hf(o3, src, ax) > self._rot_hf(o2, src, ax), ax
 
     def test_settle_time_tunes_decay_rate_not_gain(self):
         # settle 収束時間: 長いほど減衰が遅い。後半/前半エネルギー比で判別する(振幅ゲインだと比は
