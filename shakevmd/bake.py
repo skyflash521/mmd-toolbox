@@ -137,6 +137,8 @@ def bake(
     freq: float = 1.2,
     motion_scale: float = 0.5,
     settle: float = 0.3,         # 度。停止後の減衰振動の初期振幅(§6.2)。0で無効
+    gait_freq: float = 0.0,      # Hz。歩調周期成分の周波数(§2.7/§95 walking)。0で無効
+    gait_amp: float = 0.0,       # 歩調成分の振幅(MMD距離単位)。左右=gait_freq、上下=2×gait_freq
     fade_sec: float = 0.7,
     cut_pos_threshold: float = 5.0,
     cut_rot_threshold: float = 20.0,
@@ -245,6 +247,18 @@ def bake(
                         t + phase_sec, breath_amp
                     )
 
+            # 歩調周期成分(§2.7/§95 walking): 乱数ノイズに加算で混合する。位置のみ、左右(x)=
+            # gait_freq、上下(y)=2×gait_freq の正弦波。奥行(z)・回転には載せない。位相は軸別に
+            # シード派生(決定論的)。gait_freq=0 または gait_amp=0 で無効。
+            gait = np.zeros((len(sframes), 3))
+            if gait_freq > 0.0 and gait_amp != 0.0:
+                for axis, mult in ((0, 1.0), (1, 2.0)):
+                    ph_seed = noise.derive_seed(seed, si, "gait", axis)
+                    phase = (ph_seed % 100000) / 100000.0 * 2.0 * np.pi
+                    gait[:, axis] = gait_amp * np.sin(
+                        2.0 * np.pi * (gait_freq * mult) * t + phase
+                    )
+
             # settle(§6.2): 角速度の停止点で、停止直前の回転移動方向へ減衰振動を加算する。
             # 停止時刻のΔ角度は0なので「直前の角速度ベクトル」angles[i-1]-angles[i-2] を方向に使う。
             # detect_stops/settle_oscillation はセグメントの angle_speed に対して行うため、
@@ -299,9 +313,11 @@ def bake(
                     + impulse_rot[idx][i] * fade_v
                     for i in range(3)
                 )
-                # 位置 = クロスフェードノイズ × 適応振幅 + 呼吸ドリフト(範囲フェードのみ)
+                # 位置 = クロスフェードノイズ × 適応振幅 + 呼吸ドリフト + 歩調成分(範囲フェードのみ)
                 pos_noise = tuple(
-                    pos_n[i][idx] * amp_pos * amp_factor + breath[idx][i] * fade_v
+                    pos_n[i][idx] * amp_pos * amp_factor
+                    + breath[idx][i] * fade_v
+                    + gait[idx][i] * fade_v
                     for i in range(3)
                 )
                 persp = _governing_perspective(wv, f)
