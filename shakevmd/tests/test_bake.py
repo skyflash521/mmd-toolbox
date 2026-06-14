@@ -742,7 +742,7 @@ class TestProfileCrossfadeAndBreathing:
         # プロファイルクロスフェード(§6.2): 移動セグメントは静止より高周波成分が多い。
         # 回転3軸で確認する。クロスフェードの hf 検証は回転チャンネルで行う:
         # 位置チャンネルは呼吸ドリフト(0.3Hz、位置のみ)が静止窓の hf を下げ、クロスフェード
-        # 無しでも移動>静止を満たしうるため(round6 指摘#1)。位置のクロスフェードは呼吸帯域を
+        # 無しでも移動>静止を満たしうるため。位置のクロスフェードは呼吸帯域を
         # 除いた band-ratio で別途検証する(test_crossfade_applies_to_position_via_octave_band_ratio)。
         src_s, src_m = self._static_input(), self._moving_input()
         rst = by_frame(bake.bake(src_s, seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.3))
@@ -754,7 +754,7 @@ class TestProfileCrossfadeAndBreathing:
 
     def test_per_frame_crossfade_within_single_segment(self):
         # 速度クロスフェードは「フレーム毎の速度」で効く(§6.2)。同一ノイズ実現(同一 seed)で
-        # 「同じ時間窓」を移動側/静止側に切り替えて比較し、マジックマージン(round4 指摘#1)を排す。
+        # 「同じ時間窓」を移動側/静止側に切り替えて比較し、マジックマージンを排す。
         #   decel: 0..50 移動 → 50..99 静止。 accel: 0..50 静止 → 50..99 移動。
         # キーは 0/50/99 で隣接1フレーム差なし → カット無し → 各々単一セグメント。
         # 後半窓[58:88]: decel=静止プロファイル、accel=移動プロファイルを「同一ノイズ」に適用する
@@ -762,7 +762,7 @@ class TestProfileCrossfadeAndBreathing:
         # 固定スペクトルなら両者同一重み → 合成完全一致 → strict > で落ちる(マージン不要)。
         # セグメント単位の二値実装も、accel/decel は速度分布が対称で同一プロファイルを選ぶため落ちる。
         # 速度はワールド位置パンで駆動されるので回転チャンネルも切り替わる(回転で観測 → 呼吸の
-        # 汚染なし。round6 指摘#1)。3回転軸で確認する。
+        # 汚染なし)。3回転軸で確認する。
         L = self._LIN
         decel = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
                  kf(50, center=(60.0, 0.0, 0.0), interp_block=L),
@@ -790,12 +790,12 @@ class TestProfileCrossfadeAndBreathing:
 
     def test_crossfade_is_speed_proportional_not_binary(self):
         # §6.2 のクロスフェードは速度比例 (1-s)·still + s·moving。s=0/1 だけでなく中間 s=0.5 が
-        # 「両端の間」に入ること(厳密単調)を確認し、フレーム毎の二値スイッチ(round5 指摘#1)を排除する。
+        # 「両端の間」に入ること(厳密単調)を確認し、フレーム毎の二値スイッチを排除する。
         # 同一 seed・同一窓[58:88]に s=0/0.5/1 を与える3経路(同一ノイズの再重み付け = マージン不要):
         #   s0  : 窓は静止(decel)。 sfull: 窓は全速(accel、唯一の運動 → 正規化1)。
         #   shalf: 窓の前(0..25)に2倍速のピークを置き、窓は半速 → 正規化0.5。
         # 二値スイッチは中間が端へ張り付き、固定スペクトルは同一重みで3者一致 → どちらも落ちる。
-        # 回転チャンネルで観測する(呼吸の汚染なし。round6 指摘#1)。
+        # 回転チャンネルで観測する(呼吸の汚染なし)。
         L = self._LIN
         s0 = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
               kf(50, center=(60.0, 0.0, 0.0), interp_block=L),
@@ -842,7 +842,7 @@ class TestProfileCrossfadeAndBreathing:
         return float(high / (low + 1e-12))
 
     def test_crossfade_applies_to_position_via_octave_band_ratio(self):
-        # 位置の hf は呼吸(0.3Hz)で汚染されるため(round6 指摘#1)、呼吸帯域を除いた高/低オクターブ
+        # 位置の hf は呼吸(0.3Hz)で汚染されるため、呼吸帯域を除いた高/低オクターブ
         # エネルギー比で位置のクロスフェードを直接検証する。移動は MOVING_PROFILE で高オクターブ重みが
         # 大きい → 比が大きい。同一 seed → 同一ノイズ → 重み差のみ(固定スペクトルは比一致 → red)。
         src_s, src_m = self._static_input(), self._moving_input()
@@ -853,7 +853,7 @@ class TestProfileCrossfadeAndBreathing:
 
     def test_breathing_present_in_static_absent_on_rotation(self):
         # 完全静止セグメントの位置揺れに 0.3Hz 成分が現れ、移動セグメントでは (1-speed)≈0 で消える。
-        # 位置全体の 0.3Hz が移動を大きく(>3×)上回る。回転には呼吸を載せない(round4 指摘#2)ので
+        # 位置全体の 0.3Hz が移動を大きく(>3×)上回る。回転には呼吸を載せないので
         # 回転は静止が移動を大きく上回らない(<2×)→ 回転にドリフトを載せる実装はここで落ちる。
         # N=99 → 100サンプルで 0.3Hz が整数1周期。
         src_s, src_m = self._static_input(), self._moving_input()
@@ -863,7 +863,7 @@ class TestProfileCrossfadeAndBreathing:
         rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, settle=0.0, fade_sec=0.3))
         assert self._e03_sum(pst, src_s, "pos", self.N) > 3.0 * self._e03_sum(pmv, src_m, "pos", self.N)
         assert self._e03_sum(rst, src_s, "rot", self.N) < 2.0 * self._e03_sum(rmv, src_m, "rot", self.N)
-        # §6.2「完全静止区間: 高周波微動+長周期ドリフト」: 静止でも高周波微動が残る(round7 指摘)。
+        # §6.2「完全静止区間: 高周波微動+長周期ドリフト」: 静止でも高周波微動が残る。
         # 静止区間の高オクターブを消して呼吸ドリフトだけにする実装はここで落ちる(回転で観測、freq=1.2)。
         for ax in range(3):
             assert self._band_ratio(rst, src_s, ax, self.N, "rot") > 0.1, f"tremor rot{ax}"
@@ -930,7 +930,7 @@ class TestWalkingGait:
 
     @staticmethod
     def _maxabs(series):
-        # 最大絶対値。定数オフセット(DC)も検出する(std だと見逃す。round4 指摘)。
+        # 最大絶対値。定数オフセット(DC)も検出する(std だと見逃す)。
         return float(np.max(np.abs(series)))
 
     def test_gait_tracks_freq_lr_f_updown_2f(self):
@@ -1040,18 +1040,18 @@ class TestCoreApiTuning:
 
     def test_still_profile_tunes_static_octave_weights(self):
         # 静止セグメントのオクターブ重み = still_profile。moving_profile は固定し still のみ変える。
-        # 静止で moving_profile を使う誤実装は hi==lo になり落ちる(round1 指摘)。
+        # 静止で moving_profile を使う誤実装は hi==lo になり落ちる。
         src = self._static()
         common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.1,
                       moving_profile=motion.MOVING_PROFILE)
         hi = by_frame(bake.bake(src, still_profile=(1.0, 1.0, 1.0), **common))
         lo = by_frame(bake.bake(src, still_profile=(1.0, 0.05, 0.01), **common))
-        for ax in range(3):   # 全回転軸(x のみ効かせる実装を排除。round6)
+        for ax in range(3):   # 全回転軸(x のみ効かせる実装を排除)
             assert self._rot_hf(hi, src, ax) > self._rot_hf(lo, src, ax), ax
 
     def test_moving_profile_tunes_moving_octave_weights(self):
         # 移動セグメントのオクターブ重み = moving_profile。still_profile は固定し moving のみ変える。
-        # 移動で still_profile を使う誤実装は hi==lo になり落ちる(round1 指摘)。
+        # 移動で still_profile を使う誤実装は hi==lo になり落ちる。
         src = self._moving()
         common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.1,
                       still_profile=motion.STILL_PROFILE)
@@ -1061,9 +1061,9 @@ class TestCoreApiTuning:
             assert self._rot_hf(hi, src, ax) > self._rot_hf(lo, src, ax), ax
 
     def test_profiles_apply_to_position_channels(self, monkeypatch):
-        # プロファイルは回転だけでなく位置チャンネルにも適用される(§2.5 は generic。round2#1)。
+        # プロファイルは回転だけでなく位置チャンネルにも適用される(§2.5 はチャンネル非依存)。
         # 静止(still_profile)・移動(moving_profile)両レジームで確認する(位置を片側に固定する実装を
-        # 排除。round5)。呼吸を切って(BREATHING_AMP_FACTOR=0)位置 std の汚染を除き、相対高周波で判別。
+        # 排除)。呼吸を切って(BREATHING_AMP_FACTOR=0)位置 std の汚染を除き、相対高周波で判別。
         monkeypatch.setattr(motion, "BREATHING_AMP_FACTOR", 0.0)
         for src, vary in ((self._static(), "still_profile"), (self._moving(), "moving_profile")):
             common = dict(seed=1, amp_rot=0.0, amp_pos=1.0, settle=0.0, fade_sec=0.1)
@@ -1073,7 +1073,7 @@ class TestCoreApiTuning:
             lo_kw[vary] = (1.0, 0.05, 0.01)
             hi = by_frame(bake.bake(src, **common, **hi_kw))
             lo = by_frame(bake.bake(src, **common, **lo_kw))
-            for ax in range(3):   # 全位置軸(x のみ効かせる実装を排除。round6)
+            for ax in range(3):   # 全位置軸(x のみ効かせる実装を排除)
                 assert self._pos_hf(hi, src, ax) > self._pos_hf(lo, src, ax), (vary, ax)
 
     def test_octave_count_follows_profile_length(self):
@@ -1091,7 +1091,7 @@ class TestCoreApiTuning:
 
     def test_settle_time_tunes_decay_rate_not_gain(self):
         # settle 収束時間: 長いほど減衰が遅い。後半/前半エネルギー比で判別する(振幅ゲインだと比は
-        # 不変=落ちる。round1 指摘#3)。amp_rot=0 で基本ノイズを切り settle 成分(回転)だけ観測。
+        # 不変=落ちる)。amp_rot=0 で基本ノイズを切り settle 成分(回転)だけ観測。
         # PAN_STOP は frame30 で停止。
         def late_over_early(settle_time):
             res = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
@@ -1111,7 +1111,7 @@ class TestCoreApiTuning:
                       moving_profile=motion.MOVING_PROFILE,
                       settle_time=motion.DEFAULT_SETTLE_TIME_SEC).camera_keys
         assert a == b
-        # 既定は内蔵定数そのものに束縛されている(別値を既定にする誤配線を排除。round3#2)。
+        # 既定は内蔵定数そのものに束縛されている(別値を既定にする誤配線を排除)。
         sig = inspect.signature(bake.bake).parameters
         assert sig["still_profile"].default is motion.STILL_PROFILE
         assert sig["moving_profile"].default is motion.MOVING_PROFILE
@@ -1119,7 +1119,7 @@ class TestCoreApiTuning:
 
     def test_profile_length_mismatch_raises(self):
         # still/moving のプロファイル長は一致が必要(オクターブ数の整合)。両方向の不一致で ValueError
-        # (片方向だけ検証する非対称バリデータを排除。round2 指摘#3)。
+        # (片方向だけ検証する非対称バリデータを排除)。
         with pytest.raises(ValueError):
             bake.bake(self._static(), still_profile=(1.0, 0.5), moving_profile=(1.0, 0.5, 0.25))
         with pytest.raises(ValueError):
@@ -1157,7 +1157,7 @@ class TestNaiveRotation:
     def test_naive_still_applies_position_noise(self):
         # naive でも位置ノイズは適用される(§8: center = 元中心 + pos_noise)。回転ノイズを切れば
         # 中心逆算は無関係になり naive/既定は同一の中心(元+pos_noise)になり、かつ中心は元から動く。
-        # naive で pos_noise を落とす実装は「中心が動かない/既定と不一致」で落ちる(round1 指摘)。
+        # naive で pos_noise を落とす実装は「中心が動かない/既定と不一致」で落ちる。
         src = self._src()
         common = dict(seed=1, amp_rot=0.0, amp_pos=0.5, settle=0.0, fade_sec=0.1)
         nv = by_frame(bake.bake(src, naive_rotation=True, **common))
