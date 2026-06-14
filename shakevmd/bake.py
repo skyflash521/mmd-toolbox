@@ -27,16 +27,22 @@ def round_half_up(x) -> int:
     return int(math.floor(float(x) + 0.5))
 
 
-def apply_gaze_shake(camera_key, rot_noise, pos_noise=(0.0, 0.0, 0.0)) -> dict:
+def apply_gaze_shake(camera_key, rot_noise, pos_noise=(0.0, 0.0, 0.0), naive=False) -> dict:
     """視線揺れ変換(§4.2)。
 
     - 揺れ角度 = camera_key.rotation + rot_noise(成分ごとのオイラー加算)
     - カメラのワールド位置は固定(pos_noise 指定時はその分だけワールドでシフト)
     - 新しい角度・距離からカメラ中心を逆算: center = cam_pos - R(新角度)·(0,0,distance)
+    naive=True(素朴な角度加算モード、§8)では中心の逆算を行わず、元のカメラ中心に
+    位置ノイズだけ加える(角度はオイラー加算、ワールド位置は固定しない)。距離0では
+    既定と一致する。
     rot_noise=(drx,dry,drz) ラジアン、pos_noise=(dx,dy,dz)。
     戻り値: {"position": (cx,cy,cz), "rotation": (rx,ry,rz)}
     """
     new_rot = tuple(camera_key.rotation[i] + rot_noise[i] for i in range(3))
+    if naive:
+        center = np.array(camera_key.position, dtype=float) + np.array(pos_noise, dtype=float)
+        return {"position": tuple(center), "rotation": new_rot}
     # カメラワールド位置(位置ノイズ分シフト)
     cam_pos = np.array(camera.to_world(camera_key).position, dtype=float)
     cam_pos = cam_pos + np.array(pos_noise, dtype=float)
@@ -142,6 +148,7 @@ def bake(
     # 静止/移動プロファイル(オクターブ重み構成、§6.2/§8 内蔵)。オクターブ数=プロファイル長。
     still_profile=motion.STILL_PROFILE,
     moving_profile=motion.MOVING_PROFILE,
+    naive_rotation: bool = False,  # 素朴な角度加算モード(§8 内蔵)。中心逆算を行わない
     gait_freq: float = 0.0,      # Hz。歩調周期成分の周波数(§2.7/§95 walking)。0で無効
     gait_amp: float = 0.0,       # 歩調成分の振幅(MMD距離単位)。左右=gait_freq、上下=2×gait_freq
     fade_sec: float = 0.7,
@@ -339,7 +346,7 @@ def bake(
                     f, s["distance"], s["position"], s["rotation"],
                     LINEAR_CAMERA_INTERP, fov, persp,
                 )
-                shaken = apply_gaze_shake(probe, rot_noise, pos_noise)
+                shaken = apply_gaze_shake(probe, rot_noise, pos_noise, naive=naive_rotation)
                 baked.append(CameraKey(
                     f, s["distance"], shaken["position"], shaken["rotation"],
                     LINEAR_CAMERA_INTERP, fov, persp,
