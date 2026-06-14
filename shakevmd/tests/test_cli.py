@@ -4,11 +4,10 @@ CLI はコアの薄いラッパー: 引数解析 → VMD読み(mmd_toolbox.vmd.i
 終了コード(§9): 0 正常 / 1 入力不正(VMDでない・カメラキーなし)/ 2 引数エラー
 (範囲不正・重複・上書き未許可)/ 3 出力書き込み失敗。
 
-本サブステップの範囲は **§2.1-2.6 + §9 のコア CLI**(I/O・範囲・主要揺れパラメーター・終了コード)。
-§2.7 の運用/プリセット flags(`--preset`・`--dry-run`・`--preview-csv`・`-v/--verbose`)は
-**後続「CLI 運用機能」サブステップへ繰り延べ**る(--preset は presets.py を要し、--dry-run/
---preview-csv は bake 結果の追加情報=最大振幅・チャンネル別揺れ量の公開を要するため)。
-未実装の間、これらは未知オプションとして exit 2(test_rejects_internal_params_exit2 と同じ扱い)。
+`TestCli` はコア CLI(**§2.1-2.6 + §9**: I/O・範囲・主要揺れパラメーター・終了コード)を、
+`TestCliOps` は **§2.7 運用/プリセット系**(`--preset`・`--dry-run`・`--preview-csv`・`-v/--verbose`)
+を検証する。§2.7 のうち内蔵パラメーター(オクターブ/プロファイル)のプリセット調整と walking の
+歩調成分ノイズは、コア拡張を要するため後続サブステップへ繰延(本段階のプリセットは公開引数の束)。
 """
 
 import sys
@@ -16,7 +15,7 @@ import sys
 import numpy as np
 import pytest
 
-from shakevmd import cli
+from shakevmd import cli, presets
 from mmd_toolbox.vmd import io
 from mmd_toolbox.vmd.types import BoneKey, CameraKey, VmdDocument
 
@@ -76,6 +75,16 @@ SMALL_CUT_KEYS = [
     cam(29, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
     cam(30, center=(4.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
     cam(60, center=(4.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
+]
+
+# frame21 と frame41 の2か所で中心が大きく跳ぶ=複数カット(報告が全位置を含むかの検証用)。
+MULTI_CUT_KEYS = [
+    cam(0, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
+    cam(20, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
+    cam(21, center=(40.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
+    cam(40, center=(40.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
+    cam(41, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
+    cam(60, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
 ]
 
 
@@ -495,13 +504,6 @@ class TestCli:
         ):
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), *args]) == 2
 
-    def test_deferred_section27_options_exit2(self, tmp_path):
-        # §2.7 運用/プリセット flags は本サブステップ未実装 → 未知オプションとして exit2
-        # (後続「CLI 運用機能」サブステップで実装。方針=docstring と契約=本テストを一致させる)
-        inp = write_input(tmp_path / "in.vmd")
-        for args in (["--preset", "handheld"], ["--dry-run"], ["--preview-csv", "x.csv"], ["--verbose"], ["-v"]):
-            assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), *args]) == 2
-
     def test_range_snaps_at_cli(self, tmp_path):
         # 非キー端点は「最近接」の既存キー(0/30/60)へスナップ(§5.2)。
         # 最近接を floor(常に直前キー) / ceil(常に切り上げ)の両方から区別するため、
@@ -655,7 +657,8 @@ class TestCli:
         inp = write_input(tmp_path / "in.vmd")
         for opt in ("--output", "--range", "--seed", "--amp-rot", "--amp-pos",
                     "--rot-weights", "--freq", "--fade", "--motion-scale",
-                    "--settle", "--cut-threshold", "--impulse"):
+                    "--settle", "--cut-threshold", "--impulse",
+                    "--preset", "--preview-csv"):
             assert cli.main([inp, opt]) == 2
 
     def test_rejects_internal_params_exit2(self, tmp_path):
@@ -685,3 +688,334 @@ class TestCli:
         assert sorted(k.frame for k in outdoc.camera) == list(range(0, 61))
         text = capsys.readouterr()
         assert "warning:" in (text.out + text.err).lower()   # 非カメラ透過の警告(安定マーカー)
+
+
+import csv as _csv
+
+
+class TestCliOps:
+    """§2.7 運用/プリセット系: --preset / --dry-run / --preview-csv / -v,--verbose。
+
+    本段階のプリセットは公開引数の束(個別引数が優先)。内蔵パラメーター調整と
+    walking 歩調成分はコア拡張後の後続サブステップへ繰延(test_cli.py docstring 参照)。
+    """
+
+    # --- プリセット定義(presets.py) -------------------------------------
+    PUBLIC_PARAMS = {"amp_rot", "amp_pos", "rot_weights", "freq",
+                     "motion_scale", "settle", "cut_threshold"}
+
+    def test_presets_defined_for_all_names(self):
+        # §2.7 の4プリセットが定義され、各々が公開引数の「完全な束」を返す(一括設定)。未知名は KeyError。
+        assert set(presets.PRESET_NAMES) == {"handheld", "telephoto", "walking", "earthquake"}
+        for name in presets.PRESET_NAMES:
+            params = presets.get_preset(name)
+            assert isinstance(params, dict)
+            assert set(params) == self.PUBLIC_PARAMS   # 全公開引数を一括設定(部分集合でない)
+        with pytest.raises(KeyError):
+            presets.get_preset("nonexistent-preset")
+
+    def test_all_presets_run_via_cli(self, tmp_path):
+        # 4プリセット名すべてが CLI で受理され正常終了する(earthquake だけでなく全名)。
+        inp = write_input(tmp_path / "in.vmd")
+        for name in ("handheld", "telephoto", "walking", "earthquake"):
+            assert cli.main([inp, "-o", str(tmp_path / f"{name}.vmd"), "--preset", name]) == 0, name
+
+    def test_unknown_preset_exit2(self, tmp_path):
+        # 未知のプリセット名は引数エラー(exit 2)。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--preset", "bogus"]) == 2
+
+    def test_preset_changes_output(self, tmp_path):
+        # --preset はベイクに効く(既定実行と異なる出力になる)。earthquake は既定と明確に異なる。
+        inp = write_input(tmp_path / "in.vmd")
+        base, eq = tmp_path / "base.vmd", tmp_path / "eq.vmd"
+        assert cli.main([inp, "-o", str(base)]) == 0
+        assert cli.main([inp, "-o", str(eq), "--preset", "earthquake"]) == 0
+        assert base.read_bytes() != eq.read_bytes()
+
+    def test_individual_arg_overrides_preset(self, tmp_path):
+        # 個別引数はプリセットより優先。かつ「1つ明示してもプリセット全体は無効化されない」
+        # ことを判別する(§2.7)。1引数だけ上書きし、全適用とも既定とも異なることを確認。
+        inp = write_input(tmp_path / "in.vmd")
+        base, full, part = tmp_path / "base.vmd", tmp_path / "full.vmd", tmp_path / "part.vmd"
+        assert cli.main([inp, "-o", str(base)]) == 0                              # 既定
+        assert cli.main([inp, "-o", str(full), "--preset", "earthquake"]) == 0     # earthquake 全適用
+        assert cli.main([inp, "-o", str(part), "--preset", "earthquake",
+                         "--amp-rot", "0.8"]) == 0                                  # amp-rot だけ上書き
+        assert part.read_bytes() != full.read_bytes()   # amp-rot 上書きが効く(全適用と異なる)
+        assert part.read_bytes() != base.read_bytes()   # 残りの earthquake 引数は有効(既定とも異なる)
+
+    def test_full_explicit_args_supersede_preset(self, tmp_path):
+        # 全公開引数を既定値で明示すれば、--preset を付けても既定実行とバイナリ一致(完全上書き)。
+        inp = write_input(tmp_path / "in.vmd")
+        d, e = tmp_path / "d.vmd", tmp_path / "e.vmd"
+        spec_defaults = [
+            "--amp-rot", "0.8", "--amp-pos", "0.05", "--rot-weights", "1,1,0.3",
+            "--freq", "1.2", "--motion-scale", "0.5", "--settle", "0.3",
+            "--cut-threshold", "5,20",
+        ]
+        assert cli.main([inp, "-o", str(d)]) == 0
+        assert cli.main([inp, "-o", str(e), "--preset", "earthquake", *spec_defaults]) == 0
+        assert d.read_bytes() == e.read_bytes()
+
+    def test_preset_matches_explicit_params(self, tmp_path):
+        # CLI の --preset は presets.get_preset() の値をそのまま適用する(§8: presets.py が
+        # プリセット定義の境界)。全4プリセットで「--preset NAME == その公開引数の明示指定」を
+        # 検証し、各プリセットが束を実際に適用すること(no-op でない)も同時に保証する。
+        inp = write_input(tmp_path / "in.vmd")
+        for name in presets.PRESET_NAMES:
+            p = presets.get_preset(name)
+            explicit = [
+                "--amp-rot", str(p["amp_rot"]), "--amp-pos", str(p["amp_pos"]),
+                "--rot-weights", "{},{},{}".format(*p["rot_weights"]),
+                "--freq", str(p["freq"]), "--motion-scale", str(p["motion_scale"]),
+                "--settle", str(p["settle"]),
+                "--cut-threshold", "{},{}".format(*p["cut_threshold"]),
+            ]
+            a, b = tmp_path / f"{name}_a.vmd", tmp_path / f"{name}_b.vmd"
+            assert cli.main([inp, "-o", str(a), "--preset", name]) == 0, name
+            assert cli.main([inp, "-o", str(b), *explicit]) == 0, name
+            assert a.read_bytes() == b.read_bytes(), name
+
+    def test_individual_override_is_order_independent(self, tmp_path):
+        # 個別引数の優先は指定順に依らない(§2.7)。個別引数を --preset の前に置いても上書きが効く
+        # (後続 preset が先行の個別引数を潰す実装を排除)。
+        inp = write_input(tmp_path / "in.vmd")
+        before, after = tmp_path / "before.vmd", tmp_path / "after.vmd"
+        assert cli.main([inp, "-o", str(before), "--amp-rot", "0.8", "--preset", "earthquake"]) == 0
+        assert cli.main([inp, "-o", str(after), "--preset", "earthquake", "--amp-rot", "0.8"]) == 0
+        assert before.read_bytes() == after.read_bytes()
+
+    # --- --dry-run ---------------------------------------------------------
+    def test_dry_run_writes_no_output(self, tmp_path):
+        # --dry-run は出力ファイルを書かない(§2.7)。exit 0。
+        inp = write_input(tmp_path / "in.vmd")
+        out = tmp_path / "out.vmd"
+        assert cli.main([inp, "-o", str(out), "--dry-run"]) == 0
+        assert not out.exists()
+
+    def test_dry_run_writes_no_default_output(self, tmp_path):
+        # -o 省略時も --dry-run は既定出力(<入力>_shake.vmd)を書かない(§2.7「出力せず」)。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "--dry-run"]) == 0
+        assert not (tmp_path / "in_shake.vmd").exists()
+
+    def test_dry_run_reports_stats(self, tmp_path, capsys):
+        # --dry-run は統計を表示する(§2.7: 適用範囲・出力キー数・最大振幅・カット位置・警告)。
+        # ラベル(安定マーカー)と出力キー数(KEYS 全域=61)の双方を確認する。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
+        cap = capsys.readouterr()
+        text = (cap.out + cap.err).lower()
+        assert "61" in text                                   # 出力キー数(0..60)
+        for label in ("range", "key", "amplitude", "cut"):    # 各統計項目のラベル
+            assert label in text, label
+
+    def test_dry_run_reports_detected_cut(self, tmp_path, capsys):
+        # --dry-run はカット検出位置を報告する(§5.3, §10)。frame30 でカットする入力で
+        # "cut" ラベル付きで検出フレーム "30" が現れる(偶発的な "30" を排除)。
+        inp = write_input(tmp_path / "cut.vmd", CUT_KEYS)
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
+        cap = capsys.readouterr()
+        text = (cap.out + cap.err).lower()
+        assert "cut" in text and "30" in text
+
+    def test_dry_run_reports_all_cuts(self, tmp_path, capsys):
+        # 複数カットは全位置を報告する(§5.3「検出されたカット位置は…必ず報告」)。
+        # frame21・frame41 の2カット入力で両方が現れる(先頭1個だけ報告する実装を排除)。
+        inp = write_input(tmp_path / "mcut.vmd", MULTI_CUT_KEYS)
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
+        cap = capsys.readouterr()
+        text = cap.out + cap.err
+        assert "21" in text and "41" in text
+
+    def test_dry_run_reports_all_snapped_ranges(self, tmp_path, capsys):
+        # 複数 --range の解決後範囲を全て報告する(§5.2)。キー 0/15/30/45/60 の入力で
+        # 0:14→0:15, 44:60→45:60。両範囲端(15 と 45)が現れる。
+        keys = [cam(0), cam(15), cam(30, persp=1), cam(45), cam(60)]
+        inp = write_input(tmp_path / "mr.vmd", keys)
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
+                         "--range", "0:14", "--range", "44:60", "--dry-run"]) == 0
+        cap = capsys.readouterr()
+        text = cap.out + cap.err
+        assert "15" in text and "45" in text     # 2範囲のスナップ後端
+
+    def test_dry_run_reports_warning(self, tmp_path, capsys):
+        # --dry-run は警告も表示する(§2.7)。同一フレーム重複の正規化警告が出る入力で確認。
+        dup = [cam(0), cam(30), cam(30, center=(9.0, 9.0, 9.0)), cam(60)]
+        inp = write_input(tmp_path / "dup.vmd", dup)
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
+        cap = capsys.readouterr()
+        assert "warning:" in (cap.out + cap.err).lower()
+
+    def test_dry_run_reports_snapped_range(self, tmp_path, capsys):
+        # --dry-run はスナップ「後」の実適用範囲を報告する(§5.2)。26:60 は 30:60 へスナップ
+        # (KEYS のキーは 0/30/60)。生の入力ではなく解決後の 30・60 が現れる。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
+                         "--range", "26:60", "--dry-run"]) == 0
+        cap = capsys.readouterr()
+        text = cap.out + cap.err
+        assert "30" in text and "60" in text     # スナップ後の範囲端
+
+    # --- --preview-csv -----------------------------------------------------
+    def _read_csv(self, path):
+        rows = list(_csv.reader(path.read_text(encoding="utf-8").splitlines()))
+        return rows[0], rows[1:]
+
+    def test_preview_csv_written(self, tmp_path):
+        # --preview-csv はフレームごとの揺れ量(各チャンネル)を CSV 出力する(§2.7)。
+        inp = write_input(tmp_path / "in.vmd")
+        out = tmp_path / "out.vmd"
+        csv_path = tmp_path / "preview.csv"
+        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path)]) == 0
+        assert csv_path.exists()
+        header, data = self._read_csv(csv_path)
+        # frame 列 + 回転3 + 位置3 の計7列以上、データ行はベイクフレーム数(61)。
+        assert len(header) >= 7
+        assert "frame" in header[0].lower()
+        assert len(data) == 61
+        assert all(len(r) == len(header) for r in data)
+        # frame 列は実フレーム(0..60)。全行同一フレーム等を排除(§2.7「フレームごと」)。
+        assert [int(r[0]) for r in data] == list(range(0, 61))
+
+    def test_preview_csv_holds_shake_amounts_not_absolute(self, tmp_path):
+        # CSV の値は「揺れ量」(=ベイク値−元サンプリング)であって絶対カメラ値ではない(§2.7)。
+        # 揺れ無し(amp/settle=0)なら全チャンネルほぼ0、既定(揺れ有り)なら非ゼロが現れる、で判別。
+        # 絶対カメラ値なら揺れ無しでも非ゼロ(KEYS の位置は非0)になるはず=これを排除する。
+        inp = write_input(tmp_path / "in.vmd")
+        zero_csv, shake_csv = tmp_path / "zero.csv", tmp_path / "shake.csv"
+        assert cli.main([inp, "-o", str(tmp_path / "z.vmd"), "--preview-csv", str(zero_csv),
+                         "--amp-rot", "0", "--amp-pos", "0", "--settle", "0"]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "s.vmd"), "--preview-csv", str(shake_csv)]) == 0
+
+        def channel_vals(path):
+            _, data = self._read_csv(path)
+            return [abs(float(c)) for r in data for c in r[1:]]  # frame 列以外
+
+        assert max(channel_vals(zero_csv)) < 1e-4    # 揺れ無し → ほぼ0(揺れ量である証拠)
+        assert max(channel_vals(shake_csv)) > 1e-4   # 揺れ有り → 非ゼロ
+
+    def test_preview_csv_deltas_reconstruct_baked(self, tmp_path):
+        # CSV の各チャンネル値は「ベイク値 − 元サンプリング」の揺れ量で、列ごとに正しい(§2.7)。
+        # 全フレームで サンプリング + CSV差分 == ベイク値 を確認(無関係/重複列の実装を排除)。
+        from mmd_toolbox.vmd import interp
+        inp = write_input(tmp_path / "in.vmd")
+        out, csv_path = tmp_path / "out.vmd", tmp_path / "p.csv"
+        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path), "--seed", "3"]) == 0
+        header, data = self._read_csv(csv_path)
+        col = {name: header.index(name)
+               for name in ("rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z")}
+        baked = {k.frame: k for k in read_camera(out)}
+        for row in data:
+            f = int(row[0])
+            s = interp.sample_camera(KEYS, f)
+            for j, axis in enumerate(("rot_x", "rot_y", "rot_z")):
+                assert baked[f].rotation[j] == pytest.approx(
+                    s["rotation"][j] + float(row[col[axis]]), abs=1e-4)
+            for j, axis in enumerate(("pos_x", "pos_y", "pos_z")):
+                assert baked[f].position[j] == pytest.approx(
+                    s["position"][j] + float(row[col[axis]]), abs=1e-4)
+
+    def test_preview_csv_still_writes_vmd(self, tmp_path):
+        # --preview-csv は通常出力(VMD)も書く(--dry-run とは異なり出力を抑止しない)。
+        inp = write_input(tmp_path / "in.vmd")
+        out = tmp_path / "out.vmd"
+        assert cli.main([inp, "-o", str(out), "--preview-csv", str(tmp_path / "p.csv")]) == 0
+        assert out.exists()
+
+    def test_preview_csv_does_not_change_vmd(self, tmp_path):
+        # --preview-csv は付加出力で、ベイクされる VMD を変えない(§2.7)。
+        # 非 preview 実行とバイナリ一致する。
+        inp = write_input(tmp_path / "in.vmd")
+        without, with_csv = tmp_path / "wo.vmd", tmp_path / "w.vmd"
+        assert cli.main([inp, "-o", str(without)]) == 0
+        assert cli.main([inp, "-o", str(with_csv), "--preview-csv", str(tmp_path / "p.csv")]) == 0
+        assert with_csv.read_bytes() == without.read_bytes()
+
+    def test_preview_csv_write_failure_exit3(self, tmp_path):
+        # CSV 出力の書き込み失敗も出力書き込み失敗(§9 コード3)として扱う。
+        # 親がファイル(ディレクトリでない)の CSV パス → 書き込み不可。
+        inp = write_input(tmp_path / "in.vmd")
+        clash = tmp_path / "afile"
+        clash.write_bytes(b"x")
+        rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--preview-csv", str(clash / "p.csv")])
+        assert rc == 3
+
+    def test_dry_run_suppresses_preview_csv(self, tmp_path):
+        # --dry-run は「出力せず」(§2.7)。--preview-csv 併用でも CSV を書かない。
+        inp = write_input(tmp_path / "in.vmd")
+        csv_path = tmp_path / "p.csv"
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
+                         "--preview-csv", str(csv_path), "--dry-run"]) == 0
+        assert not csv_path.exists()
+
+    # --- -v / --verbose ----------------------------------------------------
+    def test_verbose_reports_range_and_cuts(self, tmp_path, capsys):
+        # --verbose は詳細ログ(適用範囲・カット位置等)を出す(§2.7, §5.2, §5.3)。
+        # かつ非 verbose 実行ではこれら詳細を出さない(範囲/カット報告は dry-run/verbose 限定)。
+        inp = write_input(tmp_path / "cut.vmd", CUT_KEYS)
+        assert cli.main([inp, "-o", str(tmp_path / "a.vmd")]) == 0
+        q = capsys.readouterr()
+        quiet_text = (q.out + q.err).lower()
+        assert "range" not in quiet_text and "cut" not in quiet_text   # 非verboseは詳細を出さない
+        assert cli.main([inp, "-o", str(tmp_path / "b.vmd"), "--verbose"]) == 0
+        cap = capsys.readouterr()
+        verbose_text = (cap.out + cap.err).lower()
+        assert len(cap.out + cap.err) > len(q.out + q.err)            # 出力が増える
+        assert "range" in verbose_text and "cut" in verbose_text and "30" in verbose_text
+
+    def test_verbose_reports_snapped_range(self, tmp_path, capsys):
+        # --verbose もスナップ後の実適用範囲を報告する(§5.2)。KEYS で 26:60 → 30:60。
+        inp = write_input(tmp_path / "in.vmd")
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
+                         "--range", "26:60", "--verbose"]) == 0
+        cap = capsys.readouterr()
+        text = cap.out + cap.err
+        assert "30" in text and "60" in text
+
+    def test_verbose_reports_all_cuts(self, tmp_path, capsys):
+        # verbose も検出カット全件を報告する(§5.3)。frame21・frame41 の2カット入力。
+        inp = write_input(tmp_path / "mcut.vmd", MULTI_CUT_KEYS)
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--verbose"]) == 0
+        cap = capsys.readouterr()
+        text = cap.out + cap.err
+        assert "21" in text and "41" in text
+
+    def test_verbose_reports_all_snapped_ranges(self, tmp_path, capsys):
+        # verbose も複数 --range の解決後範囲を全て報告する(§5.2)。0:14→0:15, 44:60→45:60。
+        keys = [cam(0), cam(15), cam(30, persp=1), cam(45), cam(60)]
+        inp = write_input(tmp_path / "mr.vmd", keys)
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
+                         "--range", "0:14", "--range", "44:60", "--verbose"]) == 0
+        cap = capsys.readouterr()
+        text = cap.out + cap.err
+        assert "15" in text and "45" in text
+
+    def test_verbose_still_writes_output(self, tmp_path):
+        # --verbose は通常出力(VMD)を書く。出力を抑止するのは --dry-run のみ(§2.7)。
+        inp = write_input(tmp_path / "in.vmd")
+        out = tmp_path / "out.vmd"
+        assert cli.main([inp, "-o", str(out), "--verbose"]) == 0
+        assert out.exists()
+        assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
+
+    def test_verbose_does_not_change_vmd(self, tmp_path):
+        # --verbose はログのみで、ベイクされる VMD を変えない(§2.7)。非 verbose と一致する。
+        inp = write_input(tmp_path / "in.vmd")
+        q, v = tmp_path / "q.vmd", tmp_path / "v.vmd"
+        assert cli.main([inp, "-o", str(q)]) == 0
+        assert cli.main([inp, "-o", str(v), "--verbose"]) == 0
+        assert v.read_bytes() == q.read_bytes()
+
+    def test_verbose_short_alias_equals_long(self, tmp_path, capsys):
+        # -v は --verbose と同義(§2.7)。出力パスを同一にして(ログがパスを含んでも差が出ない)
+        # 両者の詳細ログが一致することを確認する。
+        inp = write_input(tmp_path / "in.vmd")
+        out = str(tmp_path / "out.vmd")            # 同一パス(入力とは別なので上書きガード対象外)
+        assert cli.main([inp, "-o", out, "-v"]) == 0
+        short = capsys.readouterr()
+        short_text = short.out + short.err
+        assert cli.main([inp, "-o", out, "--verbose"]) == 0
+        long = capsys.readouterr()
+        assert short_text == (long.out + long.err)
