@@ -8,12 +8,22 @@
 """
 
 import argparse
+import csv
 import math
 import os
 import sys
 
-from mmd_toolbox.vmd import io
+from mmd_toolbox.vmd import interp, io
+from shakevmd import cuts, presets
 from shakevmd.bake import bake
+
+# 公開引数の hard-default(§2.3-2.6)。プリセット/個別引数が未指定の項目に使う。
+# fade はプリセット対象外(プリセットは7引数)だが、None センチネル解決のため hard-default を持つ。
+_HARD_DEFAULTS = {
+    "amp_rot": 0.8, "amp_pos": 0.05, "rot_weights": (1.0, 1.0, 0.3),
+    "freq": 1.2, "motion_scale": 0.5, "settle": 0.3, "cut_threshold": (5.0, 20.0),
+    "fade": 0.7,
+}
 
 
 def _finite_float(text):
@@ -126,16 +136,23 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--range", dest="ranges", action="append", type=_parse_range)
-    p.add_argument("--amp-rot", type=_nonneg_float, default=0.8)       # 振幅 ≥0
-    p.add_argument("--amp-pos", type=_nonneg_float, default=0.05)      # 振幅 ≥0
-    p.add_argument("--rot-weights", type=_parse_rot_weights, default=(1.0, 1.0, 0.3))
-    p.add_argument("--freq", type=_positive_float, default=1.2)        # 周波数 >0
+    # 公開揺れパラメーターは default=None(未指定センチネル)。--preset と個別引数の優先を
+    # main() で解決する(明示 > preset > hard-default)。型検証は明示値にのみ適用される。
+    p.add_argument("--amp-rot", type=_nonneg_float)        # 振幅 ≥0
+    p.add_argument("--amp-pos", type=_nonneg_float)        # 振幅 ≥0
+    p.add_argument("--rot-weights", type=_parse_rot_weights)
+    p.add_argument("--freq", type=_positive_float)         # 周波数 >0
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--fade", type=_nonneg_float, default=0.7)          # 秒 ≥0
-    p.add_argument("--motion-scale", type=_nonneg_float, default=0.5)  # 係数 ≥0(0で無効)
-    p.add_argument("--settle", type=_nonneg_float, default=0.3)        # 度(振幅)≥0(0で無効)
-    p.add_argument("--cut-threshold", type=_parse_cut_threshold, default=(5.0, 20.0))
+    p.add_argument("--fade", type=_nonneg_float)           # 秒 ≥0
+    p.add_argument("--motion-scale", type=_nonneg_float)   # 係数 ≥0(0で無効)
+    p.add_argument("--settle", type=_nonneg_float)         # 度(振幅)≥0(0で無効)
+    p.add_argument("--cut-threshold", type=_parse_cut_threshold)
     p.add_argument("--impulse", dest="impulses", action="append", type=_parse_impulse)
+    # §2.7 運用/プリセット系。
+    p.add_argument("--preset", choices=presets.PRESET_NAMES)   # 未知名は argparse が exit 2
+    p.add_argument("--dry-run", dest="dry_run", action="store_true")
+    p.add_argument("--preview-csv", dest="preview_csv")
+    p.add_argument("-v", "--verbose", action="store_true")
     return p
 
 
@@ -170,6 +187,55 @@ def _same_path(a: str, b: str) -> bool:
         return os.path.realpath(a) == os.path.realpath(b)
 
 
+def _working_view(camera):
+    """正規化作業ビュー: フレームでソートし重複は後勝ち。bake の正規化と同じ規則。"""
+    by_frame = {}
+    for k in camera:
+        by_frame[k.frame] = k          # 同一フレームは後勝ち
+    return [by_frame[f] for f in sorted(by_frame)]
+
+
+def _snap(x, frames):
+    """x を最近接の既存キーフレームへスナップ(同距離は小さい方)。bake の _snap と同規則。"""
+    return min(frames, key=lambda f: (abs(f - x), f))
+
+
+def _resolve_param(name, args, preset):
+    """公開引数を 明示 > preset > hard-default の優先で解決する(§2.7)。"""
+    v = getattr(args, name)
+    if v is not None:
+        return v
+    if name in preset:
+        return preset[name]
+    return _HARD_DEFAULTS[name]
+
+
+def _shake_stats(orig_camera, baked_keys, applied, cut_pos, cut_rot):
+    """dry-run/verbose/CSV 用の統計を算出する。
+
+    戻り値: (rows, max_amp, detected_cuts)。rows は (frame, [rot差分3], [pos差分3])。
+    揺れ量 = ベイク値 − 元サンプリング(適用範囲内の各ベイクフレーム)。bake は不変のまま、
+    出力と cuts/interp から算出する。
+    """
+    wv = _working_view(orig_camera)
+    detected_cuts = cuts.detect_cuts(wv, cut_pos, cut_rot)
+    applied_frames = set()
+    for a, b in applied:
+        applied_frames.update(range(a, b + 1))
+    rows = []
+    max_amp = 0.0
+    for k in sorted(baked_keys, key=lambda x: x.frame):
+        if k.frame not in applied_frames:
+            continue
+        s = interp.sample_camera(wv, k.frame)
+        dr = [k.rotation[i] - s["rotation"][i] for i in range(3)]
+        dp = [k.position[i] - s["position"][i] for i in range(3)]
+        rows.append((k.frame, dr, dp))
+        for v in dr + dp:
+            max_amp = max(max_amp, abs(v))
+    return rows, max_amp, detected_cuts
+
+
 def main(argv=None) -> int:
     """CLI エントリポイント。終了コードを返す(§9: 0/1/2/3)。"""
     if argv is None:
@@ -187,6 +253,12 @@ def main(argv=None) -> int:
 
     # 上書きガード: 入力と同一パスへの出力は --overwrite 必須(§2.2)。未許可なら書かずにエラー。
     if not args.overwrite and _same_path(output, args.input):
+        return 2
+
+    # --preview-csv は付加出力(§2.7)。出力 VMD や入力と同一パスだと一方を上書きして
+    # データ消失するため、パス衝突は引数エラー(exit 2)とする。
+    if args.preview_csv and (_same_path(args.preview_csv, output)
+                             or _same_path(args.preview_csv, args.input)):
         return 2
 
     # 入力読み込み(欠落・非VMD・カメラキーなし → 入力不正 §9 コード1)。
@@ -214,6 +286,17 @@ def main(argv=None) -> int:
         if any(s > e for (s, e) in ranges):
             return 2
 
+    # 公開揺れパラメーターを解決(明示 > --preset > hard-default、§2.7)。
+    preset = presets.get_preset(args.preset) if args.preset else {}
+    amp_rot = _resolve_param("amp_rot", args, preset)
+    amp_pos = _resolve_param("amp_pos", args, preset)
+    rot_weights = _resolve_param("rot_weights", args, preset)
+    freq = _resolve_param("freq", args, preset)
+    motion_scale = _resolve_param("motion_scale", args, preset)
+    settle = _resolve_param("settle", args, preset)
+    cut_threshold = _resolve_param("cut_threshold", args, preset)
+    fade = _resolve_param("fade", args, preset)
+
     # ベイク。引数由来の異常は §9 コード2 に集約する:
     # - ValueError: 範囲の重複/接触(空カメラは上で弾き済み)。
     # - OverflowError: 有限だが過大な値(例 --fade 1e308 → int(round(fade*FPS)) が inf 変換で失敗)。
@@ -222,15 +305,15 @@ def main(argv=None) -> int:
             doc.camera,
             ranges=ranges,
             seed=args.seed,
-            amp_rot=args.amp_rot,
-            amp_pos=args.amp_pos,
-            rot_weights=args.rot_weights,
-            freq=args.freq,
-            motion_scale=args.motion_scale,
-            settle=args.settle,
-            fade_sec=args.fade,
-            cut_pos_threshold=args.cut_threshold[0],
-            cut_rot_threshold=args.cut_threshold[1],
+            amp_rot=amp_rot,
+            amp_pos=amp_pos,
+            rot_weights=rot_weights,
+            freq=freq,
+            motion_scale=motion_scale,
+            settle=settle,
+            fade_sec=fade,
+            cut_pos_threshold=cut_threshold[0],
+            cut_rot_threshold=cut_threshold[1],
             impulses=tuple(args.impulses or ()),
         )
     except (ValueError, OverflowError):
@@ -241,10 +324,7 @@ def main(argv=None) -> int:
     if not _all_finite(result.camera_keys):
         return 2
 
-    doc.camera = result.camera_keys
-
-    # 警告表示(§3.1): io.read の警告(名前デコード不可等)+ bake の警告(正規化・帯域制限
-    # クランプ等)+ 非カメラセクション透過。安定マーカー "warning:" を前置して提示する。
+    # 警告表示(§3.1): io.read の警告 + bake の警告 + 非カメラセクション透過。常に表示する。
     warnings = [f"{w.code}: {w.message}" for w in read_warnings]
     warnings += list(result.warnings)
     if doc.bone or doc.morph or doc.light or doc.self_shadow or doc.ik_property:
@@ -252,9 +332,31 @@ def main(argv=None) -> int:
     for w in warnings:
         print(f"warning: {w}", file=sys.stderr)
 
+    # 適用範囲(スナップ後)・統計を算出(dry-run/verbose/preview-csv 用)。bake は不変のまま、
+    # 出力と cuts/interp から求める。範囲端は最近接キーへスナップ(§5.2)。
+    wv_frames = [k.frame for k in _working_view(doc.camera)]
+    if ranges is None:
+        applied = [(wv_frames[0], wv_frames[-1])]
+    else:
+        applied = sorted((_snap(s, wv_frames), _snap(e, wv_frames)) for (s, e) in ranges)
+    rows, max_amp, detected_cuts = _shake_stats(
+        doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
+
+    # 詳細統計は --dry-run と --verbose のみで表示(通常実行は出さない、§5.2/§5.3)。
+    if args.dry_run or args.verbose:
+        print(f"range: {applied}")
+        print(f"keys: {len(result.camera_keys)}")
+        print(f"max amplitude: {max_amp:.6g}")
+        print(f"cuts: {detected_cuts}")
+
+    # --dry-run は出力を一切書かない(VMD も preview-csv も)。統計表示のみ(§2.7)。
+    if args.dry_run:
+        return 0
+
+    doc.camera = result.camera_keys
+
     # 出力書き込み。失敗の原因で終了コードを分ける(§9):
     # - OverflowError: 過大な値が float32 シリアライズで溢れた=引数起因 → コード2。
-    #   (例 --amp-rot 1e308 → 回転 ~1e306 → struct.pack("<f") が溢れる)
     # - その他の例外: 実際の I/O 失敗(権限・不正パス・ディスク等)→ コード3。
     try:
         io.write_file(doc, output)
@@ -262,5 +364,16 @@ def main(argv=None) -> int:
         return 2
     except Exception:
         return 3
+
+    # フレームごとの揺れ量(各チャンネル)を CSV 出力(§2.7)。失敗は出力書き込み失敗 → コード3。
+    if args.preview_csv:
+        try:
+            with open(args.preview_csv, "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["frame", "rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z"])
+                for frame, dr, dp in rows:
+                    w.writerow([frame, *dr, *dp])
+        except Exception:
+            return 3
 
     return 0

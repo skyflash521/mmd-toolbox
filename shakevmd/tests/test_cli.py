@@ -933,6 +933,14 @@ class TestCliOps:
         assert cli.main([inp, "-o", str(with_csv), "--preview-csv", str(tmp_path / "p.csv")]) == 0
         assert with_csv.read_bytes() == without.read_bytes()
 
+    def test_preview_csv_path_collision_exit2(self, tmp_path):
+        # --preview-csv が出力 VMD と同一パスなら CSV が VMD を上書きしてしまう→引数エラー(exit 2)。
+        # 入力と同一でも同様。付加出力の契約(§2.7)を守れない組合せを排除する。
+        inp = write_input(tmp_path / "in.vmd")
+        out = tmp_path / "out.vmd"
+        assert cli.main([inp, "-o", str(out), "--preview-csv", str(out)]) == 2
+        assert cli.main([inp, "-o", str(out), "--preview-csv", inp]) == 2
+
     def test_preview_csv_write_failure_exit3(self, tmp_path):
         # CSV 出力の書き込み失敗も出力書き込み失敗(§9 コード3)として扱う。
         # 親がファイル(ディレクトリでない)の CSV パス → 書き込み不可。
