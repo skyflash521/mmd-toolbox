@@ -352,7 +352,7 @@ class TestCli:
         assert out_bytes(["--freq", "3.0"], "freq.vmd") != base
         assert out_bytes(["--rot-weights", "1,1,0.9"], "rw.vmd") != base
         assert out_bytes(["--fade", "0.2"], "fade.vmd") != base
-        assert out_bytes(["--motion-scale", "2.0"], "ms.vmd") != base
+        assert out_bytes(["--motion-damp", "2.0"], "ms.vmd") != base
         # --cut-threshold は KEYS にカット(隣接フレーム)がないため出力は変わらないが、
         # パースされ exit0 になることは確認(効果は test_cuts.py / bake のカットテストで担保)
         assert cli.main([inp, "-o", str(tmp_path / "ct.vmd"), "--cut-threshold", "4,15"]) == 0
@@ -398,7 +398,7 @@ class TestCli:
         spec_defaults = [
             "--amp-rot", "0.8", "--amp-pos", "0.05", "--rot-weights", "1,1,0.3",
             "--freq", "1.2", "--seed", "1", "--fade", "0.7",
-            "--motion-scale", "0.5", "--settle", "0.3", "--cut-threshold", "5,20",
+            "--motion-damp", "1.0", "--settle", "0.3", "--cut-threshold", "5,20",
         ]
         for name, keys in (("plain", KEYS), ("stop", PAN_STOP_KEYS),
                            ("cut", CUT_KEYS), ("anglecut", ANGLE_CUT_KEYS)):
@@ -461,7 +461,7 @@ class TestCli:
         # CLI は bake() の薄いラッパー。各フラグが bake の「対応」パラメーターへ正しく
         # 配線されることを等価比較で検証する(値が別パラメーターへ渡る誤配線を排除)。
         # CLI が実際に読む入力キーで bake し、同じ writer で round-trip して比較するため
-        # float32 精度差は相殺される。motion_scale=0 / settle=0 のケースは「0で無効化」
+        # float32 精度差は相殺される。motion_damp=0 / settle=0 のケースは「0で無効化」
         # (§2.5)も兼ね、`args.x or default` のように 0 を既定へ落とす実装を排除する。
         # 各ケースは「フラグ値が実際に出力へ効く入力」で検証する(不活性な入力だと値を
         # 無視する誤配線でも等価が成立してしまう)。settle は停止入力(PAN_STOP_KEYS)、
@@ -473,8 +473,8 @@ class TestCli:
             (["--amp-rot", "2.0"], dict(amp_rot=2.0), KEYS),
             (["--amp-pos", "0.3"], dict(amp_pos=0.3), KEYS),
             (["--fade", "0.2"], dict(fade_sec=0.2), KEYS),
-            (["--motion-scale", "2.0"], dict(motion_scale=2.0), KEYS),
-            (["--motion-scale", "0"], dict(motion_scale=0.0), KEYS),     # 0で無効化(§2.5)
+            (["--motion-damp", "2.0"], dict(motion_damp=2.0), KEYS),
+            (["--motion-damp", "0"], dict(motion_damp=0.0), KEYS),     # 0で無効化(§2.5)
             (["--settle", "1.5"], dict(settle=1.5), PAN_STOP_KEYS),      # 停止入力で settle 発火
             (["--settle", "0"], dict(settle=0.0), PAN_STOP_KEYS),        # 0で無効化(§2.5)
             (["--seed", "9"], dict(seed=9), KEYS),
@@ -561,7 +561,7 @@ class TestCli:
     def test_invalid_numeric_scalars_exit2(self, tmp_path):
         # §9: 数値スカラーの不正入力は引数エラー(exit 2)。float 系も --seed 同様に弾く。
         inp = write_input(tmp_path / "in.vmd")
-        for opt in ("--amp-rot", "--amp-pos", "--freq", "--fade", "--motion-scale", "--settle"):
+        for opt in ("--amp-rot", "--amp-pos", "--freq", "--fade", "--motion-damp", "--settle"):
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), opt, "xyz"]) == 2
 
     def test_non_finite_numeric_exit2(self, tmp_path):
@@ -569,7 +569,7 @@ class TestCli:
         # クラッシュしうるため、CLI 境界で弾く(スカラー・複合フォーマット双方)。
         inp = write_input(tmp_path / "in.vmd")
         for opt, val in (("--fade", "inf"), ("--amp-rot", "nan"), ("--freq", "inf"),
-                         ("--motion-scale", "-inf"), ("--rot-weights", "1,inf,1"),
+                         ("--motion-damp", "-inf"), ("--rot-weights", "1,inf,1"),
                          ("--cut-threshold", "inf,20"), ("--impulse", "20:inf:0.5")):
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), opt, val]) == 2
 
@@ -582,12 +582,12 @@ class TestCli:
     def test_out_of_domain_numeric_exit2(self, tmp_path):
         # 物理量の定義域違反は引数エラー(exit 2)。振幅/秒数/係数は非負、周波数は正、
         # cut-threshold(感度)は非負、--impulse の S は非負・D は正(§2.3-2.6)。
-        # 0 が有効な無効化値である項目(amp/motion-scale/settle/cut-threshold)は別途 0 許容。
+        # 0 が有効な無効化値である項目(amp/motion-damp/settle/cut-threshold)は別途 0 許容。
         inp = write_input(tmp_path / "in.vmd")
         o = str(tmp_path / "o.vmd")
         cases = [
             ["--fade", "-0.7"], ["--amp-rot", "-1"], ["--amp-pos", "-0.1"],
-            ["--motion-scale", "-1"], ["--settle", "-1"],
+            ["--motion-damp", "-1"], ["--settle", "-1"],
             ["--freq", "0"], ["--freq", "-1"],
             ["--cut-threshold", "-5,20"], ["--cut-threshold", "5,-20"],
             ["--impulse", "20:-1:0.5"],   # S(強さ)が負
@@ -601,7 +601,7 @@ class TestCli:
         # 0 が有効な無効化/中立値である項目は exit 0(過剰拒否しない)。
         inp = write_input(tmp_path / "in.vmd")
         o = str(tmp_path / "o.vmd")
-        for args in (["--amp-rot", "0"], ["--amp-pos", "0"], ["--motion-scale", "0"],
+        for args in (["--amp-rot", "0"], ["--amp-pos", "0"], ["--motion-damp", "0"],
                      ["--settle", "0"], ["--fade", "0"], ["--cut-threshold", "0,0"],
                      ["--impulse", "20:0:0.5"]):
             assert cli.main([inp, "-o", o, *args]) == 0, args
@@ -640,11 +640,12 @@ class TestCli:
 
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")  # 意図的に bake 内で overflow させる
     def test_non_finite_baked_output_exit2(self, tmp_path):
-        # 引数は有限でも bake 内の乗算で出力が inf 化しうる(amp-pos×motion-scale)。
-        # float32 は inf を例外なく pack するため、焼き後の有限性検査で exit 2 に倒す(§9)。
+        # 引数は有限でも bake 内の乗算で出力が非有限化しうる(amp-rot × rot-weights が
+        # radians 前に inf 化 → 回転ノイズ inf/nan)。motion_damp の値に依らず焼き後の
+        # 有限性検査(_all_finite、float32 書き出しより前)で exit 2 に倒す(§9)。
         inp = write_input(tmp_path / "in.vmd")
         rc = cli.main([inp, "-o", str(tmp_path / "o.vmd"),
-                       "--amp-pos", "1e308", "--motion-scale", "1e308"])
+                       "--amp-rot", "1e308", "--rot-weights", "1e308,1,1"])
         assert rc == 2
 
     def test_serialization_overflow_is_arg_error_exit2(self, tmp_path):
@@ -664,7 +665,7 @@ class TestCli:
         # §9: 値を要するオプションに値が無い(オペランド欠落)も引数エラー(exit 2)。
         inp = write_input(tmp_path / "in.vmd")
         for opt in ("--output", "--range", "--seed", "--amp-rot", "--amp-pos",
-                    "--rot-weights", "--freq", "--fade", "--motion-scale",
+                    "--rot-weights", "--freq", "--fade", "--motion-damp",
                     "--settle", "--cut-threshold", "--impulse",
                     "--preset", "--preview-csv"):
             assert cli.main([inp, opt]) == 2
@@ -711,7 +712,7 @@ class TestCliOps:
 
     # --- プリセット定義(presets.py) -------------------------------------
     PUBLIC_PARAMS = {"amp_rot", "amp_pos", "rot_weights", "freq",
-                     "motion_scale", "settle", "cut_threshold"}
+                     "motion_damp", "settle", "cut_threshold"}
     # 内蔵パラメーター(CLI 非公開、プリセット/コアAPIのみ。§8)。許可集合は presets の
     # 単一の真実源から導出する(ハードコードしない。新規内蔵パラメータ追加時に自動で同期)。
     INTERNAL_PARAMS = set(presets.INTERNAL_PARAM_NAMES)
@@ -784,7 +785,7 @@ class TestCliOps:
         baked = bake(
             list(src), seed=1,
             amp_rot=hp["amp_rot"], amp_pos=hp["amp_pos"], rot_weights=hp["rot_weights"],
-            freq=hp["freq"], motion_scale=hp["motion_scale"], settle=hp["settle"],
+            freq=hp["freq"], motion_damp=hp["motion_damp"], settle=hp["settle"],
             cut_pos_threshold=hp["cut_threshold"][0], cut_rot_threshold=hp["cut_threshold"][1],
             fade_sec=0.7, impulses=(), **internal,
         )
@@ -803,7 +804,7 @@ class TestCliOps:
         baked = bake(
             list(src), seed=1,
             amp_rot=p["amp_rot"], amp_pos=p["amp_pos"], rot_weights=p["rot_weights"],
-            freq=p["freq"], motion_scale=p["motion_scale"], settle=p["settle"],
+            freq=p["freq"], motion_damp=p["motion_damp"], settle=p["settle"],
             cut_pos_threshold=p["cut_threshold"][0], cut_rot_threshold=p["cut_threshold"][1],
             fade_sec=0.7, impulses=(), gait_freq=p["gait_freq"], gait_amp=p["gait_amp"],
         )
@@ -847,7 +848,7 @@ class TestCliOps:
         d, e = tmp_path / "d.vmd", tmp_path / "e.vmd"
         spec_defaults = [
             "--amp-rot", "0.8", "--amp-pos", "0.05", "--rot-weights", "1,1,0.3",
-            "--freq", "1.2", "--motion-scale", "0.5", "--settle", "0.3",
+            "--freq", "1.2", "--motion-damp", "1.0", "--settle", "0.3",
             "--cut-threshold", "5,20",
         ]
         assert cli.main([inp, "-o", str(d)]) == 0
@@ -865,7 +866,7 @@ class TestCliOps:
             explicit = [
                 "--amp-rot", str(p["amp_rot"]), "--amp-pos", str(p["amp_pos"]),
                 "--rot-weights", "{},{},{}".format(*p["rot_weights"]),
-                "--freq", str(p["freq"]), "--motion-scale", str(p["motion_scale"]),
+                "--freq", str(p["freq"]), "--motion-damp", str(p["motion_damp"]),
                 "--settle", str(p["settle"]),
                 "--cut-threshold", "{},{}".format(*p["cut_threshold"]),
             ]

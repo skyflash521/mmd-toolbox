@@ -110,7 +110,7 @@ class TestApplyGazeShake:
 # パースホールド、範囲外原本バイト保持、再現性)。
 # 後続サブステップ(本テストの対象外): モーション適応の静止/移動プロファイル
 # クロスフェード・呼吸ドリフト・settle(§6.2 の高度部分)。基本の adaptive_amplitude
-# (motion_scale 連動)は実装に含むが、専用契約テストは後続でまとめる。
+# (motion_damp 連動)は実装に含むが、専用契約テストは後続でまとめる。
 # ---------------------------------------------------------------------------
 
 from mmd_toolbox.vmd import interp
@@ -367,20 +367,20 @@ class TestBake:
 
     # --- モーション適応(§6.2 角速度＋移動速度) ---------------------------
     def test_motion_adaptation_responds_to_rotation_only(self):
-        # その場回転(中心固定・角度のみ変化)でも motion_scale が効く(§6.2 角速度)。
+        # その場回転(中心固定・角度のみ変化)でも motion_damp が効く(§6.2 角速度)。
         # カメラ中心位置だけで速度を測る実装は静止扱いになり、ここで落ちる。
         keys = [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-30.0),
                 kf(60, center=(0.0, 0.0, 0.0), rotation=(0.0, 1.0, 0.0), distance=-30.0)]
-        a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=0.0, fade_sec=0.2))
-        b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=10.0, fade_sec=0.2))
+        a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_damp=0.0, fade_sec=0.2))
+        b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_damp=10.0, fade_sec=0.2))
         assert a[30].rotation != pytest.approx(b[30].rotation, abs=1e-4)
 
     def test_motion_adaptation_responds_to_distance_only(self):
-        # ズーム(中心・角度固定・距離のみ変化)でも motion_scale が効く(§6.2 移動速度)。
+        # ズーム(中心・角度固定・距離のみ変化)でも motion_damp が効く(§6.2 移動速度)。
         keys = [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-50.0),
                 kf(60, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-10.0)]
-        a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=0.0, fade_sec=0.2))
-        b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_scale=10.0, fade_sec=0.2))
+        a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_damp=0.0, fade_sec=0.2))
+        b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_damp=10.0, fade_sec=0.2))
         assert a[30].rotation != pytest.approx(b[30].rotation, abs=1e-4)
 
     # --- settle 停止後の減衰振動(§6.2) -----------------------------------
@@ -425,9 +425,10 @@ class TestBake:
         for f in range(0, 61):
             s = interp.sample_camera(PAN_STOP, f)
             assert res0[f].rotation == pytest.approx(s["rotation"], abs=1e-6)
-        # (b) settle=0 + base ノイズ有り → 通常の揺れは残る(settle=0 が base を殺さない)
+        # (b) settle=0 + base ノイズ有り → 通常の揺れは残る(settle=0 が base を殺さない)。
+        # motion_damp=0 で速度減衰を切り、動中フレームでも base ノイズが残ることを見る。
         resn = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=10.0, amp_pos=0.0,
-                                  settle=0.0, fade_sec=0.1))
+                                  settle=0.0, motion_damp=0.0, fade_sec=0.1))
         s30 = interp.sample_camera(PAN_STOP, 30)
         assert resn[30].rotation != pytest.approx(s30["rotation"], abs=1e-3)
 
@@ -855,12 +856,13 @@ class TestProfileCrossfadeAndBreathing:
         # 完全静止セグメントの位置揺れに 0.3Hz 成分が現れ、移動セグメントでは (1-speed)≈0 で消える。
         # 位置全体の 0.3Hz が移動を大きく(>3×)上回る。回転には呼吸を載せないので
         # 回転は静止が移動を大きく上回らない(<2×)→ 回転にドリフトを載せる実装はここで落ちる。
-        # N=99 → 100サンプルで 0.3Hz が整数1周期。
+        # N=99 → 100サンプルで 0.3Hz が整数1周期。motion_damp=0 で速度減衰を切り、
+        # 静止/移動差を呼吸((1-speed)比例、減衰とは別成分)だけに絞る。
         src_s, src_m = self._static_input(), self._moving_input()
-        pst = by_frame(bake.bake(src_s, seed=1, amp_rot=0.0, amp_pos=1.0, settle=0.0, fade_sec=0.3))
-        pmv = by_frame(bake.bake(src_m, seed=1, amp_rot=0.0, amp_pos=1.0, settle=0.0, fade_sec=0.3))
-        rst = by_frame(bake.bake(src_s, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, settle=0.0, fade_sec=0.3))
-        rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, settle=0.0, fade_sec=0.3))
+        pst = by_frame(bake.bake(src_s, seed=1, amp_rot=0.0, amp_pos=1.0, motion_damp=0.0, settle=0.0, fade_sec=0.3))
+        pmv = by_frame(bake.bake(src_m, seed=1, amp_rot=0.0, amp_pos=1.0, motion_damp=0.0, settle=0.0, fade_sec=0.3))
+        rst = by_frame(bake.bake(src_s, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, motion_damp=0.0, settle=0.0, fade_sec=0.3))
+        rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, motion_damp=0.0, settle=0.0, fade_sec=0.3))
         assert self._e03_sum(pst, src_s, "pos", self.N) > 3.0 * self._e03_sum(pmv, src_m, "pos", self.N)
         assert self._e03_sum(rst, src_s, "rot", self.N) < 2.0 * self._e03_sum(rmv, src_m, "rot", self.N)
         # §6.2「完全静止区間: 高周波微動+長周期ドリフト」: 静止でも高周波微動が残る。
@@ -872,7 +874,7 @@ class TestProfileCrossfadeAndBreathing:
         # 呼吸は (1-speed) 比例(§6.2)。同一 seed・同一窓[20:120](100サンプル=0.3Hz整数1周期)に
         # s=0/0.5/1 を与える3経路で、0.3Hz エネルギー合計が s について厳密単調減少することを確認する。
         # セグメント単位の静止ゲート実装(混合セグメントで呼吸ゼロ)も二値ゲート(中間で張り付く)も
-        # ここで落ちる。motion_scale=0 でノイズ側の速度依存振幅ブーストを切り、呼吸のみ分離する。
+        # ここで落ちる。motion_damp=0 でノイズ側の速度依存(減衰)を切り、呼吸のみ分離する。
         END = 119
         L = self._LIN
         s0 = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
@@ -887,7 +889,7 @@ class TestProfileCrossfadeAndBreathing:
 
         def e03_sum(src):
             res = by_frame(bake.bake(src, seed=5, amp_rot=0.0, amp_pos=2.0,
-                                     motion_scale=0.0, settle=0.0, fade_sec=0.3))
+                                     motion_damp=0.0, settle=0.0, fade_sec=0.3))
             return self._e03_sum(res, src, "pos", END, win)
 
         assert e03_sum(s0) > e03_sum(shalf) > e03_sum(sfull)
@@ -1053,7 +1055,8 @@ class TestCoreApiTuning:
         # 移動セグメントのオクターブ重み = moving_profile。still_profile は固定し moving のみ変える。
         # 移動で still_profile を使う誤実装は hi==lo になり落ちる。
         src = self._moving()
-        common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, settle=0.0, fade_sec=0.1,
+        # motion_damp=0 で速度減衰を切り、移動セグメントの振幅を残してオクターブ重みを観測する。
+        common = dict(seed=1, amp_rot=5.0, amp_pos=0.0, motion_damp=0.0, settle=0.0, fade_sec=0.1,
                       still_profile=motion.STILL_PROFILE)
         hi = by_frame(bake.bake(src, moving_profile=(1.0, 1.0, 1.0), **common))
         lo = by_frame(bake.bake(src, moving_profile=(1.0, 0.05, 0.01), **common))

@@ -163,18 +163,24 @@ class TestFrameSpeeds:
 
 class TestAdaptiveAmplitude:
     def test_zero_speed_is_base(self):
-        assert motion.adaptive_amplitude(0.8, 0.0) == pytest.approx(0.8)
+        # 静止(速度0)は減衰なし=基本振幅のまま
+        assert motion.adaptive_amplitude(0.8, 0.0, motion_damp=1.0) == pytest.approx(0.8)
 
-    def test_full_speed_scales_by_motion_scale(self):
-        # 速度1・motion_scale=0.5 → base×1.5
-        assert motion.adaptive_amplitude(0.8, 1.0, motion_scale=0.5) == pytest.approx(1.2)
+    def test_full_speed_damps_by_motion_damp(self):
+        # 速度1・motion_damp=0.5 → base×(1-0.5)=0.4(動くほど減衰)
+        assert motion.adaptive_amplitude(0.8, 1.0, motion_damp=0.5) == pytest.approx(0.4)
 
-    def test_motion_scale_zero_disables(self):
-        assert motion.adaptive_amplitude(0.8, 1.0, motion_scale=0.0) == pytest.approx(0.8)
+    def test_motion_damp_zero_disables(self):
+        # motion_damp=0 は減衰なし=基本振幅(速度に依らず一定)
+        assert motion.adaptive_amplitude(0.8, 1.0, motion_damp=0.0) == pytest.approx(0.8)
+
+    def test_clamped_to_zero(self):
+        # motion_damp×速度 > 1 でも負にならず 0 でクランプ(振幅は 0 まで)
+        assert motion.adaptive_amplitude(0.8, 1.0, motion_damp=2.0) == pytest.approx(0.0)
 
     def test_array_input(self):
-        out = motion.adaptive_amplitude(1.0, np.array([0.0, 0.5, 1.0]), motion_scale=0.4)
-        assert np.allclose(out, [1.0, 1.2, 1.4])
+        out = motion.adaptive_amplitude(1.0, np.array([0.0, 0.5, 1.0]), motion_damp=0.4)
+        assert np.allclose(out, [1.0, 0.8, 0.6])
 
 
 # ---------------------------------------------------------------------------

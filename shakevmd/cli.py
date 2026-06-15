@@ -21,7 +21,7 @@ from shakevmd.bake import bake
 # fade はプリセット対象外(プリセットは7引数)だが、None センチネル解決のため hard-default を持つ。
 _HARD_DEFAULTS = {
     "amp_rot": 0.8, "amp_pos": 0.05, "rot_weights": (1.0, 1.0, 0.3),
-    "freq": 1.2, "motion_scale": 0.5, "settle": 0.3, "cut_threshold": (5.0, 20.0),
+    "freq": 1.2, "motion_damp": 1.0, "settle": 0.3, "cut_threshold": (5.0, 20.0),
     "fade": 0.7,
 }
 
@@ -144,7 +144,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--freq", type=_positive_float)         # 周波数 >0
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--fade", type=_nonneg_float)           # 秒 ≥0
-    p.add_argument("--motion-scale", type=_nonneg_float)   # 係数 ≥0(0で無効)
+    p.add_argument("--motion-damp", type=_nonneg_float)    # 減衰係数 ≥0(0で無効)
     p.add_argument("--settle", type=_nonneg_float)         # 度(振幅)≥0(0で無効)
     p.add_argument("--cut-threshold", type=_parse_cut_threshold)
     p.add_argument("--impulse", dest="impulses", action="append", type=_parse_impulse)
@@ -165,7 +165,7 @@ def _default_output(input_path: str) -> str:
 def _all_finite(keys) -> bool:
     """全カメラキーの数値(距離・位置・回転)が有限か。
 
-    有限な引数でも bake 内の乗算(例 --amp-pos 1e308 × --motion-scale 1e308)で inf に
+    有限な引数でも bake 内の乗算(例 --amp-pos 1e308 を減衰なしで焼く)で inf に
     なりうる。float32 は inf を例外なく pack するため、書き出し前にここで検査する。
     """
     for k in keys:
@@ -292,7 +292,7 @@ def main(argv=None) -> int:
     amp_pos = _resolve_param("amp_pos", args, preset)
     rot_weights = _resolve_param("rot_weights", args, preset)
     freq = _resolve_param("freq", args, preset)
-    motion_scale = _resolve_param("motion_scale", args, preset)
+    motion_damp = _resolve_param("motion_damp", args, preset)
     settle = _resolve_param("settle", args, preset)
     cut_threshold = _resolve_param("cut_threshold", args, preset)
     fade = _resolve_param("fade", args, preset)
@@ -312,7 +312,7 @@ def main(argv=None) -> int:
             amp_pos=amp_pos,
             rot_weights=rot_weights,
             freq=freq,
-            motion_scale=motion_scale,
+            motion_damp=motion_damp,
             settle=settle,
             fade_sec=fade,
             cut_pos_threshold=cut_threshold[0],

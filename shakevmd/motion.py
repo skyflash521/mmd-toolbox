@@ -10,7 +10,7 @@ import numpy as np
 FPS = 30.0
 
 # 既定値(暫定。実装完了後に調整)
-DEFAULT_MOTION_SCALE = 0.5   # 実効振幅 = 基本振幅 ×(1 + motion_scale × 正規化速度)
+DEFAULT_MOTION_DAMP = 1.0    # 暫定。実効振幅 = 基本振幅 × clamp(1 - motion_damp × 正規化速度, 0, 1)
 DEFAULT_FADE_SEC = 0.7       # 範囲端の自動フェード時間
 DEFAULT_SETTLE_TIME_SEC = 1.0       # settle 減衰振動の収束時間(内蔵)
 DEFAULT_SETTLE_FREQ_HZ = 2.5        # settle 振動の周波数(内蔵)
@@ -96,13 +96,14 @@ def frame_speeds(values) -> np.ndarray:
 
 
 def adaptive_amplitude(
-    base_amp: float, normalized_speed, motion_scale: float = DEFAULT_MOTION_SCALE
+    base_amp: float, normalized_speed, motion_damp: float = DEFAULT_MOTION_DAMP
 ):
-    """実効振幅 = 基本振幅 ×(1 + motion_scale × 正規化速度)(§6.2)。
+    """実効振幅 = 基本振幅 × clamp(1 - motion_damp × 正規化速度, 0, 1)(§6.2)。
 
+    速度が上がるほど揺れを減衰させる(静止で最大、高速でほぼ0)。motion_damp=0 で減衰なし。
     normalized_speed はスカラーまたは配列([0,1] 想定)。
     """
-    return base_amp * (1.0 + motion_scale * normalized_speed)
+    return base_amp * np.maximum(0.0, 1.0 - motion_damp * normalized_speed)
 
 
 def detect_stops(

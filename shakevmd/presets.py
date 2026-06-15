@@ -19,30 +19,33 @@ INTERNAL_PARAM_NAMES = (
     "gait_freq", "gait_amp", "still_profile", "moving_profile", "settle_time", "naive_rotation",
 )
 
-# 各プリセット = 公開引数(amp_rot/amp_pos/rot_weights/freq/motion_scale/settle/cut_threshold)の束。
+# 各プリセット = 公開引数(amp_rot/amp_pos/rot_weights/freq/motion_damp/settle/cut_threshold)の束。
 # walking は加えて内蔵の歩調成分(gait_freq/gait_amp)を持つ(§95)。
+# motion_damp は速度での振幅減衰(大きいほど動中に揺れが消える)。値は暫定(後続のチューニングで詰める)。
 _PRESETS = {
     # 手持ち撮影: 既定に近い自然な揺れ。
     "handheld": {
         "amp_rot": 0.9, "amp_pos": 0.06, "rot_weights": (1.0, 1.0, 0.35),
-        "freq": 1.3, "motion_scale": 0.6, "settle": 0.4, "cut_threshold": (5.0, 20.0),
+        "freq": 1.3, "motion_damp": 1.0, "settle": 0.4, "cut_threshold": (5.0, 20.0),
     },
     # 望遠: 画角が狭く角度揺れが拡大、低周波のゆったりしたドリフト主体。位置揺れは控えめ。
+    # 据えたショット主体なので動中は揺れを強く抑える。
     "telephoto": {
         "amp_rot": 1.8, "amp_pos": 0.015, "rot_weights": (1.0, 1.0, 0.2),
-        "freq": 0.7, "motion_scale": 0.8, "settle": 0.5, "cut_threshold": (5.0, 20.0),
+        "freq": 0.7, "motion_damp": 1.0, "settle": 0.5, "cut_threshold": (5.0, 20.0),
     },
     # 歩き: 上下動の大きい周期的な揺れ。乱数ノイズに歩調成分を混合(左右=gait_freq、上下=2倍)。
     # gait_freq=1.0 → 上下のバウンドは 2.0Hz(歩行の歩調相当)。値は暫定(後続で微調整)。
+    # 歩行は常に動いているため減衰は弱め(動中も揺れを残す)。
     "walking": {
         "amp_rot": 1.0, "amp_pos": 0.18, "rot_weights": (1.3, 0.7, 0.3),
-        "freq": 2.0, "motion_scale": 0.4, "settle": 0.3, "cut_threshold": (5.0, 20.0),
+        "freq": 2.0, "motion_damp": 0.3, "settle": 0.3, "cut_threshold": (5.0, 20.0),
         "gait_freq": 1.0, "gait_amp": 0.1,
     },
-    # 地震: 激しく高周波・大振幅。
+    # 地震: 激しく高周波・大振幅。動中でも揺れ続けるべきなので減衰なし。
     "earthquake": {
         "amp_rot": 3.5, "amp_pos": 0.5, "rot_weights": (1.0, 1.0, 0.8),
-        "freq": 5.0, "motion_scale": 0.2, "settle": 0.6, "cut_threshold": (5.0, 20.0),
+        "freq": 5.0, "motion_damp": 0.0, "settle": 0.6, "cut_threshold": (5.0, 20.0),
     },
 }
 

@@ -142,7 +142,7 @@ def bake(
     amp_pos: float = 0.05,       # MMD距離単位
     rot_weights=(1.0, 1.0, 0.3),  # Pitch/Yaw/Roll = rx/ry/rz 個別重み
     freq: float = 1.2,
-    motion_scale: float = 0.5,
+    motion_damp: float = 1.0,
     settle: float = 0.3,         # 度。停止後の減衰振動の初期振幅(§6.2)。0で無効
     settle_time: float = motion.DEFAULT_SETTLE_TIME_SEC,  # 秒。settle減衰振動の収束時間(§2.5/§8 内蔵)
     # 静止/移動プロファイル(オクターブ重み構成、§6.2/§8 内蔵)。オクターブ数=プロファイル長。
@@ -324,9 +324,10 @@ def bake(
             for idx, f in enumerate(sframes):
                 s = samples[idx]
                 fade_v = fade[f - a]
-                # 振幅 = 基本 × 適応(1+motion_scale×速度) × 範囲フェード。
-                # settle/impulse は別成分(自前の振幅)で、範囲フェードのみ掛けて加算する(§6.2/§6.3)。
-                amp_factor = (1.0 + motion_scale * speeds[idx]) * fade_v
+                # 振幅 = 基本 × 適応 clamp(1 - motion_damp×速度, 0, 1) × 範囲フェード。
+                # 動くほど揺れを減衰させる(§6.2)。settle/impulse は別成分(自前の振幅)で、
+                # 範囲フェードのみ掛けて加算する(§6.2/§6.3)。
+                amp_factor = max(0.0, 1.0 - motion_damp * speeds[idx]) * fade_v
                 rot_noise = tuple(
                     rot_n[i][idx] * math.radians(amp_rot * rot_weights[i]) * amp_factor
                     + settle_rot[idx][i] * fade_v
