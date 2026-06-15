@@ -245,6 +245,12 @@ def test_perspective_series_holds_nearest_prior():
     assert series[31] == 1  # 以降ホールド
 
 
+def test_perspective_series_empty_raises():
+    # 空キー列は interp に倣い ValueError(直接呼び出し時の防御)。
+    with pytest.raises(ValueError):
+        perspective_series([], 0, 10)
+
+
 def test_perspective_before_first_key_uses_first():
     # 当該フレーム以前にキーが無い場合は先頭キーの値を用いる。これは §4.2 の
     # 直近ホールドの境界補完であり、vmd-interp の境界規約(最初のキー以前は端キーの
