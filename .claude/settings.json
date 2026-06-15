@@ -1,18 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(awk *)",
-      "Bash(basename *)",
-      "Bash(bash *codex-review-loop/watchdog.sh*)",
-      "Bash(cat *)",
-      "Bash(column *)",
-      "Bash(comm *)",
-      "Bash(cut *)",
-      "Bash(diff *)",
-      "Bash(dirname *)",
-      "Bash(echo *)",
-      "Bash(file *)",
-      "Bash(find *)",
+      "Bash(bash .claude/skills/codex-review-loop/watchdog.sh*)",
       "Bash(git blame *)",
       "Bash(git branch --list *)",
       "Bash(git branch --list)",
@@ -21,16 +10,10 @@
       "Bash(git branch -av)",
       "Bash(git branch -v)",
       "Bash(git branch)",
-      "Bash(git cat-file *)",
       "Bash(git config --get *)",
       "Bash(git config --list)",
       "Bash(git config -l)",
       "Bash(git describe *)",
-      "Bash(git diff *)",
-      "Bash(git diff)",
-      "Bash(git grep *)",
-      "Bash(git log *)",
-      "Bash(git log)",
       "Bash(git ls-files *)",
       "Bash(git ls-files)",
       "Bash(git ls-tree *)",
@@ -42,10 +25,7 @@
       "Bash(git rev-list *)",
       "Bash(git rev-parse *)",
       "Bash(git shortlog *)",
-      "Bash(git show *)",
-      "Bash(git show)",
       "Bash(git stash list)",
-      "Bash(git stash show *)",
       "Bash(git status *)",
       "Bash(git status)",
       "Bash(git tag --list *)",
@@ -53,33 +33,29 @@
       "Bash(git tag -l *)",
       "Bash(git tag)",
       "Bash(git worktree list)",
-      "Bash(grep *)",
-      "Bash(head *)",
-      "Bash(ls *)",
-      "Bash(ls)",
-      "Bash(nl *)",
-      "Bash(node *codex-companion.mjs*)",
-      "Bash(od *)",
-      "Bash(pwd)",
+      "Bash(node /*codex-companion.mjs*)",
       "Bash(pytest)",
       "Bash(pytest *)",
       "Bash(python -m pytest)",
-      "Bash(python -m pytest *)",
-      "Bash(realpath *)",
-      "Bash(rg *)",
-      "Bash(sed -n *)",
-      "Bash(sort *)",
-      "Bash(stat *)",
-      "Bash(tail *)",
-      "Bash(tree *)",
-      "Bash(uniq *)",
-      "Bash(wc *)",
-      "Bash(xxd *)"
+      "Bash(python -m pytest *)"
     ]
   },
   "sandbox": {
     "excludedCommands": [
-      "node *codex-companion.mjs*"
+      "node \"*codex-companion.mjs\"*"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-readonly.py\""
+          }
+        ]
+      }
     ]
   }
 }
