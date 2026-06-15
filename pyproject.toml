@@ -20,8 +20,8 @@ dev = [
 shakevmd = "shakevmd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*", "shakevmd*"]
+include = ["mmd_toolbox*", "shakevmd*", "sparsevmd*"]
 
 [tool.pytest.ini_options]
-testpaths = ["mmd_toolbox", "shakevmd"]
+testpaths = ["mmd_toolbox", "shakevmd", "sparsevmd"]
 pythonpath = ["."]

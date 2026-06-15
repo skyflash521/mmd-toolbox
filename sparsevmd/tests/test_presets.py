@@ -81,8 +81,27 @@ def test_zero_allowed_for_non_fov(field):
     assert getattr(t, field) == 0.0
 
 
-# NOTE: 「単位付き文字列はエラー」(§2.4)は CLI(argparse)層の数値パースの責務であり、
-# resolve_tolerances はパース済みの float を受ける。文字列拒否は CLI テストで検証する。
+# NOTE: 「単位付き文字列はエラー」(§2.4)は二重に守る。CLI(argparse)層が parse 時に
+# 弾いて終了コード2にするのに加え、resolve_tolerances 自体も float() 不能な値を
+# ValueError とする(下の test_non_numeric_override_rejected)。終了コードへの対応づけは
+# CLI テストで別途検証する。
+
+
+def test_override_stored_as_float():
+    # override 値(int・数値文字列)は float へ変換して格納する(非floatのまま残らない)。
+    t = presets.resolve_tolerances(
+        "balanced", {"bone_pos": 0, "camera_fov": 1, "camera_pos": "0.03"}
+    )
+    assert isinstance(t.bone_pos, float) and t.bone_pos == 0.0
+    assert isinstance(t.camera_fov, float) and t.camera_fov == 1.0
+    assert isinstance(t.camera_pos, float) and t.camera_pos == pytest.approx(0.03)
+
+
+@pytest.mark.parametrize("bad", [None, object(), "0.5deg", "abc"])
+def test_non_numeric_override_rejected(bad):
+    # float() できない値(None/非数値/単位付き文字列)は TypeError を漏らさず ValueError。
+    with pytest.raises(ValueError):
+        presets.resolve_tolerances("balanced", {"bone_pos": bad})
 
 
 def test_unknown_preset_raises():
