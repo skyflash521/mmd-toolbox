@@ -126,10 +126,13 @@ def kf(frame, distance=-30.0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0),
     return CameraKey(frame, distance, center, rotation, interp_block, fov, perspective)
 
 
-# 動きのある原本カメラ列(ソート済み・一意)。距離・中心・角度・視野角・パースが変化。
+# 動きのある原本カメラ列(ソート済み・一意)。距離・中心・角度・パースが変化。
+# FOV は一定(30)とする: FOV が変化する区間は密キーを焼かず元キーを温存する仕様(§3.1)のため、
+# 手ブレ系テストの入力は FOV 一定にして毎フレーム密ベイクを行使する。FOV 温存挙動は
+# TestFovTransitionPreservation で専用フィクスチャを使って検証する。
 SEQ = [
     kf(0, distance=-30.0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), fov=30, perspective=0),
-    kf(30, distance=-25.0, center=(10.0, 5.0, 2.0), rotation=(0.2, 0.1, 0.0), fov=45, perspective=1),
+    kf(30, distance=-25.0, center=(10.0, 5.0, 2.0), rotation=(0.2, 0.1, 0.0), fov=30, perspective=1),
     kf(60, distance=-20.0, center=(20.0, 0.0, -3.0), rotation=(-0.1, 0.3, 0.05), fov=30, perspective=1),
 ]
 
@@ -585,25 +588,30 @@ class TestBake:
                 assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-9)
 
     # --- 視野角・パース(§3.1 / §7.3) --------------------------------------
-    def test_fov_equals_rounded_sample_even_with_shake(self):
-        # 視野角は揺れ対象外。非ゼロ揺れでも各フレームの視野角=元曲線サンプルの四捨五入
+    def test_fov_equals_rounded_sample_when_constant(self):
+        # 視野角は揺れ対象外。FOV 一定の区間(SEQ は FOV=30 一定)では非ゼロ揺れでも
+        # 各フレームの視野角=元曲線サンプルの四捨五入(整数度)。
         res = by_frame(bake.bake(SEQ, seed=1, amp_rot=20.0, amp_pos=3.0, fade_sec=0.3))
         for f in range(0, 61):
             s = interp.sample_camera(SEQ, f)
             assert isinstance(res[f].fov, int)
             assert res[f].fov == bake.round_half_up(s["fov"])
 
-    def test_fov_rounds_half_up_not_bankers(self):
-        # 視野角の丸めは四捨五入(round half up)で、Python round() の銀行丸めではない
-        # (vmd-interp.md §3/§5)。線形補間で frame1 がちょうど 36.5 になる構成。
-        # 36.5 → 四捨五入=37、銀行丸め(Python round)=36 で区別できる。
+    def test_fov_ramp_interval_is_preserved_not_baked(self):
+        # FOV が変化する区間(隣接キーで FOV が異なる)は密キーを焼かず元キーを温存する(§3.1)。
+        # 36→37 の1区間 [0,2]。旧仕様は frame1 を四捨五入(37)で密ベイクしたが、新仕様では
+        # frame1 に密キーを生やさず、両端の元キー(0,2)をバイト単位で温存して MMD の実数補間に委ねる
+        # (整数 FOV を毎フレーム焼くとズームが階段になるのを避ける)。
         keys = [
             kf(0, fov=36, interp_block=bake.LINEAR_CAMERA_INTERP),
             kf(2, fov=37, interp_block=bake.LINEAR_CAMERA_INTERP),
         ]
-        assert interp.sample(keys, "fov", 1) == pytest.approx(36.5, abs=1e-9)  # 前提
-        res = by_frame(bake.bake(keys, seed=1, amp_rot=0.0, amp_pos=0.0))
-        assert res[1].fov == 37   # 四捨五入(Python round(36.5) は 36 になる)
+        res = bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=1.0)
+        frames = [k.frame for k in res.camera_keys]
+        by = {k.frame: k for k in res.camera_keys}
+        assert 1 not in by                    # ランプ内側に密キーが生えない
+        assert frames.count(0) == 1 and frames.count(2) == 1   # 端点に揺れ付き追加キーが混入しない
+        assert by[0] == keys[0] and by[2] == keys[1]   # 両端の元キーを温存(揺れ無し)
 
     def test_perspective_holds_governing_key(self):
         # パースは当該フレーム以前で最も近いキーの値をホールド
@@ -613,6 +621,40 @@ class TestBake:
         assert res[29].perspective == 0
         assert res[30].perspective == 1    # key1 以降は persp1
         assert res[45].perspective == 1
+
+    # --- FOV 変化区間の温存(§3.1 / §7.3) ---------------------------------
+    def _zoom_seq(self):
+        # FOV: [0,20] 一定30 → [20,50] 30→18(ズーム=ランプ) → [50,70] 一定18。
+        # 中心は静止させ FOV 挙動を分離(静止区間は速度0で揺れが乗る)。
+        L = bake.LINEAR_CAMERA_INTERP
+        return [kf(0, fov=30, interp_block=L), kf(20, fov=30, interp_block=L),
+                kf(50, fov=18, interp_block=L), kf(70, fov=18, interp_block=L)]
+
+    def test_fov_constant_spans_densely_baked_with_shake(self):
+        # FOV 一定の区間は毎フレーム密キー。FOV=一定整数で、揺れが乗る(回帰ガード)。
+        seq = self._zoom_seq()
+        res = by_frame(bake.bake(seq, seed=1, amp_rot=10.0, amp_pos=0.0, fade_sec=0.1))
+        for f in range(2, 19):          # 一定区間 [0,20] 内側(fade端を避ける)
+            assert res[f].fov == 30
+            s = interp.sample_camera(seq, f)
+            assert res[f].rotation != pytest.approx(s["rotation"], abs=1e-4)   # 揺れあり
+        for f in range(52, 69):         # 一定区間 [50,70] 内側
+            assert res[f].fov == 18
+            s = interp.sample_camera(seq, f)
+            assert res[f].rotation != pytest.approx(s["rotation"], abs=1e-4)   # 揺れあり
+
+    def test_fov_ramp_span_preserves_originals_no_interior_keys(self):
+        # FOV 変化区間 [20,50] は密キーを焼かず、両端の元キーをバイト温存。内側にキーが生えない。
+        seq = self._zoom_seq()
+        res = bake.bake(seq, seed=1, amp_rot=20.0, amp_pos=5.0, fade_sec=0.1)
+        frames = [k.frame for k in res.camera_keys]
+        by = {k.frame: k for k in res.camera_keys}
+        assert not any(21 <= f <= 49 for f in by)          # ランプ内側にキー無し
+        assert frames.count(20) == 1 and frames.count(50) == 1   # 端点に揺れ付き追加キーが混入しない
+        orig = {k.frame: k for k in seq}
+        assert by[20] == orig[20] and by[50] == orig[50]   # 両端は元キー温存(揺れ無し)
+        # 出力 FOV にランプ中間の整数ステップ(19..29)が現れない(階段でない)
+        assert all(k.fov in (30, 18) for k in res.camera_keys)
 
     # --- 範囲指定・範囲外保持(§3.2 / §5.2 / §7.1) -------------------------
     def test_default_range_is_full_span(self):

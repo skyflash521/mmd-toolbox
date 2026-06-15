@@ -210,6 +210,17 @@ def bake(
         detected, list(manual_cuts_add), list(manual_cuts_remove)
     )
 
+    # FOV 変化区間(隣接する作業ビューキーで視野角が異なる区間)は密キーを焼かず、その区間の
+    # 元キーを温存して MMD の実数補間に委ねる(§3.1)。整数 FOV を毎フレーム焼くとゆっくりズームが
+    # 1°刻みの階段になるため。fov_ramp_frames のフレームは密ベイクせず、ramp_boundary の元キーを温存する。
+    fov_ramp_frames: set = set()
+    ramp_boundary: set = set()
+    for i in range(len(wv) - 1):
+        if wv[i].fov != wv[i + 1].fov:
+            fov_ramp_frames.update(range(wv[i].frame, wv[i + 1].frame + 1))
+            ramp_boundary.add(wv[i].frame)
+            ramp_boundary.add(wv[i + 1].frame)
+
     fade_frames = int(round(fade_sec * FPS))
     baked: list = []
 
@@ -223,6 +234,8 @@ def bake(
             )
         for si, seg in enumerate(cuts.segment_bounds(a, b, cut_frames)):
             sframes = list(range(seg.start, seg.end + 1))
+            if all(f in fov_ramp_frames for f in sframes):
+                continue            # 全フレームが FOV 変化区間 → 密ベイクせず、ノイズ計算・警告も行わない
             t = np.array([f / FPS for f in sframes], dtype=float)
 
             # 速度解析(セグメント単位。カットをまたがない。§6.2 角速度＋移動速度)。
@@ -325,6 +338,8 @@ def bake(
                     impulse_rot[j] += direction * osc[j] * env
 
             for idx, f in enumerate(sframes):
+                if f in fov_ramp_frames:
+                    continue            # FOV 変化区間は密キーを焼かない(§3.1。元キーを後で温存)
                 s = samples[idx]
                 fade_v = fade[f - a]
                 # 振幅 = 基本 × 適応 clamp(1 - motion_damp×速度, 0, 1) × 範囲フェード。
@@ -364,6 +379,10 @@ def bake(
 
     out_keys = [k for k in camera_keys if not _in_range(k.frame)]
 
+    # FOV 変化区間の境界キーは、範囲内でも密ベイクせず元キー(作業ビュー)を温存する(§3.1)。
+    # 範囲外の境界キーは out_keys が原本バイトで保持するため、ここでは範囲内のみを対象にする。
+    fov_preserved = [k for k in wv if k.frame in ramp_boundary and _in_range(k.frame)]
+
     # 警告の重複を畳む(同一帯域制限警告がチャンネル/セグメントで繰り返されるため)
     seen, uniq = set(), []
     for w in warnings:
@@ -371,5 +390,5 @@ def bake(
             seen.add(w)
             uniq.append(w)
 
-    result_keys = sorted(baked + out_keys, key=lambda k: k.frame)
+    result_keys = sorted(baked + fov_preserved + out_keys, key=lambda k: k.frame)
     return BakeResult(camera_keys=result_keys, warnings=uniq)
