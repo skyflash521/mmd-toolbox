@@ -192,7 +192,15 @@ class TestCli:
         inp = write_input(p)
         before = p.read_bytes()
         link = tmp_path / "link.vmd"
-        link.symlink_to(p)                        # link は入力と同一実体
+        try:
+            link.symlink_to(p)                    # link は入力と同一実体
+        except OSError as e:
+            # 権限不足(Windows ERROR_PRIVILEGE_NOT_HELD)のときだけ skip。
+            # 開発者モード/管理者権限が無いとシンボリックリンクを作成できない。
+            # それ以外の OSError は本物の失敗としてそのまま表面化させる。
+            if getattr(e, "winerror", None) != 1314:
+                raise
+            pytest.skip("シンボリックリンク作成権限なし(開発者モード/管理者権限が必要)")
         assert cli.main([inp, "-o", str(link)]) == 2
         assert p.read_bytes() == before           # ガード時は原本を書き換えない
 

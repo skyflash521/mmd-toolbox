@@ -34,6 +34,7 @@
       "Bash(git tag)",
       "Bash(git worktree list)",
       "Bash(node /*codex-companion.mjs*)",
+      "Bash(node C:/*codex-companion.mjs*)",
       "Bash(pytest)",
       "Bash(pytest *)",
       "Bash(python -m pytest)",
@@ -52,7 +53,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-readonly.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-readonly.py\"",
+            "shell": "bash"
           }
         ]
       }
