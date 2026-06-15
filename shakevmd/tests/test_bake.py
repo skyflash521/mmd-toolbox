@@ -776,10 +776,11 @@ class TestProfileCrossfadeAndBreathing:
             late_a, late_d, early_a, early_d = [], [], [], []
             for seed in range(3):
                 # settle 切(停止過渡の高周波混入を排除)。同一 seed で decel/accel は同一ノイズ。
+                # motion_damp=0 で速度減衰を切り、移動区間でも振幅を残してプロファイル質感を観測する。
                 d = by_frame(bake.bake(decel, seed=seed, amp_rot=5.0, amp_pos=0.0,
-                                       settle=0.0, fade_sec=0.3))
+                                       motion_damp=0.0, settle=0.0, fade_sec=0.3))
                 a = by_frame(bake.bake(accel, seed=seed, amp_rot=5.0, amp_pos=0.0,
-                                       settle=0.0, fade_sec=0.3))
+                                       motion_damp=0.0, settle=0.0, fade_sec=0.3))
                 ds = self._shake_series(d, decel, "rot", ax, self.N)
                 as_ = self._shake_series(a, accel, "rot", ax, self.N)
                 late_a.append(self._hf_ratio(as_[LATE]))   # accel: 後半は移動
@@ -792,25 +793,23 @@ class TestProfileCrossfadeAndBreathing:
     def test_crossfade_is_speed_proportional_not_binary(self):
         # §6.2 のクロスフェードは速度比例 (1-s)·still + s·moving。s=0/1 だけでなく中間 s=0.5 が
         # 「両端の間」に入ること(厳密単調)を確認し、フレーム毎の二値スイッチを排除する。
-        # 同一 seed・同一窓[58:88]に s=0/0.5/1 を与える3経路(同一ノイズの再重み付け = マージン不要):
-        #   s0  : 窓は静止(decel)。 sfull: 窓は全速(accel、唯一の運動 → 正規化1)。
-        #   shalf: 窓の前(0..25)に2倍速のピークを置き、窓は半速 → 正規化0.5。
+        # 絶対基準 ref=1.0 で、同一窓[58:88]の速度を 0 / 0.5 / 1.0(=正規化 0/0.5/1.0)に直接作る
+        # 3経路(各々単一セグメント等速)。絶対正規化なので「窓前にピークを置く」相対トリックは不要。
+        #   s0: 全域静止。 shalf: 0.5/f 等速。 sfull: 1.0/f 等速。
         # 二値スイッチは中間が端へ張り付き、固定スペクトルは同一重みで3者一致 → どちらも落ちる。
-        # 回転チャンネルで観測する(呼吸の汚染なし)。
-        L = self._LIN
+        # motion_damp=0 で速度減衰を切り、移動区間でも振幅を残して質感を観測する(回転で観測=呼吸非汚染)。
+        L, REF = self._LIN, 1.0
         s0 = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
-              kf(50, center=(60.0, 0.0, 0.0), interp_block=L),
-              kf(self.N, center=(60.0, 0.0, 0.0), interp_block=L)]
+              kf(self.N, center=(0.0, 0.0, 0.0), interp_block=L)]                  # 全域静止 → 窓 0
         shalf = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
-                 kf(25, center=(60.0, 0.0, 0.0), interp_block=L),     # 0..25: 2.4/f がピーク
-                 kf(self.N, center=(148.8, 0.0, 0.0), interp_block=L)]  # 25..99: 1.2/f = 半速
+                 kf(self.N, center=(0.5 * self.N, 0.0, 0.0), interp_block=L)]      # 0.5/f → 正規化0.5
         sfull = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
-                 kf(50, center=(0.0, 0.0, 0.0), interp_block=L),
-                 kf(self.N, center=(60.0, 0.0, 0.0), interp_block=L)]
+                 kf(self.N, center=(1.0 * self.N, 0.0, 0.0), interp_block=L)]      # 1.0/f → 正規化1.0
         W = slice(58, 88)
 
         def hf_rot(src, seed):
             res = by_frame(bake.bake(src, seed=seed, amp_rot=5.0, amp_pos=0.0,
+                                     motion_damp=0.0, speed_ref_world=REF,
                                      settle=0.0, fade_sec=0.3))
             return self._hf_ratio(self._shake_series(res, src, "rot", 0, self.N)[W])
 
@@ -873,23 +872,24 @@ class TestProfileCrossfadeAndBreathing:
     def test_breathing_scales_with_inverse_speed_in_single_segment(self):
         # 呼吸は (1-speed) 比例(§6.2)。同一 seed・同一窓[20:120](100サンプル=0.3Hz整数1周期)に
         # s=0/0.5/1 を与える3経路で、0.3Hz エネルギー合計が s について厳密単調減少することを確認する。
-        # セグメント単位の静止ゲート実装(混合セグメントで呼吸ゼロ)も二値ゲート(中間で張り付く)も
-        # ここで落ちる。motion_damp=0 でノイズ側の速度依存(減衰)を切り、呼吸のみ分離する。
+        # 絶対基準 ref=2.0 で窓の速度を 0 / 1.0 / 2.0(=正規化 0/0.5/1.0)に直接作る(各々単一セグメント
+        # 等速。絶対正規化なので相対トリックは不要)。セグメント単位の静止ゲート実装(移動セグメントで
+        # 呼吸ゼロ)も二値ゲート(中間で張り付く)もここで落ちる。motion_damp=0 でノイズ側の速度依存
+        # (減衰)を切り、呼吸のみ分離する。
         END = 119
-        L = self._LIN
+        L, REF = self._LIN, 2.0
         s0 = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
-              kf(19, center=(60.0, 0.0, 0.0), interp_block=L),     # 0..19 移動 → 19..119 静止
-              kf(END, center=(60.0, 0.0, 0.0), interp_block=L)]
+              kf(END, center=(0.0, 0.0, 0.0), interp_block=L)]                  # 全域静止 → 正規化0
         shalf = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
-                 kf(10, center=(60.0, 0.0, 0.0), interp_block=L),  # 0..10: 6/f がピーク
-                 kf(END, center=(387.0, 0.0, 0.0), interp_block=L)]  # 10..119: 3/f = 半速
+                 kf(END, center=(1.0 * END, 0.0, 0.0), interp_block=L)]         # 1.0/f → 正規化0.5
         sfull = [kf(0, center=(0.0, 0.0, 0.0), interp_block=L),
-                 kf(END, center=(238.0, 0.0, 0.0), interp_block=L)]  # 全域 2/f 等速 = 正規化1
+                 kf(END, center=(2.0 * END, 0.0, 0.0), interp_block=L)]         # 2.0/f → 正規化1.0
         win = slice(20, END + 1)  # frame20.. が静止(s0)/半速(shalf)/全速(sfull)、100サンプル
 
         def e03_sum(src):
             res = by_frame(bake.bake(src, seed=5, amp_rot=0.0, amp_pos=2.0,
-                                     motion_damp=0.0, settle=0.0, fade_sec=0.3))
+                                     motion_damp=0.0, speed_ref_world=REF,
+                                     settle=0.0, fade_sec=0.3))
             return self._e03_sum(res, src, "pos", END, win)
 
         assert e03_sum(s0) > e03_sum(shalf) > e03_sum(sfull)

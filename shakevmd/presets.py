@@ -17,6 +17,7 @@ PRESET_NAMES = ("handheld", "telephoto", "walking", "earthquake")
 # 歩調成分・静止/移動プロファイル(オクターブ重み構成)・settle収束時間・素朴な角度加算モード。
 INTERNAL_PARAM_NAMES = (
     "gait_freq", "gait_amp", "still_profile", "moving_profile", "settle_time", "naive_rotation",
+    "speed_ref_world", "speed_ref_angle",
 )
 
 # 各プリセット = 公開引数(amp_rot/amp_pos/rot_weights/freq/motion_damp/settle/cut_threshold)の束。

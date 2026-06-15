@@ -15,6 +15,9 @@ DEFAULT_FADE_SEC = 0.7       # 範囲端の自動フェード時間
 DEFAULT_SETTLE_TIME_SEC = 1.0       # settle 減衰振動の収束時間(内蔵)
 DEFAULT_SETTLE_FREQ_HZ = 2.5        # settle 振動の周波数(内蔵)
 DEFAULT_STOP_SPEED_THRESHOLD = 0.1  # 正規化速度がこれを下回ると停止とみなす(内蔵)
+# 速度正規化の絶対基準(§6.2)。正規化速度 = clamp(絶対速度 / 基準速度, 0, 1)。
+DEFAULT_SPEED_REF_WORLD = 1.0       # 暫定。ワールド位置のフレーム間移動がこの値で正規化速度1
+DEFAULT_SPEED_REF_ANGLE = 0.02      # 暫定。回転のフレーム間変化(rad)がこの値で正規化速度1
 
 # 静止/移動プロファイル(§6.2)。オクターブ重みベクトル(長さ=noise.DEFAULT_OCTAVES=3)。
 # 静止: 低周波寄り(急減衰=落ち着いた揺れ)。移動: 高周波寄り(緩減衰=細かい揺れ)。暫定値。
@@ -72,27 +75,24 @@ def fade_envelope(n_frames: int, fade_sec: float = DEFAULT_FADE_SEC, fps: float 
     return env
 
 
-def frame_speeds(values) -> np.ndarray:
+def frame_speeds(values, ref) -> np.ndarray:
     """フレーム毎の値列から、正規化速度 [0,1] をフレーム毎に返す(§6.2)。
 
-    速度[i] = 隣接フレーム差の大きさ(スカラーは絶対値、ベクトルはユークリッドノルム)、
-    速度[0]=0。セグメント内の最大値で正規化する(完全静止なら全0)。
-    values は1チャンネルのスカラー列、または各行がベクトルの2次元配列。
+    正規化速度[i] = clamp(|隣接フレーム差| / ref, 0, 1)。速度[0]=0。
+    絶対基準 ref で割る(セグメント内ピークでは割らない)ため、同じ絶対速度は
+    クリップ内の他の動きに依らず同じ正規化速度になる。ref<=0 は退避で全0(適応無効)。
+    スカラーは絶対値、ベクトルはユークリッドノルム。values は1チャンネルのスカラー列、
+    または各行がベクトルの2次元配列。
     """
     v = np.asarray(values, dtype=float)
     n = v.shape[0]
     speeds = np.zeros(n)
+    if ref <= 0:
+        return speeds
     if n >= 2:
         d = v[1:] - v[:-1]
         speeds[1:] = np.abs(d) if v.ndim == 1 else np.linalg.norm(d, axis=1)
-    peak = speeds.max() if n else 0.0
-    if peak > 1e-12:
-        speeds = speeds / peak
-    else:
-        # 数値ノイズ級(<=1e-12)の微小運動は静止扱いで全0にする。
-        # フルスケールへ増幅しない/中途半端な極小値を残さない。
-        speeds = np.zeros(n)
-    return speeds
+    return np.clip(speeds / ref, 0.0, 1.0)
 
 
 def adaptive_amplitude(

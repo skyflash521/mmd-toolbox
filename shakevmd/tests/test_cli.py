@@ -757,7 +757,8 @@ class TestCliOps:
         # cli を通して例外なく exit 0 になることを確認する。衝突があれば **internal で TypeError。
         p = dict(presets.get_preset("handheld"))
         p.update(still_profile=(1.0, 0.5, 0.25), moving_profile=(1.0, 0.7, 0.4),
-                 settle_time=2.0, naive_rotation=True, gait_freq=1.5, gait_amp=0.1)
+                 settle_time=2.0, naive_rotation=True, gait_freq=1.5, gait_amp=0.1,
+                 speed_ref_world=2.0, speed_ref_angle=0.05)
         # 全内蔵パラメータを実際に行使する(将来の追加で取りこぼさない)。
         assert set(presets.INTERNAL_PARAM_NAMES) <= set(p)
         monkeypatch.setitem(presets._PRESETS, "handheld", p)
@@ -772,7 +773,8 @@ class TestCliOps:
         # 出力に効く → どれか1つでも転送漏れがあれば直接 bake と不一致で落ちる。
         from shakevmd.bake import bake
         internal = dict(still_profile=(1.0, 0.5, 0.25), moving_profile=(1.0, 0.7, 0.4),
-                        settle_time=2.5, naive_rotation=True, gait_freq=1.5, gait_amp=0.1)
+                        settle_time=2.5, naive_rotation=True, gait_freq=1.5, gait_amp=0.1,
+                        speed_ref_world=2.0, speed_ref_angle=0.05)
         assert set(internal) >= set(presets.INTERNAL_PARAM_NAMES)   # 全内蔵を網羅(将来追加も強制)
         p = dict(presets.get_preset("handheld"))
         p.update(internal)

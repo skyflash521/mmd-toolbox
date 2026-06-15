@@ -106,54 +106,64 @@ class TestFadeEnvelope:
 
 
 class TestFrameSpeeds:
+    # frame_speeds(values, ref): 正規化速度 = clamp(|フレーム間差分| / ref, 0, 1)。
+    # セグメント内ピークでは割らない(絶対基準)。speed[0]=0。
     def test_static_is_zero(self):
-        speeds = motion.frame_speeds(np.full(50, 3.0))
+        speeds = motion.frame_speeds(np.full(50, 3.0), 1.0)
         assert np.allclose(speeds, 0.0)
 
-    def test_sub_threshold_motion_is_static(self):
-        # 数値ノイズ級(<=1e-12)の微小運動は静止扱いで全0(フルスケール増幅しない)
-        speeds = motion.frame_speeds(np.array([0.0, 1e-13, 2e-13]))
-        assert np.allclose(speeds, 0.0)
+    def test_absolute_not_peak_normalized(self):
+        # 基準より十分遅い一定運動は、ピーク正規化のように1へ増幅されず小さいまま。
+        # (これがバグ修正の核: 同セグメントに速い動きがあっても遅い動きは過大評価されない)
+        speeds = motion.frame_speeds(np.arange(0, 5, 1.0), ref=10.0)  # 生速度=1.0/フレーム
+        assert np.allclose(speeds[1:], 0.1)        # 1.0/10.0、ピークでも1にならない
+        assert np.max(speeds) == pytest.approx(0.1)
 
-    def test_normalized_to_unit_max(self):
-        # 一定速度で増加 → 差分一定 → 正規化後はほぼ一定の最大1
-        vals = np.arange(50, dtype=float) * 2.0
-        speeds = motion.frame_speeds(vals)
-        assert np.max(speeds) == pytest.approx(1.0, abs=1e-9)
-        assert np.all(speeds >= -1e-12) and np.all(speeds <= 1.0 + 1e-12)
+    def test_proportional_to_ref(self):
+        # 基準未満では絶対速度に比例(差分2.0、ref=8 → 0.25)。
+        speeds = motion.frame_speeds(np.arange(0, 12, 2.0), ref=8.0)
+        assert np.allclose(speeds[1:], 0.25)
 
-    def test_relative_magnitude(self):
-        # 後半で速度2倍 → 正規化後、後半が前半の約2倍、最大が1
+    def test_clamped_at_ref(self):
+        # 基準以上の速度は1でクランプ(それ以上速くしても1)。
+        speeds = motion.frame_speeds(np.array([0.0, 20.0, 60.0]), ref=5.0)
+        assert np.allclose(speeds, [0.0, 1.0, 1.0])
+
+    def test_relative_magnitude_preserved_below_ref(self):
+        # 基準未満では後半の2倍速が正規化後も約2倍を保つ。
         vals = np.concatenate([np.arange(0, 10, 1.0), np.arange(10, 30, 2.0)])
-        speeds = motion.frame_speeds(vals)
-        assert np.max(speeds) == pytest.approx(1.0, abs=1e-9)
+        speeds = motion.frame_speeds(vals, ref=8.0)   # 速度1と2は基準未満
         slow = np.median(speeds[2:9])
         fast = np.median(speeds[12:19])
         assert fast == pytest.approx(2.0 * slow, rel=0.2)
 
     def test_length_matches(self):
-        speeds = motion.frame_speeds(np.zeros(37))
+        speeds = motion.frame_speeds(np.zeros(37), 1.0)
         assert speeds.shape == (37,)
 
     def test_frame_alignment_explicit(self):
-        # speed[i] = |x[i]-x[i-1]|、speed[0]=0。値が変化したフレームに速度が現れる。
+        # speed[i] = |x[i]-x[i-1]| / ref、speed[0]=0。値が変化したフレームに速度が現れる。
         vals = np.array([0.0, 0.0, 0.0, 10.0, 10.0, 10.0])
-        speeds = motion.frame_speeds(vals)
-        # 差分は index 3 のみ(10)。最大で正規化 → index3=1、他0
+        speeds = motion.frame_speeds(vals, ref=10.0)
         assert np.allclose(speeds, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
 
     def test_scalar_speed_is_absolute(self):
-        # 速度は差の「大きさ」。減少列でも絶対値で扱う。
+        # 速度は差の「大きさ」。減少列でも絶対値で扱う(差分1.0、ref=1 → 1.0)。
         vals = np.array([3.0, 2.0, 1.0])
-        speeds = motion.frame_speeds(vals)  # 生 [0,1,1] → 正規化 [0,1,1]
+        speeds = motion.frame_speeds(vals, ref=1.0)
         assert np.allclose(speeds, [0.0, 1.0, 1.0])
 
     def test_vector_norm_is_euclidean(self):
-        # ベクトル差の大きさはユークリッドノルム([3,4,0] の差 → 5)
+        # ベクトル差の大きさはユークリッドノルム([3,4,0] の差 → 5、ref=5 → 1)。
         vals = np.array([[0.0, 0.0, 0.0], [3.0, 4.0, 0.0], [3.0, 4.0, 0.0]])
-        speeds = motion.frame_speeds(vals)
-        # 生速度 [0,5,0] → 正規化 [0,1,0]
+        speeds = motion.frame_speeds(vals, ref=5.0)
         assert np.allclose(speeds, [0.0, 1.0, 0.0])
+
+    def test_nonpositive_ref_is_zero(self):
+        # ref<=0 は退避: 全0(モーション適応無効)。0 も負も同様(abs(speed/ref) 等の誤実装を排除)。
+        for ref in (0.0, -3.0, -1e-9):
+            speeds = motion.frame_speeds(np.arange(0, 5, 1.0), ref=ref)
+            assert np.allclose(speeds, 0.0), ref
 
 
 # ---------------------------------------------------------------------------

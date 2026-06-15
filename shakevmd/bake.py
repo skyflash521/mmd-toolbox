@@ -148,6 +148,9 @@ def bake(
     # 静止/移動プロファイル(オクターブ重み構成、§6.2/§8 内蔵)。オクターブ数=プロファイル長。
     still_profile=motion.STILL_PROFILE,
     moving_profile=motion.MOVING_PROFILE,
+    # 速度正規化の絶対基準(§6.2 内蔵)。移動(ワールド位置)と回転(角度)で別個。
+    speed_ref_world: float = motion.DEFAULT_SPEED_REF_WORLD,
+    speed_ref_angle: float = motion.DEFAULT_SPEED_REF_ANGLE,
     naive_rotation: bool = False,  # 素朴な角度加算モード(§8 内蔵)。中心逆算を行わない
     gait_freq: float = 0.0,      # Hz。歩調周期成分の周波数(§2.7/§95 walking)。0で無効
     gait_amp: float = 0.0,       # 歩調成分の振幅(MMD距離単位)。左右=gait_freq、上下=2×gait_freq
@@ -236,8 +239,8 @@ def bake(
                 for s in samples
             ], dtype=float)
             angles = np.array([s["rotation"] for s in samples], dtype=float)
-            angle_speed = motion.frame_speeds(angles)
-            speeds = np.maximum(motion.frame_speeds(world), angle_speed)
+            angle_speed = motion.frame_speeds(angles, speed_ref_angle)
+            speeds = np.maximum(motion.frame_speeds(world, speed_ref_world), angle_speed)
 
             # チャンネル別ノイズ(セグメント別シード派生=位相独立。§5.3-1)。
             # 静止/移動プロファイルのオクターブ重みをフレーム毎の速度でクロスフェード(§6.2)。
