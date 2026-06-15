@@ -21,7 +21,7 @@ from shakevmd.bake import bake
 # fade はプリセット対象外(プリセットは7引数)だが、None センチネル解決のため hard-default を持つ。
 _HARD_DEFAULTS = {
     "amp_rot": 0.8, "amp_pos": 0.05, "rot_weights": (1.0, 1.0, 0.3),
-    "freq": 1.2, "motion_damp": 1.0, "settle": 0.3, "cut_threshold": (5.0, 20.0),
+    "freq": 1.2, "motion_damp": 1.0, "settle": 0.0, "cut_threshold": (5.0, 20.0),
     "fade": 0.7,
 }
 

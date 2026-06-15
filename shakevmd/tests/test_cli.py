@@ -398,7 +398,7 @@ class TestCli:
         spec_defaults = [
             "--amp-rot", "0.8", "--amp-pos", "0.05", "--rot-weights", "1,1,0.3",
             "--freq", "1.2", "--seed", "1", "--fade", "0.7",
-            "--motion-damp", "1.0", "--settle", "0.3", "--cut-threshold", "5,20",
+            "--motion-damp", "1.0", "--settle", "0", "--cut-threshold", "5,20",
         ]
         for name, keys in (("plain", KEYS), ("stop", PAN_STOP_KEYS),
                            ("cut", CUT_KEYS), ("anglecut", ANGLE_CUT_KEYS)):
@@ -850,7 +850,7 @@ class TestCliOps:
         d, e = tmp_path / "d.vmd", tmp_path / "e.vmd"
         spec_defaults = [
             "--amp-rot", "0.8", "--amp-pos", "0.05", "--rot-weights", "1,1,0.3",
-            "--freq", "1.2", "--motion-damp", "1.0", "--settle", "0.3",
+            "--freq", "1.2", "--motion-damp", "1.0", "--settle", "0",
             "--cut-threshold", "5,20",
         ]
         assert cli.main([inp, "-o", str(d)]) == 0

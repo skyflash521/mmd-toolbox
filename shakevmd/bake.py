@@ -143,7 +143,7 @@ def bake(
     rot_weights=(1.0, 1.0, 0.3),  # Pitch/Yaw/Roll = rx/ry/rz 個別重み
     freq: float = 1.2,
     motion_damp: float = 1.0,
-    settle: float = 0.3,         # 度。停止後の減衰振動の初期振幅(§6.2)。0で無効
+    settle: float = 0.0,         # 度。停止後の減衰振動の初期振幅(§6.2)。0で無効(既定=無効)
     settle_time: float = motion.DEFAULT_SETTLE_TIME_SEC,  # 秒。settle減衰振動の収束時間(§2.5/§8 内蔵)
     # 静止/移動プロファイル(オクターブ重み構成、§6.2/§8 内蔵)。オクターブ数=プロファイル長。
     still_profile=motion.STILL_PROFILE,
