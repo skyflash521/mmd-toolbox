@@ -102,6 +102,14 @@ def test_multichannel_respects_each_channel_tolerance():
     assert keys == [0, 4, 5, 6, 10]
 
 
+def test_split_prefers_extremum_not_max_error_frame():
+    # 端点0,20。最大誤差は frame3 だが速度反転の極値は frame2。tol=9 で1回分割。
+    # 極値優先なら [0,2,4]、生の最大誤差優先なら [0,3,4] になる。§5.5。
+    ch = lin(0, [0, 10, 2, 4, 20], tol=9.0)
+    keys = reduce_track([0, 4], [ch], min_seg=1, max_seg=180, strict=False)
+    assert keys == [0, 2, 4]
+
+
 def test_adjacent_segment_accepted():
     # 隣接フレーム区間は内部点が無く常に受理(分割不能)。
     ch = lin(0, [0.0, 100.0], tol=0.001)

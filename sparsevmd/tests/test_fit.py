@@ -56,6 +56,16 @@ def test_residual_frame_offset_start():
     assert frame == 101
 
 
+def test_residual_prefers_velocity_reversal_over_max_error():
+    # 端点 0,20 の直線に対し、最大誤差は単調区間の frame3(誤差11)だが、
+    # 速度反転(極値)は frame1/frame2。§5.5 に従い分割候補は極値中の誤差最大 frame2。
+    # 採否用の最大絶対誤差は真の最大(11.0)を返す。
+    ch = LinearScalarChannel(0, [0.0, 10.0, 2.0, 4.0, 20.0], tol=1.0)
+    err, frame = ch.residual(0, 4)
+    assert err == pytest.approx(11.0)
+    assert frame == 2
+
+
 def test_normalized_divides_by_tol():
     vals = [0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0]
     ch = LinearScalarChannel(0, [float(v) for v in vals], tol=2.0)
