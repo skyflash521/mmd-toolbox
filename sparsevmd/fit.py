@@ -11,6 +11,21 @@ linear mode のスカラー評価器をまず提供する。ベジェ曲線フ�
 import math
 
 
+def _normalize(err, frame, tol):
+    """誤差・フレームを正規化誤差へ変換する(§5.5)。
+
+    許容0は誤差0で (0.0, None)、誤差が正で (inf, frame)。
+    """
+    if tol == 0.0:
+        return (math.inf, frame) if err > 0.0 else (0.0, None)
+    return (err / tol, frame)
+
+
+def _round_half_up(x):
+    """四捨五入(0.5切り上げ)。視野角は非負なので floor(x+0.5) で表せる(§3.2)。"""
+    return math.floor(x + 0.5)
+
+
 class LinearScalarChannel:
     """1スカラーチャンネルを線形補間で評価する(§5.2 の線形ケース, §7.2)。
 
@@ -65,6 +80,94 @@ class LinearScalarChannel:
         許容0のチャンネルは、誤差0なら (0.0, None)、誤差が正なら (inf, frame)。
         """
         err, frame = self.residual(a, b)
-        if self.tol == 0.0:
-            return (math.inf, frame) if err > 0.0 else (0.0, None)
-        return (err / self.tol, frame)
+        return _normalize(err, frame, self.tol)
+
+
+class EuclideanVectorChannel:
+    """カメラ中心位置などのベクトルチャンネル(§4.2, §7.2)。
+
+    各軸を線形補間し、採否・分割はサンプルベクトルとのユークリッド距離で測る。
+    分割候補は最大ユークリッド誤差フレーム(§5.1 の基本)。
+    """
+
+    def __init__(self, frame_start, vectors, tol):
+        self.frame_start = frame_start
+        self.vectors = [tuple(float(c) for c in v) for v in vectors]
+        self.tol = float(tol)
+
+    def _vec(self, frame):
+        return self.vectors[frame - self.frame_start]
+
+    def residual(self, a, b):
+        va = self._vec(a)
+        vb = self._vec(b)
+        span = b - a
+        errs = {}
+        for f in range(a + 1, b):
+            t = (f - a) / span
+            pred = tuple(va[i] + (vb[i] - va[i]) * t for i in range(3))
+            errs[f] = math.dist(self._vec(f), pred)
+        if not errs:
+            return (0.0, None)
+        max_err = max(errs.values())
+        if max_err == 0.0:
+            return (0.0, None)
+        # いずれかの軸で速度が反転する切り返し点を優先候補にする(§5.5)。
+        reversals = [f for f in errs if self._is_reversal(f)]
+        candidates = reversals if reversals else list(errs)
+        worst = max(candidates, key=lambda f: (errs[f], -f))
+        return (max_err, worst)
+
+    def _is_reversal(self, frame):
+        prev = self._vec(frame - 1)
+        cur = self._vec(frame)
+        nxt = self._vec(frame + 1)
+        return any((cur[i] - prev[i]) * (nxt[i] - cur[i]) < 0.0 for i in range(3))
+
+    def normalized(self, a, b):
+        err, frame = self.residual(a, b)
+        return _normalize(err, frame, self.tol)
+
+
+class FovChannel:
+    """視野角チャンネル(§4.2, §7.2)。
+
+    出力は整数度保存のため、線形補間値を四捨五入した整数で再評価し、元サンプルとの
+    差(丸めを含む総誤差)を測る。許容は §2.4 で0.5度以上に制限される。
+    分割候補は速度符号反転(局所極値)を優先し、無ければ最大誤差フレーム(§5.5)。
+    """
+
+    def __init__(self, frame_start, values, tol):
+        self.frame_start = frame_start
+        self.values = [float(v) for v in values]
+        self.tol = float(tol)
+
+    def _value(self, frame):
+        return self.values[frame - self.frame_start]
+
+    def residual(self, a, b):
+        va = self._value(a)
+        vb = self._value(b)
+        span = b - a
+        errs = {}
+        for f in range(a + 1, b):
+            pred = va + (vb - va) * (f - a) / span
+            errs[f] = abs(_round_half_up(pred) - self._value(f))
+        if not errs:
+            return (0.0, None)
+        max_err = max(errs.values())
+        if max_err == 0.0:
+            return (0.0, None)
+        reversals = [f for f in errs if self._is_reversal(f)]
+        candidates = reversals if reversals else list(errs)
+        worst = max(candidates, key=lambda f: (errs[f], -f))
+        return (max_err, worst)
+
+    def _is_reversal(self, frame):
+        d_prev = self._value(frame) - self._value(frame - 1)
+        d_next = self._value(frame + 1) - self._value(frame)
+        return d_prev * d_next < 0.0
+
+    def normalized(self, a, b):
+        err, frame = self.residual(a, b)
+        return _normalize(err, frame, self.tol)

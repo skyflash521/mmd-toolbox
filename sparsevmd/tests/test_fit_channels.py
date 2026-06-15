@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-from sparsevmd.fit import EuclideanVectorChannel, FovChannel
+from sparsevmd.fit import EuclideanVectorChannel, FovChannel, _round_half_up
 
 
 # --- EuclideanVectorChannel -------------------------------------------------
@@ -52,6 +52,17 @@ def test_vector_split_frame_at_max_distance():
     assert err == pytest.approx(10.0)
 
 
+def test_vector_prefers_velocity_reversal_over_max_error():
+    # Z軸が 0,10,2,4,20 と動く(端点 0→20)。最大ユークリッド誤差は単調区間の frame3、
+    # 速度反転(切り返し)は frame1/frame2。§5.5 に従い分割候補は反転中の誤差最大 frame2。
+    # 採否用の最大誤差は真の最大(11)を返す。
+    vecs = [(0.0, 0.0, 0.0), (0.0, 0.0, 10.0), (0.0, 0.0, 2.0), (0.0, 0.0, 4.0), (0.0, 0.0, 20.0)]
+    ch = EuclideanVectorChannel(0, vecs, tol=1.0)
+    err, frame = ch.residual(0, 4)
+    assert err == pytest.approx(11.0)
+    assert frame == 2
+
+
 # --- FovChannel -------------------------------------------------------------
 
 
@@ -88,6 +99,24 @@ def test_fov_round_down_below_half():
     ch = FovChannel(0, vals, tol=0.5)
     err, frame = ch.residual(0, 2)
     assert err == pytest.approx(0.4)
+
+
+def test_round_half_up_is_not_bankers():
+    # 四捨五入(0.5切り上げ)。Python 標準 round の偶数丸めとは異なる(§3.2)。
+    assert _round_half_up(0.5) == 1
+    assert _round_half_up(1.5) == 2  # 偶数丸めなら 2 だが…
+    assert _round_half_up(2.5) == 3  # 偶数丸めなら 2。half-up は 3。
+    assert _round_half_up(30.4) == 30
+    assert _round_half_up(30.6) == 31
+
+
+def test_fov_prefers_velocity_reversal_over_max_error():
+    # FOV が 30,40,32,34,50(端点30→50)。最大誤差は単調区間の frame3、速度反転は
+    # frame1/frame2。§5.5 で分割候補は反転中の誤差最大 frame2。採否用最大誤差は11。
+    ch = FovChannel(0, [30.0, 40.0, 32.0, 34.0, 50.0], tol=1.0)
+    err, frame = ch.residual(0, 4)
+    assert err == pytest.approx(11.0)
+    assert frame == 2
 
 
 def test_fov_normalized_and_zero_tol():
