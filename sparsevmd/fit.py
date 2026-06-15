@@ -10,6 +10,11 @@ linear mode のスカラー評価器をまず提供する。ベジェ曲線フ�
 
 import math
 
+import numpy as np
+
+# 実質ゼロ誤差の閾値(回転は unwrap/slerp の浮動小数誤差で厳密0にならないため)。
+_ZERO_EPS = 1e-9
+
 
 def _normalize(err, frame, tol):
     """誤差・フレームを正規化誤差へ変換する(§5.5)。
@@ -59,7 +64,7 @@ class LinearScalarChannel:
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
-        if max_err == 0.0:
+        if max_err <= _ZERO_EPS:
             return (0.0, None)
         # 速度符号反転(局所極値)を優先候補にする(§5.5)。無ければ全内部。
         reversals = [f for f in errs if self._is_reversal(f)]
@@ -110,7 +115,7 @@ class EuclideanVectorChannel:
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
-        if max_err == 0.0:
+        if max_err <= _ZERO_EPS:
             return (0.0, None)
         # いずれかの軸で速度が反転する切り返し点を優先候補にする(§5.5)。
         reversals = [f for f in errs if self._is_reversal(f)]
@@ -156,7 +161,7 @@ class FovChannel:
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
-        if max_err == 0.0:
+        if max_err <= _ZERO_EPS:
             return (0.0, None)
         reversals = [f for f in errs if self._is_reversal(f)]
         candidates = reversals if reversals else list(errs)
@@ -167,6 +172,170 @@ class FovChannel:
         d_prev = self._value(frame) - self._value(frame - 1)
         d_next = self._value(frame + 1) - self._value(frame)
         return d_prev * d_next < 0.0
+
+    def normalized(self, a, b):
+        err, frame = self.residual(a, b)
+        return _normalize(err, frame, self.tol)
+
+
+# ---------------------------------------------------------------------------
+# 回転ユーティリティ(quaternion)
+# ---------------------------------------------------------------------------
+
+
+def _quat_dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _quat_normalize(q):
+    n = math.sqrt(sum(c * c for c in q))
+    return tuple(c / n for c in q)
+
+
+def _quat_conj(q):
+    return (-q[0], -q[1], -q[2], q[3])
+
+
+def _quat_mul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+def _quat_slerp(q0, q1, t):
+    """同一半球前提の球面線形補間(端点は正規化・整列済みを渡す)。"""
+    d = _quat_dot(q0, q1)
+    if d < 0.0:
+        q1 = tuple(-c for c in q1)
+        d = -d
+    if d > 0.9995:
+        r = tuple(q0[i] + t * (q1[i] - q0[i]) for i in range(4))
+        return _quat_normalize(r)
+    th0 = math.acos(d)
+    th = th0 * t
+    s0 = math.sin(th0 - th) / math.sin(th0)
+    s1 = math.sin(th) / math.sin(th0)
+    return tuple(s0 * q0[i] + s1 * q1[i] for i in range(4))
+
+
+def _quat_angle_deg(a, b):
+    """2つの単位quaternion間の角度距離(度)。符号不変(|dot|)。"""
+    d = min(1.0, abs(_quat_dot(a, b)))
+    return math.degrees(2.0 * math.acos(d))
+
+
+class CameraRotationChannel:
+    """カメラ回転(3軸Euler共通曲線、§5.3, §7.2)。
+
+    各軸を線形補間で評価し、誤差は unwrap 後の軸別角度誤差(度)の最大。360度境界の
+    ラップは __init__ の軸別 unwrap で除去する。分割候補は軸別速度反転を優先(§5.5)。
+    """
+
+    def __init__(self, frame_start, eulers, tol):
+        self.frame_start = frame_start
+        arr = np.asarray(eulers, dtype=float)
+        self.eulers = np.column_stack([np.unwrap(arr[:, i]) for i in range(3)])
+        self.tol = float(tol)
+
+    def _euler(self, frame):
+        return self.eulers[frame - self.frame_start]
+
+    def residual(self, a, b):
+        ea = self._euler(a)
+        eb = self._euler(b)
+        span = b - a
+        errs = {}
+        for f in range(a + 1, b):
+            t = (f - a) / span
+            ef = self._euler(f)
+            errs[f] = max(
+                abs(math.degrees(ef[i] - (ea[i] + (eb[i] - ea[i]) * t))) for i in range(3)
+            )
+        if not errs:
+            return (0.0, None)
+        max_err = max(errs.values())
+        if max_err <= _ZERO_EPS:
+            return (0.0, None)
+        reversals = [f for f in errs if self._is_reversal(f)]
+        candidates = reversals if reversals else list(errs)
+        worst = max(candidates, key=lambda f: (errs[f], -f))
+        return (max_err, worst)
+
+    def _is_reversal(self, frame):
+        prev = self._euler(frame - 1)
+        cur = self._euler(frame)
+        nxt = self._euler(frame + 1)
+        # 微小ジッタを反転と誤認しないよう、両側の速度が有意な軸のみで判定する。
+        for i in range(3):
+            d_prev = cur[i] - prev[i]
+            d_next = nxt[i] - cur[i]
+            if abs(d_prev) > _ZERO_EPS and abs(d_next) > _ZERO_EPS and d_prev * d_next < 0.0:
+                return True
+        return False
+
+    def normalized(self, a, b):
+        err, frame = self.residual(a, b)
+        return _normalize(err, frame, self.tol)
+
+
+class BoneRotationChannel:
+    """ボーン回転(quaternion slerp、§5.3, §7.2)。
+
+    端点 quaternion の slerp(線形係数)で予測し、サンプルとの角度距離(度)で誤差を測る。
+    __init__ で正規化と同一半球整列を行う。分割候補は回転方向反転(相対回転軸の符号
+    反転)を優先する(§5.5)。
+    """
+
+    def __init__(self, frame_start, quats, tol):
+        self.frame_start = frame_start
+        aligned = []
+        for q in quats:
+            qn = _quat_normalize(q)
+            if aligned and _quat_dot(qn, aligned[-1]) < 0.0:
+                qn = tuple(-c for c in qn)
+            aligned.append(qn)
+        self.quats = aligned
+        self.tol = float(tol)
+
+    def _q(self, frame):
+        return self.quats[frame - self.frame_start]
+
+    def residual(self, a, b):
+        q0 = self._q(a)
+        q1 = self._q(b)
+        span = b - a
+        errs = {}
+        for f in range(a + 1, b):
+            t = (f - a) / span
+            errs[f] = _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, t))
+        if not errs:
+            return (0.0, None)
+        max_err = max(errs.values())
+        if max_err <= _ZERO_EPS:
+            return (0.0, None)
+        reversals = [f for f in errs if self._is_reversal(f)]
+        candidates = reversals if reversals else list(errs)
+        worst = max(candidates, key=lambda f: (errs[f], -f))
+        return (max_err, worst)
+
+    def _rel_axis(self, frame):
+        rel = _quat_mul(self._q(frame), _quat_conj(self._q(frame - 1)))
+        return rel[:3]
+
+    def _is_reversal(self, frame):
+        ax0 = self._rel_axis(frame)
+        ax1 = self._rel_axis(frame + 1)
+        # 微小回転は軸が不定なので、両側の回転軸が有意な場合のみ符号反転で判定する。
+        n0 = math.sqrt(sum(c * c for c in ax0))
+        n1 = math.sqrt(sum(c * c for c in ax1))
+        if n0 <= _ZERO_EPS or n1 <= _ZERO_EPS:
+            return False
+        return sum(ax0[i] * ax1[i] for i in range(3)) < 0.0
 
     def normalized(self, a, b):
         err, frame = self.residual(a, b)
