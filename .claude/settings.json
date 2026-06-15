@@ -3,6 +3,7 @@
     "allow": [
       "Bash(awk *)",
       "Bash(basename *)",
+      "Bash(bash *codex-review-loop/watchdog.sh*)",
       "Bash(cat *)",
       "Bash(column *)",
       "Bash(comm *)",
@@ -60,6 +61,10 @@
       "Bash(node *codex-companion.mjs*)",
       "Bash(od *)",
       "Bash(pwd)",
+      "Bash(pytest)",
+      "Bash(pytest *)",
+      "Bash(python -m pytest)",
+      "Bash(python -m pytest *)",
       "Bash(realpath *)",
       "Bash(rg *)",
       "Bash(sed -n *)",
