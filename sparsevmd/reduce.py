@@ -26,6 +26,7 @@ from .fit import (
     EuclideanVectorChannel,
     FovChannel,
     LinearScalarChannel,
+    _quat_angle_deg,
     _round_half_up,
 )
 from .sample import perspective_series
@@ -142,6 +143,72 @@ def build_bone_keys(source_keys, frames, segment_interp=None):
 
 class StrictError(Exception):
     """--strict 指定時に許容誤差を満たせない(§2.5、終了コード4)。"""
+
+
+def _angle_diff_deg(a, b):
+    """2つの角度(ラジアン)の最小角度差(度、非負)。±2πのラップに不変。
+
+    単一フレームの軸別角度誤差を unwrap 後と同値に測る(§7.2/§5.3)。
+    """
+    d = a - b
+    return abs(math.degrees(math.atan2(math.sin(d), math.cos(d))))
+
+
+def verify_camera_track(source_keys, output_keys, ranges, tols):
+    """出力キーを再サンプリングし、§7.2 メトリクスで許容超過フレームを返す(§7.3)。
+
+    各範囲を 1 フレーム間隔で元サンプルと比較する。視野角は出力に保存済みの整数度キーを
+    補間した値で評価する(保存時に丸め済みなので再度丸めない)。丸め由来の差は §7.2/§7.3 の
+    とおり許容(0.5度以上)内なら超過にならない。回転は軸別角度誤差(ラップ不変)の最大。
+    戻り値は超過フレームの昇順リスト(空なら合格)。
+    """
+    bad = set()
+    for f0, f1 in ranges:
+        for f in range(f0, f1 + 1):
+            s = interp.sample_camera(source_keys, f)
+            o = interp.sample_camera(output_keys, f)
+            if math.dist(s["position"], o["position"]) > tols.camera_pos:
+                bad.add(f)
+            elif abs(s["distance"] - o["distance"]) > tols.camera_distance:
+                bad.add(f)
+            elif abs(o["fov"] - s["fov"]) > tols.camera_fov:
+                bad.add(f)
+            elif (
+                max(_angle_diff_deg(s["rotation"][i], o["rotation"][i]) for i in range(3))
+                > tols.camera_rot
+            ):
+                bad.add(f)
+    return sorted(bad)
+
+
+def verify_bone_track(source_keys, output_keys, ranges, tols):
+    """出力キーを再サンプリングし、§7.2 メトリクスで許容超過フレームを返す(§7.3)。
+
+    位置はユークリッド距離、回転は quaternion 角度距離で測る。戻り値は昇順リスト。
+    """
+    bad = set()
+    for f0, f1 in ranges:
+        for f in range(f0, f1 + 1):
+            sp = (
+                interp.sample(source_keys, "pos_x", f),
+                interp.sample(source_keys, "pos_y", f),
+                interp.sample(source_keys, "pos_z", f),
+            )
+            op = (
+                interp.sample(output_keys, "pos_x", f),
+                interp.sample(output_keys, "pos_y", f),
+                interp.sample(output_keys, "pos_z", f),
+            )
+            if math.dist(sp, op) > tols.bone_pos:
+                bad.add(f)
+            elif (
+                _quat_angle_deg(
+                    interp.sample(source_keys, "rot", f), interp.sample(output_keys, "rot", f)
+                )
+                > tols.bone_rot
+            ):
+                bad.add(f)
+    return sorted(bad)
 
 
 def reduce_track(boundaries, channels, min_seg, max_seg, strict):
@@ -270,14 +337,16 @@ def reduce_camera_track(
     """カメラトラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
 
     各範囲を 30fps 整数フレームでサンプリングし、不連続検出→必須境界→チャンネル評価→
-    区間削減→出力キー生成する。範囲外の元キーは逐語保持する。curve_mode="bezier" では
-    チャンネルが1本のベジェ曲線で採否を判定し(より少ないキーに削減)、各出力区間の制御点を
-    到達側キーの補間バイトに格納する。
+    区間削減→出力キー生成→出力後検証(§7.3)する。範囲外の元キーは逐語保持する。
+    curve_mode="bezier" ではチャンネルが1本のベジェ曲線で採否を判定し(より少ないキーに
+    削減)、各出力区間の制御点を到達側キーの補間バイトに格納する。
+
+    出力後検証(§7.3)は verify_camera_track で出力を再サンプリングし、許容超過があれば
+    非strictは超過フレームをキーに追加して再構築(1フレーム間隔まで密化すれば元値を逐語
+    保持でき必ず収束)、strictは StrictError。float32 格納差は §2.4 で量子化誤差として
+    許容されるため float64 上の検証で扱う。
 
     スコープ外として以下は未実装:
-    - §7.1 の出力後 float32 再サンプリング検証。区間削減は float64 サンプル上で許容誤差を
-      保証し、出力の補間を再サンプルした値は削減時の評価と一致する。float32 格納差は §2.4 で
-      量子化誤差として許容されるため、再検証は実質的に満たされる。
     - §6.3 の範囲端境界キー注入・隣接曲線書き換え。範囲外キーは逐語保持する保守的方針。
     """
     reduced = []
@@ -303,7 +372,7 @@ def reduce_camera_track(
         fov_ch = FovChannel(f0, fovs, tols.camera_fov, mode=curve_mode)
         rot_ch = CameraRotationChannel(f0, eulers, tols.camera_rot, mode=curve_mode)
         channels = [pos_ch, dist_ch, fov_ch, rot_ch]
-        range_frames = reduce_track(bounds, channels, min_seg, max_seg, strict)
+        range_frames = set(reduce_track(bounds, channels, min_seg, max_seg, strict))
 
         segment_interp = None
         if curve_mode == "bezier":
@@ -313,7 +382,17 @@ def reduce_camera_track(
                     cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
                 )
 
-        reduced.extend(build_camera_keys(source_keys, range_frames, segment_interp))
+        # §7.3 出力後検証: 出力を再サンプリングし許容超過があれば、非strictは超過フレームを
+        # キーに追加して再構築(1フレーム間隔は元値を逐語保持し必ず収束)、strictはエラー。
+        while True:
+            keys = build_camera_keys(source_keys, sorted(range_frames), segment_interp)
+            bad = verify_camera_track(source_keys, keys, [(f0, f1)], tols)
+            if not bad:
+                break
+            if strict:
+                raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
+            range_frames |= set(bad)
+        reduced.extend(keys)
 
     outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
     return sorted(reduced + outside, key=lambda k: k.frame)
@@ -354,7 +433,7 @@ def reduce_bone_track(
         pos_ch = EuclideanVectorChannel(f0, positions, tols.bone_pos, mode=curve_mode)
         rot_ch = BoneRotationChannel(f0, quats, tols.bone_rot, mode=curve_mode)
         channels = [pos_ch, rot_ch]
-        range_frames = reduce_track(bounds, channels, min_seg, max_seg, strict)
+        range_frames = set(reduce_track(bounds, channels, min_seg, max_seg, strict))
 
         segment_interp = None
         if curve_mode == "bezier":
@@ -362,7 +441,16 @@ def reduce_bone_track(
                 cp_x, cp_y, cp_z = pos_ch.curve(a, b)
                 return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
-        reduced.extend(build_bone_keys(source_keys, range_frames, segment_interp))
+        # §7.3 出力後検証(カメラと同様。非strictは密化で収束、strictはエラー)。
+        while True:
+            keys = build_bone_keys(source_keys, sorted(range_frames), segment_interp)
+            bad = verify_bone_track(source_keys, keys, [(f0, f1)], tols)
+            if not bad:
+                break
+            if strict:
+                raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
+            range_frames |= set(bad)
+        reduced.extend(keys)
 
     outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
     return sorted(reduced + outside, key=lambda k: k.frame)
