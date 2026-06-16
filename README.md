@@ -9,6 +9,7 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 | `docs/specs/` | MMDファイル形式の詳細仕様(VMD/PMX)。バイナリレイアウトの正 |
 | `mmd_toolbox/` | 共通ライブラリ。VMD読み書き・補間曲線評価・カメラ座標変換 |
 | `shakevmd/` | カメラVMDに手ぶれを焼き込むCLIツール |
+| `sparsevmd/` | 密なVMDキーフレームを疎なキーフレームと補間曲線へ変換するCLIツール |
 
 仕様書は各ディレクトリ直下に置かれている:
 
@@ -17,19 +18,20 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
   - [mmd_toolbox/vmd-interp.md](mmd_toolbox/vmd-interp.md) — 補間曲線評価
   - [mmd_toolbox/vmd-camera.md](mmd_toolbox/vmd-camera.md) — カメラ座標変換
 - [shakevmd/shakevmd.md](shakevmd/shakevmd.md) — shakevmd
+- [sparsevmd/sparsevmd.md](sparsevmd/sparsevmd.md) — sparsevmd
 
 ## 開発環境
 
 ### コア(ビルド・テスト)
 
-本体ライブラリと CLI のビルド・テストに必要な最小構成。実行時依存は `numpy` のみで OS 非依存。
+本体ライブラリと CLI のビルド・テストに必要な最小構成。実行時依存は `numpy` と `scipy`(`scipy` は sparsevmd の補間曲線フィットで使用)。いずれも pip が各 OS 向けホイールを導入する。
 
 | ツール | 用途 | 備考 |
 |---|---|---|
 | Python 3.11 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.11 未満のことがあるため `py -3` を使う |
 | Git | バージョン管理 | Windows は Git for Windows(Git Bash 同梱)を推奨 |
 
-`numpy`(実行時依存)と `pytest`(開発依存)は `pip install -e ".[dev]"` で導入される。
+`numpy`・`scipy`(実行時依存)と `pytest`(開発依存)は `pip install -e ".[dev]"` で導入される。
 
 ### 環境構築
 
@@ -71,6 +73,7 @@ cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替え�
 ```sh
 pytest            # 全テスト
 pytest mmd_toolbox     # mmd_toolboxのみ
+pytest sparsevmd       # sparsevmdのみ
 ```
 
 テストは外部サービス・ネットワーク・MMD本体を必要としない。
