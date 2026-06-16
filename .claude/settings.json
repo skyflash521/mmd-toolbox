@@ -38,7 +38,15 @@
       "Bash(pytest)",
       "Bash(pytest *)",
       "Bash(python -m pytest)",
-      "Bash(python -m pytest *)"
+      "Bash(python -m pytest *)",
+      "Bash(.venv/Scripts/pytest.exe)",
+      "Bash(.venv/Scripts/pytest.exe *)",
+      "Bash(./.venv/Scripts/pytest.exe)",
+      "Bash(./.venv/Scripts/pytest.exe *)",
+      "Bash(.venv/Scripts/python.exe -m pytest)",
+      "Bash(.venv/Scripts/python.exe -m pytest *)",
+      "Bash(./.venv/Scripts/python.exe -m pytest)",
+      "Bash(./.venv/Scripts/python.exe -m pytest *)"
     ]
   },
   "sandbox": {
