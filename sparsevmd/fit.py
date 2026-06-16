@@ -267,11 +267,12 @@ class CameraRotationChannel:
     ラップは __init__ の軸別 unwrap で除去する。分割候補は軸別速度反転を優先(§5.5)。
     """
 
-    def __init__(self, frame_start, eulers, tol):
+    def __init__(self, frame_start, eulers, tol, mode="linear"):
         self.frame_start = frame_start
         arr = np.asarray(eulers, dtype=float)
         self.eulers = np.column_stack([np.unwrap(arr[:, i]) for i in range(3)])
         self.tol = float(tol)
+        self.mode = mode
 
     def _euler(self, frame):
         return self.eulers[frame - self.frame_start]
@@ -280,13 +281,40 @@ class CameraRotationChannel:
         ea = self._euler(a)
         eb = self._euler(b)
         span = b - a
-        errs = {}
-        for f in range(a + 1, b):
-            t = (f - a) / span
-            ef = self._euler(f)
-            errs[f] = max(
-                abs(math.degrees(ef[i] - (ea[i] + (eb[i] - ea[i]) * t))) for i in range(3)
-            )
+        internal = range(a + 1, b)
+        if self.mode == "bezier":
+            # 3軸が1本の共通係数曲線 y(x)∈[0,1] を共有する(§5.3)。各軸の予測は
+            # ea[i]+(eb[i]-ea[i])*y。軸別角度誤差(度)の二乗和を最小化して曲線を合わせ、
+            # 量子化後の曲線で誤差を再評価する。
+            def _resid_at(coeff):
+                out = []
+                for f in internal:
+                    y = coeff((f - a) / span)
+                    ef = self._euler(f)
+                    out.extend(
+                        math.degrees(ef[i] - (ea[i] + (eb[i] - ea[i]) * y))
+                        for i in range(3)
+                    )
+                return out
+
+            cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+            errs = {}
+            for f in internal:
+                y = interp._solve_factor(*cp, (f - a) / span)
+                ef = self._euler(f)
+                errs[f] = max(
+                    abs(math.degrees(ef[i] - (ea[i] + (eb[i] - ea[i]) * y)))
+                    for i in range(3)
+                )
+        else:
+            errs = {}
+            for f in internal:
+                t = (f - a) / span
+                ef = self._euler(f)
+                errs[f] = max(
+                    abs(math.degrees(ef[i] - (ea[i] + (eb[i] - ea[i]) * t)))
+                    for i in range(3)
+                )
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
@@ -322,7 +350,7 @@ class BoneRotationChannel:
     反転)を優先する(§5.5)。
     """
 
-    def __init__(self, frame_start, quats, tol):
+    def __init__(self, frame_start, quats, tol, mode="linear"):
         self.frame_start = frame_start
         aligned = []
         for q in quats:
@@ -332,6 +360,7 @@ class BoneRotationChannel:
             aligned.append(qn)
         self.quats = aligned
         self.tol = float(tol)
+        self.mode = mode
 
     def _q(self, frame):
         return self.quats[frame - self.frame_start]
@@ -340,10 +369,29 @@ class BoneRotationChannel:
         q0 = self._q(a)
         q1 = self._q(b)
         span = b - a
-        errs = {}
-        for f in range(a + 1, b):
-            t = (f - a) / span
-            errs[f] = _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, t))
+        internal = range(a + 1, b)
+        if self.mode == "bezier":
+            # slerp 係数 y(x)∈[0,1] を1本のベジェ曲線で表す(§5.3)。予測は
+            # slerp(q0,q1,y)。角度距離(度)の二乗和を最小化して係数曲線を合わせ、
+            # 量子化後の曲線で誤差を再評価する。
+            def _resid_at(coeff):
+                return [
+                    _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, coeff((f - a) / span)))
+                    for f in internal
+                ]
+
+            cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+            errs = {
+                f: _quat_angle_deg(
+                    self._q(f), _quat_slerp(q0, q1, interp._solve_factor(*cp, (f - a) / span))
+                )
+                for f in internal
+            }
+        else:
+            errs = {}
+            for f in internal:
+                t = (f - a) / span
+                errs[f] = _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, t))
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
@@ -481,6 +529,51 @@ def fit_bezier_curve(xs, ys):
 
     max_err = max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
     return (cp, max_err)
+
+
+def _fit_coeff_curve(xs, resid_at):
+    """共通の係数曲線 y(x)∈[0,1] をフィットし量子化制御点を返す(§5.3)。
+
+    回転チャンネル用。fit_bezier_curve がスカラー (xs,ys) を直接合わせるのに対し、
+    こちらは「曲線係数 y を介した誤差」を resid_at(coeff_fn) で受け取り最小化する
+    (カメラ3軸共通・ボーン slerp 係数のように y が複数量へ非線形に効く場合)。
+    coeff_fn(x) は正規化時間 x∈[0,1] に対する曲線値 y を返す。fit_bezier_curve と同じ
+    再パラメータ化 x2=x1+(1-x1)*t でボックス境界に収め、複数初期値を決定論的に試す。
+    内部点が無ければ線形制御点を返す。
+    """
+    if not xs:
+        return _BEZIER_LINEAR_CP
+
+    def residual(v):
+        x1, t, y1, y2 = v
+        x2 = x1 + (1.0 - x1) * t
+        return resid_at(lambda x: _bezier_y_at(x1, y1, x2, y2, x))
+
+    best = None
+    best_cost = math.inf
+    for ix1, iy1, ix2, iy2 in _BEZIER_INITS:
+        t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
+        x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
+        try:
+            sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4))
+        except Exception:
+            continue
+        cost = float(np.sum(np.square(residual(sol.x))))
+        if cost < best_cost:
+            best_cost = cost
+            best = sol.x
+    if best is None:
+        best = [20.0 / 127, _clip01((107 - 20) / (127 - 20)), 20.0 / 127, 107.0 / 127]
+
+    x1, t, y1, y2 = best
+    x2 = x1 + (1.0 - x1) * t
+    x1q = _quantize_cp(x1)
+    x2q = _quantize_cp(x2)
+    y1q = _quantize_cp(y1)
+    y2q = _quantize_cp(y2)
+    if x1q > x2q:  # 量子化後の X 単調を担保(§5.4)
+        x2q = x1q
+    return (x1q, y1q, x2q, y2q)
 
 
 def _clip01(v):
