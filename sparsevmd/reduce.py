@@ -321,14 +321,18 @@ def _bone_seam_interp(source_keys, a, b, tols):
     return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
 
-def reduce_track(boundaries, channels, min_seg, max_seg, strict):
-    """必須境界とチャンネル群から、出力キーのフレーム列(昇順)を返す(§5.1)。"""
+def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None):
+    """必須境界とチャンネル群から、出力キーのフレーム列(昇順)を返す(§5.1)。
+
+    splits にリストを渡すと、許容超過で分割したフレームと駆動チャンネル(§2.7 の分割理由)を
+    {"frame", "channel", "norm_error"} で追記する。
+    """
     bounds = sorted(set(boundaries))
     presplit = _presplit(bounds, max_seg)
 
     keys = set(presplit)
     for a, b in zip(presplit, presplit[1:]):
-        _process_segment(a, b, channels, min_seg, strict, keys)
+        _process_segment(a, b, channels, min_seg, strict, keys, splits)
     return sorted(keys)
 
 
@@ -361,6 +365,7 @@ def _worst_channel(a, b, channels):
     max_norm = 0.0
     split_norm = 0.0
     split_frame = None
+    split_label = None
     for ch in channels:
         ne, frame = ch.normalized(a, b)
         if ne > max_norm:
@@ -368,10 +373,11 @@ def _worst_channel(a, b, channels):
         if frame is not None and ne > split_norm:
             split_norm = ne
             split_frame = frame
-    return max_norm, split_frame
+            split_label = getattr(ch, "label", None)
+    return max_norm, split_frame, split_label
 
 
-def _process_segment(a, b, channels, min_seg, strict, keys):
+def _process_segment(a, b, channels, min_seg, strict, keys, splits=None):
     """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える。"""
     stack = [(a, b)]
     while stack:
@@ -379,7 +385,7 @@ def _process_segment(a, b, channels, min_seg, strict, keys):
         if b - a <= 1:
             continue  # 隣接区間は内部点が無く受理(両端は既にキー)
 
-        max_norm, split_frame = _worst_channel(a, b, channels)
+        max_norm, split_frame, split_label = _worst_channel(a, b, channels)
         if max_norm <= 1.0:
             continue  # 全チャンネル許容内
 
@@ -392,6 +398,8 @@ def _process_segment(a, b, channels, min_seg, strict, keys):
         # 分割候補フレームを [a+min_seg, b-min_seg] に収める(min_seg を下回る区間を作らない)。
         w = min(max(split_frame, a + min_seg), b - min_seg)
         keys.add(w)
+        if splits is not None:
+            splits.append({"frame": w, "channel": split_label, "norm_error": max_norm})
         stack.append((a, w))
         stack.append((w, b))
 
@@ -443,6 +451,7 @@ def reduce_camera_track(
     max_seg,
     strict,
     curve_mode="linear",
+    diagnostics=None,
 ):
     """カメラトラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
 
@@ -458,9 +467,15 @@ def reduce_camera_track(
 
     範囲端の継ぎ目(§6.3)は bezier で、範囲外キーに隣接する到達側曲線を元サンプルから
     再フィットして範囲外区間の動きを忠実に保つ(_camera_seam_interp)。
+
+    diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(分割フレームと
+    駆動チャンネルと正規化誤差)・seam_rewrites(継ぎ目で曲線を書き換えたフレーム)を埋める。
     """
     reduced = []
     seam_rewrites = {}
+    diag_cuts = set()
+    diag_splits = [] if diagnostics is not None else None
+    diag_seams = set()
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         distances = [interp.sample(source_keys, "distance", f) for f in range(f0, f1 + 1)]
@@ -470,6 +485,10 @@ def reduce_camera_track(
 
         cuts = detect_cuts_camera(f0, positions, eulers, distances, cut_thresholds)
         pcuts = perspective_cut_frames(f0, persp)
+        # 閾値カットは no_cut_detect で無効化されるが、perspective 切替は常に境界(§6.2)。
+        if not no_cut_detect:
+            diag_cuts.update(cuts)
+        diag_cuts.update(pcuts)
         bounds = assemble_boundaries(
             f0,
             f1,
@@ -482,8 +501,13 @@ def reduce_camera_track(
         dist_ch = LinearScalarChannel(f0, distances, tols.camera_distance, mode=curve_mode)
         fov_ch = FovChannel(f0, fovs, tols.camera_fov, mode=curve_mode)
         rot_ch = CameraRotationChannel(f0, eulers, tols.camera_rot, mode=curve_mode)
+        pos_ch.label, dist_ch.label, fov_ch.label, rot_ch.label = (
+            "position", "distance", "fov", "rotation",
+        )
         channels = [pos_ch, dist_ch, fov_ch, rot_ch]
-        range_frames = set(reduce_track(bounds, channels, min_seg, max_seg, strict))
+        range_frames = set(
+            reduce_track(bounds, channels, min_seg, max_seg, strict, diag_splits)
+        )
 
         segment_interp = None
         if curve_mode == "bezier":
@@ -514,9 +538,11 @@ def reduce_camera_track(
                 keys[0] = dataclasses.replace(
                     keys[0], interpolation=_camera_seam_interp(source_keys, prev_src, f0, tols)
                 )
+                diag_seams.add(keys[0].frame)
             next_src = _nearest_source_after(source_keys, f1)
             if next_src is not None and _interval_clear_of_ranges(ranges, f1, next_src):
                 seam_rewrites[next_src] = _camera_seam_interp(source_keys, f1, next_src, tols)
+                diag_seams.add(next_src)
         reduced.extend(keys)
 
     outside = []
@@ -526,6 +552,10 @@ def reduce_camera_track(
         if k.frame in seam_rewrites:
             k = dataclasses.replace(k, interpolation=seam_rewrites[k.frame])
         outside.append(k)
+    if diagnostics is not None:
+        diagnostics["cuts"] = sorted(diag_cuts)
+        diagnostics["splits"] = diag_splits
+        diagnostics["seam_rewrites"] = sorted(diag_seams)
     return sorted(reduced + outside, key=lambda k: k.frame)
 
 
@@ -541,19 +571,26 @@ def reduce_bone_track(
     max_seg,
     strict,
     curve_mode="linear",
+    diagnostics=None,
 ):
     """ボーントラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
 
     cut_thresholds は (POS, ROT)。範囲外の元キーは逐語保持する。curve_mode="bezier" では
     位置(軸別)と回転(slerp 係数)を1本のベジェ曲線で採否判定し、制御点を出力キーへ格納する。
+    diagnostics に dict を渡すと cuts・splits・seam_rewrites を埋める(§2.7/§6.3)。
     """
     reduced = []
     seam_rewrites = {}
+    diag_cuts = set()
+    diag_splits = [] if diagnostics is not None else None
+    diag_seams = set()
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         quats = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
 
         cuts = detect_cuts_bone(f0, positions, quats, cut_thresholds)
+        if not no_cut_detect:
+            diag_cuts.update(cuts)
         bounds = assemble_boundaries(
             f0,
             f1,
@@ -564,8 +601,11 @@ def reduce_bone_track(
         )
         pos_ch = EuclideanVectorChannel(f0, positions, tols.bone_pos, mode=curve_mode)
         rot_ch = BoneRotationChannel(f0, quats, tols.bone_rot, mode=curve_mode)
+        pos_ch.label, rot_ch.label = "position", "rotation"
         channels = [pos_ch, rot_ch]
-        range_frames = set(reduce_track(bounds, channels, min_seg, max_seg, strict))
+        range_frames = set(
+            reduce_track(bounds, channels, min_seg, max_seg, strict, diag_splits)
+        )
 
         segment_interp = None
         if curve_mode == "bezier":
@@ -590,9 +630,11 @@ def reduce_bone_track(
                 keys[0] = dataclasses.replace(
                     keys[0], interpolation=_bone_seam_interp(source_keys, prev_src, f0, tols)
                 )
+                diag_seams.add(keys[0].frame)
             next_src = _nearest_source_after(source_keys, f1)
             if next_src is not None and _interval_clear_of_ranges(ranges, f1, next_src):
                 seam_rewrites[next_src] = _bone_seam_interp(source_keys, f1, next_src, tols)
+                diag_seams.add(next_src)
         reduced.extend(keys)
 
     outside = []
@@ -602,4 +644,8 @@ def reduce_bone_track(
         if k.frame in seam_rewrites:
             k = dataclasses.replace(k, interpolation=seam_rewrites[k.frame])
         outside.append(k)
+    if diagnostics is not None:
+        diagnostics["cuts"] = sorted(diag_cuts)
+        diagnostics["splits"] = diag_splits
+        diagnostics["seam_rewrites"] = sorted(diag_seams)
     return sorted(reduced + outside, key=lambda k: k.frame)

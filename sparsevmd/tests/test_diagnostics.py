@@ -125,6 +125,27 @@ def test_format_dry_run_shows_cut_positions():
     assert "15" in text
 
 
+def test_cli_report_json_includes_diagnostics(tmp_path):
+    # CLI 経由で --report-json が不連続検出位置を含むことをエンドツーエンドで確認する。
+    from mmd_toolbox.vmd import io
+    from mmd_toolbox.vmd.types import VmdDocument
+    from sparsevmd import cli
+
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    rep = tmp_path / "r.json"
+    keys = [
+        cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0))
+        for f in range(31)
+    ]
+    io.write_file(VmdDocument(camera=keys), str(src))
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--report-json", str(rep)])
+    assert code == 0
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    assert "diagnostics" in data["camera"]
+    assert 15 in data["camera"]["diagnostics"]["cuts"]
+
+
 def test_write_json_includes_splits_and_seams(tmp_path):
     rep = report.build_report(
         target="camera", camera=(31, 5), bones=None, selected_bones=set(),

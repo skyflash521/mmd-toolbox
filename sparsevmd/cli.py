@@ -261,18 +261,24 @@ def main(argv=None):
     new_bone = doc.bone
     camera_errors = None
     bone_errors = None
+    camera_diag = None
+    bone_diag = None
     try:
         if do_camera:
             cam = _sorted_camera(doc.camera)
             cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
+            camera_diag = {} if want_report else None
             new_camera = reduce_camera_track(
-                cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera, **cut_kw
+                cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
+                diagnostics=camera_diag, **cut_kw
             )
             if want_report:
                 camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
         if do_bone:
+            bone_diag = {} if want_report else None
             new_bone = _reduce_bones(
-                doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw
+                doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
+                diagnostics_out=bone_diag,
             )
             if want_report:
                 bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
@@ -290,6 +296,8 @@ def main(argv=None):
             keep_frames=args.keep_frames,
             camera_errors=camera_errors,
             bone_errors=bone_errors,
+            camera_diag=camera_diag,
+            bone_diag=bone_diag,
         )
         if args.dry_run:
             print(report.format_dry_run(rep))
@@ -336,10 +344,12 @@ def _global_ranges(parsed_ranges, target_frames):
     return ranges.expand_and_normalize(parsed_ranges, gmin, gmax)
 
 
-def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_kw):
+def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_kw,
+                  diagnostics_out=None):
     """選択ボーンを削減し非選択ボーンは保持して、全ボーンキー列を返す(§3.2)。
 
-    各トラックの実処理範囲はグローバル範囲とトラック区間の積集合(§2.2)。
+    各トラックの実処理範囲はグローバル範囲とトラック区間の積集合(§2.2)。diagnostics_out に
+    dict を渡すと、選択ボーンごとに {name: 診断dict} を埋める(§2.7/§6.3)。
     """
     groups = _bone_keys_by_name(bone_keys)
     out = []
@@ -347,11 +357,15 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
         ks = sorted(keys, key=lambda k: k.frame)
         if name in selected:
             track_ranges = ranges.intersect(global_ranges, ks[0].frame, ks[-1].frame)
+            diag = {} if diagnostics_out is not None else None
             out.extend(
                 reduce_bone_track(
-                    ks, track_ranges, tols, cut_thresholds=cut_thresholds, **cut_kw
+                    ks, track_ranges, tols, cut_thresholds=cut_thresholds,
+                    diagnostics=diag, **cut_kw
                 )
             )
+            if diagnostics_out is not None:
+                diagnostics_out[name] = diag
         else:
             out.extend(ks)  # 非選択トラックは保持(§3.2)
     # ボーン名(生バイト)・フレーム順に安定ソート(§3.2)。

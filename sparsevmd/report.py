@@ -33,24 +33,31 @@ def _track_entry(input_count, output_count):
 
 def build_report(
     *, target, camera, bones, selected_bones, ranges, keep_frames,
-    camera_errors=None, bone_errors=None,
+    camera_errors=None, bone_errors=None, camera_diag=None, bone_diag=None,
 ):
     """レポート dict を組み立てる(§2.7, §7.2)。
 
     camera は (input, output) または None。bones は {name: (input, output)}。
     非選択ボーンも保持カウントで列挙する(§3.2)。camera_errors は軸別最大誤差 dict、
     bone_errors は {name: 誤差dict}。指定時のみ各エントリに "errors" を載せる(§7.2)。
+    camera_diag / bone_diag は cuts・splits・seam_rewrites の診断 dict({name:dict} for bone)。
+    指定時のみ各エントリに "diagnostics" を載せる(§2.7 不連続検出位置・分割理由、§6.3 継ぎ目)。
     """
     selected_bones = set(selected_bones or ())
     bone_errors = bone_errors or {}
+    bone_diag = bone_diag or {}
     cam = _track_entry(*camera) if camera is not None else None
     if cam is not None and camera_errors is not None:
         cam["errors"] = camera_errors
+    if cam is not None and camera_diag is not None:
+        cam["diagnostics"] = camera_diag
     bone_list = []
     for name, (inp, out) in (bones or {}).items():
         entry = {"name": name, **_track_entry(inp, out), "selected": name in selected_bones}
         if name in bone_errors:
             entry["errors"] = bone_errors[name]
+        if name in bone_diag:
+            entry["diagnostics"] = bone_diag[name]
         bone_list.append(entry)
     return {
         "target": target,
@@ -71,6 +78,16 @@ def _format_errors(errors):
     return "max error: " + " ".join(parts)
 
 
+def _format_diag(diag):
+    """診断の不連続検出位置・継ぎ目書き換えを簡潔な行にする(§2.7, §6.3)。"""
+    lines = []
+    if diag.get("cuts"):
+        lines.append(f"  cuts: {diag['cuts']}")
+    if diag.get("seam_rewrites"):
+        lines.append(f"  seam rewrites: {diag['seam_rewrites']}")
+    return lines
+
+
 def format_dry_run(report):
     """dry-run のテキスト要約を返す(§2.7, §7.2)。"""
     lines = [f"target: {report['target']}"]
@@ -81,6 +98,8 @@ def format_dry_run(report):
         )
         if "errors" in cam:
             lines.append(f"  {_format_errors(cam['errors'])}")
+        if "diagnostics" in cam:
+            lines.extend(_format_diag(cam["diagnostics"]))
     for b in report["bones"]:
         state = "selected" if b["selected"] else "excluded"
         lines.append(
@@ -89,6 +108,8 @@ def format_dry_run(report):
         )
         if "errors" in b:
             lines.append(f"  {_format_errors(b['errors'])}")
+        if "diagnostics" in b:
+            lines.extend(_format_diag(b["diagnostics"]))
     lines.append(f"ranges: {report['ranges']}")
     lines.append(f"keep_frames: {report['keep_frames']}")
     return "\n".join(lines)
