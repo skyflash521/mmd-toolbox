@@ -11,6 +11,93 @@
 
 import math
 
+from mmd_toolbox.vmd import interp
+from mmd_toolbox.vmd.types import BoneKey, CameraKey
+
+from .fit import _round_half_up
+from .sample import perspective_series
+
+# linear mode の補間ブロック(真の線形: 各チャンネル x1==y1, x2==y2)。
+CAMERA_LINEAR_INTERP = bytes([20, 107, 20, 107]) * 6
+
+
+def bone_interp_bytes(x_cp, y_cp, z_cp, r_cp):
+    """4チャンネルの制御点 (x1,y1,x2,y2) からボーン補間64バイトを組み立てる。
+
+    docs/specs/vmd/VMD_file_format.md のレイアウトに従い、先頭16バイト
+    (Byte[0]〜Byte[15])に本体を置き、Byte[16]以降は先頭シーケンスを1バイトずつ
+    左シフトしたコピーを格納する。これにより Byte[2]/[3] が物理フラグで上書きされても
+    シフトコピー側から制御点を復元できる(vmd-io.md §2.2)。詰めパッドは現行MMDに倣い0。
+    """
+    first = [
+        x_cp[0], y_cp[0], z_cp[0], r_cp[0],  # x1
+        x_cp[1], y_cp[1], z_cp[1], r_cp[1],  # y1
+        x_cp[2], y_cp[2], z_cp[2], r_cp[2],  # x2
+        x_cp[3], y_cp[3], z_cp[3], r_cp[3],  # y2
+    ]
+    b = bytearray(64)
+    b[0:16] = bytes(first)
+    b[16:31] = bytes(first[1:16])
+    b[32:46] = bytes(first[2:16])
+    b[48:61] = bytes(first[3:16])
+    # 詰めパッド Byte[31]/[46]/[47]/[61]/[62]/[63] は0のまま(版依存・非検証)。
+    return bytes(b)
+
+
+_LINEAR_CP = (20, 20, 107, 107)
+BONE_LINEAR_INTERP = bone_interp_bytes(_LINEAR_CP, _LINEAR_CP, _LINEAR_CP, _LINEAR_CP)
+
+
+def build_camera_keys(source_keys, frames):
+    """削減後フレーム列からカメラ出力キーを生成する(§3.2, §4.2)。
+
+    各フレームで位置・回転(Euler)・距離・視野角(整数度へ四捨五入)・perspective
+    (直近ホールド)をソースキーからサンプリングし、線形補間ブロックを付与する。
+    """
+    keys = []
+    for f in sorted(frames):
+        keys.append(
+            CameraKey(
+                frame=f,
+                distance=interp.sample(source_keys, "distance", f),
+                position=(
+                    interp.sample(source_keys, "pos_x", f),
+                    interp.sample(source_keys, "pos_y", f),
+                    interp.sample(source_keys, "pos_z", f),
+                ),
+                rotation=interp.sample(source_keys, "rot", f),
+                interpolation=CAMERA_LINEAR_INTERP,
+                fov=_round_half_up(interp.sample(source_keys, "fov", f)),
+                perspective=perspective_series(source_keys, f, f)[0],
+            )
+        )
+    return keys
+
+
+def build_bone_keys(source_keys, frames):
+    """削減後フレーム列からボーン出力キーを生成する(§3.2)。
+
+    name_raw はソースの生バイトを保持する。各フレームで位置・回転(quaternion)を
+    サンプリングし、線形補間ブロックを付与する。
+    """
+    name_raw = source_keys[0].name_raw
+    keys = []
+    for f in sorted(frames):
+        keys.append(
+            BoneKey(
+                name_raw=name_raw,
+                frame=f,
+                position=(
+                    interp.sample(source_keys, "pos_x", f),
+                    interp.sample(source_keys, "pos_y", f),
+                    interp.sample(source_keys, "pos_z", f),
+                ),
+                rotation=interp.sample(source_keys, "rot", f),
+                interpolation=BONE_LINEAR_INTERP,
+            )
+        )
+    return keys
+
 
 class StrictError(Exception):
     """--strict 指定時に許容誤差を満たせない(§2.5、終了コード4)。"""

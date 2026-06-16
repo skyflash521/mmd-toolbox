@@ -12,6 +12,7 @@ from sparsevmd import reduce as reducer
 from sparsevmd.reduce import (
     BONE_LINEAR_INTERP,
     CAMERA_LINEAR_INTERP,
+    bone_interp_bytes,
     build_bone_keys,
     build_camera_keys,
 )
@@ -60,6 +61,28 @@ def test_bone_linear_interp_is_64_bytes_and_canonical_and_shiftcopy():
     # 物理フラグ上書き対策として Byte[2]/Byte[3] にも canonical 値が書かれている
     # (vmd-io.md §2.2: Byte[2]/[3] は物理フラグで上書きされうるためシフトコピー側から復元)。
     assert BONE_LINEAR_INTERP[2] == 20 and BONE_LINEAR_INTERP[3] == 20
+
+
+def test_bone_interp_bytes_full_shiftcopy_layout():
+    # 識別可能な値でレイアウト(docs/specs/vmd/VMD_file_format.md)を厳密に検証する。
+    b = bone_interp_bytes((1, 2, 3, 4), (5, 6, 7, 8), (9, 10, 11, 12), (13, 14, 15, 16))
+    assert len(b) == 64
+    first = [1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15, 4, 8, 12, 16]
+    # 先頭16バイト(本体)。
+    assert list(b[0:16]) == first
+    # シフトコピー(1/2/3バイト左シフト)を全範囲で検証する。
+    assert list(b[16:31]) == first[1:16]  # 15バイト
+    assert list(b[32:46]) == first[2:16]  # 14バイト
+    assert list(b[48:61]) == first[3:16]  # 13バイト
+    # 詰めパッドは0。
+    assert [b[i] for i in (31, 46, 47, 61, 62, 63)] == [0, 0, 0, 0, 0, 0]
+    # control_points で各チャンネルの制御点が復元できる。
+    k = BoneKey(b"c".ljust(15, b"\x00"), 0, (0, 0, 0), (0, 0, 0, 1), b)
+    cps = k.control_points()
+    assert cps["X"] == (1, 2, 3, 4)
+    assert cps["Y"] == (5, 6, 7, 8)
+    assert cps["Z"] == (9, 10, 11, 12)
+    assert cps["R"] == (13, 14, 15, 16)
 
 
 # --- build_camera_keys ------------------------------------------------------
