@@ -656,6 +656,26 @@ class TestBake:
         # 出力 FOV にランプ中間の整数ステップ(19..29)が現れない(階段でない)
         assert all(k.fov in (30, 18) for k in res.camera_keys)
 
+    def test_single_frame_fov_jump_is_baked_not_preserved(self):
+        # 隣接フレーム(間隔1)での瞬間 FOV ジャンプ(カット等)は階段にならないので密ベイクする(§3.1)。
+        # 温存すると短いショット内で揺れが急にオン/オフして不連続(ガクつき)になるため、温存しない。
+        # 入力補間を非線形にしておき、密ベイクキー(線形補間に再設定)と温存元キー(非線形を保持)を
+        # 区別する。出力が線形補間=密ベイク確定(温存=元の非線形補間ではない)。
+        N = NONLINEAR_INTERP
+        seq = [kf(0, fov=30, interp_block=N),
+               kf(20, fov=30, interp_block=N),
+               kf(21, fov=36, interp_block=N),   # 20→21 で fov 30→36(1フレーム=瞬間ジャンプ)
+               kf(40, fov=36, interp_block=N)]
+        res = bake.bake(seq, seed=1, amp_rot=10.0, amp_pos=0.0, fade_sec=0.1)
+        frames = [k.frame for k in res.camera_keys]
+        by = {k.frame: k for k in res.camera_keys}
+        for f in (20, 21):
+            assert frames.count(f) == 1                              # 温存キーと密キーの重複が無い
+            assert by[f].interpolation == bake.LINEAR_CAMERA_INTERP  # 密ベイク(線形再設定)=温存でない
+            s = interp.sample_camera(seq, f)
+            assert by[f].rotation != pytest.approx(s["rotation"], abs=1e-4)   # 揺れあり
+        assert by[20].fov == 30 and by[21].fov == 36   # 瞬間ジャンプはそのまま密キーで再現
+
     # --- 範囲指定・範囲外保持(§3.2 / §5.2 / §7.1) -------------------------
     def test_default_range_is_full_span(self):
         res = bake.bake(SEQ, ranges=None, seed=1)

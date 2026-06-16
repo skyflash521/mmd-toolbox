@@ -210,13 +210,15 @@ def bake(
         detected, list(manual_cuts_add), list(manual_cuts_remove)
     )
 
-    # FOV 変化区間(隣接する作業ビューキーで視野角が異なる区間)は密キーを焼かず、その区間の
-    # 元キーを温存して MMD の実数補間に委ねる(§3.1)。整数 FOV を毎フレーム焼くとゆっくりズームが
-    # 1°刻みの階段になるため。fov_ramp_frames のフレームは密ベイクせず、ramp_boundary の元キーを温存する。
+    # 視野角が複数フレームにわたって変化する区間(隣接する作業ビューキーで視野角が異なり、かつ
+    # フレーム間隔が2以上=ゆっくりズーム)は密キーを焼かず、その区間の元キーを温存して MMD の実数
+    # 補間に委ねる(§3.1)。整数 FOV を毎フレーム焼くとゆっくりズームが1°刻みの階段になるため。
+    # 隣接フレーム(間隔1)の瞬間 FOV ジャンプ(カット等のショット切替)は階段にならないので除外し、
+    # 通常どおり密ベイクする(温存すると短いショット内で揺れが急にオン/オフして不連続になるため)。
     fov_ramp_frames: set = set()
     ramp_boundary: set = set()
     for i in range(len(wv) - 1):
-        if wv[i].fov != wv[i + 1].fov:
+        if wv[i].fov != wv[i + 1].fov and wv[i + 1].frame - wv[i].frame > 1:
             fov_ramp_frames.update(range(wv[i].frame, wv[i + 1].frame + 1))
             ramp_boundary.add(wv[i].frame)
             ramp_boundary.add(wv[i + 1].frame)
