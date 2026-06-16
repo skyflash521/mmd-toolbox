@@ -18,6 +18,7 @@ dev = [
 
 [project.scripts]
 shakevmd = "shakevmd.cli:main"
+sparsevmd = "sparsevmd.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["mmd_toolbox*", "shakevmd*", "sparsevmd*"]

@@ -1,7 +1,7 @@
 """sparsevmd パッケージ土台のスモークテスト(sparsevmd.md §8)。
 
-パッケージがインポート可能で、コア(presets)が公開されていることを確認する。
-CLI(cli.main)は後続ステップで追加するため、ここでは検査しない。
+パッケージがインポート可能で、コア(presets)と console script のエントリ(cli.main)が
+公開されていることを確認する。
 """
 
 
@@ -17,3 +17,10 @@ def test_presets_module_available():
 
     assert hasattr(presets, "resolve_tolerances")
     assert hasattr(presets, "PRESET_NAMES")
+
+
+def test_console_script_entry_point_callable():
+    # pyproject の [project.scripts] sparsevmd = "sparsevmd.cli:main" の対象が解決可能。
+    from sparsevmd.cli import main
+
+    assert callable(main)
