@@ -9,6 +9,7 @@
 チャンネルは normalized(a, b) -> (正規化誤差, 最大誤差フレーム|None) を持つダックタイプ。
 """
 
+import dataclasses
 import math
 
 from mmd_toolbox.vmd import interp
@@ -211,6 +212,73 @@ def verify_bone_track(source_keys, output_keys, ranges, tols):
     return sorted(bad)
 
 
+def _interval_clear_of_ranges(ranges, lo, hi):
+    """開区間 (lo, hi) がどの処理範囲とも重ならないか(§6.3 継ぎ目の安全判定)。
+
+    継ぎ目区間に別範囲の出力キーが挟まると、最近ソースキー基準の再フィットが実際の
+    出力セグメントと一致せず壊れる。重なる場合は継ぎ目書き換えをスキップする。
+    """
+    return not any(g0 < hi and g1 > lo for g0, g1 in ranges)
+
+
+def _nearest_source_before(source_keys, frame):
+    """frame より前で最も近いソースキーのフレームを返す(なければ None)。"""
+    cands = [k.frame for k in source_keys if k.frame < frame]
+    return max(cands) if cands else None
+
+
+def _nearest_source_after(source_keys, frame):
+    """frame より後で最も近いソースキーのフレームを返す(なければ None)。"""
+    cands = [k.frame for k in source_keys if k.frame > frame]
+    return min(cands) if cands else None
+
+
+def _camera_seam_interp(source_keys, a, b, tols):
+    """区間 [a,b] を元サンプルからベジェ再フィットしカメラ補間24バイトを返す(§6.3)。
+
+    範囲端の到達側曲線が範囲外区間 [a,b] を支配する継ぎ目で、元の動きを忠実に保つよう
+    各チャンネルを元サンプルから再フィットする。単一区間のため整数量子化が誤差下限になる。
+    """
+    rng = range(a, b + 1)
+    positions = [
+        (
+            interp.sample(source_keys, "pos_x", f),
+            interp.sample(source_keys, "pos_y", f),
+            interp.sample(source_keys, "pos_z", f),
+        )
+        for f in rng
+    ]
+    distances = [interp.sample(source_keys, "distance", f) for f in rng]
+    fovs = [interp.sample(source_keys, "fov", f) for f in rng]
+    eulers = [interp.sample(source_keys, "rot", f) for f in rng]
+    pos_ch = EuclideanVectorChannel(a, positions, tols.camera_pos, mode="bezier")
+    dist_ch = LinearScalarChannel(a, distances, tols.camera_distance, mode="bezier")
+    fov_ch = FovChannel(a, fovs, tols.camera_fov, mode="bezier")
+    rot_ch = CameraRotationChannel(a, eulers, tols.camera_rot, mode="bezier")
+    cp_x, cp_y, cp_z = pos_ch.curve(a, b)
+    return camera_interp_bytes(
+        cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
+    )
+
+
+def _bone_seam_interp(source_keys, a, b, tols):
+    """区間 [a,b] を元サンプルからベジェ再フィットしボーン補間64バイトを返す(§6.3)。"""
+    rng = range(a, b + 1)
+    positions = [
+        (
+            interp.sample(source_keys, "pos_x", f),
+            interp.sample(source_keys, "pos_y", f),
+            interp.sample(source_keys, "pos_z", f),
+        )
+        for f in rng
+    ]
+    quats = [interp.sample(source_keys, "rot", f) for f in rng]
+    pos_ch = EuclideanVectorChannel(a, positions, tols.bone_pos, mode="bezier")
+    rot_ch = BoneRotationChannel(a, quats, tols.bone_rot, mode="bezier")
+    cp_x, cp_y, cp_z = pos_ch.curve(a, b)
+    return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
+
+
 def reduce_track(boundaries, channels, min_seg, max_seg, strict):
     """必須境界とチャンネル群から、出力キーのフレーム列(昇順)を返す(§5.1)。"""
     bounds = sorted(set(boundaries))
@@ -346,10 +414,11 @@ def reduce_camera_track(
     保持でき必ず収束)、strictは StrictError。float32 格納差は §2.4 で量子化誤差として
     許容されるため float64 上の検証で扱う。
 
-    スコープ外として以下は未実装:
-    - §6.3 の範囲端境界キー注入・隣接曲線書き換え。範囲外キーは逐語保持する保守的方針。
+    範囲端の継ぎ目(§6.3)は bezier で、範囲外キーに隣接する到達側曲線を元サンプルから
+    再フィットして範囲外区間の動きを忠実に保つ(_camera_seam_interp)。
     """
     reduced = []
+    seam_rewrites = {}
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         distances = [interp.sample(source_keys, "distance", f) for f in range(f0, f1 + 1)]
@@ -392,9 +461,29 @@ def reduce_camera_track(
             if strict:
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
             range_frames |= set(bad)
+
+        # §6.3 範囲端の継ぎ目: 範囲外キーに隣接する到達側曲線を元サンプルから再フィットし、
+        # 範囲外区間の動きを忠実に保つ(bezier のみ。linear は線形ブロック固定)。継ぎ目区間に
+        # 別範囲の出力キーが挟まる場合は、最近ソースキー基準の再フィットが実セグメントと
+        # ずれるためスキップする(保守的フォールバック。多範囲隣接時の安全策)。
+        if curve_mode == "bezier":
+            prev_src = _nearest_source_before(source_keys, f0)
+            if prev_src is not None and _interval_clear_of_ranges(ranges, prev_src, f0):
+                keys[0] = dataclasses.replace(
+                    keys[0], interpolation=_camera_seam_interp(source_keys, prev_src, f0, tols)
+                )
+            next_src = _nearest_source_after(source_keys, f1)
+            if next_src is not None and _interval_clear_of_ranges(ranges, f1, next_src):
+                seam_rewrites[next_src] = _camera_seam_interp(source_keys, f1, next_src, tols)
         reduced.extend(keys)
 
-    outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
+    outside = []
+    for k in source_keys:
+        if _in_any_range(k.frame, ranges):
+            continue
+        if k.frame in seam_rewrites:
+            k = dataclasses.replace(k, interpolation=seam_rewrites[k.frame])
+        outside.append(k)
     return sorted(reduced + outside, key=lambda k: k.frame)
 
 
@@ -417,6 +506,7 @@ def reduce_bone_track(
     位置(軸別)と回転(slerp 係数)を1本のベジェ曲線で採否判定し、制御点を出力キーへ格納する。
     """
     reduced = []
+    seam_rewrites = {}
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         quats = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
@@ -450,7 +540,24 @@ def reduce_bone_track(
             if strict:
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
             range_frames |= set(bad)
+
+        # §6.3 範囲端の継ぎ目(カメラと同様。bezier のみ。多範囲隣接時はスキップで安全側)。
+        if curve_mode == "bezier":
+            prev_src = _nearest_source_before(source_keys, f0)
+            if prev_src is not None and _interval_clear_of_ranges(ranges, prev_src, f0):
+                keys[0] = dataclasses.replace(
+                    keys[0], interpolation=_bone_seam_interp(source_keys, prev_src, f0, tols)
+                )
+            next_src = _nearest_source_after(source_keys, f1)
+            if next_src is not None and _interval_clear_of_ranges(ranges, f1, next_src):
+                seam_rewrites[next_src] = _bone_seam_interp(source_keys, f1, next_src, tols)
         reduced.extend(keys)
 
-    outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
+    outside = []
+    for k in source_keys:
+        if _in_any_range(k.frame, ranges):
+            continue
+        if k.frame in seam_rewrites:
+            k = dataclasses.replace(k, interpolation=seam_rewrites[k.frame])
+        outside.append(k)
     return sorted(reduced + outside, key=lambda k: k.frame)
