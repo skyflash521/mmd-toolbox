@@ -118,6 +118,52 @@ def test_non_target_section_passthrough(tmp_path):
     assert len(doc.bone) < 31
 
 
+# --- 入力正規化(§3.1) ------------------------------------------------------
+
+
+def test_duplicate_frame_camera_last_wins(tmp_path):
+    # 同一フレーム重複は後勝ち(§3.1)。frame0 を 2 回入れ、後の値が採用される。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    keys = [cam(0, center=(0.0, 0.0, 0.0)), cam(0, center=(5.0, 0.0, 0.0)),
+            cam(10, center=(5.0, 0.0, 0.0))]
+    write_vmd(src, camera=keys)
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
+    assert code == 0
+    doc, _ = io.read(str(out))
+    frames = [k.frame for k in doc.camera]
+    assert len(frames) == len(set(frames))  # 重複フレームなし
+    assert interp.sample(doc.camera, "pos_x", 0) == pytest.approx(5.0)  # 後勝ち
+
+
+def test_single_key_camera_preserved_verbatim(tmp_path):
+    # 1 キー以下のトラックは削減不能として逐語保持(値・補間ブロック不変、§3.1/§3.2)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    ease_blk = bytes([40, 90, 10, 118]) + bytes([20, 107, 20, 107]) * 5
+    key = CameraKey(7, -30.0, (3.0, 0.0, 0.0), (0.0, 0.0, 0.0), ease_blk, 30, 0)
+    write_vmd(src, camera=[key])
+    code = cli.main([str(src), "-o", str(out), "--target", "camera"])
+    assert code == 0
+    doc, _ = io.read(str(out))
+    assert doc.camera == [key]  # 補間ブロック含め完全一致
+
+
+def test_single_key_bone_preserved_verbatim(tmp_path):
+    # 選択ボーンでもキー1件なら逐語保持(補間ブロック不変)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    nonlinear = bytearray(_bone_linear())
+    nonlinear[0] = 40  # X 軸 x1 を非線形値に
+    key = BoneKey("センター".encode("cp932").ljust(15, b"\x00"), 5, (1.0, 0.0, 0.0),
+                  (0.0, 0.0, 0.0, 1.0), bytes(nonlinear))
+    write_vmd(src, bone=[key])
+    code = cli.main([str(src), "-o", str(out), "--target", "bone"])
+    assert code == 0
+    doc, _ = io.read(str(out))
+    assert doc.bone == [key]
+
+
 # --- list-bones -------------------------------------------------------------
 
 

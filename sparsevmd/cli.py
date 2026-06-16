@@ -203,6 +203,15 @@ def main(argv=None):
     except Exception:
         return 1
 
+    # 対象セクションを内部作業ビューで正規化する(フレーム順ソート・同一キー後勝ち。§3.1)。
+    # 対象外セクションは無加工で保持される。
+    norm_sections = []
+    if args.target in ("camera", "all"):
+        norm_sections.append("camera")
+    if args.target in ("bone", "all"):
+        norm_sections.append("bone")
+    doc, _ = io.normalize(doc, sections=norm_sections)
+
     includes, excludes = _build_selectors(args)
 
     # --list-bones: ボーン名・キー数・選択状態を表示して終了(§2.7)。
@@ -270,11 +279,14 @@ def main(argv=None):
         if do_camera:
             cam = _sorted_camera(doc.camera)
             cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
-            camera_diag = {} if want_report else None
-            new_camera = reduce_camera_track(
-                cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
-                diagnostics=camera_diag, **cut_kw
-            )
+            if len(cam) >= 2:
+                camera_diag = {} if want_report else None
+                new_camera = reduce_camera_track(
+                    cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
+                    diagnostics=camera_diag, **cut_kw
+                )
+            else:
+                new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持(§3.1/§3.2)
             if want_report:
                 camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
             if args.preview_csv:
@@ -364,7 +376,7 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
     out = []
     for name, keys in groups.items():
         ks = sorted(keys, key=lambda k: k.frame)
-        if name in selected:
+        if name in selected and len(ks) >= 2:
             track_ranges = ranges.intersect(global_ranges, ks[0].frame, ks[-1].frame)
             diag = {} if diagnostics_out is not None else None
             out.extend(
@@ -376,7 +388,8 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
             if diagnostics_out is not None:
                 diagnostics_out[name] = diag
         else:
-            out.extend(ks)  # 非選択トラックは保持(§3.2)
+            # 非選択トラック、および選択でもキー1件以下(削減不能)は逐語保持(§3.1/§3.2)。
+            out.extend(ks)
     # ボーン名(生バイト)・フレーム順に安定ソート(§3.2)。
     out.sort(key=lambda k: (k.name_raw, k.frame))
     return out
