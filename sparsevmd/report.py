@@ -121,30 +121,20 @@ def write_json(report, path):
         json.dump(report, f, ensure_ascii=False, indent=2)
 
 
-_ERR_COLUMNS = ["err_pos_x", "err_pos_y", "err_pos_z", "err_rot_deg", "err_distance", "err_fov"]
-_CSV_HEADER = ["track", "input_keys", "output_keys", "reduction_rate", "selected"] + _ERR_COLUMNS
+_PREVIEW_HEADER = ["track", "frame", "channel", "input", "output", "error"]
 
 
-def _err_cells(entry):
-    """誤差列(_ERR_COLUMNS 順)のセル値。該当キーが無ければ空文字(§7.2)。"""
-    errors = entry.get("errors") or {}
-    out = []
-    for col in _ERR_COLUMNS:
-        key = col[len("err_"):]
-        out.append(f"{errors[key]:.6f}" if key in errors else "")
-    return out
+def write_preview_csv(rows, path):
+    """フレーム毎の入力/出力サンプル値と誤差を CSV 出力する(§2.7 --preview-csv)。失敗時は例外。
 
-
-def write_csv(report, path):
-    """トラック別の入出力キー数・削減率・選択状態・軸別最大誤差を CSV で書き出す。失敗時は例外。"""
+    rows は {track, frame, channel, input, output, error} の dict 列(各値はスカラー)。
+    入力/出力/誤差は小数6桁で整形する。トラック別の要約・誤差・分割理由は --report-json 側。
+    """
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(_CSV_HEADER)
-        cam = report["camera"]
-        if cam is not None:
-            w.writerow(["camera", cam["input_keys"], cam["output_keys"],
-                        f"{cam['reduction_rate']:.6f}", ""] + _err_cells(cam))
-        for b in report["bones"]:
-            w.writerow([b["name"], b["input_keys"], b["output_keys"],
-                        f"{b['reduction_rate']:.6f}", "true" if b["selected"] else "false"]
-                       + _err_cells(b))
+        w.writerow(_PREVIEW_HEADER)
+        for r in rows:
+            w.writerow([
+                r["track"], r["frame"], r["channel"],
+                f"{r['input']:.6f}", f"{r['output']:.6f}", f"{r['error']:.6f}",
+            ])
