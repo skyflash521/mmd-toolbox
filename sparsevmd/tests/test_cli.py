@@ -10,7 +10,7 @@ import json
 import numpy as np
 import pytest
 
-from mmd_toolbox.vmd import io
+from mmd_toolbox.vmd import interp, io
 from mmd_toolbox.vmd.types import BoneKey, CameraKey, VmdDocument
 from sparsevmd import cli
 
@@ -61,15 +61,37 @@ def test_camera_reduce_writes_output(tmp_path):
     assert [k.frame for k in doc.camera] == [0, 30]
 
 
-def test_curve_mode_bezier_falls_back_to_linear(tmp_path):
-    # bezier 未実装のため、bezier 指定(および既定)でも linear で削減して正常終了する。
+EASE = (96, 0, 96, 30)
+
+
+def eased_camera_doc():
+    # 位置Xが1本の強いイージング曲線で動く密なカメラ(曲線フィット検証用)。
+    return [
+        cam(f, center=(30.0 * interp._solve_factor(*EASE, f / 30.0), 0.0, 0.0))
+        for f in range(31)
+    ]
+
+
+def test_curve_mode_bezier_reduces_curved_motion(tmp_path):
+    # 既定(bezier)は曲線をベジェ1本で表し両端2キーへ削減、linear は多数に分割する。
     src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "-o", str(out), "--target", "camera"])  # curve-mode 既定
-    assert code == 0
-    doc, _ = io.read(str(out))
-    assert [k.frame for k in doc.camera] == [0, 30]
+    write_vmd(src, camera=eased_camera_doc())
+
+    bez_out = tmp_path / "bez.vmd"
+    assert cli.main([str(src), "-o", str(bez_out), "--target", "camera", "--no-cut-detect"]) == 0
+    bez, _ = io.read(str(bez_out))
+
+    lin_out = tmp_path / "lin.vmd"
+    assert cli.main(
+        [str(src), "-o", str(lin_out), "--target", "camera", "--curve-mode", "linear",
+         "--no-cut-detect"]
+    ) == 0
+    lin, _ = io.read(str(lin_out))
+
+    assert [k.frame for k in bez.camera] == [0, 30]
+    assert len(lin.camera) > 2
+    # bezier の到達キーには非線形の位置X制御点が入る(線形ブロックと異なる)。
+    assert bez.camera[-1].interpolation[0:4] != bytes([20, 107, 20, 107])
 
 
 def test_default_output_path(tmp_path):
