@@ -66,17 +66,13 @@ def test_format_dry_run_contains_counts_rate_selection_range_keep():
     assert "30" in text  # 範囲端
 
 
-def test_format_dry_run_and_csv_handle_camera_none(tmp_path):
+def test_format_dry_run_handles_camera_none(tmp_path):
     r = report.build_report(
         target="bone", camera=None, bones={"センター": (5, 2)},
         selected_bones={"センター"}, ranges=[(0, 4)], keep_frames=[],
     )
     text = report.format_dry_run(r)  # 例外を出さない
     assert "センター" in text
-    path = tmp_path / "p.csv"
-    report.write_csv(r, str(path))  # camera 行なしでも書ける
-    flat = path.read_text(encoding="utf-8")
-    assert "センター" in flat
 
 
 def test_write_json_roundtrips_and_keeps_japanese_unescaped(tmp_path):
@@ -93,20 +89,23 @@ def test_write_json_roundtrips_and_keeps_japanese_unescaped(tmp_path):
     assert "センター" in names and "頭" in names
 
 
-def test_write_csv_header_and_rows(tmp_path):
-    r = sample_report()
+def test_write_preview_csv_header_and_rows(tmp_path):
+    # §2.7 --preview-csv はフレーム毎の入力/出力サンプル値と誤差。
+    rows = [
+        {"track": "camera", "frame": 0, "channel": "pos_x", "input": 1.0, "output": 1.0, "error": 0.0},
+        {"track": "camera", "frame": 1, "channel": "pos_x", "input": 2.0, "output": 1.5, "error": 0.5},
+    ]
     path = tmp_path / "preview.csv"
-    report.write_csv(r, str(path))
-    rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
-    header = rows[0]
-    # ヘッダにトラック名・入出力キー数・削減率の列がある。
-    assert "track" in header
-    assert any("input" in h for h in header) and any("output" in h for h in header)
-    ncols = len(header)
-    # 全行が同じ列数(列ずれが無い)。
-    assert all(len(row) == ncols for row in rows)
-    tracks = {row[header.index("track")] for row in rows[1:]}
-    assert "camera" in tracks and "センター" in tracks and "頭" in tracks
+    report.write_preview_csv(rows, str(path))
+    out = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
+    header = out[0]
+    assert header == ["track", "frame", "channel", "input", "output", "error"]
+    assert all(len(row) == len(header) for row in out)
+    row1 = [r for r in out[1:] if r[header.index("frame")] == "1"][0]
+    assert row1[header.index("channel")] == "pos_x"
+    assert row1[header.index("input")] == "2.000000"
+    assert row1[header.index("output")] == "1.500000"
+    assert row1[header.index("error")] == "0.500000"
 
 
 def test_write_json_bad_dir_raises(tmp_path):
@@ -115,6 +114,6 @@ def test_write_json_bad_dir_raises(tmp_path):
         report.write_json(sample_report(), str(tmp_path / "nodir" / "r.json"))
 
 
-def test_write_csv_bad_dir_raises(tmp_path):
+def test_write_preview_csv_bad_dir_raises(tmp_path):
     with pytest.raises(OSError):
-        report.write_csv(sample_report(), str(tmp_path / "nodir" / "p.csv"))
+        report.write_preview_csv([], str(tmp_path / "nodir" / "p.csv"))

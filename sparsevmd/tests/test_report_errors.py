@@ -140,19 +140,37 @@ def test_write_json_contains_errors(tmp_path):
     assert data["camera"]["errors"]["pos_x"] == 0.5
 
 
-def test_write_csv_has_error_columns(tmp_path):
-    rep = report.build_report(
-        target="camera", camera=(31, 2), bones=None, selected_bones=set(),
-        ranges=[(0, 30)], keep_frames=[], camera_errors=_cam_errors(),
+def test_cli_preview_csv_is_per_frame(tmp_path):
+    # §2.7 --preview-csv はフレーム毎の入力/出力サンプル値と誤差。トラック要約ではない。
+    from mmd_toolbox.vmd import io
+    from mmd_toolbox.vmd.types import VmdDocument
+    from sparsevmd import cli
+
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    prev = tmp_path / "preview.csv"
+    keys = [cam(f, center=(float(f), 0.0, 0.0)) for f in range(11)]
+    io.write_file(VmdDocument(camera=keys), str(src))
+    code = cli.main(
+        [str(src), "-o", str(out), "--target", "camera", "--preview-csv", str(prev)]
     )
-    p = tmp_path / "r.csv"
-    report.write_csv(rep, str(p))
-    rows = list(_csv.reader(p.read_text(encoding="utf-8").splitlines()))
+    assert code == 0
+    rows = list(_csv.reader(prev.read_text(encoding="utf-8").splitlines()))
     header = rows[0]
-    assert "err_pos_x" in header
-    assert "err_rot_deg" in header
-    cam_row = rows[1]
-    assert cam_row[header.index("err_pos_x")] == "0.500000"
+    assert header == ["track", "frame", "channel", "input", "output", "error"]
+    frames = {r[header.index("frame")] for r in rows[1:]}
+    channels = {r[header.index("channel")] for r in rows[1:]}
+    assert len(frames) > 2  # フレーム毎(要約でない)
+    assert "pos_x" in channels
+    # center.x=f は完全な線形。削減後のキー数に関わらず線形補間で各フレーム完全再現される
+    # ため、frame5 の pos_x は入力出力一致・誤差0。
+    row5 = [
+        r for r in rows[1:]
+        if r[header.index("frame")] == "5" and r[header.index("channel")] == "pos_x"
+    ][0]
+    assert row5[header.index("input")] == "5.000000"
+    assert row5[header.index("output")] == "5.000000"
+    assert row5[header.index("error")] == "0.000000"
 
 
 def test_cli_report_json_includes_camera_errors(tmp_path):
