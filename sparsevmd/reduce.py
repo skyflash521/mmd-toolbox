@@ -221,6 +221,48 @@ def _interval_clear_of_ranges(ranges, lo, hi):
     return not any(g0 < hi and g1 > lo for g0, g1 in ranges)
 
 
+def measure_camera_errors(source_keys, output_keys, ranges):
+    """出力 vs 元サンプルの §7.2 チャンネル別・軸別最大絶対誤差を返す(レポート用)。
+
+    位置は軸別の絶対誤差(§7.2「軸ごとの最大絶対誤差」)、距離・視野角は絶対差、回転は
+    軸別角度誤差(度)の最大。範囲が空なら全0。
+    """
+    m = {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "distance": 0.0, "fov": 0.0, "rot_deg": 0.0}
+    axes = ("pos_x", "pos_y", "pos_z")
+    for f0, f1 in ranges:
+        for f in range(f0, f1 + 1):
+            s = interp.sample_camera(source_keys, f)
+            o = interp.sample_camera(output_keys, f)
+            for i, ax in enumerate(axes):
+                m[ax] = max(m[ax], abs(s["position"][i] - o["position"][i]))
+            m["distance"] = max(m["distance"], abs(s["distance"] - o["distance"]))
+            m["fov"] = max(m["fov"], abs(o["fov"] - s["fov"]))
+            m["rot_deg"] = max(
+                m["rot_deg"],
+                max(_angle_diff_deg(s["rotation"][i], o["rotation"][i]) for i in range(3)),
+            )
+    return m
+
+
+def measure_bone_errors(source_keys, output_keys, ranges):
+    """出力 vs 元サンプルの §7.2 軸別位置誤差と回転角度距離(度)の最大を返す(レポート用)。"""
+    m = {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "rot_deg": 0.0}
+    axes = ("pos_x", "pos_y", "pos_z")
+    for f0, f1 in ranges:
+        for f in range(f0, f1 + 1):
+            for ax in axes:
+                m[ax] = max(
+                    m[ax], abs(interp.sample(source_keys, ax, f) - interp.sample(output_keys, ax, f))
+                )
+            m["rot_deg"] = max(
+                m["rot_deg"],
+                _quat_angle_deg(
+                    interp.sample(source_keys, "rot", f), interp.sample(output_keys, "rot", f)
+                ),
+            )
+    return m
+
+
 def _nearest_source_before(source_keys, frame):
     """frame より前で最も近いソースキーのフレームを返す(なければ None)。"""
     cands = [k.frame for k in source_keys if k.frame < frame]

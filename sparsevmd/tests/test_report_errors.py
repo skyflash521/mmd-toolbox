@@ -155,6 +155,29 @@ def test_write_csv_has_error_columns(tmp_path):
     assert cam_row[header.index("err_pos_x")] == "0.500000"
 
 
+def test_cli_report_json_includes_camera_errors(tmp_path):
+    # CLI 経由で --report-json が軸別最大誤差を含むことをエンドツーエンドで確認する。
+    from mmd_toolbox.vmd import io
+    from mmd_toolbox.vmd.types import VmdDocument
+    from sparsevmd import cli
+
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    rep = tmp_path / "r.json"
+    keys = [
+        cam(f, dist=-10.0 - 100.0 * interp._solve_factor(*EASE, f / 30.0))
+        for f in range(31)
+    ]
+    io.write_file(VmdDocument(camera=keys), str(src))
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--report-json", str(rep)])
+    assert code == 0
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    assert "errors" in data["camera"]
+    for k in ("pos_x", "pos_y", "pos_z", "distance", "fov", "rot_deg"):
+        assert k in data["camera"]["errors"]
+        assert data["camera"]["errors"][k] >= 0.0
+
+
 def test_build_report_no_errors_when_omitted():
     rep = report.build_report(
         target="camera", camera=(31, 2), bones=None, selected_bones=set(),

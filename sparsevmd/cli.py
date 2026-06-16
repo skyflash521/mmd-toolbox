@@ -19,7 +19,13 @@ from mmd_toolbox.vmd import io
 
 from . import presets, ranges, report, selection
 from .cuts import parse_cut_threshold_bone, parse_cut_threshold_camera
-from .reduce import StrictError, reduce_bone_track, reduce_camera_track
+from .reduce import (
+    StrictError,
+    measure_bone_errors,
+    measure_camera_errors,
+    reduce_bone_track,
+    reduce_camera_track,
+)
 
 # 個別許容誤差オプション → Tolerances フィールド。
 _TOL_ARGS = {
@@ -250,8 +256,11 @@ def main(argv=None):
     except ranges.RangeError:
         return 2
 
+    want_report = args.dry_run or args.report_json or args.preview_csv
     new_camera = doc.camera
     new_bone = doc.bone
+    camera_errors = None
+    bone_errors = None
     try:
         if do_camera:
             cam = _sorted_camera(doc.camera)
@@ -259,15 +268,19 @@ def main(argv=None):
             new_camera = reduce_camera_track(
                 cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera, **cut_kw
             )
+            if want_report:
+                camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
         if do_bone:
             new_bone = _reduce_bones(
                 doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw
             )
+            if want_report:
+                bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
     except StrictError:
         return 4
 
     # レポート(dry-run 統計・JSON・CSV)。dry-run でも report/preview は書き出す(§2.7)。
-    if args.dry_run or args.report_json or args.preview_csv:
+    if want_report:
         rep = report.build_report(
             target=args.target,
             camera=(len(doc.camera), len(new_camera)) if do_camera else None,
@@ -275,6 +288,8 @@ def main(argv=None):
             selected_bones=selected,
             ranges=global_ranges,
             keep_frames=args.keep_frames,
+            camera_errors=camera_errors,
+            bone_errors=bone_errors,
         )
         if args.dry_run:
             print(report.format_dry_run(rep))
@@ -342,6 +357,21 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
     # ボーン名(生バイト)・フレーム順に安定ソート(§3.2)。
     out.sort(key=lambda k: (k.name_raw, k.frame))
     return out
+
+
+def _measure_bone_errors(in_bone, out_bone, selected, global_ranges):
+    """選択ボーンごとに出力 vs 元サンプルの軸別最大誤差を測る(§7.2)。{name: 誤差dict}。"""
+    in_groups = _bone_keys_by_name(in_bone)
+    out_groups = _bone_keys_by_name(out_bone)
+    errors = {}
+    for name in selected:
+        src = sorted(in_groups.get(name, []), key=lambda k: k.frame)
+        out = sorted(out_groups.get(name, []), key=lambda k: k.frame)
+        if not src or not out:
+            continue
+        track_ranges = ranges.intersect(global_ranges, src[0].frame, src[-1].frame)
+        errors[name] = measure_bone_errors(src, out, track_ranges)
+    return errors
 
 
 def _list_bones(doc, includes, excludes):
