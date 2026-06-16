@@ -117,7 +117,8 @@ def _build_selectors(args):
     excludes += [selection.Selector("glob", v) for v in args.exclude_bone_glob]
     excludes += [selection.Selector("group", v) for v in args.exclude_bone_group]
     if args.bone_file:
-        text = open(args.bone_file, encoding="utf-8").read()
+        with open(args.bone_file, encoding="utf-8") as f:
+            text = f.read()
         finc, fexc = selection.parse_bone_file(text)
         includes += finc
         excludes += fexc
@@ -212,7 +213,11 @@ def main(argv=None):
         norm_sections.append("bone")
     doc, _ = io.normalize(doc, sections=norm_sections)
 
-    includes, excludes = _build_selectors(args)
+    # --bone-file の読み込み・解析失敗(UTF-8 デコード不能等)は引数エラー(§2.2/§9 コード2)。
+    try:
+        includes, excludes = _build_selectors(args)
+    except (UnicodeDecodeError, OSError, ValueError):
+        return 2
 
     # --list-bones: ボーン名・キー数・選択状態を表示して終了(§2.7)。
     if args.list_bones:
@@ -266,6 +271,11 @@ def main(argv=None):
         global_ranges = _global_ranges(args.ranges, target_frames)
     except ranges.RangeError:
         return 2
+
+    # 全削減範囲外の keep-frame は警告して無視する(§2.6)。
+    for f in args.keep_frames:
+        if not any(lo <= f <= hi for lo, hi in global_ranges):
+            print(f"警告: keep-frame {f} は削減範囲外のため無視します", file=sys.stderr)
 
     want_report = args.dry_run or args.report_json or args.preview_csv
     new_camera = doc.camera
@@ -469,18 +479,18 @@ def _list_bones(doc, includes, excludes):
     for k in doc.bone:
         counts[k.name] = counts.get(k.name, 0) + 1
 
+    # ボーン0件でも選択子の解決を試み、未一致選択子の警告を出す(§2.7)。0件かつ選択子なしなら無警告。
     selected = set()
-    if names:
-        try:
-            result = selection.resolve_selection(names, includes, excludes)
-            selected = set(result.selected)
-            for w in result.warnings:
-                print("警告: " + w, file=sys.stderr)
-        except selection.SelectionError as e:
-            # 選択不能でも一覧表示は行う(検査モード)。蓄積済みの不一致警告と理由を出す。
-            for w in e.warnings:
-                print("警告: " + w, file=sys.stderr)
-            print("警告: " + str(e), file=sys.stderr)
+    try:
+        result = selection.resolve_selection(names, includes, excludes)
+        selected = set(result.selected)
+        for w in result.warnings:
+            print("警告: " + w, file=sys.stderr)
+    except selection.SelectionError as e:
+        # 選択不能でも一覧表示は行う(検査モード)。蓄積済みの不一致警告と理由を出す。
+        for w in e.warnings:
+            print("警告: " + w, file=sys.stderr)
+        print("警告: " + str(e), file=sys.stderr)
 
     for name in names:
         state = "selected" if name in selected else "excluded"

@@ -164,6 +164,42 @@ def test_single_key_bone_preserved_verbatim(tmp_path):
     assert doc.bone == [key]
 
 
+# --- CLI 堅牢化(§2.2 / §2.6 / §9) -----------------------------------------
+
+
+def test_bone_file_decode_error_is_arg_error(tmp_path):
+    # --bone-file が UTF-8 でデコードできない場合は引数エラー(終了コード2、§2.2/§9)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
+    bf = tmp_path / "bones.txt"
+    bf.write_bytes(b"\xff\xfe\x00 invalid utf8")
+    code = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "bone",
+                     "--bone-file", str(bf)])
+    assert code == 2
+
+
+def test_keep_frame_out_of_range_warns(tmp_path, capsys):
+    # 全削減範囲外の keep-frame は警告して無視する(§2.6)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
+                     "--range", "0:10", "--keep-frame", "50"])
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "50" in err and ("警告" in err or "keep" in err.lower())
+
+
+def test_list_bones_zero_bones_warns_unmatched(tmp_path, capsys):
+    # ボーン0件の VMD で --bone 指定 + --list-bones → 未一致選択子を警告(§2.7)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=[cam(0), cam(30)])
+    code = cli.main([str(src), "--list-bones", "--bone", "存在しない"])
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "警告" in err
+
+
 # --- list-bones -------------------------------------------------------------
 
 
