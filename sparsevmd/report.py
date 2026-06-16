@@ -1,15 +1,16 @@
 """レポート出力(dry-run統計・JSON・CSV)(sparsevmd.md §2.7)。
 
 削減の入出力キー数・削減率・選択ボーン・範囲・keep-frame をまとめ、dry-run の
-テキスト表示、JSON 出力、CSV プレビューを提供する。書き込み失敗は例外を送出し、
-CLI が終了コード3にする。
+テキスト表示、JSON 出力(build_report の dict)、フレーム毎の CSV プレビューを提供する。
+書き込み失敗は例外を送出し、CLI が終了コード3にする。
 
-キー数・削減率・選択・範囲・keep に加え、§7.2 の軸ごと最大絶対誤差(camera_errors /
-bone_errors)を載せる。誤差は reduce.measure_camera_errors / measure_bone_errors が出力を
-再サンプリングして算出した dict。
+dry-run / JSON(build_report の dict): キー数・削減率・選択・範囲・keep に加え、§7.2 の
+軸ごと最大絶対誤差(camera_errors / bone_errors)、§2.7/§6.3 の診断(camera_diag /
+bone_diag = 不連続検出位置 cuts・分割理由 splits・継ぎ目書き換え seam_rewrites)を載せる。
+誤差・診断は reduce 側(measure_*_errors / reduce_*_track の diagnostics)が surface する。
 
-未対応(後続): 不連続検出位置・分割理由・per-frame サンプル値。いずれも削減内部の診断で、
-reduce_*_track がトラック別の診断を戻り値で surface する拡張が要る。
+--preview-csv(write_preview_csv): フレーム毎の入力/出力サンプル値と誤差(§2.7)。行は
+{track, frame, channel, input, output, error}。CLI が出力を再サンプリングして組み立てる。
 """
 
 import csv
