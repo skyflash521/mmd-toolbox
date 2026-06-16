@@ -5,8 +5,8 @@
 終了コード(§9): 0 正常 / 1 入力不正 / 2 引数エラー / 3 出力書き込み失敗 /
 4 strict で許容誤差を満たせない。
 
-linear mode のみ実装。--curve-mode bezier(既定)は当面 linear へフォールバックし、
-verbose 時に警告する(ベジェフィットは後続実装)。
+--curve-mode は bezier(既定)/linear。bezier は各区間を1本のベジェ曲線で表現して
+キーを削減し制御点を出力に格納、linear は線形補間ブロック固定で削減する。
 """
 
 import argparse
@@ -201,15 +201,13 @@ def main(argv=None):
     if args.list_bones:
         return _list_bones(doc, includes, excludes)
 
-    if args.curve_mode == "bezier" and args.verbose:
-        print("警告: ベジェフィットは未実装です。linear で削減します。", file=sys.stderr)
-
     cut_kw = dict(
         keep_frames=args.keep_frames,
         no_cut_detect=args.no_cut_detect,
         min_seg=args.min_segment_frames,
         max_seg=args.max_segment_frames,
         strict=args.strict,
+        curve_mode=args.curve_mode,
     )
 
     # ボーン選択を先に解決する。明示 --bone 名が不在なら SelectionError → コード2
