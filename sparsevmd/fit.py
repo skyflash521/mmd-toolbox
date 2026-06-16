@@ -34,47 +34,68 @@ def _round_half_up(x):
     return math.floor(x + 0.5)
 
 
-class LinearScalarChannel:
-    """1スカラーチャンネルを線形補間で評価する(§5.2 の線形ケース, §7.2)。
+def _select_worst(errs, is_reversal):
+    """誤差辞書から分割候補フレームを選ぶ(§5.5)。
 
-    values[i] はフレーム frame_start + i のサンプル値。区間 [a,b] は両端の値を結ぶ
-    線形補間で内部フレームを予測し、元サンプルとの最大絶対誤差を測る。
+    速度符号反転(局所極値)が区間内にあればその中で誤差最大、無ければ全内部の誤差最大。
+    同点は先頭(小さいフレーム)。errs が空または最大が実質0なら None を返す。
+    """
+    if not errs:
+        return None
+    max_err = max(errs.values())
+    if max_err <= _ZERO_EPS:
+        return None
+    reversals = [f for f in errs if is_reversal(f)]
+    candidates = reversals if reversals else list(errs)
+    return max(candidates, key=lambda f: (errs[f], -f))
+
+
+def _bezier_axis_pred(a0, a1, a, b, sample_fn):
+    """1軸の内部フレーム予測値を返す(ベジェ近似)。端点同値は平坦(a0固定)。
+
+    sample_fn(frame) は当該軸のサンプル値。戻り値は {frame: 予測値}。
+    """
+    span = b - a
+    internal = range(a + 1, b)
+    denom = a1 - a0
+    if abs(denom) <= 1e-9:
+        return {f: a0 for f in internal}
+    xs = [(f - a) / span for f in internal]
+    ys = [(sample_fn(f) - a0) / denom for f in internal]
+    cp, _ = fit_bezier_curve(xs, ys)
+    return {f: a0 + denom * interp._solve_factor(*cp, (f - a) / span) for f in internal}
+
+
+class LinearScalarChannel:
+    """1スカラーチャンネルを評価する(§5.2, §7.2)。
+
+    values[i] はフレーム frame_start + i のサンプル値。mode="linear" は両端を結ぶ直線で、
+    mode="bezier" は1本のベジェ曲線で内部フレームを予測し、元サンプルとの最大絶対誤差を測る。
+    分割候補フレームは§5.5(速度符号反転優先)。
     """
 
-    def __init__(self, frame_start, values, tol):
+    def __init__(self, frame_start, values, tol, mode="linear"):
         self.frame_start = frame_start
         self.values = list(values)
         self.tol = float(tol)
+        self.mode = mode
 
     def _value(self, frame):
         return self.values[frame - self.frame_start]
 
     def residual(self, a, b):
-        """区間 [a,b] の線形補間による (最大絶対誤差, 分割候補フレーム) を返す。
-
-        内部フレーム a<f<b のみを評価する。内部が無い(隣接)区間は (0.0, None)。
-        最大絶対誤差は採否判定(§7.2)に用いる真の最大値。分割候補フレームは§5.5に従い、
-        速度符号反転(局所極値・切り返し)が区間内にあればその中で誤差最大のものを優先し、
-        無ければ全内部フレームの誤差最大フレームとする。
-        """
-        va = self._value(a)
-        vb = self._value(b)
-        span = b - a
-        errs = {}
-        for f in range(a + 1, b):
-            pred = va + (vb - va) * (f - a) / span
-            errs[f] = abs(self._value(f) - pred)
+        if self.mode == "bezier":
+            pred = _bezier_axis_pred(self._value(a), self._value(b), a, b, self._value)
+        else:
+            va, vb, span = self._value(a), self._value(b), b - a
+            pred = {f: va + (vb - va) * (f - a) / span for f in range(a + 1, b)}
+        errs = {f: abs(self._value(f) - pred[f]) for f in pred}
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
         if max_err <= _ZERO_EPS:
             return (0.0, None)
-        # 速度符号反転(局所極値)を優先候補にする(§5.5)。無ければ全内部。
-        reversals = [f for f in errs if self._is_reversal(f)]
-        candidates = reversals if reversals else list(errs)
-        # 候補のうち誤差最大、同点は先頭(小さいフレーム)を選ぶ。
-        worst = max(candidates, key=lambda f: (errs[f], -f))
-        return (max_err, worst)
+        return (max_err, _select_worst(errs, self._is_reversal))
 
     def _is_reversal(self, frame):
         """frame で速度の符号が反転する(局所極値・切り返し)か。"""
@@ -98,10 +119,11 @@ class EuclideanVectorChannel:
     分割候補は最大ユークリッド誤差フレーム(§5.1 の基本)。
     """
 
-    def __init__(self, frame_start, vectors, tol):
+    def __init__(self, frame_start, vectors, tol, mode="linear"):
         self.frame_start = frame_start
         self.vectors = [tuple(float(c) for c in v) for v in vectors]
         self.tol = float(tol)
+        self.mode = mode
 
     def _vec(self, frame):
         return self.vectors[frame - self.frame_start]
@@ -110,21 +132,29 @@ class EuclideanVectorChannel:
         va = self._vec(a)
         vb = self._vec(b)
         span = b - a
-        errs = {}
-        for f in range(a + 1, b):
-            t = (f - a) / span
-            pred = tuple(va[i] + (vb[i] - va[i]) * t for i in range(3))
-            errs[f] = math.dist(self._vec(f), pred)
-        if not errs:
+        internal = list(range(a + 1, b))
+        if not internal:
             return (0.0, None)
+        if self.mode == "bezier":
+            # 各軸を個別にベジェ近似し(§4.2)、採否はユークリッド距離(§7.2)。
+            axis_pred = [
+                _bezier_axis_pred(va[i], vb[i], a, b, lambda f, i=i: self._vec(f)[i])
+                for i in range(3)
+            ]
+            errs = {
+                f: math.dist(self._vec(f), tuple(axis_pred[i][f] for i in range(3)))
+                for f in internal
+            }
+        else:
+            errs = {}
+            for f in internal:
+                t = (f - a) / span
+                pred = tuple(va[i] + (vb[i] - va[i]) * t for i in range(3))
+                errs[f] = math.dist(self._vec(f), pred)
         max_err = max(errs.values())
         if max_err <= _ZERO_EPS:
             return (0.0, None)
-        # いずれかの軸で速度が反転する切り返し点を優先候補にする(§5.5)。
-        reversals = [f for f in errs if self._is_reversal(f)]
-        candidates = reversals if reversals else list(errs)
-        worst = max(candidates, key=lambda f: (errs[f], -f))
-        return (max_err, worst)
+        return (max_err, _select_worst(errs, self._is_reversal))
 
     def _is_reversal(self, frame):
         prev = self._vec(frame - 1)
@@ -145,31 +175,29 @@ class FovChannel:
     分割候補は速度符号反転(局所極値)を優先し、無ければ最大誤差フレーム(§5.5)。
     """
 
-    def __init__(self, frame_start, values, tol):
+    def __init__(self, frame_start, values, tol, mode="linear"):
         self.frame_start = frame_start
         self.values = [float(v) for v in values]
         self.tol = float(tol)
+        self.mode = mode
 
     def _value(self, frame):
         return self.values[frame - self.frame_start]
 
     def residual(self, a, b):
-        va = self._value(a)
-        vb = self._value(b)
-        span = b - a
-        errs = {}
-        for f in range(a + 1, b):
-            pred = va + (vb - va) * (f - a) / span
-            errs[f] = abs(_round_half_up(pred) - self._value(f))
+        if self.mode == "bezier":
+            pred = _bezier_axis_pred(self._value(a), self._value(b), a, b, self._value)
+        else:
+            va, vb, span = self._value(a), self._value(b), b - a
+            pred = {f: va + (vb - va) * (f - a) / span for f in range(a + 1, b)}
+        # 出力は整数度保存。丸めを含む総誤差で測る(§7.2)。
+        errs = {f: abs(_round_half_up(pred[f]) - self._value(f)) for f in pred}
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
         if max_err <= _ZERO_EPS:
             return (0.0, None)
-        reversals = [f for f in errs if self._is_reversal(f)]
-        candidates = reversals if reversals else list(errs)
-        worst = max(candidates, key=lambda f: (errs[f], -f))
-        return (max_err, worst)
+        return (max_err, _select_worst(errs, self._is_reversal))
 
     def _is_reversal(self, frame):
         d_prev = self._value(frame) - self._value(frame - 1)
