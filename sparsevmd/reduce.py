@@ -269,12 +269,6 @@ def _nearest_source_before(source_keys, frame):
     return max(cands) if cands else None
 
 
-def _nearest_source_after(source_keys, frame):
-    """frame より後で最も近いソースキーのフレームを返す(なければ None)。"""
-    cands = [k.frame for k in source_keys if k.frame > frame]
-    return min(cands) if cands else None
-
-
 def _camera_seam_interp(source_keys, a, b, tols):
     """区間 [a,b] を元サンプルからベジェ再フィットしカメラ補間24バイトを返す(§6.3)。
 
@@ -465,14 +459,14 @@ def reduce_camera_track(
     保持でき必ず収束)、strictは StrictError。float32 格納差は §2.4 で量子化誤差として
     許容されるため float64 上の検証で扱う。
 
-    範囲端の継ぎ目(§6.3)は bezier で、範囲外キーに隣接する到達側曲線を元サンプルから
-    再フィットして範囲外区間の動きを忠実に保つ(_camera_seam_interp)。
+    範囲端の下側継ぎ目(§6.3)は bezier で、範囲開始キー(範囲内)の到達側曲線を元サンプルから
+    再フィットし、手前の範囲外キーから範囲開始までの動きを忠実に保つ(_camera_seam_interp)。
+    範囲外キーは変更不可のため、上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。
 
     diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(分割フレームと
-    駆動チャンネルと正規化誤差)・seam_rewrites(継ぎ目で曲線を書き換えたフレーム)を埋める。
+    駆動チャンネルと正規化誤差)・seam_rewrites(下側継ぎ目で曲線を書き換えた範囲開始フレーム)を埋める。
     """
     reduced = []
-    seam_rewrites = {}
     diag_cuts = set()
     diag_splits = [] if diagnostics is not None else None
     diag_seams = set()
@@ -528,10 +522,10 @@ def reduce_camera_track(
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
             range_frames |= set(bad)
 
-        # §6.3 範囲端の継ぎ目: 範囲外キーに隣接する到達側曲線を元サンプルから再フィットし、
-        # 範囲外区間の動きを忠実に保つ(bezier のみ。linear は線形ブロック固定)。継ぎ目区間に
-        # 別範囲の出力キーが挟まる場合は、最近ソースキー基準の再フィットが実セグメントと
-        # ずれるためスキップする(保守的フォールバック。多範囲隣接時の安全策)。
+        # §6.3 範囲端の下側継ぎ目: 範囲開始キー f0(範囲内)の到達側曲線を元サンプルから
+        # 再フィットし、手前の範囲外キーから f0 までの区間の動きを忠実に保つ(bezier のみ)。
+        # 範囲外キーは変更不可なので、上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。
+        # 継ぎ目区間に別範囲の出力キーが挟まる場合は安全側でスキップする。
         if curve_mode == "bezier":
             prev_src = _nearest_source_before(source_keys, f0)
             if prev_src is not None and _interval_clear_of_ranges(ranges, prev_src, f0):
@@ -539,19 +533,9 @@ def reduce_camera_track(
                     keys[0], interpolation=_camera_seam_interp(source_keys, prev_src, f0, tols)
                 )
                 diag_seams.add(keys[0].frame)
-            next_src = _nearest_source_after(source_keys, f1)
-            if next_src is not None and _interval_clear_of_ranges(ranges, f1, next_src):
-                seam_rewrites[next_src] = _camera_seam_interp(source_keys, f1, next_src, tols)
-                diag_seams.add(next_src)
         reduced.extend(keys)
 
-    outside = []
-    for k in source_keys:
-        if _in_any_range(k.frame, ranges):
-            continue
-        if k.frame in seam_rewrites:
-            k = dataclasses.replace(k, interpolation=seam_rewrites[k.frame])
-        outside.append(k)
+    outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
     if diagnostics is not None:
         diagnostics["cuts"] = sorted(diag_cuts)
         diagnostics["splits"] = diag_splits
@@ -577,10 +561,10 @@ def reduce_bone_track(
 
     cut_thresholds は (POS, ROT)。範囲外の元キーは逐語保持する。curve_mode="bezier" では
     位置(軸別)と回転(slerp 係数)を1本のベジェ曲線で採否判定し、制御点を出力キーへ格納する。
+    範囲端の下側継ぎ目は範囲開始キー(範囲内)の曲線のみ再フィット(範囲外キーは変更不可)。
     diagnostics に dict を渡すと cuts・splits・seam_rewrites を埋める(§2.7/§6.3)。
     """
     reduced = []
-    seam_rewrites = {}
     diag_cuts = set()
     diag_splits = [] if diagnostics is not None else None
     diag_seams = set()
@@ -623,7 +607,8 @@ def reduce_bone_track(
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
             range_frames |= set(bad)
 
-        # §6.3 範囲端の継ぎ目(カメラと同様。bezier のみ。多範囲隣接時はスキップで安全側)。
+        # §6.3 範囲端の下側継ぎ目のみ(範囲内の範囲開始キーを再フィット)。範囲外キーは変更不可
+        # なので上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。bezier のみ。
         if curve_mode == "bezier":
             prev_src = _nearest_source_before(source_keys, f0)
             if prev_src is not None and _interval_clear_of_ranges(ranges, prev_src, f0):
@@ -631,19 +616,9 @@ def reduce_bone_track(
                     keys[0], interpolation=_bone_seam_interp(source_keys, prev_src, f0, tols)
                 )
                 diag_seams.add(keys[0].frame)
-            next_src = _nearest_source_after(source_keys, f1)
-            if next_src is not None and _interval_clear_of_ranges(ranges, f1, next_src):
-                seam_rewrites[next_src] = _bone_seam_interp(source_keys, f1, next_src, tols)
-                diag_seams.add(next_src)
         reduced.extend(keys)
 
-    outside = []
-    for k in source_keys:
-        if _in_any_range(k.frame, ranges):
-            continue
-        if k.frame in seam_rewrites:
-            k = dataclasses.replace(k, interpolation=seam_rewrites[k.frame])
-        outside.append(k)
+    outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
     if diagnostics is not None:
         diagnostics["cuts"] = sorted(diag_cuts)
         diagnostics["splits"] = diag_splits
