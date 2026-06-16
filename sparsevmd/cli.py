@@ -13,10 +13,11 @@ import argparse
 import dataclasses
 import os
 import sys
+from collections import Counter
 
 from mmd_toolbox.vmd import io
 
-from . import presets, ranges, selection
+from . import presets, ranges, report, selection
 from .cuts import parse_cut_threshold_bone, parse_cut_threshold_camera
 from .reduce import StrictError, reduce_bone_track, reduce_camera_track
 
@@ -267,9 +268,26 @@ def main(argv=None):
     except StrictError:
         return 4
 
-    # NOTE: --dry-run の統計表示、--report-json、--preview-csv の出力は report.py
-    # (仕様 §2.7 / §8 の独立モジュール、Phase 9)で実装する。現状は dry-run は出力VMDを
-    # 書かない挙動のみ、report/preview 引数は受理のみ(次ステップで配線)。
+    # レポート(dry-run 統計・JSON・CSV)。dry-run でも report/preview は書き出す(§2.7)。
+    if args.dry_run or args.report_json or args.preview_csv:
+        rep = report.build_report(
+            target=args.target,
+            camera=(len(doc.camera), len(new_camera)) if do_camera else None,
+            bones=_bone_io_counts(doc.bone, new_bone) if do_bone else None,
+            selected_bones=selected,
+            ranges=global_ranges,
+            keep_frames=args.keep_frames,
+        )
+        if args.dry_run:
+            print(report.format_dry_run(rep))
+        try:
+            if args.report_json:
+                report.write_json(rep, args.report_json)
+            if args.preview_csv:
+                report.write_csv(rep, args.preview_csv)
+        except OSError:
+            return 3  # レポート書き込み失敗(§9)
+
     if args.dry_run:
         return 0
 
@@ -279,6 +297,13 @@ def main(argv=None):
     except Exception:
         return 3
     return 0
+
+
+def _bone_io_counts(in_keys, out_keys):
+    """ボーン名ごとの (入力キー数, 出力キー数) を返す(レポート用)。"""
+    in_counts = Counter(k.name for k in in_keys)
+    out_counts = Counter(k.name for k in out_keys)
+    return {name: (in_counts[name], out_counts.get(name, 0)) for name in in_counts}
 
 
 def _sorted_camera(camera):
