@@ -34,6 +34,19 @@ from .sample import perspective_series
 CAMERA_LINEAR_INTERP = bytes([20, 107, 20, 107]) * 6
 
 
+def camera_interp_bytes(cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
+    """6軸の制御点 (x1,y1,x2,y2) からカメラ補間24バイトを組み立てる。
+
+    docs/specs/vmd/VMD_file_format.md のレイアウトに従い、軸順 X位置・Y位置・Z位置・
+    回転・距離・視野角で、各軸を ax,bx,ay,by = (x1,x2,y1,y2) の4バイトで格納する。
+    mmd_toolbox.vmd.interp.CAMERA_CHANNEL_OFFSET のオフセット(0,4,8,12,16,20)と整合する。
+    """
+    out = bytearray()
+    for x1, y1, x2, y2 in (cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
+        out += bytes([x1, x2, y1, y2])
+    return bytes(out)
+
+
 def bone_interp_bytes(x_cp, y_cp, z_cp, r_cp):
     """4チャンネルの制御点 (x1,y1,x2,y2) からボーン補間64バイトを組み立てる。
 
@@ -61,14 +74,22 @@ _LINEAR_CP = (20, 20, 107, 107)
 BONE_LINEAR_INTERP = bone_interp_bytes(_LINEAR_CP, _LINEAR_CP, _LINEAR_CP, _LINEAR_CP)
 
 
-def build_camera_keys(source_keys, frames):
+def build_camera_keys(source_keys, frames, segment_interp=None):
     """削減後フレーム列からカメラ出力キーを生成する(§3.2, §4.2)。
 
     各フレームで位置・回転(Euler)・距離・視野角(整数度へ四捨五入)・perspective
-    (直近ホールド)をソースキーからサンプリングし、線形補間ブロックを付与する。
+    (直近ホールド)をソースキーからサンプリングする。補間ブロックは既定で線形固定。
+    segment_interp(前フレーム, 当フレーム) を渡すと、到達側キー(2個目以降)に
+    その24バイトを格納する(curve_mode="bezier" の制御点注入。先頭キーは線形)。
     """
+    ordered = sorted(frames)
     keys = []
-    for f in sorted(frames):
+    for i, f in enumerate(ordered):
+        interp_block = CAMERA_LINEAR_INTERP
+        if segment_interp is not None and i > 0:
+            block = segment_interp(ordered[i - 1], f)
+            if block is not None:
+                interp_block = block
         keys.append(
             CameraKey(
                 frame=f,
@@ -79,7 +100,7 @@ def build_camera_keys(source_keys, frames):
                     interp.sample(source_keys, "pos_z", f),
                 ),
                 rotation=interp.sample(source_keys, "rot", f),
-                interpolation=CAMERA_LINEAR_INTERP,
+                interpolation=interp_block,
                 fov=_round_half_up(interp.sample(source_keys, "fov", f)),
                 perspective=perspective_series(source_keys, f, f)[0],
             )
@@ -87,15 +108,22 @@ def build_camera_keys(source_keys, frames):
     return keys
 
 
-def build_bone_keys(source_keys, frames):
+def build_bone_keys(source_keys, frames, segment_interp=None):
     """削減後フレーム列からボーン出力キーを生成する(§3.2)。
 
     name_raw はソースの生バイトを保持する。各フレームで位置・回転(quaternion)を
-    サンプリングし、線形補間ブロックを付与する。
+    サンプリングする。補間ブロックは既定で線形固定。segment_interp(前フレーム,
+    当フレーム) を渡すと、到達側キー(2個目以降)にその64バイトを格納する。
     """
     name_raw = source_keys[0].name_raw
+    ordered = sorted(frames)
     keys = []
-    for f in sorted(frames):
+    for i, f in enumerate(ordered):
+        interp_block = BONE_LINEAR_INTERP
+        if segment_interp is not None and i > 0:
+            block = segment_interp(ordered[i - 1], f)
+            if block is not None:
+                interp_block = block
         keys.append(
             BoneKey(
                 name_raw=name_raw,
@@ -106,7 +134,7 @@ def build_bone_keys(source_keys, frames):
                     interp.sample(source_keys, "pos_z", f),
                 ),
                 rotation=interp.sample(source_keys, "rot", f),
-                interpolation=BONE_LINEAR_INTERP,
+                interpolation=interp_block,
             )
         )
     return keys
@@ -237,20 +265,22 @@ def reduce_camera_track(
     min_seg,
     max_seg,
     strict,
+    curve_mode="linear",
 ):
     """カメラトラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
 
     各範囲を 30fps 整数フレームでサンプリングし、不連続検出→必須境界→チャンネル評価→
-    区間削減→出力キー生成する。範囲外の元キーは逐語保持する。
+    区間削減→出力キー生成する。範囲外の元キーは逐語保持する。curve_mode="bezier" では
+    チャンネルが1本のベジェ曲線で採否を判定し(より少ないキーに削減)、各出力区間の制御点を
+    到達側キーの補間バイトに格納する。
 
-    MVP(linear mode)のスコープ外として以下は未実装:
-    - §7.1 の出力後 float32 再サンプリング検証。linear mode では区間削減が float64
-      サンプル上で許容誤差を保証し、出力の線形補間を再サンプルした値は削減時の評価と
-      一致する。float32 格納差は §2.4 で量子化誤差として許容されるため、再検証は実質的に
-      満たされる。strict の最終検証強化は bezier 対応(Step後段)で併せて入れる。
+    スコープ外として以下は未実装:
+    - §7.1 の出力後 float32 再サンプリング検証。区間削減は float64 サンプル上で許容誤差を
+      保証し、出力の補間を再サンプルした値は削減時の評価と一致する。float32 格納差は §2.4 で
+      量子化誤差として許容されるため、再検証は実質的に満たされる。
     - §6.3 の範囲端境界キー注入・隣接曲線書き換え。範囲外キーは逐語保持する保守的方針。
     """
-    frames = set()
+    reduced = []
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         distances = [interp.sample(source_keys, "distance", f) for f in range(f0, f1 + 1)]
@@ -268,15 +298,23 @@ def reduce_camera_track(
             keep_frames=keep_frames,
             no_cut_detect=no_cut_detect,
         )
-        channels = [
-            EuclideanVectorChannel(f0, positions, tols.camera_pos),
-            LinearScalarChannel(f0, distances, tols.camera_distance),
-            FovChannel(f0, fovs, tols.camera_fov),
-            CameraRotationChannel(f0, eulers, tols.camera_rot),
-        ]
-        frames.update(reduce_track(bounds, channels, min_seg, max_seg, strict))
+        pos_ch = EuclideanVectorChannel(f0, positions, tols.camera_pos, mode=curve_mode)
+        dist_ch = LinearScalarChannel(f0, distances, tols.camera_distance, mode=curve_mode)
+        fov_ch = FovChannel(f0, fovs, tols.camera_fov, mode=curve_mode)
+        rot_ch = CameraRotationChannel(f0, eulers, tols.camera_rot, mode=curve_mode)
+        channels = [pos_ch, dist_ch, fov_ch, rot_ch]
+        range_frames = reduce_track(bounds, channels, min_seg, max_seg, strict)
 
-    reduced = build_camera_keys(source_keys, frames)
+        segment_interp = None
+        if curve_mode == "bezier":
+            def segment_interp(a, b, pos_ch=pos_ch, dist_ch=dist_ch, fov_ch=fov_ch, rot_ch=rot_ch):
+                cp_x, cp_y, cp_z = pos_ch.curve(a, b)
+                return camera_interp_bytes(
+                    cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
+                )
+
+        reduced.extend(build_camera_keys(source_keys, range_frames, segment_interp))
+
     outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
     return sorted(reduced + outside, key=lambda k: k.frame)
 
@@ -292,12 +330,14 @@ def reduce_bone_track(
     min_seg,
     max_seg,
     strict,
+    curve_mode="linear",
 ):
     """ボーントラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
 
-    cut_thresholds は (POS, ROT)。範囲外の元キーは逐語保持する。
+    cut_thresholds は (POS, ROT)。範囲外の元キーは逐語保持する。curve_mode="bezier" では
+    位置(軸別)と回転(slerp 係数)を1本のベジェ曲線で採否判定し、制御点を出力キーへ格納する。
     """
-    frames = set()
+    reduced = []
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         quats = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
@@ -311,12 +351,18 @@ def reduce_bone_track(
             keep_frames=keep_frames,
             no_cut_detect=no_cut_detect,
         )
-        channels = [
-            EuclideanVectorChannel(f0, positions, tols.bone_pos),
-            BoneRotationChannel(f0, quats, tols.bone_rot),
-        ]
-        frames.update(reduce_track(bounds, channels, min_seg, max_seg, strict))
+        pos_ch = EuclideanVectorChannel(f0, positions, tols.bone_pos, mode=curve_mode)
+        rot_ch = BoneRotationChannel(f0, quats, tols.bone_rot, mode=curve_mode)
+        channels = [pos_ch, rot_ch]
+        range_frames = reduce_track(bounds, channels, min_seg, max_seg, strict)
 
-    reduced = build_bone_keys(source_keys, frames)
+        segment_interp = None
+        if curve_mode == "bezier":
+            def segment_interp(a, b, pos_ch=pos_ch, rot_ch=rot_ch):
+                cp_x, cp_y, cp_z = pos_ch.curve(a, b)
+                return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
+
+        reduced.extend(build_bone_keys(source_keys, range_frames, segment_interp))
+
     outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
     return sorted(reduced + outside, key=lambda k: k.frame)

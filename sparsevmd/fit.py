@@ -50,6 +50,23 @@ def _select_worst(errs, is_reversal):
     return max(candidates, key=lambda f: (errs[f], -f))
 
 
+def _axis_curve(a0, a1, a, b, sample_fn):
+    """1軸の量子化ベジェ制御点 (x1,y1,x2,y2) を返す(§5.4)。
+
+    端点同値(正規化不能)や内部点なしは線形制御点。sample_fn(frame) は当該軸のサンプル値。
+    採否(_bezier_axis_pred)と出力(curve)が同一の制御点を使うよう、両者はこれを共有する。
+    """
+    span = b - a
+    internal = range(a + 1, b)
+    denom = a1 - a0
+    if abs(denom) <= 1e-9 or not internal:
+        return _BEZIER_LINEAR_CP
+    xs = [(f - a) / span for f in internal]
+    ys = [(sample_fn(f) - a0) / denom for f in internal]
+    cp, _ = fit_bezier_curve(xs, ys)
+    return cp
+
+
 def _bezier_axis_pred(a0, a1, a, b, sample_fn):
     """1軸の内部フレーム予測値を返す(ベジェ近似)。端点同値は平坦(a0固定)。
 
@@ -60,9 +77,7 @@ def _bezier_axis_pred(a0, a1, a, b, sample_fn):
     denom = a1 - a0
     if abs(denom) <= 1e-9:
         return {f: a0 for f in internal}
-    xs = [(f - a) / span for f in internal]
-    ys = [(sample_fn(f) - a0) / denom for f in internal]
-    cp, _ = fit_bezier_curve(xs, ys)
+    cp = _axis_curve(a0, a1, a, b, sample_fn)
     return {f: a0 + denom * interp._solve_factor(*cp, (f - a) / span) for f in internal}
 
 
@@ -110,6 +125,12 @@ class LinearScalarChannel:
         """
         err, frame = self.residual(a, b)
         return _normalize(err, frame, self.tol)
+
+    def curve(self, a, b):
+        """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す(§5.4)。"""
+        if self.mode != "bezier":
+            return _BEZIER_LINEAR_CP
+        return _axis_curve(self._value(a), self._value(b), a, b, self._value)
 
 
 class EuclideanVectorChannel:
@@ -166,6 +187,17 @@ class EuclideanVectorChannel:
         err, frame = self.residual(a, b)
         return _normalize(err, frame, self.tol)
 
+    def curve(self, a, b):
+        """各軸の出力用制御点を (cp_x, cp_y, cp_z) で返す(§4.2, §5.4)。"""
+        if self.mode != "bezier":
+            return (_BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP)
+        va = self._vec(a)
+        vb = self._vec(b)
+        return tuple(
+            _axis_curve(va[i], vb[i], a, b, lambda f, i=i: self._vec(f)[i])
+            for i in range(3)
+        )
+
 
 class FovChannel:
     """視野角チャンネル(§4.2, §7.2)。
@@ -207,6 +239,12 @@ class FovChannel:
     def normalized(self, a, b):
         err, frame = self.residual(a, b)
         return _normalize(err, frame, self.tol)
+
+    def curve(self, a, b):
+        """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す(§5.4)。"""
+        if self.mode != "bezier":
+            return _BEZIER_LINEAR_CP
+        return _axis_curve(self._value(a), self._value(b), a, b, self._value)
 
 
 # ---------------------------------------------------------------------------
@@ -283,21 +321,9 @@ class CameraRotationChannel:
         span = b - a
         internal = range(a + 1, b)
         if self.mode == "bezier":
-            # 3軸が1本の共通係数曲線 y(x)∈[0,1] を共有する(§5.3)。各軸の予測は
-            # ea[i]+(eb[i]-ea[i])*y。軸別角度誤差(度)の二乗和を最小化して曲線を合わせ、
-            # 量子化後の曲線で誤差を再評価する。
-            def _resid_at(coeff):
-                out = []
-                for f in internal:
-                    y = coeff((f - a) / span)
-                    ef = self._euler(f)
-                    out.extend(
-                        math.degrees(ef[i] - (ea[i] + (eb[i] - ea[i]) * y))
-                        for i in range(3)
-                    )
-                return out
-
-            cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+            # 3軸が1本の共通係数曲線を共有する(§5.3)。出力と同一の量子化制御点
+            # (self.curve)で各軸予測 ea[i]+(eb[i]-ea[i])*y を再評価し誤差を測る。
+            cp = self.curve(a, b)
             errs = {}
             for f in internal:
                 y = interp._solve_factor(*cp, (f - a) / span)
@@ -341,6 +367,33 @@ class CameraRotationChannel:
         err, frame = self.residual(a, b)
         return _normalize(err, frame, self.tol)
 
+    def curve(self, a, b):
+        """3軸共通の出力用制御点 (x1,y1,x2,y2) を返す(§5.3, §5.4)。
+
+        各軸予測 ea[i]+(eb[i]-ea[i])*y(x) の軸別角度誤差(度)の二乗和を最小化して
+        共通係数曲線 y(x) をフィットする。内部点なしは線形。
+        """
+        if self.mode != "bezier":
+            return _BEZIER_LINEAR_CP
+        ea = self._euler(a)
+        eb = self._euler(b)
+        span = b - a
+        internal = range(a + 1, b)
+        if not internal:
+            return _BEZIER_LINEAR_CP
+
+        def _resid_at(coeff):
+            out = []
+            for f in internal:
+                y = coeff((f - a) / span)
+                ef = self._euler(f)
+                out.extend(
+                    math.degrees(ef[i] - (ea[i] + (eb[i] - ea[i]) * y)) for i in range(3)
+                )
+            return out
+
+        return _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+
 
 class BoneRotationChannel:
     """ボーン回転(quaternion slerp、§5.3, §7.2)。
@@ -371,16 +424,9 @@ class BoneRotationChannel:
         span = b - a
         internal = range(a + 1, b)
         if self.mode == "bezier":
-            # slerp 係数 y(x)∈[0,1] を1本のベジェ曲線で表す(§5.3)。予測は
-            # slerp(q0,q1,y)。角度距離(度)の二乗和を最小化して係数曲線を合わせ、
-            # 量子化後の曲線で誤差を再評価する。
-            def _resid_at(coeff):
-                return [
-                    _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, coeff((f - a) / span)))
-                    for f in internal
-                ]
-
-            cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+            # slerp 係数を1本のベジェ曲線で表す(§5.3)。出力と同一の量子化制御点
+            # (self.curve)で予測 slerp(q0,q1,y) を再評価し角度距離(度)で誤差を測る。
+            cp = self.curve(a, b)
             errs = {
                 f: _quat_angle_deg(
                     self._q(f), _quat_slerp(q0, q1, interp._solve_factor(*cp, (f - a) / span))
@@ -419,6 +465,29 @@ class BoneRotationChannel:
     def normalized(self, a, b):
         err, frame = self.residual(a, b)
         return _normalize(err, frame, self.tol)
+
+    def curve(self, a, b):
+        """slerp 係数の出力用制御点 (x1,y1,x2,y2) を返す(§5.3, §5.4)。
+
+        予測 slerp(q0,q1,y(x)) とサンプルの角度距離(度)の二乗和を最小化して係数曲線
+        y(x) をフィットする。内部点なしは線形。
+        """
+        if self.mode != "bezier":
+            return _BEZIER_LINEAR_CP
+        q0 = self._q(a)
+        q1 = self._q(b)
+        span = b - a
+        internal = range(a + 1, b)
+        if not internal:
+            return _BEZIER_LINEAR_CP
+
+        def _resid_at(coeff):
+            return [
+                _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, coeff((f - a) / span)))
+                for f in internal
+            ]
+
+        return _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
 
 
 # ---------------------------------------------------------------------------
