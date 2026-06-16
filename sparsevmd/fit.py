@@ -11,6 +11,9 @@ linear mode のスカラー評価器をまず提供する。ベジェ曲線フ�
 import math
 
 import numpy as np
+from scipy.optimize import least_squares
+
+from mmd_toolbox.vmd import interp
 
 # 実質ゼロ誤差の閾値(回転は unwrap/slerp の浮動小数誤差で厳密0にならないため)。
 _ZERO_EPS = 1e-9
@@ -340,3 +343,121 @@ class BoneRotationChannel:
     def normalized(self, a, b):
         err, frame = self.residual(a, b)
         return _normalize(err, frame, self.tol)
+
+
+# ---------------------------------------------------------------------------
+# スカラー ベジェ曲線フィット(§5.2, §5.4)
+# ---------------------------------------------------------------------------
+
+# 制御点探索の初期値(正規化 [0,1] の (x1,y1,x2,y2))。§5.4 の固定順:
+# 線形 / ease-in / ease-out / ease-in-out。先勝ち選択のため順序を仕様に合わせる。
+_BEZIER_INITS = (
+    (20.0 / 127, 20.0 / 127, 107.0 / 127, 107.0 / 127),  # 線形
+    (0.42, 0.0, 1.0, 1.0),   # ease-in
+    (0.0, 0.0, 0.58, 1.0),   # ease-out
+    (0.42, 0.0, 0.58, 1.0),  # ease-in-out
+)
+_BEZIER_LINEAR_CP = (20, 20, 107, 107)
+
+
+def _bez(s, c1, c2):
+    u = 1.0 - s
+    return 3 * u * u * s * c1 + 3 * u * s * s * c2 + s * s * s
+
+
+def _bezier_y_at(px1, py1, px2, py2, x):
+    """正規化制御点(px* in [0,1])・正規化時間 x で y を返す(連続版。最適化用)。
+
+    interp._solve_factor と同じく X(s)=x をニュートン法+二分法で解く。
+    """
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+
+    def fx(s):
+        return _bez(s, px1, px2)
+
+    def dfx(s):
+        u = 1.0 - s
+        return 3.0 * (px1 * u * u + 2.0 * (px2 - px1) * u * s + (1.0 - px2) * s * s)
+
+    s = x
+    converged = False
+    for _ in range(20):
+        err = fx(s) - x
+        if abs(err) < 1e-9:
+            converged = True
+            break
+        d = dfx(s)
+        if d <= 1e-12:
+            break
+        s -= err / d
+        if s < 0.0 or s > 1.0:
+            break
+    if not converged or s < 0.0 or s > 1.0 or abs(fx(s) - x) > 1e-6:
+        lo, hi = 0.0, 1.0
+        for _ in range(60):
+            mid = (lo + hi) / 2.0
+            if fx(mid) < x:
+                lo = mid
+            else:
+                hi = mid
+        s = (lo + hi) / 2.0
+    return _bez(s, py1, py2)
+
+
+def fit_bezier_curve(xs, ys):
+    """正規化サンプル (xs, ys) に VMD補間曲線をフィットする(§5.2, §5.4)。
+
+    制御点 (x1,y1,x2,y2) を 0..127 整数に量子化して返し、最大絶対誤差は量子化後の曲線を
+    interp._solve_factor で再評価して測る(正規化y単位)。内部点が無ければ線形・誤差0。
+    最適化は x2 = x1 + (1-x1)*t の再パラメータ化で全変数をボックス境界 [0,1] に収め、
+    X単調(x1<=x2)を保証する。複数初期値を決定論的に試して最良を採る。
+    """
+    xs = list(xs)
+    ys = list(ys)
+    if not xs:
+        return (_BEZIER_LINEAR_CP, 0.0)
+
+    def residual(v):
+        x1, t, y1, y2 = v
+        x2 = x1 + (1.0 - x1) * t
+        return [_bezier_y_at(x1, y1, x2, y2, x) - y for x, y in zip(xs, ys)]
+
+    best = None
+    best_cost = math.inf
+    for ix1, iy1, ix2, iy2 in _BEZIER_INITS:
+        t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
+        x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
+        try:
+            sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4))
+        except Exception:
+            continue
+        cost = float(np.sum(np.square(residual(sol.x))))
+        if cost < best_cost:
+            best_cost = cost
+            best = sol.x
+    if best is None:
+        best = [20.0 / 127, _clip01((107 - 20) / (127 - 20)), 20.0 / 127, 107.0 / 127]
+
+    x1, t, y1, y2 = best
+    x2 = x1 + (1.0 - x1) * t
+    x1q = _quantize_cp(x1)
+    x2q = _quantize_cp(x2)
+    y1q = _quantize_cp(y1)
+    y2q = _quantize_cp(y2)
+    if x1q > x2q:  # 量子化後の X 単調を担保(§5.4)
+        x2q = x1q
+    cp = (x1q, y1q, x2q, y2q)
+
+    max_err = max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
+    return (cp, max_err)
+
+
+def _clip01(v):
+    return min(1.0, max(0.0, v))
+
+
+def _quantize_cp(v):
+    return min(127, max(0, _round_half_up(_clip01(v) * 127)))
