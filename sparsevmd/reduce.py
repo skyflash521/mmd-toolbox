@@ -14,7 +14,20 @@ import math
 from mmd_toolbox.vmd import interp
 from mmd_toolbox.vmd.types import BoneKey, CameraKey
 
-from .fit import _round_half_up
+from .cuts import (
+    assemble_boundaries,
+    detect_cuts_bone,
+    detect_cuts_camera,
+    perspective_cut_frames,
+)
+from .fit import (
+    BoneRotationChannel,
+    CameraRotationChannel,
+    EuclideanVectorChannel,
+    FovChannel,
+    LinearScalarChannel,
+    _round_half_up,
+)
 from .sample import perspective_series
 
 # linear mode の補間ブロック(真の線形: 各チャンネル x1==y1, x2==y2)。
@@ -185,3 +198,125 @@ def _atomic_fail(a, b, strict, keys):
     # 非strict: 下限を無視し1フレームまで密に保持(§1.2 の破綻回避)。
     for f in range(a + 1, b):
         keys.add(f)
+
+
+def _in_any_range(frame, ranges):
+    return any(f0 <= frame <= f1 for f0, f1 in ranges)
+
+
+def _boundary_with_predecessor(frames, f0):
+    """不連続フレーム F に対し F-1 も境界に加える(§6.2)。
+
+    境界は F-1 と F の間にあり、境界をまたいで補間曲線を作らない。両側を必須キーに
+    することで、許容誤差が緩い場合でもジャンプが平滑化されず隣接フレームとして残る。
+    """
+    out = set(frames)
+    out |= {f - 1 for f in frames if f - 1 >= f0}
+    return out
+
+
+def _sampled_positions(source_keys, f0, f1):
+    return [
+        (
+            interp.sample(source_keys, "pos_x", f),
+            interp.sample(source_keys, "pos_y", f),
+            interp.sample(source_keys, "pos_z", f),
+        )
+        for f in range(f0, f1 + 1)
+    ]
+
+
+def reduce_camera_track(
+    source_keys,
+    ranges,
+    tols,
+    *,
+    cut_thresholds,
+    keep_frames,
+    no_cut_detect,
+    min_seg,
+    max_seg,
+    strict,
+):
+    """カメラトラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
+
+    各範囲を 30fps 整数フレームでサンプリングし、不連続検出→必須境界→チャンネル評価→
+    区間削減→出力キー生成する。範囲外の元キーは逐語保持する。
+
+    MVP(linear mode)のスコープ外として以下は未実装:
+    - §7.1 の出力後 float32 再サンプリング検証。linear mode では区間削減が float64
+      サンプル上で許容誤差を保証し、出力の線形補間を再サンプルした値は削減時の評価と
+      一致する。float32 格納差は §2.4 で量子化誤差として許容されるため、再検証は実質的に
+      満たされる。strict の最終検証強化は bezier 対応(Step後段)で併せて入れる。
+    - §6.3 の範囲端境界キー注入・隣接曲線書き換え。範囲外キーは逐語保持する保守的方針。
+    """
+    frames = set()
+    for f0, f1 in ranges:
+        positions = _sampled_positions(source_keys, f0, f1)
+        distances = [interp.sample(source_keys, "distance", f) for f in range(f0, f1 + 1)]
+        fovs = [interp.sample(source_keys, "fov", f) for f in range(f0, f1 + 1)]
+        eulers = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
+        persp = perspective_series(source_keys, f0, f1)
+
+        cuts = detect_cuts_camera(f0, positions, eulers, distances, cut_thresholds)
+        pcuts = perspective_cut_frames(f0, persp)
+        bounds = assemble_boundaries(
+            f0,
+            f1,
+            cuts=_boundary_with_predecessor(cuts, f0),
+            perspective_frames=_boundary_with_predecessor(pcuts, f0),
+            keep_frames=keep_frames,
+            no_cut_detect=no_cut_detect,
+        )
+        channels = [
+            EuclideanVectorChannel(f0, positions, tols.camera_pos),
+            LinearScalarChannel(f0, distances, tols.camera_distance),
+            FovChannel(f0, fovs, tols.camera_fov),
+            CameraRotationChannel(f0, eulers, tols.camera_rot),
+        ]
+        frames.update(reduce_track(bounds, channels, min_seg, max_seg, strict))
+
+    reduced = build_camera_keys(source_keys, frames)
+    outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
+    return sorted(reduced + outside, key=lambda k: k.frame)
+
+
+def reduce_bone_track(
+    source_keys,
+    ranges,
+    tols,
+    *,
+    cut_thresholds,
+    keep_frames,
+    no_cut_detect,
+    min_seg,
+    max_seg,
+    strict,
+):
+    """ボーントラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
+
+    cut_thresholds は (POS, ROT)。範囲外の元キーは逐語保持する。
+    """
+    frames = set()
+    for f0, f1 in ranges:
+        positions = _sampled_positions(source_keys, f0, f1)
+        quats = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
+
+        cuts = detect_cuts_bone(f0, positions, quats, cut_thresholds)
+        bounds = assemble_boundaries(
+            f0,
+            f1,
+            cuts=_boundary_with_predecessor(cuts, f0),
+            perspective_frames=set(),
+            keep_frames=keep_frames,
+            no_cut_detect=no_cut_detect,
+        )
+        channels = [
+            EuclideanVectorChannel(f0, positions, tols.bone_pos),
+            BoneRotationChannel(f0, quats, tols.bone_rot),
+        ]
+        frames.update(reduce_track(bounds, channels, min_seg, max_seg, strict))
+
+    reduced = build_bone_keys(source_keys, frames)
+    outside = [k for k in source_keys if not _in_any_range(k.frame, ranges)]
+    return sorted(reduced + outside, key=lambda k: k.frame)
