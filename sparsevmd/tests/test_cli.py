@@ -172,6 +172,85 @@ def test_target_camera_no_camera_keys_is_input_error(tmp_path):
     assert code == 1
 
 
+def test_bone_file_missing_is_arg_error(tmp_path):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
+    code = cli.main([str(src), "--target", "bone", "--bone-file", str(tmp_path / "nope.txt")])
+    assert code == 2
+
+
+def test_keep_frame_negative_is_arg_error(tmp_path):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    code = cli.main([str(src), "--target", "camera", "--keep-frame", "-3"])
+    assert code == 2
+
+
+def test_target_all_explicit_bone_absent_section_is_arg_error(tmp_path):
+    # target all・カメラあり・ボーンキー無し・明示 --bone NAME → 引数エラー(§2.2)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    code = cli.main([str(src), "--target", "all", "--bone", "存在しない"])
+    assert code == 2
+
+
+def test_target_bone_explicit_missing_name_is_arg_error_not_input(tmp_path):
+    # target bone・ボーンキー無し・明示 --bone NAME → 引数エラー2(空セクションの入力不正1より優先。§2.2)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())  # bone セクション無し
+    code = cli.main([str(src), "--target", "bone", "--bone", "存在しない"])
+    assert code == 2
+
+
+def test_unmatched_glob_warns_in_reduce_path(tmp_path, capsys):
+    # 削減パスでも不一致 glob の警告を出す(list-bones だけでなく)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    bones = [bone("頭", f, pos=(0.0, float(f), 0.0)) for f in range(31)]
+    write_vmd(src, bone=bones)
+    code = cli.main(
+        [str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear",
+         "--bone", "頭", "--bone-glob", "幻*"]
+    )
+    assert code == 0
+    assert "幻*" in capsys.readouterr().err
+
+
+def test_sole_unmatched_glob_warns_before_exit2(tmp_path, capsys):
+    # 唯一の include が不一致 glob → 最終0件で SelectionError(コード2)。
+    # 終了前に不一致警告を stderr に出す(§2.2)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("頭", 0), bone("頭", 30)])
+    code = cli.main([str(src), "--target", "bone", "--bone-glob", "幻*"])
+    assert code == 2
+    assert "幻*" in capsys.readouterr().err
+
+
+def test_range_intersect_preserves_outside(tmp_path):
+    # --range 0:10 のみ削減。範囲内[0,10]は端点へ、範囲外(15..30)は元キー保持。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    cam_keys = [cam(f, center=(float(f), 0.0, 0.0)) for f in (0, 5, 10, 15, 20, 25, 30)]
+    write_vmd(src, camera=cam_keys)
+    code = cli.main(
+        [str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear", "--range", "0:10"]
+    )
+    assert code == 0
+    doc, _ = io.read(str(out))
+    fr = [k.frame for k in doc.camera]
+    assert 0 in fr and 10 in fr  # 範囲内は端点に削減
+    assert 5 not in fr  # 範囲内の中間は削減
+    assert 15 in fr and 20 in fr and 25 in fr and 30 in fr  # 範囲外は保持
+
+
+def test_range_expand_start_after_end_is_arg_error(tmp_path):
+    # 999: は対象トラック末尾(30)に展開され 999>30 → 引数エラー(§2.2)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    code = cli.main([str(src), "--target", "camera", "--range", "999:"])
+    assert code == 2
+
+
 def test_output_parent_missing_is_write_error(tmp_path):
     # 出力先の親ディレクトリが存在しない → 出力書き込み失敗(コード3。§9)。
     src = tmp_path / "in.vmd"
