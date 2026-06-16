@@ -12,6 +12,8 @@ import pytest
 
 from mmd_toolbox.vmd import interp
 from sparsevmd.fit import (
+    BoneRotationChannel,
+    CameraRotationChannel,
     EuclideanVectorChannel,
     FovChannel,
     LinearScalarChannel,
@@ -123,3 +125,71 @@ def test_vector_bezier_combines_axes_euclidean():
     bez = EuclideanVectorChannel(0, vecs, tol=1.0, mode="bezier")
     err, _ = bez.residual(0, 10)
     assert err < 1.0  # 各軸を曲線で表現でき合成誤差も小さい
+
+
+# --- カメラ回転(3軸共通の1曲線) -------------------------------------------
+
+
+def _eased_coeff(curve, n=11):
+    span = n - 1
+    return [interp._solve_factor(*curve, f / span) for f in range(n)]
+
+
+def test_camera_rotation_bezier_shared_curve_low_error():
+    # 3軸が同じタイミング曲線(EASE)で動く。1本の共通曲線で表せるので bezier 誤差は小さく、
+    # 直線(各軸が直線進行を仮定)では大きく外れる。誤差は軸別角度の最大(度)。
+    c = _eased_coeff(EASE)
+    e1 = (math.radians(30), math.radians(20), math.radians(-10))
+    eulers = [(e1[0] * c[f], e1[1] * c[f], e1[2] * c[f]) for f in range(11)]
+    lin = CameraRotationChannel(0, eulers, tol=0.1, mode="linear")
+    bez = CameraRotationChannel(0, eulers, tol=0.1, mode="bezier")
+    assert lin.residual(0, 10)[0] > 1.0
+    assert bez.residual(0, 10)[0] < 0.1
+
+
+def test_camera_rotation_bezier_default_mode_is_linear():
+    c = _eased_coeff(EASE)
+    e1 = (math.radians(30), math.radians(20), math.radians(-10))
+    eulers = [(e1[0] * c[f], e1[1] * c[f], e1[2] * c[f]) for f in range(11)]
+    ch = CameraRotationChannel(0, eulers, tol=0.1)
+    assert ch.residual(0, 10)[0] > 1.0  # linear 相当
+
+
+def test_camera_rotation_bezier_linear_data_zero_error():
+    # 各軸が直線進行(共通の直線係数)なら bezier 誤差は ~0。
+    eulers = [(0.01 * f, -0.02 * f, 0.005 * f) for f in range(11)]
+    bez = CameraRotationChannel(0, eulers, tol=0.1, mode="bezier")
+    assert bez.residual(0, 10)[0] < 1e-3
+
+
+# --- ボーン回転(slerp 係数の1曲線) ---------------------------------------
+
+
+def _z_quat(deg):
+    h = math.radians(deg) / 2.0
+    return (0.0, 0.0, math.sin(h), math.cos(h))
+
+
+def test_bone_rotation_bezier_slerp_coeff_low_error():
+    # 90°Z 回転を EASE タイミングで進める。bezier は slerp 係数の曲線でほぼ表現でき、
+    # 直線(係数が線形)では大きく外れる。誤差はクォータニオン角距離(度)。
+    c = _eased_coeff(EASE)
+    quats = [_z_quat(90.0 * c[f]) for f in range(11)]
+    lin = BoneRotationChannel(0, quats, tol=0.1, mode="linear")
+    bez = BoneRotationChannel(0, quats, tol=0.1, mode="bezier")
+    assert lin.residual(0, 10)[0] > 1.0
+    assert bez.residual(0, 10)[0] < 0.1
+
+
+def test_bone_rotation_bezier_default_mode_is_linear():
+    c = _eased_coeff(EASE)
+    quats = [_z_quat(90.0 * c[f]) for f in range(11)]
+    ch = BoneRotationChannel(0, quats, tol=0.1)
+    assert ch.residual(0, 10)[0] > 1.0
+
+
+def test_bone_rotation_bezier_linear_data_zero_error():
+    # 係数が線形(slerp の等速進行)なら bezier 誤差は ~0。
+    quats = [_z_quat(90.0 * (f / 10.0)) for f in range(11)]
+    bez = BoneRotationChannel(0, quats, tol=0.1, mode="bezier")
+    assert bez.residual(0, 10)[0] < 1e-3
