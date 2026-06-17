@@ -315,18 +315,32 @@ def _bone_seam_interp(source_keys, a, b, tols):
     return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
 
-def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None):
+def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, progress=None):
     """必須境界とチャンネル群から、出力キーのフレーム列(昇順)を返す(§5.1)。
 
     splits にリストを渡すと、許容超過で分割したフレームと駆動チャンネル(§2.7 の分割理由)を
     {"frame", "channel", "norm_error"} で追記する。
+    progress を渡すと、再帰分割で部分区間が確定するごとに progress(処理済みフレーム数,
+    全フレーム数) を呼ぶ(§2.7 の処理経過表示)。1区間の重いベジェフィット(最大
+    max_seg フレーム)の途中でも確定した部分区間の分だけ進捗が進むため、表示が長く停滞しない。
     """
     bounds = sorted(set(boundaries))
     presplit = _presplit(bounds, max_seg)
 
     keys = set(presplit)
+    span0, span1 = presplit[0], presplit[-1]
+    on_resolve = None
+    if progress is not None:
+        total = span1 - span0
+        resolved = 0
+
+        def on_resolve(span):
+            nonlocal resolved
+            resolved += span
+            progress(resolved, total)
+
     for a, b in zip(presplit, presplit[1:]):
-        _process_segment(a, b, channels, min_seg, strict, keys, splits)
+        _process_segment(a, b, channels, min_seg, strict, keys, splits, on_resolve)
     return sorted(keys)
 
 
@@ -371,22 +385,33 @@ def _worst_channel(a, b, channels):
     return max_norm, split_frame, split_label
 
 
-def _process_segment(a, b, channels, min_seg, strict, keys, splits=None):
-    """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える。"""
+def _process_segment(a, b, channels, min_seg, strict, keys, splits=None, on_resolve=None):
+    """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える。
+
+    on_resolve を渡すと、確定した(これ以上分割しない)部分区間ごとにその区間長
+    on_resolve(b - a) を呼ぶ。葉区間の長さの総和は元区間長 [a,b] に一致するため、
+    呼び出し側で処理経過のフレーム数として積算できる(§2.7)。
+    """
     stack = [(a, b)]
     while stack:
         a, b = stack.pop()
         if b - a <= 1:
-            continue  # 隣接区間は内部点が無く受理(両端は既にキー)
+            if on_resolve is not None:
+                on_resolve(b - a)  # 隣接区間は内部点が無く受理(両端は既にキー)
+            continue
 
         max_norm, split_frame, split_label = _worst_channel(a, b, channels)
         if max_norm <= 1.0:
-            continue  # 全チャンネル許容内
+            if on_resolve is not None:
+                on_resolve(b - a)  # 全チャンネル許容内
+            continue
 
         # min_seg を下回る、または両側を min_seg で割れない区間はこれ以上 tol 分割不可。
         # 分割フレームが得られない場合も同様に atomic 扱い。
         if b - a < 2 * min_seg or split_frame is None:
             _atomic_fail(a, b, strict, keys)
+            if on_resolve is not None:
+                on_resolve(b - a)
             continue
 
         # 分割候補フレームを [a+min_seg, b-min_seg] に収める(min_seg を下回る区間を作らない)。
@@ -446,6 +471,7 @@ def reduce_camera_track(
     strict,
     curve_mode="linear",
     diagnostics=None,
+    progress=None,
 ):
     """カメラトラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
 
@@ -465,11 +491,18 @@ def reduce_camera_track(
 
     diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(分割フレームと
     駆動チャンネルと正規化誤差)・seam_rewrites(下側継ぎ目で曲線を書き換えた範囲開始フレーム)を埋める。
+
+    progress を渡すと処理経過として progress(処理済みフレーム数, 全範囲のフレーム総数, フェーズ名)
+    を呼ぶ(§2.7)。区間の再帰分割中も部分区間ごとに進み、重い出力後検証区間では note="出力後検証"
+    を添える。
     """
     reduced = []
     diag_cuts = set()
     diag_splits = [] if diagnostics is not None else None
     diag_seams = set()
+    # 全範囲のフレーム総数に対する処理経過(§2.7)。範囲ごとに base を進める。
+    total_frames = sum(f1 - f0 for f0, f1 in ranges)
+    progress_base = 0
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         distances = [interp.sample(source_keys, "distance", f) for f in range(f0, f1 + 1)]
@@ -499,9 +532,14 @@ def reduce_camera_track(
             "position", "distance", "fov", "rotation",
         )
         channels = [pos_ch, dist_ch, fov_ch, rot_ch]
+        range_progress = None
+        if progress is not None:
+            def range_progress(done, _span, note="", base=progress_base):
+                progress(base + done, total_frames, note)
         range_frames = set(
-            reduce_track(bounds, channels, min_seg, max_seg, strict, diag_splits)
+            reduce_track(bounds, channels, min_seg, max_seg, strict, diag_splits, range_progress)
         )
+        progress_base += f1 - f0
 
         segment_interp = None
         if curve_mode == "bezier":
@@ -511,6 +549,10 @@ def reduce_camera_track(
                     cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
                 )
 
+        # 出力後検証は reduce_track の後で別途重くなりうる(性能計画 Step4)。フレーム進捗は
+        # 100%付近で止まって見えるため、フェーズ名を添えて停滞表示でないことを示す(§2.7)。
+        if progress is not None:
+            progress(progress_base, total_frames, "出力後検証")
         # §7.3 出力後検証: 出力を再サンプリングし許容超過があれば、非strictは超過フレームを
         # キーに追加して再構築(1フレーム間隔は元値を逐語保持し必ず収束)、strictはエラー。
         while True:

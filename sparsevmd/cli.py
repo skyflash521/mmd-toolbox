@@ -40,6 +40,53 @@ _TOL_ARGS = {
 }
 
 
+class _Progress:
+    """削減処理の経過を stderr の1行に上書き表示する(§2.7)。
+
+    フェーズ単位で start→update→finish と使う。stderr が端末でない場合
+    (リダイレクト・パイプ・テスト捕捉)は無効化し、通常の出力・警告を汚さない。
+    表示は付帯的なものなので、書き込み失敗(エンコード不能等)では削減処理を止めない。
+    """
+
+    def __init__(self, enabled):
+        self.enabled = enabled
+        self._label = ""
+        self._total = 0
+        self._width = 0
+
+    def start(self, label, total):
+        self._label = label
+        self._total = total
+        self._width = 0
+        self.update(0)
+
+    def update(self, done, note=""):
+        if not self.enabled:
+            return
+        pct = 100.0 * done / self._total if self._total else 100.0
+        line = f"{self._label} {pct:3.0f}% ({done}/{self._total})"
+        if note:
+            line += f" {note}"
+        pad = max(0, self._width - len(line))
+        try:
+            sys.stderr.write("\r" + line + " " * pad)
+            sys.stderr.flush()
+        except (OSError, ValueError, UnicodeError):
+            self.enabled = False
+            return
+        self._width = len(line)
+
+    def finish(self):
+        if not self.enabled or not self._width:
+            return
+        try:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
+        self._width = 0
+
+
 def _nonneg_int(text):
     """非負整数(フレーム番号)。負値・非整数は引数エラー(§2.6)。"""
     v = int(text)  # 非整数は ValueError → argparse が exit 2
@@ -285,16 +332,23 @@ def main(argv=None):
     camera_diag = None
     bone_diag = None
     preview_rows = []
+    # 削減中の処理経過を stderr に表示する(対話端末時のみ。§2.7)。
+    reporter = _Progress(enabled=sys.stderr.isatty())
     try:
         if do_camera:
             cam = _sorted_camera(doc.camera)
             cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
             if len(cam) >= 2:
                 camera_diag = {} if want_report else None
+                cam_total = sum(f1 - f0 for f0, f1 in cam_ranges)
+                reporter.start("カメラ削減", cam_total)
                 new_camera = reduce_camera_track(
                     cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
-                    diagnostics=camera_diag, **cut_kw
+                    diagnostics=camera_diag,
+                    progress=lambda done, total, note="": reporter.update(done, note),
+                    **cut_kw
                 )
+                reporter.finish()
             else:
                 new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持(§3.1/§3.2)
             if want_report:
@@ -305,7 +359,7 @@ def main(argv=None):
             bone_diag = {} if want_report else None
             new_bone = _reduce_bones(
                 doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
-                diagnostics_out=bone_diag,
+                diagnostics_out=bone_diag, reporter=reporter,
             )
             if want_report:
                 bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
@@ -376,13 +430,18 @@ def _global_ranges(parsed_ranges, target_frames):
 
 
 def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_kw,
-                  diagnostics_out=None):
+                  diagnostics_out=None, reporter=None):
     """選択ボーンを削減し非選択ボーンは保持して、全ボーンキー列を返す(§3.2)。
 
     各トラックの実処理範囲はグローバル範囲とトラック区間の積集合(§2.2)。diagnostics_out に
-    dict を渡すと、選択ボーンごとに {name: 診断dict} を埋める(§2.7/§6.3)。
+    dict を渡すと、選択ボーンごとに {name: 診断dict} を埋める(§2.7/§6.3)。reporter を渡すと
+    削減対象ボーン1件ごとに処理経過を表示する(§2.7)。
     """
     groups = _bone_keys_by_name(bone_keys)
+    total = sum(1 for name, keys in groups.items() if name in selected and len(keys) >= 2)
+    if reporter is not None and total:
+        reporter.start("ボーン削減", total)
+    done = 0
     out = []
     for name, keys in groups.items():
         ks = sorted(keys, key=lambda k: k.frame)
@@ -397,9 +456,14 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
             )
             if diagnostics_out is not None:
                 diagnostics_out[name] = diag
+            done += 1
+            if reporter is not None:
+                reporter.update(done, name)
         else:
             # 非選択トラック、および選択でもキー1件以下(削減不能)は逐語保持(§3.1/§3.2)。
             out.extend(ks)
+    if reporter is not None and total:
+        reporter.finish()
     # ボーン名(生バイト)・フレーム順に安定ソート(§3.2)。
     out.sort(key=lambda k: (k.name_raw, k.frame))
     return out
