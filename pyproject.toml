@@ -9,6 +9,7 @@ description = "MikuMikuDance 向けユーティリティツール群"
 requires-python = ">=3.11"
 dependencies = [
     "numpy",
+    "scipy",
 ]
 
 [project.optional-dependencies]
@@ -18,10 +19,14 @@ dev = [
 
 [project.scripts]
 shakevmd = "shakevmd.cli:main"
+sparsevmd = "sparsevmd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*", "shakevmd*"]
+include = ["mmd_toolbox*", "shakevmd*", "sparsevmd*"]
 
 [tool.pytest.ini_options]
-testpaths = ["mmd_toolbox", "shakevmd"]
+testpaths = ["mmd_toolbox", "shakevmd", "sparsevmd"]
 pythonpath = ["."]
+# 各ツールの tests に同名テストファイル(test_cli.py 等)があるため、basename 衝突を
+# 避ける importlib インポートモードを使う(prepend 既定だと collection で衝突する)。
+addopts = "--import-mode=importlib"
