@@ -9,11 +9,7 @@ perspective境界・(no-cut-detect でなければ)検出cut を統合する。
 
 import math
 
-import pytest
-
-pytest.importorskip("mmd_toolbox.vmd.cuts", reason="impl pending: Step 1b cuts extraction")
-
-from mmd_toolbox.vmd.cuts import (  # noqa: E402
+from mmd_toolbox.vmd.cuts import (
     assemble_boundaries,
     detect_cuts_bone,
     detect_cuts_camera,
