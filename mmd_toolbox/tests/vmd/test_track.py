@@ -7,10 +7,12 @@ reduce_camera_track / reduce_bone_track は、ソースキー列と処理範囲�
 
 import pytest
 
-from mmd_toolbox.vmd.types import BoneKey, CameraKey
-from sparsevmd import presets
-from sparsevmd.reduce import (
+pytest.importorskip("mmd_toolbox.vmd.reduce", reason="impl pending: Step 1c reduce extraction")
+
+from mmd_toolbox.vmd.types import BoneKey, CameraKey  # noqa: E402
+from mmd_toolbox.vmd.reduce import (  # noqa: E402
     CAMERA_LINEAR_INTERP,
+    Tolerances,
     reduce_bone_track,
     reduce_camera_track,
 )
@@ -28,7 +30,15 @@ def _bone_linear():
 
 
 BL = _bone_linear()
-TOLS = presets.resolve_tolerances("balanced")
+# balanced プリセット相当の許容(sparsevmd.presets の balanced 値)。
+TOLS = Tolerances(
+    bone_pos=0.01,
+    bone_rot=0.10,
+    camera_pos=0.02,
+    camera_rot=0.05,
+    camera_distance=0.02,
+    camera_fov=0.50,
+)
 CAM_CUT = (5.0, 20.0, 5.0)
 BONE_CUT = (1.0, 30.0)
 

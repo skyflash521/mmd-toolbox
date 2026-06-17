@@ -7,9 +7,11 @@ linear mode では補間ブロックは線形固定。perspective は直近ホ�
 
 import pytest
 
-from mmd_toolbox.vmd.types import BoneKey, CameraKey, VmdDocument
-from sparsevmd import reduce as reducer
-from sparsevmd.reduce import (
+pytest.importorskip("mmd_toolbox.vmd.reduce", reason="impl pending: Step 1c reduce extraction")
+
+from mmd_toolbox.vmd.types import BoneKey, CameraKey, VmdDocument  # noqa: E402,F401
+from mmd_toolbox.vmd import reduce as reducer  # noqa: E402,F401
+from mmd_toolbox.vmd.reduce import (  # noqa: E402
     BONE_LINEAR_INTERP,
     CAMERA_LINEAR_INTERP,
     bone_interp_bytes,

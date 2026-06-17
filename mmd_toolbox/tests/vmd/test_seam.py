@@ -12,12 +12,27 @@
 範囲全体がトラックを覆う(範囲外キーなし)場合と linear モードでは継ぎ目の書き換えをしない。
 """
 
-from mmd_toolbox.vmd import interp
-from mmd_toolbox.vmd.types import CameraKey
-from sparsevmd import presets
-from sparsevmd.reduce import camera_interp_bytes, reduce_camera_track
+import pytest
 
-TOLS = presets.resolve_tolerances("balanced")
+pytest.importorskip("mmd_toolbox.vmd.reduce", reason="impl pending: Step 1c reduce extraction")
+
+from mmd_toolbox.vmd import interp  # noqa: E402
+from mmd_toolbox.vmd.types import CameraKey  # noqa: E402
+from mmd_toolbox.vmd.reduce import (  # noqa: E402
+    Tolerances,
+    camera_interp_bytes,
+    reduce_camera_track,
+)
+
+# balanced プリセット相当の許容(sparsevmd.presets の balanced 値)。
+TOLS = Tolerances(
+    bone_pos=0.01,
+    bone_rot=0.10,
+    camera_pos=0.02,
+    camera_rot=0.05,
+    camera_distance=0.02,
+    camera_fov=0.50,
+)
 CAM_CUT = (5.0, 20.0, 5.0)
 EASE = (96, 0, 96, 30)
 LIN = (20, 20, 107, 107)

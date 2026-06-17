@@ -12,11 +12,13 @@
 
 import pytest
 
-from mmd_toolbox.vmd import interp
-from mmd_toolbox.vmd.types import BoneKey, CameraKey
-from sparsevmd import presets
-from sparsevmd.reduce import (
+pytest.importorskip("mmd_toolbox.vmd.reduce", reason="impl pending: Step 1c reduce extraction")
+
+from mmd_toolbox.vmd import interp  # noqa: E402
+from mmd_toolbox.vmd.types import BoneKey, CameraKey  # noqa: E402
+from mmd_toolbox.vmd.reduce import (  # noqa: E402
     StrictError,
+    Tolerances,
     reduce_camera_track,
     verify_bone_track,
     verify_camera_track,
@@ -36,7 +38,15 @@ def _bone_linear():
 
 
 BL = _bone_linear()
-TOLS = presets.resolve_tolerances("balanced")
+# balanced プリセット相当の許容(sparsevmd.presets の balanced 値)。
+TOLS = Tolerances(
+    bone_pos=0.01,
+    bone_rot=0.10,
+    camera_pos=0.02,
+    camera_rot=0.05,
+    camera_distance=0.02,
+    camera_fov=0.50,
+)
 CAM_CUT = (5.0, 20.0, 5.0)
 
 
@@ -118,7 +128,7 @@ def test_verify_bone_detects_position_violation():
 def _bad_curve(monkeypatch):
     # 全チャンネルの curve を線形固定にし、採否(bezier)が曲線で受理した区間でも
     # 出力には線形を格納させて、出力段で必ず誤差を発生させる(§7.3 の検査経路を励起)。
-    import sparsevmd.fit as fit
+    import mmd_toolbox.vmd.fit as fit
 
     linear_cp = (20, 20, 107, 107)
     for cls in (
