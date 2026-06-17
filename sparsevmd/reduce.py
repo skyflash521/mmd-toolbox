@@ -555,6 +555,9 @@ def reduce_camera_track(
             progress(progress_base, total_frames, "出力後検証")
         # §7.3 出力後検証: 出力を再サンプリングし許容超過があれば、非strictは超過フレームを
         # キーに追加して再構築(1フレーム間隔は元値を逐語保持し必ず収束)、strictはエラー。
+        # 超過フレームは出力キー上には現れない(キー上は元値格納でフィット誤差0)ため、
+        # added は必ず非空 → range_frames は厳密に増え [f0,f1] 内で必ず収束する。
+        # added が空になる進行不能は理論上到達しないが、無限ループ防止に明示ガードを置く。
         while True:
             keys = build_camera_keys(source_keys, sorted(range_frames), segment_interp)
             bad = verify_camera_track(source_keys, keys, [(f0, f1)], tols)
@@ -562,7 +565,10 @@ def reduce_camera_track(
                 break
             if strict:
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
-            range_frames |= set(bad)
+            added = set(bad) - range_frames
+            range_frames |= added
+            if not added:
+                break
 
         # §6.3 範囲端の下側継ぎ目: 範囲開始キー f0(範囲内)の到達側曲線を元サンプルから
         # 再フィットし、手前の範囲外キーから f0 までの区間の動きを忠実に保つ(bezier のみ)。
@@ -640,6 +646,8 @@ def reduce_bone_track(
                 return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
         # §7.3 出力後検証(カメラと同様。非strictは密化で収束、strictはエラー)。
+        # added は必ず非空(超過フレームは元値格納のキー上には現れない)ため厳密に増え収束する。
+        # 進行不能(added 空)は理論上到達しないが、無限ループ防止に明示ガードを置く。
         while True:
             keys = build_bone_keys(source_keys, sorted(range_frames), segment_interp)
             bad = verify_bone_track(source_keys, keys, [(f0, f1)], tols)
@@ -647,7 +655,10 @@ def reduce_bone_track(
                 break
             if strict:
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
-            range_frames |= set(bad)
+            added = set(bad) - range_frames
+            range_frames |= added
+            if not added:
+                break
 
         # §6.3 範囲端の下側継ぎ目のみ(範囲内の範囲開始キーを再フィット)。範囲外キーは変更不可
         # なので上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。bezier のみ。
