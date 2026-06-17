@@ -10,6 +10,10 @@ from dataclasses import dataclass
 
 from mmd_toolbox.vmd import interp, io
 
+# perspective_series は mmd_toolbox.vmd.sample へ移送(refactor-plan-direct-reduce.md Step 1)。
+# 旧 import パス(sparsevmd.sample.perspective_series)維持のため再公開する。
+from mmd_toolbox.vmd.sample import perspective_series  # noqa: F401
+
 
 @dataclass
 class Track:
@@ -81,21 +85,3 @@ def sample_scalar(keys, channel, frame_start, frame_end):
 def sample_rotation(keys, frame_start, frame_end):
     """回転チャンネルを評価する。camera は Euler 3要素、bone は quaternion のリスト。"""
     return interp.sample_range(keys, "rot", frame_start, frame_end)
-
-
-def perspective_series(keys, frame_start, frame_end):
-    """各フレームの perspective を直近キー値で保持して返す(§4.2)。
-
-    当該フレーム以前にキーが無い場合は先頭キーの値を用いる
-    (vmd-interp の境界規約「最初のキー以前は端キーの値で一定」に倣う)。
-    """
-    if not keys:
-        raise ValueError("キー列が空")
-    series = []
-    idx = 0
-    n = len(keys)
-    for f in range(frame_start, frame_end + 1):
-        while idx + 1 < n and keys[idx + 1].frame <= f:
-            idx += 1
-        series.append(keys[idx].perspective)
-    return series

@@ -9,11 +9,9 @@ strictでは終了コード4につながる StrictError を送出する。
 
 import pytest
 
-pytest.importorskip("mmd_toolbox.vmd.reduce", reason="impl pending: Step 1c reduce extraction")
-
-from mmd_toolbox.vmd import reduce as reducer  # noqa: E402,F401
-from mmd_toolbox.vmd.fit import LinearScalarChannel  # noqa: E402
-from mmd_toolbox.vmd.reduce import StrictError, reduce_track  # noqa: E402
+from mmd_toolbox.vmd import reduce as reducer  # noqa: F401
+from mmd_toolbox.vmd.fit import LinearScalarChannel
+from mmd_toolbox.vmd.reduce import StrictError, reduce_track
 
 
 def lin(frame_start, values, tol):

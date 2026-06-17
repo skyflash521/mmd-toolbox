@@ -8,26 +8,16 @@ CLI 層はこの ValueError を引数エラー(終了コード2)に対応づけ�
 """
 
 import math
-from dataclasses import dataclass, fields
+from dataclasses import fields
+
+# Tolerances(許容誤差の器)は共通ライブラリ mmd_toolbox.vmd.reduce へ移送した
+# (refactor-plan-direct-reduce.md Step 1)。preset 名 → 値の表と検証は sparsevmd の
+# 運用ポリシーとして本モジュールに残す。旧 import パス(sparsevmd.presets.Tolerances)
+# 維持のため再公開する。
+from mmd_toolbox.vmd.reduce import Tolerances  # noqa: F401
 
 # 品質プリセット名(§2.3)。
 PRESET_NAMES = ("precise", "balanced", "aggressive")
-
-
-@dataclass
-class Tolerances:
-    """各チャンネルの最大許容誤差(§2.4)。
-
-    単位: bone_pos/camera_pos/camera_distance は MMD距離単位、
-    bone_rot/camera_rot/camera_fov は度。
-    """
-
-    bone_pos: float
-    bone_rot: float
-    camera_pos: float
-    camera_rot: float
-    camera_distance: float
-    camera_fov: float
 
 
 # §2.4 の許容誤差表(precise / balanced / aggressive)。

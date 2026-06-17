@@ -14,11 +14,9 @@
 
 import pytest
 
-pytest.importorskip("mmd_toolbox.vmd.reduce", reason="impl pending: Step 1c reduce extraction")
-
-from mmd_toolbox.vmd import interp  # noqa: E402
-from mmd_toolbox.vmd.types import CameraKey  # noqa: E402
-from mmd_toolbox.vmd.reduce import (  # noqa: E402
+from mmd_toolbox.vmd import interp
+from mmd_toolbox.vmd.types import CameraKey
+from mmd_toolbox.vmd.reduce import (
     Tolerances,
     camera_interp_bytes,
     reduce_camera_track,

@@ -7,10 +7,8 @@ reduce_camera_track / reduce_bone_track は、ソースキー列と処理範囲�
 
 import pytest
 
-pytest.importorskip("mmd_toolbox.vmd.reduce", reason="impl pending: Step 1c reduce extraction")
-
-from mmd_toolbox.vmd.types import BoneKey, CameraKey  # noqa: E402
-from mmd_toolbox.vmd.reduce import (  # noqa: E402
+from mmd_toolbox.vmd.types import BoneKey, CameraKey
+from mmd_toolbox.vmd.reduce import (
     CAMERA_LINEAR_INTERP,
     Tolerances,
     reduce_bone_track,

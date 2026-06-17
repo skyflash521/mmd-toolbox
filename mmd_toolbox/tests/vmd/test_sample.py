@@ -6,10 +6,8 @@ perspective_series は各フレームの perspective を直近キー値で保持
 
 import pytest
 
-pytest.importorskip("mmd_toolbox.vmd.sample", reason="impl pending: Step 1c reduce extraction")
-
-from mmd_toolbox.vmd.types import CameraKey  # noqa: E402
-from mmd_toolbox.vmd.sample import perspective_series  # noqa: E402
+from mmd_toolbox.vmd.types import CameraKey
+from mmd_toolbox.vmd.sample import perspective_series
 
 
 # 真の線形補間になる制御点(各チャンネル x1==y1, x2==y2 → y=x)。
