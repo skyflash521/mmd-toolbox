@@ -66,6 +66,24 @@ def test_format_dry_run_contains_counts_rate_selection_range_keep():
     assert "30" in text  # 範囲端
 
 
+def test_build_report_note_when_not_reducible():
+    # 削減対象なし(全トラック1キー以下・範囲空)を記録する(§2.2/§3.1)。
+    rep = report.build_report(
+        target="camera", camera=(1, 1), bones=None, selected_bones=set(),
+        ranges=[(7, 7)], keep_frames=[], reduced=False,
+    )
+    assert rep["note"] == "削減対象なし"
+    assert "削減対象なし" in report.format_dry_run(rep)
+
+
+def test_build_report_no_note_when_reducible():
+    rep = report.build_report(
+        target="camera", camera=(31, 2), bones=None, selected_bones=set(),
+        ranges=[(0, 30)], keep_frames=[], reduced=True,
+    )
+    assert "note" not in rep
+
+
 def test_format_dry_run_handles_camera_none(tmp_path):
     r = report.build_report(
         target="bone", camera=None, bones={"センター": (5, 2)},

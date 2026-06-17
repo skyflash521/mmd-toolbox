@@ -35,6 +35,7 @@ def _track_entry(input_count, output_count):
 def build_report(
     *, target, camera, bones, selected_bones, ranges, keep_frames,
     camera_errors=None, bone_errors=None, camera_diag=None, bone_diag=None,
+    reduced=True,
 ):
     """レポート dict を組み立てる(§2.7, §7.2)。
 
@@ -43,6 +44,7 @@ def build_report(
     bone_errors は {name: 誤差dict}。指定時のみ各エントリに "errors" を載せる(§7.2)。
     camera_diag / bone_diag は cuts・splits・seam_rewrites の診断 dict({name:dict} for bone)。
     指定時のみ各エントリに "diagnostics" を載せる(§2.7 不連続検出位置・分割理由、§6.3 継ぎ目)。
+    reduced が False(全トラック1キー以下・範囲空など削減対象なし)のとき note を載せる(§2.2/§3.1)。
     """
     selected_bones = set(selected_bones or ())
     bone_errors = bone_errors or {}
@@ -60,13 +62,16 @@ def build_report(
         if name in bone_diag:
             entry["diagnostics"] = bone_diag[name]
         bone_list.append(entry)
-    return {
+    result = {
         "target": target,
         "camera": cam,
         "bones": bone_list,
         "ranges": list(ranges or []),
         "keep_frames": list(keep_frames or []),
     }
+    if not reduced:
+        result["note"] = "削減対象なし"
+    return result
 
 
 def _rate_pct(entry):
@@ -92,6 +97,8 @@ def _format_diag(diag):
 def format_dry_run(report):
     """dry-run のテキスト要約を返す(§2.7, §7.2)。"""
     lines = [f"target: {report['target']}"]
+    if "note" in report:
+        lines.append(report["note"])
     cam = report["camera"]
     if cam is not None:
         lines.append(

@@ -202,6 +202,35 @@ def _bone_keys_by_name(bone_keys):
     return groups
 
 
+def _bone_reduced(bone_keys, selected, global_ranges):
+    """選択ボーンのうち、キー2件以上かつ有効処理範囲が空でないものが1つでもあるか(§2.2/§3.1)。"""
+    groups = _bone_keys_by_name(bone_keys)
+    for name, keys in groups.items():
+        if name not in selected or len(keys) < 2:
+            continue
+        ks = sorted(keys, key=lambda k: k.frame)
+        if ranges.intersect(global_ranges, ks[0].frame, ks[-1].frame):
+            return True
+    return False
+
+
+def _log_diagnostics(camera_diag, bone_diag):
+    """verbose 時に不連続検出位置・継ぎ目書き換え・分割理由を stderr に出す(§2.7/§6.3)。"""
+    def emit(label, d):
+        if not d:
+            return
+        if d.get("cuts"):
+            print(f"詳細[{label}]: 不連続検出位置 {d['cuts']}", file=sys.stderr)
+        if d.get("seam_rewrites"):
+            print(f"詳細[{label}]: 継ぎ目書き換え {d['seam_rewrites']}", file=sys.stderr)
+        if d.get("splits"):
+            print(f"詳細[{label}]: 分割 {len(d['splits'])} 件", file=sys.stderr)
+
+    emit("camera", camera_diag)
+    for name, d in (bone_diag or {}).items():
+        emit(f"bone {name}", d)
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -325,6 +354,7 @@ def main(argv=None):
             print(f"警告: keep-frame {f} は削減範囲外のため無視します", file=sys.stderr)
 
     want_report = args.dry_run or args.report_json or args.preview_csv
+    want_diag = want_report or args.verbose  # verbose は診断を stderr ログに出す(§2.7/§6.3)
     new_camera = doc.camera
     new_bone = doc.bone
     camera_errors = None
@@ -334,12 +364,15 @@ def main(argv=None):
     preview_rows = []
     # 削減中の処理経過を stderr に表示する(対話端末時のみ。§2.7)。
     reporter = _Progress(enabled=sys.stderr.isatty())
+    did_reduce = False
     try:
         if do_camera:
             cam = _sorted_camera(doc.camera)
             cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
             if len(cam) >= 2:
-                camera_diag = {} if want_report else None
+                if cam_ranges:  # 有効範囲が空なら実際には削減されない(§2.2/§3.1)
+                    did_reduce = True
+                camera_diag = {} if want_diag else None
                 cam_total = sum(f1 - f0 for f0, f1 in cam_ranges)
                 reporter.start("カメラ削減", cam_total)
                 new_camera = reduce_camera_track(
@@ -356,11 +389,13 @@ def main(argv=None):
             if args.preview_csv:
                 preview_rows.extend(_camera_preview_rows(cam, new_camera, cam_ranges))
         if do_bone:
-            bone_diag = {} if want_report else None
+            bone_diag = {} if want_diag else None
             new_bone = _reduce_bones(
                 doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
                 diagnostics_out=bone_diag, reporter=reporter,
             )
+            if _bone_reduced(doc.bone, selected, global_ranges):
+                did_reduce = True
             if want_report:
                 bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
             if args.preview_csv:
@@ -369,6 +404,10 @@ def main(argv=None):
                 )
     except StrictError:
         return 4
+
+    # verbose: 不連続検出位置・分割理由・継ぎ目書き換えを stderr に出す(§2.7/§6.3)。
+    if args.verbose:
+        _log_diagnostics(camera_diag, bone_diag)
 
     # レポート(dry-run 統計・JSON・CSV)。dry-run でも report/preview は書き出す(§2.7)。
     if want_report:
@@ -383,6 +422,7 @@ def main(argv=None):
             bone_errors=bone_errors,
             camera_diag=camera_diag,
             bone_diag=bone_diag,
+            reduced=did_reduce,
         )
         if args.dry_run:
             print(report.format_dry_run(rep))

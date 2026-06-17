@@ -164,6 +164,30 @@ def test_single_key_bone_preserved_verbatim(tmp_path):
     assert doc.bone == [key]
 
 
+# --- 削減対象なし記録 / verbose(§2.2 / §3.1 / §2.7 / §6.3) ---------------
+
+
+def test_dry_run_records_no_reduction_target(tmp_path, capsys):
+    # 全トラック1キー以下 → dry-run に「削減対象なし」を記録(§3.1)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=[cam(7, center=(3.0, 0.0, 0.0))])
+    code = cli.main([str(src), "--target", "camera", "--dry-run"])
+    assert code == 0
+    assert "削減対象なし" in capsys.readouterr().out
+
+
+def test_verbose_logs_diagnostics(tmp_path, capsys):
+    # -v 指定で不連続検出位置などの診断を stderr に出す(§2.7/§6.3)。レポート系フラグ無しでも。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    keys = [cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0))
+            for f in range(31)]
+    write_vmd(src, camera=keys)
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "-v"])
+    assert code == 0
+    assert "15" in capsys.readouterr().err  # 不連続検出位置 frame15 が verbose ログに出る
+
+
 # --- CLI 堅牢化(§2.2 / §2.6 / §9) -----------------------------------------
 
 
