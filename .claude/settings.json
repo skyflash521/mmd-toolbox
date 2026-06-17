@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(bash .claude/skills/codex-review-loop/watchdog.sh*)",
+      "Bash(git add *)",
       "Bash(git blame *)",
       "Bash(git branch --list *)",
       "Bash(git branch --list)",
@@ -13,6 +14,7 @@
       "Bash(git config --get *)",
       "Bash(git config --list)",
       "Bash(git config -l)",
+      "Bash(git commit *)",
       "Bash(git describe *)",
       "Bash(git ls-files *)",
       "Bash(git ls-files)",
@@ -62,6 +64,11 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-readonly.py\"",
+            "shell": "bash"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git-write.py\"",
             "shell": "bash"
           }
         ]
