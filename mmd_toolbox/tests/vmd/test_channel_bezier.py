@@ -10,10 +10,8 @@ import math
 
 import pytest
 
-pytest.importorskip("mmd_toolbox.vmd.fit", reason="impl pending: Step 1a fit extraction")
-
-from mmd_toolbox.vmd import interp  # noqa: E402
-from mmd_toolbox.vmd.fit import (  # noqa: E402
+from mmd_toolbox.vmd import interp
+from mmd_toolbox.vmd.fit import (
     BoneRotationChannel,
     CameraRotationChannel,
     EuclideanVectorChannel,
