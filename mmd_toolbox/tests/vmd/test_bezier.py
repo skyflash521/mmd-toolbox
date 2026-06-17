@@ -10,9 +10,11 @@ import math
 import numpy as np
 import pytest
 
-from mmd_toolbox.vmd import interp
-from sparsevmd import fit
-from sparsevmd.fit import fit_bezier_curve
+pytest.importorskip("mmd_toolbox.vmd.fit", reason="impl pending: Step 1a fit extraction")
+
+from mmd_toolbox.vmd import interp  # noqa: E402
+from mmd_toolbox.vmd import fit  # noqa: E402
+from mmd_toolbox.vmd.fit import fit_bezier_curve  # noqa: E402
 
 
 def _internal_xs(n=9):

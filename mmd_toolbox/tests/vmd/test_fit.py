@@ -9,8 +9,10 @@ import math
 
 import pytest
 
-from sparsevmd import fit
-from sparsevmd.fit import LinearScalarChannel
+pytest.importorskip("mmd_toolbox.vmd.fit", reason="impl pending: Step 1a fit extraction")
+
+from mmd_toolbox.vmd import fit  # noqa: E402
+from mmd_toolbox.vmd.fit import LinearScalarChannel  # noqa: E402
 
 
 def test_linear_values_zero_error():

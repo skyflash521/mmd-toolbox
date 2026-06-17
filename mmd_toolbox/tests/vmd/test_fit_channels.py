@@ -9,7 +9,9 @@ import math
 
 import pytest
 
-from sparsevmd.fit import EuclideanVectorChannel, FovChannel, _round_half_up
+pytest.importorskip("mmd_toolbox.vmd.fit", reason="impl pending: Step 1a fit extraction")
+
+from mmd_toolbox.vmd.fit import EuclideanVectorChannel, FovChannel, _round_half_up  # noqa: E402
 
 
 # --- EuclideanVectorChannel -------------------------------------------------

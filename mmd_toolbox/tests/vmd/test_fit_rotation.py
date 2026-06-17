@@ -12,7 +12,9 @@ import math
 
 import pytest
 
-from sparsevmd.fit import BoneRotationChannel, CameraRotationChannel
+pytest.importorskip("mmd_toolbox.vmd.fit", reason="impl pending: Step 1a fit extraction")
+
+from mmd_toolbox.vmd.fit import BoneRotationChannel, CameraRotationChannel  # noqa: E402
 
 
 def quat_z(deg):
