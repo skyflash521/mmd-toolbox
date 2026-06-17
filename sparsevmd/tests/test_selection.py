@@ -303,3 +303,41 @@ def test_parse_bone_file_dedup(text, expect_inc, expect_exc):
     includes, excludes = selection.parse_bone_file(text)
     assert includes == expect_inc
     assert excludes == expect_exc
+
+
+# --- デコード不能名は name 一致不可(§2.2) ----------------------------------
+
+UNDEC = "�"  # CP932 デコード不能ボーン名の置換文字表示
+
+
+def test_name_selector_cannot_target_undecodable():
+    # --bone で置換文字名を明示しても一致しない → 入力に存在しない扱い(エラー)。
+    with pytest.raises(SelectionError):
+        resolve_selection(
+            BONES + [UNDEC],
+            includes=[Selector("name", UNDEC)],
+            excludes=[],
+            undecodable={UNDEC},
+        )
+
+
+def test_exclude_name_undecodable_warns_not_matched():
+    # --exclude-bone で置換文字名を指定しても一致せず、警告して継続(除外されない)。
+    r = resolve_selection(
+        BONES + [UNDEC],
+        includes=[],
+        excludes=[Selector("name", UNDEC)],
+        undecodable={UNDEC},
+    )
+    assert UNDEC in r.selected
+    assert warned_about(r, "存在しません")
+
+
+def test_default_all_and_glob_still_include_undecodable():
+    # name 以外(デフォルト全件・glob)では置換文字名も対象になる。
+    r_all = resolve_selection(BONES + [UNDEC], includes=[], excludes=[], undecodable={UNDEC})
+    assert UNDEC in r_all.selected
+    r_glob = resolve_selection(
+        BONES + [UNDEC], includes=[Selector("glob", "*")], excludes=[], undecodable={UNDEC}
+    )
+    assert UNDEC in r_glob.selected

@@ -487,3 +487,36 @@ def test_strict_unsatisfiable_is_exit_4(tmp_path):
         ]
     )
     assert code == 4
+
+
+# --- デコード不能ボーン名(§2.2) -------------------------------------------
+
+def undec_bone(frame, pos=(0.0, 0.0, 0.0)):
+    # CP932 デコード不能なボーン名フィールド(孤立したリードバイト 0x81)。
+    return BoneKey(b"\x81".ljust(15, b"\x00"), frame, pos, (0.0, 0.0, 0.0, 1.0), BL)
+
+
+def test_undecodable_bone_name_warns_and_reduces(tmp_path, capsys):
+    # デコード不能名は警告しつつ、トラックの削減自体は継続する(§2.2)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    keys = [undec_bone(0), undec_bone(10, (1.0, 0.0, 0.0)), undec_bone(20, (2.0, 0.0, 0.0))]
+    write_vmd(src, bone=keys)
+    code = cli.main([str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear"])
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "デコード" in err or "Shift-JIS" in err
+    assert out.exists()
+    # 線形に並んだ中間キーが落ち、端点2キー(frame 0/20)へ削減されたことを確認する。
+    out_doc, _ = io.read(str(out))
+    assert [k.frame for k in out_doc.bone] == [0, 20]
+
+
+def test_undecodable_name_not_targetable_by_bone(tmp_path):
+    # 置換文字名を --bone で明示しても一致せず、入力に存在しない扱いでコード2(§2.2)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    keys = [undec_bone(0), undec_bone(10), undec_bone(20)]
+    write_vmd(src, bone=keys)
+    code = cli.main([str(src), "-o", str(out), "--target", "bone", "--bone", "�"])
+    assert code == 2

@@ -195,6 +195,22 @@ def _bone_names_in_order(bone_keys):
     return seen
 
 
+def _undecodable_bone_names(bone_keys):
+    """CP932 でデコードできないボーン名フィールドの表示名(置換文字入り)の集合(§2.2)。
+
+    これらの名前は `--bone` / `--exclude-bone` の name 一致では使えない(§2.2)ため、
+    selection に渡して name 種別の照合から除外させる。
+    """
+    undecodable = set()
+    for k in bone_keys:
+        head = k.name_raw.split(b"\x00", 1)[0]
+        try:
+            head.decode("cp932")
+        except UnicodeDecodeError:
+            undecodable.add(k.name)
+    return undecodable
+
+
 def _bone_keys_by_name(bone_keys):
     groups = {}
     for k in bone_keys:
@@ -276,9 +292,20 @@ def main(argv=None):
 
     # 入力読み込み(VMDでない等 → 入力不正 §9 コード1)。
     try:
-        doc, _warnings = io.read(args.input)
+        doc, read_warnings = io.read(args.input)
     except Exception:
         return 1
+
+    # 読み込み時の警告(デコード不能な名前フィールド等)を surface する(§2.2)。
+    # 同一(コード・セクション・メッセージ)はキー毎の重複を避けて1行にまとめる。
+    seen_warn = set()
+    for w in read_warnings:
+        key = (w.code, w.section, w.message)
+        if key in seen_warn:
+            continue
+        seen_warn.add(key)
+        where = f"({w.section})" if w.section else ""
+        print(f"警告: {w.message}{where}", file=sys.stderr)
 
     # 対象セクションを内部作業ビューで正規化する(フレーム順ソート・同一キー後勝ち。§3.1)。
     # 対象外セクションは無加工で保持される。
@@ -312,9 +339,12 @@ def main(argv=None):
     # (ボーンセクションが空の場合を含む。§2.2)。これは §3.1 の空セクション コード1 より
     # 優先する(明示名の引数エラーが勝つ)。
     bone_names = _bone_names_in_order(doc.bone)
+    undecodable = _undecodable_bone_names(doc.bone)
     if args.target in ("bone", "all") and _has_bone_selection(args):
         try:
-            sel = selection.resolve_selection(bone_names, includes, excludes)
+            sel = selection.resolve_selection(
+                bone_names, includes, excludes, undecodable=undecodable
+            )
         except selection.SelectionError as e:
             # エラーで終了する前に、蓄積済みの不一致警告を出力する(§2.2)。
             for w in e.warnings:
@@ -586,7 +616,9 @@ def _list_bones(doc, includes, excludes):
     # ボーン0件でも選択子の解決を試み、未一致選択子の警告を出す(§2.7)。0件かつ選択子なしなら無警告。
     selected = set()
     try:
-        result = selection.resolve_selection(names, includes, excludes)
+        result = selection.resolve_selection(
+            names, includes, excludes, undecodable=_undecodable_bone_names(doc.bone)
+        )
         selected = set(result.selected)
         for w in result.warnings:
             print("警告: " + w, file=sys.stderr)

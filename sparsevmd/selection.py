@@ -95,10 +95,16 @@ def _matched_names(bone_names, selector):
     return {n for n in bone_names if _matches(n, selector)}
 
 
-def resolve_selection(bone_names, includes, excludes):
-    """include/exclude セレクタを適用し SelectionResult を返す(§2.2)。"""
+def resolve_selection(bone_names, includes, excludes, undecodable=None):
+    """include/exclude セレクタを適用し SelectionResult を返す(§2.2)。
+
+    undecodable はデコード不能なボーン名(置換文字入りの表示名)の集合。これらは
+    name 種別の `--bone` / `--exclude-bone` では一致不可とする(§2.2)。glob/group
+    やデフォルト全件選択では通常どおり対象になる。
+    """
     includes = list(includes or [])
     excludes = list(excludes or [])
+    undecodable = set(undecodable or ())
     warnings = []
 
     # 空文字 NAME はエラー(§2.2)。
@@ -117,6 +123,8 @@ def resolve_selection(bone_names, includes, excludes):
 
     universe = list(bone_names)
     universe_set = set(universe)
+    # name 種別の照合に使う集合。デコード不能名は一致不可とする(§2.2)。
+    name_universe = universe_set - undecodable
 
     # include 集合を構築。
     if not includes:
@@ -126,10 +134,11 @@ def resolve_selection(bone_names, includes, excludes):
         missing_names = []
         for sel in includes:
             if sel.kind == "name":
-                if sel.value in universe_set:
+                if sel.value in name_universe:
                     included.add(sel.value)
                 else:
-                    # --bone 明示名が不在 → ハード エラー(空 universe を含む。§2.2)。
+                    # --bone 明示名が不在(デコード不能名も含む)→ ハード エラー
+                    # (空 universe を含む。§2.2)。
                     missing_names.append(sel.value)
             else:
                 hit = _matched_names(universe, sel)
@@ -148,7 +157,7 @@ def resolve_selection(bone_names, includes, excludes):
     excluded = set()
     for sel in excludes:
         if sel.kind == "name":
-            if sel.value in universe_set:
+            if sel.value in name_universe:
                 excluded.add(sel.value)
             else:
                 warnings.append(
