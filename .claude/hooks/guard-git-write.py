@@ -97,10 +97,45 @@ def _has_redirect(s):
     return bool(re.search(r"[<>]", t))
 
 
+def _split_on_unquoted_newlines(cmd):
+    """Split cmd at newlines that are OUTSIDE single/double quotes, honoring backslash
+    escapes. A newline inside a quoted argument (e.g. a multi-line `git commit -m`
+    message) stays within its line, so shlex can parse the quoted value as one token;
+    real newline-separated commands still split into separate lines (the compound-command
+    security boundary is unchanged). Single quotes are literal (no escapes inside);
+    outside and inside double quotes a backslash escapes the next char."""
+    lines = []
+    buf = []
+    sq = dq = False  # inside single- / double-quoted span
+    i, n = 0, len(cmd)
+    while i < n:
+        c = cmd[i]
+        # Backslash escape: outside quotes, or inside double quotes (not inside single).
+        if c == "\\" and not sq and i + 1 < n:
+            buf.append(c)
+            buf.append(cmd[i + 1])
+            i += 2
+            continue
+        if c == "'" and not dq:
+            sq = not sq
+            buf.append(c)
+        elif c == '"' and not sq:
+            dq = not dq
+            buf.append(c)
+        elif c == "\n" and not sq and not dq:
+            lines.append("".join(buf))
+            buf = []
+        else:
+            buf.append(c)
+        i += 1
+    lines.append("".join(buf))
+    return lines
+
+
 def _split_segments(cmd):
     """Split a command line into subcommand token-lists. Raises on parse failure."""
     segments = []
-    for line in cmd.split("\n"):
+    for line in _split_on_unquoted_newlines(cmd):
         if not line.strip():
             continue
         lex = shlex.shlex(line, posix=True, punctuation_chars=True)
@@ -395,6 +430,18 @@ def _selftest():
         ("git add f.py || true", "ask"),
         ("git commit -m 'x' && git status", "ask"),
         ("cd repo && git commit -m 'x'", "ask"),
+        # multi-line commit message: newlines are INSIDE the double-quoted value, so the
+        # whole command is one line/segment -> plain git commit -> pass (no stray prompt)
+        ('git commit -m "subject\n\n- bullet1\n- bullet2\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>"', "pass"),
+        ('git commit -m "subject line\n\nbody paragraph"', "pass"),
+        # UNQUOTED newline still separates commands -> compound boundary preserved (security)
+        ("git add f.py\ngit commit -m 'x'", "pass"),   # both are safe git writes
+        ("git add f.py\nrm x", "ask"),                  # a non-write command after a newline
+        ("git commit -m 'x'\ngit push", "ask"),         # newline-separated push must still ask
+        # newlines inside single quotes are part of the value, not command boundaries -> pass
+        ("git commit -m 'subject\n\n- bullet1\n- bullet2'", "pass"),
+        # a backslash-escaped newline (line continuation) keeps it one command -> pass
+        ("git add a.py\\\nb.py", "pass"),
         # shell expansion around git add/commit -> ask
         ("git commit -m \"$MSG\"", "ask"),
         ("git add $FILES", "ask"),
