@@ -1248,38 +1248,32 @@ class TestBakeResolvedRanges:
     公開し、CLI が再計算(_snap の二重実装)せず単一の正にできるようにする。
     """
 
-    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
     def test_resolved_full_range_when_no_ranges(self):
         # ranges 省略 → 作業ビューの先頭〜末尾キー1区間。
         res = bake.bake(SEQ, seed=1)
         assert res.resolved == [(0, 60)]
 
-    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
     def test_resolved_snaps_explicit_range_to_nearest_keys(self):
         # SEQ のキーは 0/30/60。端は最近接キーへスナップ(28→30, 58→60)。
         res = bake.bake(SEQ, seed=1, ranges=[(28, 58)])
         assert res.resolved == [(30, 60)]
 
-    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
     def test_resolved_swaps_when_snapped_ends_reverse(self):
         # スナップ後に start>end になったら入れ替える(bake の範囲解決と同規則)。
         res = bake.bake(SEQ, seed=1, ranges=[(58, 28)])
         assert res.resolved == [(30, 60)]
 
-    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
     def test_resolved_sorted_for_multiple_ranges(self):
         # 複数範囲は昇順に整列して返す(非接触)。
         res = bake.bake(SEQ, seed=1, ranges=[(60, 60), (0, 0)])
         assert res.resolved == [(0, 0), (60, 60)]
 
-    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
     def test_resolved_snap_tie_breaks_to_smaller_frame(self):
         # 同距離のときは小さいフレームへスナップ(_snap の規則)。
         # SEQ キー 0/30/60。15 は 0 と 30 の中点 → 0、45 は 30 と 60 の中点 → 30。
         res = bake.bake(SEQ, seed=1, ranges=[(15, 45)])
         assert res.resolved == [(0, 30)]
 
-    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
     def test_resolved_uses_normalized_working_view(self):
         # resolved は正規化作業ビュー(ソート済み)由来で、入力列の並びに依らない。
         shuffled = [SEQ[2], SEQ[0], SEQ[1]]

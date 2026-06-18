@@ -89,6 +89,7 @@ class BakeResult:
 
     camera_keys: list   # ベイク後の全カメラキー(範囲内=高密度、範囲外=原本)
     warnings: list
+    resolved: list      # 適用範囲(端を最近接キーへスナップ済み、昇順・非接触)
 
 
 def _working_view(camera_keys):
@@ -393,4 +394,4 @@ def bake(
             uniq.append(w)
 
     result_keys = sorted(baked + fov_preserved + out_keys, key=lambda k: k.frame)
-    return BakeResult(camera_keys=result_keys, warnings=uniq)
+    return BakeResult(camera_keys=result_keys, warnings=uniq, resolved=resolved)
