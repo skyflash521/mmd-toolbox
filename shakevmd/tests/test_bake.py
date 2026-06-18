@@ -1238,3 +1238,58 @@ class TestNaiveRotation:
         src = self._src()
         common = dict(seed=1, amp_rot=8.0, amp_pos=0.0, settle=0.0, fade_sec=0.1)
         assert bake.bake(src, **common).camera_keys == bake.bake(src, naive_rotation=False, **common).camera_keys
+
+
+class TestBakeResolvedRanges:
+    """BakeResult.resolved: 端を最近接キーへスナップ済みの適用範囲(昇順・非接触)。
+
+    Step 3 で shakevmd が in-process で reduce を呼ぶとき、reduce に渡す適用範囲が要る。
+    bake は既に内部で同じスナップ(_snap)を行っているので、その結果を result.resolved として
+    公開し、CLI が再計算(_snap の二重実装)せず単一の正にできるようにする。
+    """
+
+    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
+    def test_resolved_full_range_when_no_ranges(self):
+        # ranges 省略 → 作業ビューの先頭〜末尾キー1区間。
+        res = bake.bake(SEQ, seed=1)
+        assert res.resolved == [(0, 60)]
+
+    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
+    def test_resolved_snaps_explicit_range_to_nearest_keys(self):
+        # SEQ のキーは 0/30/60。端は最近接キーへスナップ(28→30, 58→60)。
+        res = bake.bake(SEQ, seed=1, ranges=[(28, 58)])
+        assert res.resolved == [(30, 60)]
+
+    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
+    def test_resolved_swaps_when_snapped_ends_reverse(self):
+        # スナップ後に start>end になったら入れ替える(bake の範囲解決と同規則)。
+        res = bake.bake(SEQ, seed=1, ranges=[(58, 28)])
+        assert res.resolved == [(30, 60)]
+
+    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
+    def test_resolved_sorted_for_multiple_ranges(self):
+        # 複数範囲は昇順に整列して返す(非接触)。
+        res = bake.bake(SEQ, seed=1, ranges=[(60, 60), (0, 0)])
+        assert res.resolved == [(0, 0), (60, 60)]
+
+    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
+    def test_resolved_snap_tie_breaks_to_smaller_frame(self):
+        # 同距離のときは小さいフレームへスナップ(_snap の規則)。
+        # SEQ キー 0/30/60。15 は 0 と 30 の中点 → 0、45 は 30 と 60 の中点 → 30。
+        res = bake.bake(SEQ, seed=1, ranges=[(15, 45)])
+        assert res.resolved == [(0, 30)]
+
+    @pytest.mark.xfail(reason="impl pending: Step 3a resolved", strict=True)
+    def test_resolved_uses_normalized_working_view(self):
+        # resolved は正規化作業ビュー(ソート済み)由来で、入力列の並びに依らない。
+        shuffled = [SEQ[2], SEQ[0], SEQ[1]]
+        assert bake.bake(shuffled, seed=1).resolved == [(0, 60)]
+
+    def test_resolved_rejects_touching_ranges(self):
+        # 接触判定は「スナップ後」に行う(bake.py の範囲解決順)。スナップ前は非接触でも、
+        # スナップ後に端が一致したら重複として拒否する。SEQ キー 0/30/60 で
+        # (0,16)→(0,30)、(17,60)→(30,60) はスナップ後に frame30 で接触する。
+        # 入力時点で接触させると「スナップ前に判定する」誤実装も通ってしまうため、
+        # スナップ後にのみ接触する入力で固定する。
+        with pytest.raises(ValueError):
+            bake.bake(SEQ, seed=1, ranges=[(0, 16), (17, 60)])
