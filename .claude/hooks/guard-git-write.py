@@ -7,6 +7,24 @@ bypass verification, or widen the staged/committed scope are routed back to a hu
 prompt. The broad `Bash(git add *)` / `Bash(git commit *)` allow rules in settings.json
 would otherwise auto-approve those dangerous forms too.
 
+Staying auto-approved (callers, read this before constructing a git command): two
+DISTINCT things can force a prompt, and they have different causes:
+  (1) Allow-glob miss (NOT this hook): the settings.json globs match only commands that
+      BEGIN with `git add` / `git commit`. A form that shifts those leading tokens passes
+      this hook yet matches no allow rule, so it still prompts — e.g.
+      `git -C <path> commit ...` (begins `git -C`, not `git commit`).
+  (2) This hook emits "ask": an env-var prefix (`VAR=x git ...`), a compound that mixes in
+      a non-(git add/commit) segment (`cd <path> && git ...`, `git add f && rm x`), shell
+      expansion (`$`, backtick, `$()`, `<()`/`>()`, brace `{a,b}`), or a redirect around an
+      add/commit. Note a compound of ONLY safe git writes still passes
+      (`git add f && git commit -m "..."`).
+The Bash tool's cwd is already the repo root, so run plain `git add` / `git commit` from
+the cwd (no `cd`, no `-C`/`--git-dir`/`--work-tree`, no env prefix) and keep the message in
+a single `-m "..."` double-quoted string with NO `$` or backtick inside it — those two are
+treated as expansion even inside double quotes and prompt. Braces, newlines, and the
+`<noreply@...>` trailer inside the quotes are fine. (`-F <file>` is NOT gated and matches
+the allow rule, so it does not prompt; it is discouraged only to keep one message style.)
+
 Design (mirror of auto-approve-readonly.py's safety stance, inverted):
   * This hook ONLY ever emits "ask" (or stays silent / pass-through). It never emits
     "allow" and never "deny". Worst case on a bug it re-introduces a prompt — it can
