@@ -7,39 +7,52 @@ bypass verification, or widen the staged/committed scope are routed back to a hu
 prompt. The broad `Bash(git add *)` / `Bash(git commit *)` allow rules in settings.json
 would otherwise auto-approve those dangerous forms too.
 
-Staying auto-approved (callers, read this before constructing a git command): two
-DISTINCT things can force a prompt, and they have different causes:
-  (1) Allow-glob miss (NOT this hook): the settings.json globs match only commands that
+Staying auto-approved (callers, read this before constructing a git command): THREE things
+can stop a plain auto-approve, with different causes and severities:
+  (1) Hard DENY (this hook): command substitution (`$(...)`, backtick) or a heredoc (`<<`)
+      inside a git add/commit segment — the prompt-inducing `$(cat <<'EOF'...)` form. It is
+      blocked outright, not merely prompted. (`$(`/backtick expand even inside double quotes;
+      `<<` is the heredoc operator outside quotes. A backslash-escaped `\$(` is literal and
+      not denied; a non-git segment's substitution is not denied either.)
+  (2) Allow-glob miss (NOT this hook): the settings.json globs match only commands that
       BEGIN with `git add` / `git commit`. A form that shifts those leading tokens passes
       this hook yet matches no allow rule, so it still prompts — e.g.
       `git -C <path> commit ...` (begins `git -C`, not `git commit`).
-  (2) This hook emits "ask": an env-var prefix (`VAR=x git ...`), a compound that mixes in
-      a non-(git add/commit) segment (`cd <path> && git ...`, `git add f && rm x`), shell
-      expansion (`$`, backtick, `$()`, `<()`/`>()`, brace `{a,b}`), or a redirect around an
-      add/commit. Note a compound of ONLY safe git writes still passes
+  (3) This hook emits "ask": an env-var prefix (`VAR=x git ...`), a compound that mixes in
+      a non-(git add/commit) segment (`cd <path> && git ...`, `git add f && rm x`), a bare
+      `$` / process-substitution `<()`/`>()` / brace `{a,b}` expansion, or a redirect around
+      an add/commit. Note a compound of ONLY safe git writes still passes
       (`git add f && git commit -m "..."`).
 The Bash tool's cwd is already the repo root, so run plain `git add` / `git commit` from
 the cwd (no `cd`, no `-C`/`--git-dir`/`--work-tree`, no env prefix) and keep the message in
-a single `-m "..."` double-quoted string with NO `$` or backtick inside it — those two are
-treated as expansion even inside double quotes and prompt. Braces, newlines, and the
-`<noreply@...>` trailer inside the quotes are fine. (`-F <file>` is NOT gated and matches
-the allow rule, so it does not prompt; it is discouraged only to keep one message style.)
+a single `-m "..."` double-quoted string — NEVER `$(...)`/backtick/heredoc (those are denied)
+and avoid a bare `$` (it prompts as expansion). Braces, newlines, and the `<noreply@...>`
+trailer inside the quotes are fine. (`-F <file>` is NOT gated and matches the allow rule, so
+it does not prompt; it is discouraged only to keep one message style.)
 
 Design (mirror of auto-approve-readonly.py's safety stance, inverted):
-  * This hook ONLY ever emits "ask" (or stays silent / pass-through). It never emits
-    "allow" and never "deny". Worst case on a bug it re-introduces a prompt — it can
-    never wrongly approve a write and never hard-block a command outright. Returning
-    "ask" beats the broad "allow" rule because PreToolUse composes deny > ask > allow.
+  * This hook emits "ask" (force a prompt) or, for ONE narrow case, "deny" (hard block);
+    otherwise it stays silent / pass-through. It never emits "allow". The single "deny"
+    case is command substitution / heredoc on a git add/commit (`$(...)`, backtick, `<<`):
+    these have no legitimate use there (the message is a literal `-m "..."`, not assembled
+    by a subshell or fed from a heredoc) and are the prompt-inducing `$(cat <<'EOF'...)`
+    pattern, so they are blocked outright rather than merely prompted. Everything else that
+    is risky is "ask", never "allow"; worst case on a bug it re-introduces a prompt. "deny"
+    beats "ask" beats "allow" (PreToolUse composes deny > ask > allow).
   * It is a SEPARATE hook so the existing auto-approve-readonly.py keeps its invariant
-    ("only allow read-only, never deny"). The two run on the same Bash matcher; ask wins.
+    ("only allow read-only, never deny"). The two run on the same Bash matcher; ask wins
+    over that hook's allow, and this hook's deny wins over everything.
   * Only `git add` / `git commit` are inspected. Every other command passes through
-    untouched (so this hook never adds prompts to anything that works today).
-  * Fail-safe to "ask": any shell expansion ($ / backtick / $()/ <()/ >()), env-var
-    prefix, parse failure, or unrecognized shape around a git add/commit segment yields
+    untouched (so this hook never adds prompts to anything that works today). Plain human
+    commit forms (`git commit -m "msg"`, multiple `-m`, an editor commit, `-F <file>`) have
+    no `$(`/backtick/`<<` and are never denied.
+  * Fail-safe to "ask": any other shell expansion ($ / brace / <()/ >()), env-var prefix,
+    redirect, parse failure, or unrecognized shape around a git add/commit segment yields
     "ask" rather than silently letting a possibly-hidden dangerous flag through.
 
 Behavior:
-  * git add/commit with a gated flag/pathspec, or ambiguous -> "ask".
+  * git add/commit with command substitution / heredoc (`$(...)`/backtick/`<<`) -> "deny".
+  * git add/commit with a gated flag/pathspec, other expansion/redirect, or ambiguous -> "ask".
   * Anything else -> prints nothing, exits 0 (pass-through): normal flow decides
     (the broad allow rule auto-approves plain add/commit; unrelated commands unaffected).
 
@@ -87,14 +100,44 @@ ADD_GATED_SHORT = set("AuNpief")  # -A -u -N -p -i -e -f
 BROAD_PATHSPECS = {".", "*", ":/", ":", "::", ":/:"}
 
 
-_SQUOTE = re.compile(r"'[^']*'")          # single-quoted span: fully literal in shell
-_DQUOTE = re.compile(r'"(?:[^"\\]|\\.)*"')  # double-quoted span: literal redirects, live $
+_DQUOTE = re.compile(r'"(?:[^"\\]|\\.)*"')  # double-quoted span (run after single quotes blanked)
+
+
+def _blank_single_quoted(s):
+    """Return s with the CONTENTS of single-quoted spans replaced by spaces, tracking
+    double-quote state so an apostrophe INSIDE a double-quoted string (`"it's $x"`) is literal
+    text, NOT a single-quote delimiter. A naive `'[^']*'` regex cannot tell the two apart and
+    would wrongly swallow `$x` between two such apostrophes, hiding live expansion/substitution
+    (a deny/ask bypass). Backslash escapes are honored outside single quotes. _DQUOTE (run
+    AFTER this) can then safely strip double-quoted spans, since any `"` that sat inside single
+    quotes is already blanked."""
+    out = []
+    sq = dq = False
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\" and not sq and i + 1 < n:
+            out.append(c)
+            out.append(s[i + 1])
+            i += 2
+            continue
+        if c == "'" and not dq:
+            sq = not sq
+            out.append(" ")
+        elif c == '"' and not sq:
+            dq = not dq
+            out.append(c)
+        else:
+            out.append(" " if sq else c)
+        i += 1
+    return "".join(out)
+
 
 def _has_shell_expansion(s):
     # $ / backtick / process-substitution that the shell would expand. Single-quoted text
-    # is literal, so strip it first (a literal $ in 'msg' is not expansion). Double-quoted
+    # is literal, so blank it first (a literal $ in 'msg' is not expansion). Double-quoted
     # $ IS expanded by the shell, so it is intentionally kept.
-    t = _SQUOTE.sub(" ", s)
+    t = _blank_single_quoted(s)
     if "$" in t or "`" in t or "<(" in t or ">(" in t:
         return True
     # Brace expansion ({a,b}, {1..5}) expands to multiple words, so the actual staged set
@@ -109,10 +152,29 @@ def _has_redirect(s):
     # A redirect can create/overwrite a file. Redirect operators inside quotes (single OR
     # double) are literal, so strip both kinds of quoted spans first; then ignore the
     # harmless /dev/null and fd-dup forms before looking for any remaining < or >.
-    t = _DQUOTE.sub(" ", _SQUOTE.sub(" ", s))
+    t = _DQUOTE.sub(" ", _blank_single_quoted(s))
     for pat in (r"\d*>>?\s*/dev/null\b", r"&>>?\s*/dev/null\b", r"2>&1", r"1>&2"):
         t = re.sub(pat, " ", t)
     return bool(re.search(r"[<>]", t))
+
+
+def _has_cmdsubst_or_heredoc(s):
+    # Command substitution (`$(...)` / backtick) and heredocs (`<<`) have NO legitimate use
+    # in a git add/commit: the message must be a literal `-m "..."` string, not assembled
+    # by a subshell or fed from a heredoc. They are the prompt-inducing `$(cat <<'EOF'...)`
+    # pattern. Unlike other expansions (handled by "ask"), these are hard-DENIED so the
+    # only path is the correct literal form. Single-quoted spans are literal (strip them);
+    # backslash-escaped chars (`\$`, `` \` ``) are literal too (neutralize them) so an
+    # escaped `\$(` is not mistaken for live substitution. Command substitution expands even
+    # inside double quotes, so `$(`/backtick are checked with double quotes kept; the heredoc
+    # `<<` operator lives outside quotes, so both quote kinds are stripped for it.
+    t = _blank_single_quoted(s)
+    t = re.sub(r"\\\n", "", t)   # join line continuations FIRST: `$\<nl>(` is live `$(`
+    t = re.sub(r"\\.", " ", t)   # then neutralize other backslash-escapes (`\$`, `` \` ``)
+    if "$(" in t or "`" in t:
+        return True
+    t = _DQUOTE.sub(" ", t)
+    return "<<" in t
 
 
 def _split_on_unquoted_newlines(cmd):
@@ -169,6 +231,51 @@ def _split_segments(cmd):
         if seg:
             segments.append(seg)
     return segments
+
+
+def _raw_segments(cmd):
+    """Split cmd into RAW segment strings on unquoted `;`/`|`/`&`/newline (quote- and
+    escape-aware). Unlike _split_segments (which returns shlex token lists), this keeps the
+    original text so callers can scan a single segment for substitution/heredoc syntax that
+    tokenizing would normalize away. Consecutive operator chars (`&&`, `||`, `|&`) collapse
+    into one boundary."""
+    segs = []
+    buf = []
+    sq = dq = False
+    i, n = 0, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if c == "\\" and not sq and i + 1 < n:
+            buf.append(c)
+            buf.append(cmd[i + 1])
+            i += 2
+            continue
+        if c == "'" and not dq:
+            sq = not sq
+            buf.append(c)
+        elif c == '"' and not sq:
+            dq = not dq
+            buf.append(c)
+        elif not sq and not dq and c in ";|&\n":
+            if buf:
+                segs.append("".join(buf))
+                buf = []
+            while i + 1 < n and cmd[i + 1] in ";|&":
+                i += 1
+        else:
+            buf.append(c)
+        i += 1
+    if buf:
+        segs.append("".join(buf))
+    return segs
+
+
+def _tokenize_segment(rs):
+    """shlex-tokenize a single raw segment (no operator splitting). Used only to identify
+    whether the segment is a git add/commit; raises on parse failure."""
+    lex = shlex.shlex(rs, posix=True, punctuation_chars=True)
+    lex.commenters = ""
+    return [t for t in lex if t not in OPS]
 
 
 def _gated_short(token, gated_set):
@@ -244,26 +351,22 @@ def _add_gated(args):
     return False
 
 
-def _subcommand_and_args(seg):
-    """For a segment, return (subcommand, args, danger) if it's a git invocation, else
-    (None, None, False). subcommand is '?' when it's git but the subcommand can't be
-    resolved (-> caller asks). danger is True when a `-c`/`--config-env` global config
-    injection is present (can set commit.gpgsign=false / core.hookspath=... to bypass
-    verification), so the caller asks for add/commit."""
+def _locate_subcommand(seg):
+    """Locate the git subcommand in a token list. Returns (sub_index, had_assign, danger),
+    or None if the segment is not a git invocation. sub_index is the index of the subcommand
+    token, or None when git has no subcommand. had_assign is True if an env-var prefix
+    (`FOO=bar git ...`) precedes git. danger is True for a `-c`/`--config-env` global config
+    injection (can set commit.gpgsign=false / core.hooksPath=... to bypass verification).
+    Shared by _subcommand_and_args (ask/pass tier) and _deny_target_subcommand (deny tier)
+    so the skip logic lives in one place."""
     i = 0
-    # skip leading env-var assignments (FOO=bar git ...) — handled as ambiguous by caller
     had_assign = False
     while i < len(seg) and ASSIGN.match(seg[i]):
         had_assign = True
         i += 1
-    if i >= len(seg):
-        return (None, None, False)
-    verb = seg[i]
-    base = verb.rsplit("/", 1)[-1]  # tolerate /usr/bin/git
-    if base != "git":
-        return (None, None, False)
+    if i >= len(seg) or seg[i].rsplit("/", 1)[-1] != "git":  # tolerate /usr/bin/git
+        return None
     i += 1
-    # skip git global options; flag config-injection ones as dangerous
     danger = False
     while i < len(seg):
         t = seg[i]
@@ -282,15 +385,49 @@ def _subcommand_and_args(seg):
             i += 1  # valueless global option (e.g. -p, --no-pager, --paginate)
             continue
         break
-    if i >= len(seg):
+    return (i if i < len(seg) else None, had_assign, danger)
+
+
+def _subcommand_and_args(seg):
+    """For a segment, return (subcommand, args, danger) if it's a git invocation, else
+    (None, None, False). subcommand is '?' when it's git but the subcommand can't be
+    resolved (env prefix, or none present) -> caller asks. danger flags `-c`/`--config-env`
+    global config injection, so the caller asks for add/commit."""
+    loc = _locate_subcommand(seg)
+    if loc is None:
+        return (None, None, False)
+    idx, had_assign, danger = loc
+    if idx is None:
         return ("?", None, danger)  # git with no resolvable subcommand
-    sub = seg[i]
-    args = seg[i + 1:]
-    return ("?" if had_assign else sub), args, danger
+    sub = seg[idx]
+    return ("?" if had_assign else sub), seg[idx + 1:], danger
+
+
+def _deny_target_subcommand(seg):
+    """True if the segment is a git command whose REAL subcommand is add/commit, or cannot
+    be statically confirmed to be a different plain subcommand (the subcommand position is
+    itself a command substitution). Lets the deny tier hard-block cmdsubst/heredoc inside a
+    git add/commit even behind an env prefix, while NOT denying a confirmed non-write
+    subcommand (log/status/...) — so env-prefixed `git status` with `commit` only as an
+    ARGUMENT is not mistaken for a commit."""
+    loc = _locate_subcommand(seg)
+    if loc is None:
+        return False
+    idx, _had_assign, _danger = loc
+    if idx is None:
+        return False  # `git` with no subcommand
+    sub = seg[idx]
+    # add/commit is the target. Anything that is NOT a clean lowercase subcommand word
+    # cannot be confirmed to be a non-write subcommand — e.g. a command-substituted
+    # subcommand leaves a `$`/`(`/`$(...)` fragment after tokenizing — so treat it as a
+    # target too. A real non-write subcommand (log/status/rev-parse/...) is a clean word and
+    # is NOT denied (its substitution would be in args, not the subcommand position).
+    return sub in ("add", "commit") or not re.fullmatch(r"[a-z][a-z0-9-]*", sub)
 
 
 def classify(cmd):
-    """Return ("ask", reason) to force a prompt, or ("pass", None) for normal flow.
+    """Return ("deny", reason) to hard-block, ("ask", reason) to force a prompt, or
+    ("pass", None) for normal flow.
 
     A command is only allowed to pass (deferring to the broad git add/commit allow rule)
     when EVERY segment is a non-gated git add/commit. If a git add/commit is compounded
@@ -299,9 +436,40 @@ def classify(cmd):
     the host's compound-decomposition for a security boundary."""
     if not isinstance(cmd, str) or not cmd.strip():
         return ("pass", None)
-    # Cheap pre-filter: if it can't contain a git add/commit, never interfere.
-    if "git" not in cmd or ("add" not in cmd and "commit" not in cmd):
+    # Cheap pre-filter: skip only when there is neither a git add/commit NOR any
+    # substitution/heredoc to inspect, so an obfuscated subcommand (`git $(...)` whose text
+    # never spells "commit") still reaches the deny tier below.
+    if "git" not in cmd or (
+        "add" not in cmd and "commit" not in cmd
+        and "$(" not in cmd and "`" not in cmd and "<<" not in cmd
+    ):
         return ("pass", None)
+    # DENY tier (evaluated FIRST — before parsing and before any "ask"): command substitution
+    # / heredoc inside a git add/commit segment is the prompt-inducing `$(cat <<'EOF'...)`
+    # form and has no legitimate use; hard-block it so it cannot be approved away even when
+    # combined with a gated flag or env prefix. Run BEFORE _split_segments so a shlex parse
+    # failure (e.g. a stray quote inside a heredoc body) cannot drop it to "ask". Checked per
+    # RAW segment so substitution in a NON-git segment (`echo "$(date)" && git commit ...`)
+    # is NOT denied (it falls through to the "ask" tier).
+    deny_reason = ("git add/commit でのコマンド置換/ヒアドキュメント($(...)・バッククォート・<<)"
+                   "は禁止。メッセージは -m にダブルクォート文字列で渡すこと(複数行は単一 -m の"
+                   "実改行、または段落ごとに -m を分ける)")
+    for rs in _raw_segments(cmd):
+        if not rs.strip():
+            continue
+        try:
+            toks = _tokenize_segment(rs)
+        except Exception:
+            # Tokenizing failed (e.g. an unbalanced quote in a half-written message). Fall
+            # back to a textual check so a git add/commit with cmdsubst/heredoc is still
+            # denied here, not dropped to the parse-fail "ask" below. A segment that merely
+            # starts with (optional env-prefix then) `git` and carries the dangerous syntax
+            # is blocked conservatively — such input is malformed and won't run cleanly anyway.
+            if re.match(r"\s*(?:[A-Za-z_]\w*=\S*\s+)*git\b", rs) and _has_cmdsubst_or_heredoc(rs):
+                return ("deny", deny_reason)
+            continue
+        if _deny_target_subcommand(toks) and _has_cmdsubst_or_heredoc(rs):
+            return ("deny", deny_reason)
     try:
         segments = _split_segments(cmd)
     except Exception:
@@ -332,8 +500,9 @@ def classify(cmd):
     # checks below must not fire on unrelated commands like `echo git commit < in.txt`).
     if not saw_git_write:
         return ("pass", None)
-    # A real git add/commit invocation exists. Apply whole-command safety so the broad
-    # allow rule can't auto-approve more than a plain add/commit.
+    # A real git add/commit invocation exists (and already passed the DENY tier above).
+    # Apply whole-command safety so the broad allow rule can't auto-approve more than a
+    # plain add/commit.
     if _has_shell_expansion(cmd):
         return ("ask", "git add/commit にシェル展開が含まれ引数を検証できないため確認します")
     if _has_redirect(cmd):
@@ -354,10 +523,10 @@ def main():
         sys.exit(0)
     cmd = (data.get("tool_input") or {}).get("command")
     decision, reason = classify(cmd)
-    if decision == "ask":
+    if decision in ("ask", "deny"):
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "ask",
+            "permissionDecision": decision,
             "permissionDecisionReason": reason,
         }}))
     # else: print nothing -> normal permission flow.
@@ -460,10 +629,55 @@ def _selftest():
         ("git commit -m 'subject\n\n- bullet1\n- bullet2'", "pass"),
         # a backslash-escaped newline (line continuation) keeps it one command -> pass
         ("git add a.py\\\nb.py", "pass"),
-        # shell expansion around git add/commit -> ask
+        # shell expansion around git add/commit -> ask (bare $ / unquoted var, no $()/backtick)
         ("git commit -m \"$MSG\"", "ask"),
         ("git add $FILES", "ask"),
-        ("git commit -m `whoami`", "ask"),
+        # command substitution / heredoc on git add/commit -> DENY (hard block; the
+        # prompt-inducing `$(cat <<'EOF'...)` anti-pattern). backtick/$() expand even inside
+        # double quotes; `<<` is the heredoc operator outside quotes.
+        ("git commit -m `whoami`", "deny"),
+        ("git commit -m \"$(date)\"", "deny"),
+        ('git commit -m "$(cat <<\'EOF\'\nmsg\nEOF\n)"', "deny"),
+        ("git commit -F - <<EOF\nmsg\nEOF", "deny"),
+        ("git add `echo f.py`", "deny"),
+        # DENY runs BEFORE ask: a gated flag or env prefix must not let cmdsubst slip to ask
+        ("git commit --amend -m \"$(date)\"", "deny"),
+        ("GIT_AUTHOR_NAME=x git commit -m \"$(date)\"", "deny"),
+        # per-segment: cmdsubst in a NON-git segment -> not denied (compound -> ask);
+        # cmdsubst in the git segment -> deny even alongside another segment
+        ("echo \"$(date)\" && git commit -m 'msg'", "ask"),
+        ("git commit -m \"$(date)\" && git status", "deny"),
+        # backslash-escaped substitution is literal, not live -> not denied (bare $ -> ask)
+        ("git commit -m \"\\$(date)\"", "ask"),
+        # deny runs BEFORE parsing: a stray quote in a heredoc body breaks shlex, but the
+        # heredoc git segment is still denied (not dropped to the parse-fail "ask")
+        ("git commit -F - <<EOF\n'\nEOF", "deny"),
+        # subcommand produced by substitution (quoted OR unquoted, single OR multi) -> the
+        # subcommand isn't a clean word, can't confirm non-write -> deny
+        ("git \"$(printf commit)\" -m msg", "deny"),
+        ("git $(printf commit) -m msg", "deny"),
+        ("git $(printf com;printf mit) -m msg", "deny"),
+        # tokenize failure (unbalanced quote) must NOT drop a git+cmdsubst to "ask" -> deny
+        ("git commit -m \"$(date)", "deny"),
+        # a clean non-write subcommand with substitution in ARGS is not denied (sub is a word)
+        ("git log \"$(date)\"", "pass"),
+        ("git p4 \"$(date)\"", "pass"),                  # digit in a real subcommand is clean
+        ("git l \"$(date)\"", "pass"),                    # single-char alias is a clean word
+        # apostrophes INSIDE a double-quoted message are literal, not single-quote delimiters;
+        # the substitution/expansion between them must still be seen (no quote-state bypass)
+        ("git commit -m \"it's $(date) isn't\"", "deny"),
+        ("git commit -m \"it's $TOTAL isn't\"", "ask"),
+        ("git commit -m 'it is $(date) fine'", "pass"),    # truly single-quoted -> literal
+        # line continuation forms live substitution/heredoc after joining -> deny
+        ("git commit -m \"$\\\n(date)\"", "deny"),
+        ("git commit -F - <\\\n<EOF", "deny"),
+        # env-prefixed non-write subcommand with `commit` only as an ARG -> not denied as a
+        # commit (real subcommand is `status`); the env prefix still routes it to "ask"
+        ("X=1 git status commit \"$(date)\"", "ask"),
+        # plain human commit forms must NOT be denied (no $()/backtick/<<)
+        ("git commit -m 'subject' -m 'body'", "pass"),   # multiple -m (paragraphs)
+        ("git commit", "pass"),                          # editor commit
+        ("git commit -m \"see func() call\"", "pass"),   # parens without $ are literal
         # env prefix hides behavior -> ask
         ("GIT_AUTHOR_NAME=x git commit -m 'y'", "ask"),
         # global option then subcommand
