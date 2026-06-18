@@ -50,11 +50,12 @@ def _select_worst(errs, is_reversal):
     return max(candidates, key=lambda f: (errs[f], -f))
 
 
-def _axis_curve(a0, a1, a, b, sample_fn):
+def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None):
     """1軸の量子化ベジェ制御点 (x1,y1,x2,y2) を返す(§5.4)。
 
     端点同値(正規化不能)や内部点なしは線形制御点。sample_fn(frame) は当該軸のサンプル値。
     採否(_bezier_axis_pred)と出力(curve)が同一の制御点を使うよう、両者はこれを共有する。
+    early_exit_err(正規化y単位)は fit_bezier_curve の早期終了閾値へ渡す(性能改修)。
     """
     span = b - a
     internal = range(a + 1, b)
@@ -63,7 +64,7 @@ def _axis_curve(a0, a1, a, b, sample_fn):
         return _BEZIER_LINEAR_CP
     xs = [(f - a) / span for f in internal]
     ys = [(sample_fn(f) - a0) / denom for f in internal]
-    cp, _ = fit_bezier_curve(xs, ys)
+    cp, _ = fit_bezier_curve(xs, ys, early_exit_err=early_exit_err)
     return cp
 
 
@@ -103,10 +104,17 @@ class LinearScalarChannel:
         return self.values[frame - self.frame_start]
 
     def _axis_cp(self, a, b):
-        """区間 [a,b] の量子化ベジェ制御点を計算しインスタンスにキャッシュする。"""
+        """区間 [a,b] の量子化ベジェ制御点を計算しインスタンスにキャッシュする。
+
+        早期終了閾値は許容誤差を正規化y単位へ換算した tol/|denom| を渡す(区間が許容内に
+        フィットできた時点で残り初期値を打ち切る。性能改修)。
+        """
         cp = self._cp_cache.get((a, b))
         if cp is None:
-            cp = _axis_curve(self._value(a), self._value(b), a, b, self._value)
+            a0, a1 = self._value(a), self._value(b)
+            denom = abs(a1 - a0)
+            ee = self.tol / denom if denom > 1e-9 else None
+            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee)
             self._cp_cache[(a, b)] = cp
         return cp
 
@@ -165,11 +173,17 @@ class EuclideanVectorChannel:
         return self.vectors[frame - self.frame_start]
 
     def _axis_cp(self, a, b, i):
-        """区間 [a,b]・軸 i の量子化ベジェ制御点を計算しインスタンスにキャッシュする。"""
+        """区間 [a,b]・軸 i の量子化ベジェ制御点を計算しインスタンスにキャッシュする。
+
+        採否はユークリッド距離(3軸合成)が許容内かで判定するため、軸別の早期終了閾値は
+        各軸が tol/√3 以内なら合成 <= tol になるよう tol/(√3·|denom_i|) を渡す(性能改修)。
+        """
         cp = self._cp_cache.get((a, b, i))
         if cp is None:
             va, vb = self._vec(a), self._vec(b)
-            cp = _axis_curve(va[i], vb[i], a, b, lambda f: self._vec(f)[i])
+            denom = abs(vb[i] - va[i])
+            ee = self.tol / (math.sqrt(3.0) * denom) if denom > 1e-9 else None
+            cp = _axis_curve(va[i], vb[i], a, b, lambda f: self._vec(f)[i], early_exit_err=ee)
             self._cp_cache[(a, b, i)] = cp
         return cp
 
@@ -239,10 +253,18 @@ class FovChannel:
         return self.values[frame - self.frame_start]
 
     def _axis_cp(self, a, b):
-        """区間 [a,b] の量子化ベジェ制御点を計算しインスタンスにキャッシュする。"""
+        """区間 [a,b] の量子化ベジェ制御点を計算しインスタンスにキャッシュする。
+
+        早期終了閾値は許容(度)を正規化y単位へ換算した tol/|denom| を渡す。FOV は出力時に
+        整数度へ丸めるため丸め分(最大0.5度)の上振れがありうるが、採否は丸め込みの residual で
+        測られ、超過すれば reduce 側で分割されるためフィット品質は担保される(性能改修)。
+        """
         cp = self._cp_cache.get((a, b))
         if cp is None:
-            cp = _axis_curve(self._value(a), self._value(b), a, b, self._value)
+            a0, a1 = self._value(a), self._value(b)
+            denom = abs(a1 - a0)
+            ee = self.tol / denom if denom > 1e-9 else None
+            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee)
             self._cp_cache[(a, b)] = cp
         return cp
 
@@ -428,7 +450,8 @@ class CameraRotationChannel:
                 )
             return out
 
-        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+        # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す(性能改修)。
+        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol)
         self._cp_cache[(a, b)] = cp
         return cp
 
@@ -529,7 +552,8 @@ class BoneRotationChannel:
                 for f in internal
             ]
 
-        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+        # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す(性能改修)。
+        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol)
         self._cp_cache[(a, b)] = cp
         return cp
 
@@ -596,13 +620,32 @@ def _bezier_y_at(px1, py1, px2, py2, x):
     return _bez(s, py1, py2)
 
 
-def fit_bezier_curve(xs, ys):
+def _quantize_solution(sol_x):
+    """最適化解 (x1,t,y1,y2) を 0..127 整数の制御点 (x1,y1,x2,y2) へ量子化する(§5.4)。"""
+    x1, t, y1, y2 = sol_x
+    x2 = x1 + (1.0 - x1) * t
+    x1q = _quantize_cp(x1)
+    x2q = _quantize_cp(x2)
+    y1q = _quantize_cp(y1)
+    y2q = _quantize_cp(y2)
+    if x1q > x2q:  # 量子化後の X 単調を担保(§5.4)
+        x2q = x1q
+    return (x1q, y1q, x2q, y2q)
+
+
+def fit_bezier_curve(xs, ys, early_exit_err=None):
     """正規化サンプル (xs, ys) に VMD補間曲線をフィットする(§5.2, §5.4)。
 
     制御点 (x1,y1,x2,y2) を 0..127 整数に量子化して返し、最大絶対誤差は量子化後の曲線を
     interp._solve_factor で再評価して測る(正規化y単位)。内部点が無ければ線形・誤差0。
     最適化は x2 = x1 + (1-x1)*t の再パラメータ化で全変数をボックス境界 [0,1] に収め、
-    X単調(x1<=x2)を保証する。複数初期値を決定論的に試して最良を採る。
+    X単調(x1<=x2)を保証する。複数初期値を決定論的に試して最良(コスト最小)を採る。
+
+    early_exit_err(正規化y単位)を渡すと、各初期値の評価後に現在の最良の量子化誤差がそれ以下
+    なら残りの初期値を試さず打ち切る(性能改修 performance-fix-plan.md Step 3)。閾値は呼び出し側
+    (チャンネル)が許容誤差から算出して渡す(tol / |denom|): 区間が許容内にフィットできた時点で
+    打ち切るため、採否(誤差 <= 許容)は変わらず、出力は全初期値試行と許容内一致になる。
+    None なら早期終了しない(全初期値試行=改修前と同一挙動)。
     """
     xs = list(xs)
     ys = list(ys)
@@ -614,8 +657,12 @@ def fit_bezier_curve(xs, ys):
         x2 = x1 + (1.0 - x1) * t
         return [_bezier_y_at(x1, y1, x2, y2, x) - y for x, y in zip(xs, ys)]
 
-    best = None
+    def quantized_err(cp):
+        return max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
+
     best_cost = math.inf
+    best_cp = None
+    best_err = None
     for ix1, iy1, ix2, iy2 in _BEZIER_INITS:
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
@@ -626,25 +673,19 @@ def fit_bezier_curve(xs, ys):
         cost = float(np.sum(np.square(residual(sol.x))))
         if cost < best_cost:
             best_cost = cost
-            best = sol.x
-    if best is None:
-        best = [20.0 / 127, _clip01((107 - 20) / (127 - 20)), 20.0 / 127, 107.0 / 127]
-
-    x1, t, y1, y2 = best
-    x2 = x1 + (1.0 - x1) * t
-    x1q = _quantize_cp(x1)
-    x2q = _quantize_cp(x2)
-    y1q = _quantize_cp(y1)
-    y2q = _quantize_cp(y2)
-    if x1q > x2q:  # 量子化後の X 単調を担保(§5.4)
-        x2q = x1q
-    cp = (x1q, y1q, x2q, y2q)
-
-    max_err = max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
-    return (cp, max_err)
+            best_cp = _quantize_solution(sol.x)
+            best_err = quantized_err(best_cp)
+            if early_exit_err is not None and best_err <= early_exit_err:
+                return (best_cp, best_err)  # 許容内にフィット済み。残り初期値は不要
+    if best_cp is None:
+        best_cp = _quantize_solution(
+            [20.0 / 127, _clip01((107 - 20) / (127 - 20)), 20.0 / 127, 107.0 / 127]
+        )
+        best_err = quantized_err(best_cp)
+    return (best_cp, best_err)
 
 
-def _fit_coeff_curve(xs, resid_at):
+def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     """共通の係数曲線 y(x)∈[0,1] をフィットし量子化制御点を返す(§5.3)。
 
     回転チャンネル用。fit_bezier_curve がスカラー (xs,ys) を直接合わせるのに対し、
@@ -653,6 +694,10 @@ def _fit_coeff_curve(xs, resid_at):
     coeff_fn(x) は正規化時間 x∈[0,1] に対する曲線値 y を返す。fit_bezier_curve と同じ
     再パラメータ化 x2=x1+(1-x1)*t でボックス境界に収め、複数初期値を決定論的に試す。
     内部点が無ければ線形制御点を返す。
+
+    early_exit_err を渡すと、現在の最良の量子化後残差(resid_at の単位=回転では度)の最大値が
+    それ以下なら残りの初期値を試さず打ち切る(性能改修)。閾値は呼び出し側が許容誤差(度)から
+    渡す。None なら早期終了しない(全初期値試行=改修前と同一挙動)。
     """
     if not xs:
         return _BEZIER_LINEAR_CP
@@ -662,8 +707,12 @@ def _fit_coeff_curve(xs, resid_at):
         x2 = x1 + (1.0 - x1) * t
         return resid_at(lambda x: _bezier_y_at(x1, y1, x2, y2, x))
 
-    best = None
+    def quantized_err(cp):
+        res = resid_at(lambda x: interp._solve_factor(*cp, x))
+        return max((abs(r) for r in res), default=0.0)
+
     best_cost = math.inf
+    best_cp = None
     for ix1, iy1, ix2, iy2 in _BEZIER_INITS:
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
@@ -674,19 +723,14 @@ def _fit_coeff_curve(xs, resid_at):
         cost = float(np.sum(np.square(residual(sol.x))))
         if cost < best_cost:
             best_cost = cost
-            best = sol.x
-    if best is None:
-        best = [20.0 / 127, _clip01((107 - 20) / (127 - 20)), 20.0 / 127, 107.0 / 127]
-
-    x1, t, y1, y2 = best
-    x2 = x1 + (1.0 - x1) * t
-    x1q = _quantize_cp(x1)
-    x2q = _quantize_cp(x2)
-    y1q = _quantize_cp(y1)
-    y2q = _quantize_cp(y2)
-    if x1q > x2q:  # 量子化後の X 単調を担保(§5.4)
-        x2q = x1q
-    return (x1q, y1q, x2q, y2q)
+            best_cp = _quantize_solution(sol.x)
+            if early_exit_err is not None and quantized_err(best_cp) <= early_exit_err:
+                return best_cp  # 許容内にフィット済み。残り初期値は不要
+    if best_cp is None:
+        best_cp = _quantize_solution(
+            [20.0 / 127, _clip01((107 - 20) / (127 - 20)), 20.0 / 127, 107.0 / 127]
+        )
+    return best_cp
 
 
 def _clip01(v):
