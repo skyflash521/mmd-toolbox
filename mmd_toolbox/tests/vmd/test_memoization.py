@@ -36,7 +36,6 @@ def _count_calls(monkeypatch, name):
     return counter
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2 memoization", strict=True)
 def test_scalar_curve_fit_memoized(monkeypatch):
     calls = _count_calls(monkeypatch, "fit_bezier_curve")
     ch = fit.LinearScalarChannel(0, _eased(0.0, 100.0), tol=1.0, mode="bezier")
@@ -46,7 +45,6 @@ def test_scalar_curve_fit_memoized(monkeypatch):
     assert calls["n"] == 1
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2 memoization", strict=True)
 def test_fov_curve_fit_memoized(monkeypatch):
     calls = _count_calls(monkeypatch, "fit_bezier_curve")
     ch = fit.FovChannel(0, _eased(30.0, 80.0), tol=1.0, mode="bezier")
@@ -56,7 +54,6 @@ def test_fov_curve_fit_memoized(monkeypatch):
     assert calls["n"] == 1
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2 memoization", strict=True)
 def test_euclidean_axis_fit_memoized(monkeypatch):
     # Y 軸だけが動く(X/Z は端点同値=正規化不能でフィットを呼ばない)。
     # よって実フィットは Y 軸の1区間ぶんで、residual→curve→curve で1回に収束する。
@@ -70,7 +67,6 @@ def test_euclidean_axis_fit_memoized(monkeypatch):
     assert calls["n"] == 1
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2 memoization", strict=True)
 def test_camera_rotation_coeff_fit_memoized(monkeypatch):
     calls = _count_calls(monkeypatch, "_fit_coeff_curve")
     c = [interp._solve_factor(*EASE, f / 10) for f in range(11)]
@@ -83,7 +79,6 @@ def test_camera_rotation_coeff_fit_memoized(monkeypatch):
     assert calls["n"] == 1
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2 memoization", strict=True)
 def test_bone_rotation_coeff_fit_memoized(monkeypatch):
     calls = _count_calls(monkeypatch, "_fit_coeff_curve")
 

@@ -67,17 +67,20 @@ def _axis_curve(a0, a1, a, b, sample_fn):
     return cp
 
 
-def _bezier_axis_pred(a0, a1, a, b, sample_fn):
+def _bezier_axis_pred(a0, a1, a, b, sample_fn, cp=None):
     """1軸の内部フレーム予測値を返す(ベジェ近似)。端点同値は平坦(a0固定)。
 
     sample_fn(frame) は当該軸のサンプル値。戻り値は {frame: 予測値}。
+    cp を渡すと量子化済み制御点の再計算(_axis_curve)を省く(メモ化)。端点同値の
+    平坦ケースは cp を使わないため、cp 有無で結果は変わらない。
     """
     span = b - a
     internal = range(a + 1, b)
     denom = a1 - a0
     if abs(denom) <= 1e-9:
         return {f: a0 for f in internal}
-    cp = _axis_curve(a0, a1, a, b, sample_fn)
+    if cp is None:
+        cp = _axis_curve(a0, a1, a, b, sample_fn)
     return {f: a0 + denom * interp._solve_factor(*cp, (f - a) / span) for f in internal}
 
 
@@ -94,13 +97,24 @@ class LinearScalarChannel:
         self.values = list(values)
         self.tol = float(tol)
         self.mode = mode
+        self._cp_cache = {}  # (a, b) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _value(self, frame):
         return self.values[frame - self.frame_start]
 
+    def _axis_cp(self, a, b):
+        """区間 [a,b] の量子化ベジェ制御点を計算しインスタンスにキャッシュする。"""
+        cp = self._cp_cache.get((a, b))
+        if cp is None:
+            cp = _axis_curve(self._value(a), self._value(b), a, b, self._value)
+            self._cp_cache[(a, b)] = cp
+        return cp
+
     def residual(self, a, b):
         if self.mode == "bezier":
-            pred = _bezier_axis_pred(self._value(a), self._value(b), a, b, self._value)
+            pred = _bezier_axis_pred(
+                self._value(a), self._value(b), a, b, self._value, cp=self._axis_cp(a, b)
+            )
         else:
             va, vb, span = self._value(a), self._value(b), b - a
             pred = {f: va + (vb - va) * (f - a) / span for f in range(a + 1, b)}
@@ -130,7 +144,7 @@ class LinearScalarChannel:
         """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す(§5.4)。"""
         if self.mode != "bezier":
             return _BEZIER_LINEAR_CP
-        return _axis_curve(self._value(a), self._value(b), a, b, self._value)
+        return self._axis_cp(a, b)
 
 
 class EuclideanVectorChannel:
@@ -145,9 +159,19 @@ class EuclideanVectorChannel:
         self.vectors = [tuple(float(c) for c in v) for v in vectors]
         self.tol = float(tol)
         self.mode = mode
+        self._cp_cache = {}  # (a, b, axis) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _vec(self, frame):
         return self.vectors[frame - self.frame_start]
+
+    def _axis_cp(self, a, b, i):
+        """区間 [a,b]・軸 i の量子化ベジェ制御点を計算しインスタンスにキャッシュする。"""
+        cp = self._cp_cache.get((a, b, i))
+        if cp is None:
+            va, vb = self._vec(a), self._vec(b)
+            cp = _axis_curve(va[i], vb[i], a, b, lambda f: self._vec(f)[i])
+            self._cp_cache[(a, b, i)] = cp
+        return cp
 
     def residual(self, a, b):
         va = self._vec(a)
@@ -159,7 +183,9 @@ class EuclideanVectorChannel:
         if self.mode == "bezier":
             # 各軸を個別にベジェ近似し(§4.2)、採否はユークリッド距離(§7.2)。
             axis_pred = [
-                _bezier_axis_pred(va[i], vb[i], a, b, lambda f, i=i: self._vec(f)[i])
+                _bezier_axis_pred(
+                    va[i], vb[i], a, b, lambda f, i=i: self._vec(f)[i], cp=self._axis_cp(a, b, i)
+                )
                 for i in range(3)
             ]
             errs = {
@@ -191,12 +217,7 @@ class EuclideanVectorChannel:
         """各軸の出力用制御点を (cp_x, cp_y, cp_z) で返す(§4.2, §5.4)。"""
         if self.mode != "bezier":
             return (_BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP)
-        va = self._vec(a)
-        vb = self._vec(b)
-        return tuple(
-            _axis_curve(va[i], vb[i], a, b, lambda f, i=i: self._vec(f)[i])
-            for i in range(3)
-        )
+        return tuple(self._axis_cp(a, b, i) for i in range(3))
 
 
 class FovChannel:
@@ -212,13 +233,24 @@ class FovChannel:
         self.values = [float(v) for v in values]
         self.tol = float(tol)
         self.mode = mode
+        self._cp_cache = {}  # (a, b) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _value(self, frame):
         return self.values[frame - self.frame_start]
 
+    def _axis_cp(self, a, b):
+        """区間 [a,b] の量子化ベジェ制御点を計算しインスタンスにキャッシュする。"""
+        cp = self._cp_cache.get((a, b))
+        if cp is None:
+            cp = _axis_curve(self._value(a), self._value(b), a, b, self._value)
+            self._cp_cache[(a, b)] = cp
+        return cp
+
     def residual(self, a, b):
         if self.mode == "bezier":
-            pred = _bezier_axis_pred(self._value(a), self._value(b), a, b, self._value)
+            pred = _bezier_axis_pred(
+                self._value(a), self._value(b), a, b, self._value, cp=self._axis_cp(a, b)
+            )
         else:
             va, vb, span = self._value(a), self._value(b), b - a
             pred = {f: va + (vb - va) * (f - a) / span for f in range(a + 1, b)}
@@ -244,7 +276,7 @@ class FovChannel:
         """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す(§5.4)。"""
         if self.mode != "bezier":
             return _BEZIER_LINEAR_CP
-        return _axis_curve(self._value(a), self._value(b), a, b, self._value)
+        return self._axis_cp(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +343,7 @@ class CameraRotationChannel:
         self.eulers = np.column_stack([np.unwrap(arr[:, i]) for i in range(3)])
         self.tol = float(tol)
         self.mode = mode
+        self._cp_cache = {}  # (a, b) -> 共通係数曲線の量子化制御点(区間フィットのメモ化)
 
     def _euler(self, frame):
         return self.eulers[frame - self.frame_start]
@@ -375,6 +408,9 @@ class CameraRotationChannel:
         """
         if self.mode != "bezier":
             return _BEZIER_LINEAR_CP
+        cached = self._cp_cache.get((a, b))
+        if cached is not None:
+            return cached
         ea = self._euler(a)
         eb = self._euler(b)
         span = b - a
@@ -392,7 +428,9 @@ class CameraRotationChannel:
                 )
             return out
 
-        return _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+        self._cp_cache[(a, b)] = cp
+        return cp
 
 
 class BoneRotationChannel:
@@ -414,6 +452,7 @@ class BoneRotationChannel:
         self.quats = aligned
         self.tol = float(tol)
         self.mode = mode
+        self._cp_cache = {}  # (a, b) -> slerp 係数曲線の量子化制御点(区間フィットのメモ化)
 
     def _q(self, frame):
         return self.quats[frame - self.frame_start]
@@ -474,6 +513,9 @@ class BoneRotationChannel:
         """
         if self.mode != "bezier":
             return _BEZIER_LINEAR_CP
+        cached = self._cp_cache.get((a, b))
+        if cached is not None:
+            return cached
         q0 = self._q(a)
         q1 = self._q(b)
         span = b - a
@@ -487,7 +529,9 @@ class BoneRotationChannel:
                 for f in internal
             ]
 
-        return _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at)
+        self._cp_cache[(a, b)] = cp
+        return cp
 
 
 # ---------------------------------------------------------------------------
