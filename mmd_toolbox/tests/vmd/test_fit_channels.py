@@ -86,7 +86,7 @@ def test_fov_rounding_within_half_degree():
 
 def test_fov_half_integer_quantization_is_half_degree():
     # 半整数(x.5)サンプルは整数へ丸めると必ず 0.5 度の量子化誤差になる。
-    # (丸め方向 half-up は誤差では区別できず、出力キー値の決定性は Step10 で検証する。)
+    # (丸め方向 half-up は誤差では区別できない。)
     vals = [30.0, 30.5, 31.0, 31.5, 32.0]
     ch = FovChannel(0, vals, tol=0.5)
     err, frame = ch.residual(0, 4)

@@ -5,7 +5,7 @@
 - BoneRotationChannel: 端点 quaternion の slerp(線形係数)で予測し、サンプルとの
   角度距離(度)で誤差。slerp 軌道から外れたフレームで分割。
 
-linear mode の評価のみ(ベジェ係数探索は後続)。
+linear mode の回転評価を対象とする。
 """
 
 import math

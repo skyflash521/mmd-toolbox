@@ -565,7 +565,7 @@ def reduce_camera_track(
                     cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
                 )
 
-        # 出力後検証は reduce_track の後で別途重くなりうる(性能計画 Step4)。フレーム進捗は
+        # 出力後検証は reduce_track の後で別途重くなりうる。フレーム進捗は
         # 100%付近で止まって見えるため、フェーズ名を添えて停滞表示でないことを示す(§2.7)。
         if progress is not None:
             progress(progress_base, total_frames, "出力後検証")

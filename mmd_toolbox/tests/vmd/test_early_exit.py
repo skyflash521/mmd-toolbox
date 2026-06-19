@@ -1,10 +1,10 @@
-"""ベジェフィットの早期終了テスト(性能改修 / performance-fix-plan.md Step 3)。
+"""ベジェフィットの早期終了テスト。
 
 fit_bezier_curve / _fit_coeff_curve は初期値4種(線形/ease-in/ease-out/ease-in-out)から
 最適化し最良(コスト最小)を採る。early_exit_err を渡すと、現在の最良の量子化誤差がそれ以下に
 なった時点で残りの初期値を試さず打ち切る。閾値は呼び出し側(チャンネル)が許容誤差から算出して
 渡す(区間が許容内にフィットできた時点で打ち切る)ため、採否(誤差 <= 許容)は変わらず、出力は
-全初期値試行と許容内一致になる。early_exit_err=None なら全初期値試行(改修前と同一挙動)。
+全初期値試行と許容内一致になる。early_exit_err=None なら早期終了せず全初期値を試す。
 
 検証は2系統:
 - 発火と過剰発火しないこと(least_squares 呼び出し回数)。
@@ -81,7 +81,7 @@ def test_coeff_curve_exits_after_first_init(monkeypatch):
 
 
 def test_full_search_preserves_known_curve_cp():
-    # early_exit_err なし(全初期値試行)では既知曲線の制御点復元は改修前と不変。
+    # early_exit_err なし(全初期値試行)では既知曲線の制御点を安定に復元する。
     xs, ys = _curve_ys(EASE, n=9)
     cp, err = fit.fit_bezier_curve(xs, ys)
     assert err < 0.01

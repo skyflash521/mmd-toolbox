@@ -4,8 +4,7 @@
 各チャンネルの「区間 [a,b] を表現したときの正規化誤差と最大誤差フレーム」を
 このモジュールの評価器から得る(チャンネルは normalized(a,b) を持つダックタイプ)。
 
-linear mode のスカラー評価器をまず提供する。ベジェ曲線フィット・回転評価器は
-後続ステップで追加する。
+スカラー(線形)評価器・ベジェ曲線フィット・回転評価器を提供する。
 """
 
 import math
@@ -55,7 +54,7 @@ def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None):
 
     端点同値(正規化不能)や内部点なしは線形制御点。sample_fn(frame) は当該軸のサンプル値。
     採否(_bezier_axis_pred)と出力(curve)が同一の制御点を使うよう、両者はこれを共有する。
-    early_exit_err(正規化y単位)は fit_bezier_curve の早期終了閾値へ渡す(性能改修)。
+    early_exit_err(正規化y単位)は fit_bezier_curve の早期終了閾値へ渡す。
     """
     span = b - a
     internal = range(a + 1, b)
@@ -107,7 +106,7 @@ class LinearScalarChannel:
         """区間 [a,b] の量子化ベジェ制御点を計算しインスタンスにキャッシュする。
 
         早期終了閾値は許容誤差を正規化y単位へ換算した tol/|denom| を渡す(区間が許容内に
-        フィットできた時点で残り初期値を打ち切る。性能改修)。
+        フィットできた時点で残り初期値を打ち切る)。
         """
         cp = self._cp_cache.get((a, b))
         if cp is None:
@@ -176,7 +175,7 @@ class EuclideanVectorChannel:
         """区間 [a,b]・軸 i の量子化ベジェ制御点を計算しインスタンスにキャッシュする。
 
         採否はユークリッド距離(3軸合成)が許容内かで判定するため、軸別の早期終了閾値は
-        各軸が tol/√3 以内なら合成 <= tol になるよう tol/(√3·|denom_i|) を渡す(性能改修)。
+        各軸が tol/√3 以内なら合成 <= tol になるよう tol/(√3·|denom_i|) を渡す。
         """
         cp = self._cp_cache.get((a, b, i))
         if cp is None:
@@ -257,7 +256,7 @@ class FovChannel:
 
         早期終了閾値は許容(度)を正規化y単位へ換算した tol/|denom| を渡す。FOV は出力時に
         整数度へ丸めるため丸め分(最大0.5度)の上振れがありうるが、採否は丸め込みの residual で
-        測られ、超過すれば reduce 側で分割されるためフィット品質は担保される(性能改修)。
+        測られ、超過すれば reduce 側で分割されるためフィット品質は担保される。
         """
         cp = self._cp_cache.get((a, b))
         if cp is None:
@@ -450,7 +449,7 @@ class CameraRotationChannel:
                 )
             return out
 
-        # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す(性能改修)。
+        # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す。
         cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol)
         self._cp_cache[(a, b)] = cp
         return cp
@@ -552,7 +551,7 @@ class BoneRotationChannel:
                 for f in internal
             ]
 
-        # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す(性能改修)。
+        # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す。
         cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol)
         self._cp_cache[(a, b)] = cp
         return cp
@@ -642,10 +641,10 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     X単調(x1<=x2)を保証する。複数初期値を決定論的に試して最良(コスト最小)を採る。
 
     early_exit_err(正規化y単位)を渡すと、各初期値の評価後に現在の最良の量子化誤差がそれ以下
-    なら残りの初期値を試さず打ち切る(性能改修 performance-fix-plan.md Step 3)。閾値は呼び出し側
-    (チャンネル)が許容誤差から算出して渡す(tol / |denom|): 区間が許容内にフィットできた時点で
-    打ち切るため、採否(誤差 <= 許容)は変わらず、出力は全初期値試行と許容内一致になる。
-    None なら早期終了しない(全初期値試行=改修前と同一挙動)。
+    なら残りの初期値を試さず打ち切る。閾値は呼び出し側(チャンネル)が許容誤差から算出して渡す
+    (tol / |denom|): 区間が許容内にフィットできた時点で打ち切るため、採否(誤差 <= 許容)は
+    変わらず、出力は全初期値試行と許容内一致になる。
+    None なら早期終了せず全初期値を試す。
     """
     xs = list(xs)
     ys = list(ys)
@@ -696,8 +695,8 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     内部点が無ければ線形制御点を返す。
 
     early_exit_err を渡すと、現在の最良の量子化後残差(resid_at の単位=回転では度)の最大値が
-    それ以下なら残りの初期値を試さず打ち切る(性能改修)。閾値は呼び出し側が許容誤差(度)から
-    渡す。None なら早期終了しない(全初期値試行=改修前と同一挙動)。
+    それ以下なら残りの初期値を試さず打ち切る。閾値は呼び出し側が許容誤差(度)から渡す。
+    None なら早期終了せず全初期値を試す。
     """
     if not xs:
         return _BEZIER_LINEAR_CP

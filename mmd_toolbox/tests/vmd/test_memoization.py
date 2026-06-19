@@ -1,4 +1,4 @@
-"""区間フィット結果のメモ化テスト(性能改修 / performance-fix-plan.md Step 1)。
+"""区間フィット結果のメモ化テスト。
 
 curve(a,b) と residual(a,b) は同一区間に対して同じベジェ曲線フィット
 (fit_bezier_curve / _fit_coeff_curve)を計算する。チャンネルはインスタンス単位で
