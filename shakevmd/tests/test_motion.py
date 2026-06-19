@@ -1,7 +1,7 @@
 """motion の確定的コアのテスト(shakevmd.md §5.1 フェード, §6.2 速度適応)。
 
-このサブステップは fade_envelope / frame_speeds / adaptive_amplitude を対象とする。
-settle・インパルス・プロファイルブレンドは後続サブステップ。
+このファイルは motion の確定的コア(フェード・フレーム速度・停止検出・適応振幅・settle 過渡・
+インパルス包絡・プロファイルクロスフェード・呼吸ドリフト)を対象とする。
 """
 
 import numpy as np

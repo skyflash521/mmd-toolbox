@@ -1,6 +1,6 @@
 """bake の視線揺れ変換のテスト(shakevmd.md §4.2)。
 
-サブステップA: apply_gaze_shake のみ。ベイクループ本体 bake() は後続サブステップ。
+視線揺れの基礎変換 apply_gaze_shake とベイクループ bake() を対象とする。
 §4.2 の実現は「揺れ角度 = 元角度 + ノイズ(オイラー加算)、カメラ位置固定になるよう
 中心を逆算」。距離0では素朴な角度加算と一致する。
 """
@@ -105,12 +105,11 @@ class TestApplyGazeShake:
 # ---------------------------------------------------------------------------
 # bake() ループ統合(§3/§4/§5、§7テスト契約)
 #
-# 本サブステップの範囲: ベイクコアループ(範囲解決・スナップ、正規化作業ビュー、
+# このセクション(TestBake)はベイクコアループに集中する: 範囲解決・スナップ、正規化作業ビュー、
 # カット分割と位相独立、毎フレームのサンプリング→ノイズ→視線揺れ変換、視野角丸め・
-# パースホールド、範囲外原本バイト保持、再現性)。
-# 後続サブステップ(本テストの対象外): モーション適応の静止/移動プロファイル
-# クロスフェード・呼吸ドリフト・settle(§6.2 の高度部分)。基本の adaptive_amplitude
-# (motion_damp 連動)は実装に含むが、専用契約テストは後続でまとめる。
+# パースホールド、範囲外原本バイト保持、再現性。基本の adaptive_amplitude(motion_damp 連動)と
+# settle(§6.2)もこの節で検証する。静止/移動プロファイルクロスフェード・呼吸ドリフトは
+# 別クラス(TestProfileCrossfadeAndBreathing)で検証する。
 # ---------------------------------------------------------------------------
 
 from mmd_toolbox.vmd import interp
@@ -599,8 +598,8 @@ class TestBake:
 
     def test_fov_ramp_interval_is_preserved_not_baked(self):
         # FOV が変化する区間(隣接キーで FOV が異なる)は密キーを焼かず元キーを温存する(§3.1)。
-        # 36→37 の1区間 [0,2]。旧仕様は frame1 を四捨五入(37)で密ベイクしたが、新仕様では
-        # frame1 に密キーを生やさず、両端の元キー(0,2)をバイト単位で温存して MMD の実数補間に委ねる
+        # 36→37 の1区間 [0,2]。frame1 に密キーを生やさず(整数丸めで 37 を焼くのを避ける)、
+        # 両端の元キー(0,2)をバイト単位で温存して MMD の実数補間に委ねる
         # (整数 FOV を毎フレーム焼くとズームが階段になるのを避ける)。
         keys = [
             kf(0, fov=36, interp_block=bake.LINEAR_CAMERA_INTERP),
@@ -1076,7 +1075,7 @@ class TestWalkingGait:
 
 class TestCoreApiTuning:
     """§8/§2.5: 内蔵パラメータ(静止/移動プロファイル=オクターブ重み構成、settle 収束時間)を
-    bake() 引数で調整できる(coreAPI)。既定は従来の内蔵定数で挙動不変。
+    bake() 引数で調整できる(coreAPI)。引数省略時は内蔵定数の既定値で動く。
     オクターブ数はプロファイル長で決まる(別引数を設けず連動を一本化)。"""
 
     N = 99
@@ -1243,9 +1242,8 @@ class TestNaiveRotation:
 class TestBakeResolvedRanges:
     """BakeResult.resolved: 端を最近接キーへスナップ済みの適用範囲(昇順・非接触)。
 
-    Step 3 で shakevmd が in-process で reduce を呼ぶとき、reduce に渡す適用範囲が要る。
-    bake は既に内部で同じスナップ(_snap)を行っているので、その結果を result.resolved として
-    公開し、CLI が再計算(_snap の二重実装)せず単一の正にできるようにする。
+    reduce へ適用範囲を渡す呼び出し側が、bake が内部で行うスナップ(_snap)を再実装せず
+    単一の正を参照できるよう、その結果を result.resolved として公開する。
     """
 
     def test_resolved_full_range_when_no_ranges(self):
