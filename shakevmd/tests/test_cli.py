@@ -6,8 +6,8 @@ CLI はコアの薄いラッパー: 引数解析 → VMD読み(mmd_toolbox.vmd.i
 
 `TestCli` はコア CLI(**§2.1-2.6 + §9**: I/O・範囲・主要揺れパラメーター・終了コード)を、
 `TestCliOps` は **§2.7 運用/プリセット系**(`--preset`・`--dry-run`・`--preview-csv`・`-v/--verbose`)
-を検証する。§2.7 のうち内蔵パラメーター(オクターブ/プロファイル)のプリセット調整と walking の
-歩調成分ノイズは、コア拡張を要するため後続サブステップへ繰延(本段階のプリセットは公開引数の束)。
+を検証する。walking の歩調成分(gait_freq/gait_amp)は内蔵パラメーターとして転送・検証する。
+内蔵パラメーター(静止/移動プロファイルのオクターブ重み)のプリセット別調整値はここでは扱わない。
 """
 
 import sys
@@ -706,8 +706,8 @@ import csv as _csv
 class TestCliOps:
     """§2.7 運用/プリセット系: --preset / --dry-run / --preview-csv / -v,--verbose。
 
-    本段階のプリセットは公開引数の束(個別引数が優先)。内蔵パラメーター調整と
-    walking 歩調成分はコア拡張後の後続サブステップへ繰延(test_cli.py docstring 参照)。
+    プリセットは公開引数の束(個別引数が優先)に加え、walking は内蔵の歩調成分を持つ。
+    静止/移動プロファイルのプリセット別調整値はここでは扱わない(モジュール冒頭 docstring 参照)。
     """
 
     # --- プリセット定義(presets.py) -------------------------------------
@@ -1133,3 +1133,134 @@ class TestCliOps:
         assert cli.main([inp, "-o", out, "--verbose"]) == 0
         long = capsys.readouterr()
         assert short_text == (long.out + long.err)
+
+
+import math
+
+from mmd_toolbox.vmd import interp
+from mmd_toolbox.vmd.sample import perspective_series
+
+# --smooth が使う固定許容(shakevmd 側に持つ aggressive 値: 位置・回転[度]・距離・視野角[度])。
+SMOOTH_POS_TOL = 0.10
+SMOOTH_ROT_TOL_DEG = 0.25
+SMOOTH_DIST_TOL = 0.10
+SMOOTH_FOV_TOL = 1.00
+
+# frame30 で FOV が瞬間的に跳ぶ(=カット。§3.1 で密ベイクされる)入力。FOV チャンネルを
+# --smooth 経由で行使するための素材(他チャンネルは既定で揺れる)。
+FOV_CUT_KEYS = [
+    cam(0, fov=30), cam(29, fov=30), cam(30, fov=45), cam(60, fov=45),
+]
+
+# カメラ補間24バイトのチャンネル並び: 位置X/Y/Z(0:12)・回転(12:16)・距離(16:20)・視野角(20:24)。
+# 各軸は ax,bx,ay,by の4バイトで制御点 (ax,ay)/(bx,by)。線形は対角線上(ax==ay かつ bx==by)。
+
+
+def _curved(g4):
+    """補間1軸(4バイト ax,bx,ay,by)が線形でない=ベジェ曲線か。線形は ax==ay かつ bx==by。"""
+    return g4[0] != g4[2] or g4[1] != g4[3]
+
+# はっきり揺れる手ぶれ設定(全範囲ベイク、固定 seed)。
+_SHAKE_ARGS = ["--amp-rot", "8.0", "--amp-pos", "1.0", "--seed", "1", "--fade", "0.1"]
+
+
+class TestSmooth:
+    """`--smooth`: ベイク後に in-process で reduce を呼び、疎ベジェ出力にする。
+
+    目的は 30fps 超再生のカクつき解消だが、**手ぶれ品質を損なわないこと**が必須要件。よって固定するのは
+    「疎ベジェへ削減」「位置・回転チャンネルがベジェ補間になる」「密ベイクを許容内で保つ(位置・回転・距離は
+    サブフレーム、FOV は専用テスト)」「perspective を保つ」「中間VMDを書かず最終出力1回のみ」。
+    平坦化しないことは位置忠実性が同時に担保する(平坦化すれば素の動きから許容を超えて外れる)。
+    """
+
+    def _bake(self, out_path, *extra):
+        inp = write_input(out_path.parent / "in.vmd")
+        rc = cli.main([inp, "-o", str(out_path), *_SHAKE_ARGS, *extra])
+        return rc
+
+    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
+    def test_smooth_flag_accepted(self, tmp_path):
+        out = tmp_path / "smooth.vmd"
+        assert self._bake(out, "--smooth") == 0
+        assert out.exists()
+
+    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
+    def test_smooth_reduces_key_count(self, tmp_path):
+        dense = tmp_path / "dense.vmd"
+        smooth = tmp_path / "smooth.vmd"
+        assert self._bake(dense) == 0
+        assert self._bake(smooth, "--smooth") == 0
+        n_dense = len(read_camera(dense))
+        n_smooth = len(read_camera(smooth))
+        assert n_dense == 61                # 全範囲 0..60 を毎フレーム密ベイク
+        assert n_smooth < n_dense * 0.6     # 実質的な疎化(1キー削るだけでは通らない)
+
+    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
+    def test_smooth_position_and_rotation_channels_are_bezier(self, tmp_path):
+        # ジャダー解消の要点は位置・回転チャンネルの補間が線形でなくなること。制御点の形状で
+        # 「曲線(線形でない)」を判定し(別の線形バイト列に騙されない)、位置(0:12 の3軸)と
+        # 回転(12:16)で個別に、曲線な区間を持つキーが在ることを要求する。
+        smooth = tmp_path / "smooth.vmd"
+        assert self._bake(smooth, "--smooth") == 0
+        # 補間は到達キー(区間の終端)に乗る。先頭キーの補間バイトは区間評価に使われないため除外。
+        ks = [bytes(k.interpolation) for k in read_camera(smooth)[1:]]
+        assert any(any(_curved(b[j:j + 4]) for j in (0, 4, 8)) for b in ks)  # 位置チャンネルが曲線
+        assert any(_curved(b[12:16]) for b in ks)                            # 回転チャンネルが曲線
+
+    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
+    def test_smooth_preserves_shake_within_tolerance(self, tmp_path):
+        # 疎ベジェを密ベイクと比較し、位置・回転・距離の3系統が許容内であること(= 手ぶれを許容内で
+        # 忠実に保持)。整数フレームだけでなく **サブフレーム(0.25刻み=60fps超を含む)** でも検証し、
+        # ベジェのオーバーシュート・逸脱を契約に含める。FOV はこの入力で一定なので
+        # test_smooth_preserves_fov(FOV 変化入力)で別途検証する。
+        dense = tmp_path / "dense.vmd"
+        smooth = tmp_path / "smooth.vmd"
+        assert self._bake(dense) == 0
+        assert self._bake(smooth, "--smooth") == 0
+        dk, sk = read_camera(dense), read_camera(smooth)
+        for i in range(0, 241):         # 0..60 を 0.25 刻み
+            f = i * 0.25
+            d = interp.sample_camera(dk, f)
+            s = interp.sample_camera(sk, f)
+            assert math.dist(s["position"], d["position"]) <= SMOOTH_POS_TOL + 1e-6
+            for ax in range(3):         # 回転3軸(度)。±2π ラップ不変な最小角度差で比較。
+                diff = s["rotation"][ax] - d["rotation"][ax]
+                diff_deg = abs(math.degrees(math.atan2(math.sin(diff), math.cos(diff))))
+                assert diff_deg <= SMOOTH_ROT_TOL_DEG + 1e-6
+            assert abs(s["distance"] - d["distance"]) <= SMOOTH_DIST_TOL + 1e-6
+        # 位置忠実性(全サンプルで <= 0.10)が成り立つため、揺れが平坦化していないことも同時に担保される
+        # (平坦化すれば素の動きから 0.10 を超えて外れ、密ベイクとの差が許容を超える)。
+        # perspective(離散ホールド)は全フレームで密ベイクと一致(壊さない)。
+        assert perspective_series(sk, 0, 60) == perspective_series(dk, 0, 60)
+
+    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
+    def test_smooth_preserves_fov(self, tmp_path):
+        # FOV が変化する入力(frame30 で 30→45 の瞬間ジャンプ=カット)で FOV チャンネルを --smooth
+        # 経由で行使し、全フレームで密ベイクと許容内(視野角 1.00 度)であること(--smooth が FOV を
+        # 壊さない)を確認する。
+        inp = write_input(tmp_path / "in.vmd", keys=FOV_CUT_KEYS)
+        dense = tmp_path / "dense.vmd"
+        smooth = tmp_path / "smooth.vmd"
+        assert cli.main([inp, "-o", str(dense), *_SHAKE_ARGS]) == 0
+        assert cli.main([inp, "-o", str(smooth), *_SHAKE_ARGS, "--smooth"]) == 0
+        dk, sk = read_camera(dense), read_camera(smooth)
+        for i in range(0, 241):         # 0..60 を 0.25 刻み(60fps超の FOV 補間も検証)
+            f = i * 0.25
+            sf = interp.sample_camera(sk, f)["fov"]
+            df = interp.sample_camera(dk, f)["fov"]
+            assert abs(sf - df) <= SMOOTH_FOV_TOL + 1e-6
+
+    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
+    def test_smooth_writes_single_vmd_no_intermediate(self, tmp_path, monkeypatch):
+        # 中間VMDを書かない(密キーをディスクへ出して再読込しない)。出力書き込みは最終1回のみ。
+        inp = write_input(tmp_path / "in.vmd")       # 入力はパッチ前に書く(カウント対象外)
+        out = tmp_path / "smooth.vmd"
+        calls = []
+        real_write = cli.io.write_file
+        def counting(doc, path):
+            calls.append(str(path))
+            return real_write(doc, path)
+        monkeypatch.setattr(cli.io, "write_file", counting)
+        assert cli.main([inp, "-o", str(out), *_SHAKE_ARGS, "--smooth"]) == 0
+        assert calls == [str(out)]    # 最終出力先へ1回だけ(中間VMDを書かない)
+        assert out.exists()
