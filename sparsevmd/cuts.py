@@ -2,8 +2,8 @@
 
 CLI 層の閾値文字列パース(`POS,ROT,DIST` / `POS,ROT`)は sparsevmd 固有として本モジュールに
 残す。不連続検出・必須境界の本体(detect_cuts_* / perspective_cut_frames / assemble_boundaries
-と角度ヘルパ)は共通ライブラリ mmd_toolbox.vmd.cuts へ移送したので、旧 import パス
-(`sparsevmd.cuts`)維持のため同名で再公開する(refactor-plan-direct-reduce.md Step 1)。
+と角度ヘルパ)は共通ライブラリ mmd_toolbox.vmd.cuts にあるので、旧 import パス
+(`sparsevmd.cuts`)維持のため同名で再公開する。
 """
 
 import math

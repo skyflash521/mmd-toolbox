@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from mmd_toolbox.vmd import interp, io
 
-# perspective_series は mmd_toolbox.vmd.sample へ移送(refactor-plan-direct-reduce.md Step 1)。
+# perspective_series の実体は mmd_toolbox.vmd.sample にある。
 # 旧 import パス(sparsevmd.sample.perspective_series)維持のため再公開する。
 from mmd_toolbox.vmd.sample import perspective_series  # noqa: F401
 
@@ -38,8 +38,8 @@ def build_tracks(doc, target):
     本関数はトラック分割に専念しエラーは送出しない。
 
     正規化警告(重複ドロップ・並べ替え)は現状この層では破棄する。ユーザーへの提示
-    (verbose/レポート。§2.7)が必要な場合は、レポート統合(Phase9/Step11)で
-    io.normalize を別途呼ぶか本関数の警告返却拡張で対応する。
+    (verbose/レポート。§2.7)が必要な場合は、io.normalize を別途呼ぶか本関数の
+    警告返却を拡張して対応する。
     """
     sections = {"camera": ["camera"], "bone": ["bone"], "all": ["camera", "bone"]}[target]
     normalized, _warnings = io.normalize(doc, sections=sections)

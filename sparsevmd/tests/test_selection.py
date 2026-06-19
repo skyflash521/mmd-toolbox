@@ -9,7 +9,7 @@ SelectionError はそれまでに蓄積した警告を .warnings に保持する
 警告はセレクタ値を含む文字列で、原因(どの名前/パターンか)を区別できる。
 
 bone-file のパス検証(不在・非通常ファイル)は CLI(argparse)層の責務であり、
-parse_bone_file はテキストを受ける。パス検証は CLI テスト(Step4)で扱う。
+parse_bone_file はテキストを受ける。パス検証は CLI(argparse)層のテストで扱う。
 """
 
 import pytest

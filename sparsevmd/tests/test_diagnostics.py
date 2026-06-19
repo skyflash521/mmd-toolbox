@@ -82,7 +82,7 @@ def test_diagnostics_captures_seam_rewrites():
 
 
 def test_diagnostics_optional_no_dict():
-    # diagnostics 未指定でも従来どおり動く。
+    # diagnostics 未指定でも(省略可能引数として)正常に動く。
     src = [cam(f, center=(float(f), 0.0, 0.0)) for f in range(11)]
     keys = camera_track(src, [(0, 10)])
     assert [k.frame for k in keys] == [0, 10]

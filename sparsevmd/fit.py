@@ -1,8 +1,8 @@
 """sparsevmd.fit: 後方互換のための re-export。
 
-補間曲線フィット・誤差評価の実体は共通ライブラリ mmd_toolbox.vmd.fit へ移送した
-(リファクタ refactor-plan-direct-reduce.md Step 1)。本モジュールは旧 import パス
-(`sparsevmd.fit`)を維持するための薄い再公開層で、公開・非公開シンボルを同名で再輸出する。
+補間曲線フィット・誤差評価の実体は共通ライブラリ mmd_toolbox.vmd.fit にある。
+本モジュールは旧 import パス(`sparsevmd.fit`)を維持するための薄い再公開層で、
+公開・非公開シンボルを同名で再輸出する。
 """
 
 from mmd_toolbox.vmd.fit import (  # noqa: F401

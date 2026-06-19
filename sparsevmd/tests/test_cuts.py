@@ -2,8 +2,7 @@
 
 `POS,ROT,DIST`(camera)/ `POS,ROT`(bone)のCLI閾値文字列を解析する。
 個数違い・非数値・負値・非有限(nan/inf)・空白混入・空要素は ValueError。
-不連続検出・必須境界の本体テストは mmd_toolbox.vmd.cuts へ移送済み
-(refactor-plan-direct-reduce.md Step 1)。
+不連続検出・必須境界の本体テストは mmd_toolbox.vmd.cuts にある。
 """
 
 import pytest

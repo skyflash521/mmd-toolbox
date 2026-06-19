@@ -10,10 +10,9 @@ CLI 層はこの ValueError を引数エラー(終了コード2)に対応づけ�
 import math
 from dataclasses import fields
 
-# Tolerances(許容誤差の器)は共通ライブラリ mmd_toolbox.vmd.reduce へ移送した
-# (refactor-plan-direct-reduce.md Step 1)。preset 名 → 値の表と検証は sparsevmd の
-# 運用ポリシーとして本モジュールに残す。旧 import パス(sparsevmd.presets.Tolerances)
-# 維持のため再公開する。
+# Tolerances(許容誤差の器)の実体は共通ライブラリ mmd_toolbox.vmd.reduce にある。
+# preset 名 → 値の表と検証は sparsevmd の運用ポリシーとして本モジュールに残す。
+# 旧 import パス(sparsevmd.presets.Tolerances)維持のため再公開する。
 from mmd_toolbox.vmd.reduce import Tolerances  # noqa: F401
 
 # 品質プリセット名(§2.3)。

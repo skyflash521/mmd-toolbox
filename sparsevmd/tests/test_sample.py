@@ -1,4 +1,4 @@
-"""サンプリング層のテスト(sparsevmd.md §3.1, §5.1 / 実装計画 Phase3)。
+"""サンプリング層のテスト(sparsevmd.md §3.1, §5.1)。
 
 sample.build_tracks は対象セクション(camera/bone)を内部作業ビューで正規化
 (フレームソート・同一キー後勝ち)し、camera を1トラック、bone をボーン名ごとの
