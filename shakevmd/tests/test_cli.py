@@ -1178,13 +1178,11 @@ class TestSmooth:
         rc = cli.main([inp, "-o", str(out_path), *_SHAKE_ARGS, *extra])
         return rc
 
-    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
     def test_smooth_flag_accepted(self, tmp_path):
         out = tmp_path / "smooth.vmd"
         assert self._bake(out, "--smooth") == 0
         assert out.exists()
 
-    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
     def test_smooth_reduces_key_count(self, tmp_path):
         dense = tmp_path / "dense.vmd"
         smooth = tmp_path / "smooth.vmd"
@@ -1195,7 +1193,6 @@ class TestSmooth:
         assert n_dense == 61                # 全範囲 0..60 を毎フレーム密ベイク
         assert n_smooth < n_dense * 0.6     # 実質的な疎化(1キー削るだけでは通らない)
 
-    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
     def test_smooth_position_and_rotation_channels_are_bezier(self, tmp_path):
         # ジャダー解消の要点は位置・回転チャンネルの補間が線形でなくなること。制御点の形状で
         # 「曲線(線形でない)」を判定し(別の線形バイト列に騙されない)、位置(0:12 の3軸)と
@@ -1207,7 +1204,6 @@ class TestSmooth:
         assert any(any(_curved(b[j:j + 4]) for j in (0, 4, 8)) for b in ks)  # 位置チャンネルが曲線
         assert any(_curved(b[12:16]) for b in ks)                            # 回転チャンネルが曲線
 
-    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
     def test_smooth_preserves_shake_within_tolerance(self, tmp_path):
         # 疎ベジェを密ベイクと比較し、位置・回転・距離の3系統が許容内であること(= 手ぶれを許容内で
         # 忠実に保持)。整数フレームだけでなく **サブフレーム(0.25刻み=60fps超を含む)** でも検証し、
@@ -1233,7 +1229,6 @@ class TestSmooth:
         # perspective(離散ホールド)は全フレームで密ベイクと一致(壊さない)。
         assert perspective_series(sk, 0, 60) == perspective_series(dk, 0, 60)
 
-    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
     def test_smooth_preserves_fov(self, tmp_path):
         # FOV が変化する入力(frame30 で 30→45 の瞬間ジャンプ=カット)で FOV チャンネルを --smooth
         # 経由で行使し、全フレームで密ベイクと許容内(視野角 1.00 度)であること(--smooth が FOV を
@@ -1250,7 +1245,40 @@ class TestSmooth:
             df = interp.sample_camera(dk, f)["fov"]
             assert abs(sf - df) <= SMOOTH_FOV_TOL + 1e-6
 
-    @pytest.mark.xfail(reason="impl pending: --smooth", strict=True)
+    def test_smooth_preserves_cut_boundary(self, tmp_path):
+        # 位置カット(frame30 で中心が大きく跳ぶ)入力で、平滑化後もカット前後の位置が密ベイクと
+        # サブフレームで許容内に収まること(=カットがなだらかに溶けない)。これはエンドツーエンドの
+        # カット忠実性の確認で、keep_frames 経路の分離検証は別テストが担う(出力後検証による
+        # 自動キー化でも段差は保たれ得るため、最終キーの観察だけでは経路を切り分けられない)。
+        inp = write_input(tmp_path / "in.vmd", keys=CUT_KEYS)
+        dense = tmp_path / "dense.vmd"
+        smooth = tmp_path / "smooth.vmd"
+        assert cli.main([inp, "-o", str(dense), *_SHAKE_ARGS]) == 0
+        assert cli.main([inp, "-o", str(smooth), *_SHAKE_ARGS, "--smooth"]) == 0
+        dk, sk = read_camera(dense), read_camera(smooth)
+        for i in range(0, 241):         # 0..60 を 0.25 刻み(カット境界 frame30 の前後も含む)
+            f = i * 0.25
+            d = interp.sample_camera(dk, f)
+            s = interp.sample_camera(sk, f)
+            assert math.dist(s["position"], d["position"]) <= SMOOTH_POS_TOL + 1e-6
+
+    def test_smooth_passes_bake_cuts_as_keep_frames(self, tmp_path, monkeypatch):
+        # カット境界の供給源が keep_frames であることを配線レベルで検証する。CLI は reduce 側の
+        # 再検出を無効化(no_cut_detect=True)し、bake が確定したカット F の F-1/F を keep_frames で
+        # 渡す。reduce 呼び出しを捕捉してこの契約を直接確かめる(最終キーの観察では出力後検証の
+        # 自動キー化と区別できないため)。frame30 の位置カットでは 29,30 が含まれる。
+        inp = write_input(tmp_path / "in.vmd", keys=CUT_KEYS)
+        out = tmp_path / "smooth.vmd"
+        captured = {}
+        real = cli.reduce_camera_track
+        def capturing(*args, **kwargs):
+            captured.update(kwargs)
+            return real(*args, **kwargs)
+        monkeypatch.setattr(cli, "reduce_camera_track", capturing)
+        assert cli.main([inp, "-o", str(out), *_SHAKE_ARGS, "--smooth"]) == 0
+        assert captured["no_cut_detect"] is True
+        assert {29, 30} <= set(captured["keep_frames"])
+
     def test_smooth_writes_single_vmd_no_intermediate(self, tmp_path, monkeypatch):
         # 中間VMDを書かない(密キーをディスクへ出して再読込しない)。出力書き込みは最終1回のみ。
         inp = write_input(tmp_path / "in.vmd")       # 入力はパッチ前に書く(カウント対象外)

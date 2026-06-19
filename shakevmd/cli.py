@@ -14,6 +14,7 @@ import os
 import sys
 
 from mmd_toolbox.vmd import interp, io
+from mmd_toolbox.vmd.reduce import Tolerances, reduce_camera_track
 from shakevmd import cuts, presets
 from shakevmd.bake import bake
 
@@ -24,6 +25,17 @@ _HARD_DEFAULTS = {
     "freq": 1.2, "motion_damp": 1.0, "settle": 0.0, "cut_threshold": (5.0, 20.0),
     "fade": 0.7,
 }
+
+# --smooth でベイク後にプロセス内で疎ベジェへ削減する固定設定。
+# 許容はカメラ4項目の aggressive 値。bone はこの経路で不参照のダミー値。
+_SMOOTH_TOLERANCES = Tolerances(
+    bone_pos=1.0, bone_rot=30.0,
+    camera_pos=0.10, camera_rot=0.25, camera_distance=0.10, camera_fov=1.00,
+)
+# reduce へ渡すカット距離閾値。検出は no_cut_detect=True で無効化するが cut_thresholds は
+# 必須引数で 3 要素を要するため、pos と同程度の値を添える。
+_SMOOTH_CUT_DIST = 5.0
+_SMOOTH_MAX_SEG = 5
 
 
 def _finite_float(text):
@@ -153,6 +165,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     p.add_argument("--preview-csv", dest="preview_csv")
     p.add_argument("-v", "--verbose", action="store_true")
+    # opt-in: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを解消する。
+    p.add_argument("--smooth", action="store_true")
     return p
 
 
@@ -357,7 +371,32 @@ def main(argv=None) -> int:
     if args.dry_run:
         return 0
 
-    doc.camera = result.camera_keys
+    # --smooth: ベイクした密キーをプロセス内でそのまま reduce へ渡し、疎ベジェへ変換する
+    # (中間VMDは作らない)。範囲はベイクと同じスナップ後範囲 result.resolved を使い、CLI
+    # パイプラインと同値にする。
+    # カット境界: bake は原本の隣接キーで、reduce はベイク後の毎フレーム値でカットを検出するため
+    # 検出ドメインが異なる。reduce 側の再検出は無効化し(no_cut_detect=True)、ベイクが確定した
+    # カット detected_cuts だけを境界とする。カット F は F-1→F の不連続なので、両側を必須キーに
+    # して境界をまたぐ曲線を作らないよう F-1 と F の対を keep_frames に渡す(perspective 切替は
+    # reduce が常に境界化する)。再検出を切ることで、振幅の大きい手ぶれを区間内の偽カットと
+    # 誤判定する余地も無くす。
+    camera_out = result.camera_keys
+    if args.smooth:
+        keep = sorted({f for c in detected_cuts for f in (c - 1, c) if f >= 0})
+        camera_out = reduce_camera_track(
+            result.camera_keys,
+            result.resolved,
+            _SMOOTH_TOLERANCES,
+            cut_thresholds=(cut_threshold[0], cut_threshold[1], _SMOOTH_CUT_DIST),
+            keep_frames=tuple(keep),
+            no_cut_detect=True,
+            min_seg=1,
+            max_seg=_SMOOTH_MAX_SEG,
+            strict=False,
+            curve_mode="bezier",
+        )
+
+    doc.camera = camera_out
 
     # 出力書き込み。失敗の原因で終了コードを分ける(§9):
     # - OverflowError: 過大な値が float32 シリアライズで溢れた=引数起因 → コード2。
