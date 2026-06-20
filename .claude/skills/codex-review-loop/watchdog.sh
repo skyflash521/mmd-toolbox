@@ -15,7 +15,6 @@
 #                           (b) WALL_CAP_SECS elapsed with the log identified but no terminal.
 #
 # Before exiting it prints, to stdout:
-#     BASELINE_READY        (once, right after the baseline snapshot — see handshake below)
 #     LOG=<path>            (empty if no log was identified)
 #     OUTCOME=<code> <reason>
 # so the caller reads its background output file to learn WHICH log holds the result.
@@ -28,8 +27,9 @@
 # snapshot; the newest such log wins. A still-running orphan log from a prior or failed round
 # stays in the baseline and is therefore never mistaken for this round's, even while it is being
 # written. Correctness depends on the baseline being taken before the companion creates this
-# round's log — enforced by the BASELINE_READY handshake (the caller waits for it before
-# launching the agent), not by luck.
+# round's log — ensured by launch ordering (the caller starts this watchdog in the background
+# before the agent; the ~100ms baseline precedes the agent's ~seconds-later job log). A rare
+# mis-order only false-fires no-start, which degrades to a safe retry.
 #
 # Accepted limitation (best-effort safety net; the agent response is the primary result channel,
 # so a wrong watchdog signal degrades to a retry, never a wrong fix): two checkouts of a
@@ -94,18 +94,14 @@ list_logs() {
 # True if $1 was present at the baseline snapshot (exact line match against the baseline set).
 in_baseline() { printf '%s\n' "$baseline" | awk -v k="$1" '$0==k{f=1} END{exit !f}'; }
 
-# Snapshot pre-existing logs (paths only) BEFORE signalling readiness. LAUNCH ORDERING: the
-# caller must start this watchdog, wait for BASELINE_READY, and only then launch the agent — so
-# this baseline is taken before the companion creates this round's log.
+# Snapshot pre-existing logs (paths only). LAUNCH ORDERING (no readiness poll — staying
+# prompt-free): the caller starts this watchdog in the background BEFORE the agent. This snapshot
+# is a ~100ms find, while the companion's job log appears ~seconds after the agent launches, so
+# this round's log is reliably "new since baseline" without any handshake. A rare mis-order only
+# false-fires no-start, which degrades to a safe retry — not worth a prompt-generating poll.
 baseline=$(list_logs | sort)
 
-# Readiness handshake. The caller waits for this line in our output before launching the agent.
-# stdout only (our normal output channel, like LOG=/OUTCOME=) — no filesystem write, so the
-# watchdog stays read-only; bash's printf builtin write(2)s immediately, so it appears at once.
-printf 'BASELINE_READY\n'
-
-# Start the grace/wall clocks AFTER baseline+readiness, so baseline time is not charged against
-# the agent's startup grace (the caller launches the agent only after BASELINE_READY).
+# Start the grace/wall clocks right after the baseline snapshot.
 start=$(now)
 
 # Pick the newest log that did not exist at the baseline snapshot (this round's).
