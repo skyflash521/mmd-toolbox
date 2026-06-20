@@ -1356,3 +1356,36 @@ class TestSmooth:
         for k in ks[1:]:
             b = bytes(k.interpolation)
             assert all(not _curved(b[j:j + 4]) for j in (0, 4, 8, 12, 16, 20))
+
+    def test_smooth_preserves_high_frequency_shake(self, tmp_path):
+        # 高周波(帯域上限付近)＋強インパルスの速いトランジェントでも、疎ベジェ化で揺れが
+        # つぶれない(平坦化しない)こと。reduce の出力後検証が許容超過区間を1フレームまで分割
+        # するため、整数フレームでは密ベイクと aggressive 許容内に収まり、振幅(peak-to-peak)も
+        # 保たれる(=周波数を上げても削減で振幅が潰れない)。
+        inp = write_input(tmp_path / "in.vmd", keys=[cam(0), cam(60)])
+        dense = tmp_path / "dense.vmd"
+        smooth = tmp_path / "smooth.vmd"
+        hf = [*_SHAKE_ARGS, "--freq", "2.0", "--impulse", "30:60:0.08"]  # 8Hz帯域＋速い衝撃
+        assert cli.main([inp, "-o", str(dense), *hf, "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(smooth), *hf]) == 0
+        dk, sk = read_camera(dense), read_camera(smooth)
+        # 整数フレームで密と許容内(速い揺れもキー化され、つぶれない)
+        for f in range(0, 61):
+            d = interp.sample_camera(dk, f)
+            s = interp.sample_camera(sk, f)
+            assert math.dist(s["position"], d["position"]) <= SMOOTH_POS_TOL + 1e-6
+            for ax in range(3):
+                diff = s["rotation"][ax] - d["rotation"][ax]
+                diff_deg = abs(math.degrees(math.atan2(math.sin(diff), math.cos(diff))))
+                assert diff_deg <= SMOOTH_ROT_TOL_DEG + 1e-6
+        # 入力が「速いトランジェント(高周波)」かつ「振幅が十分大きい」ことを固定する
+        # (緩い揺れや平坦な入力で比較が形骸化しないように)。回転X(整数フレーム)で確認。
+        drx = [interp.sample_camera(dk, f)["rotation"][0] for f in range(61)]
+        srx = [interp.sample_camera(sk, f)["rotation"][0] for f in range(61)]
+        max_step = max(abs(math.degrees(drx[f + 1] - drx[f])) for f in range(60))
+        assert max_step > 2.0          # 隣接フレームで大きく変化=速い揺れ(高周波)
+        dpp = math.degrees(max(drx) - min(drx))
+        spp = math.degrees(max(srx) - min(srx))
+        assert dpp > 5.0               # 振幅が十分大きい(平坦入力での形骸化防止)
+        # 振幅(peak-to-peak)が密とほぼ一致=平坦化していない(許容ぶんの目減りは許す)。
+        assert spp >= dpp - 2 * SMOOTH_ROT_TOL_DEG
