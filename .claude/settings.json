@@ -76,6 +76,18 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify-permission.py\" 2>/dev/null || true",
+            "shell": "bash"
+          }
+        ]
+      }
     ]
   }
 }
