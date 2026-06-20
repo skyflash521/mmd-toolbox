@@ -165,8 +165,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     p.add_argument("--preview-csv", dest="preview_csv")
     p.add_argument("-v", "--verbose", action="store_true")
-    # opt-in: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを解消する。
-    p.add_argument("--smooth", action="store_true")
+    # 既定 on: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを低減する。
+    # --no-smooth で無効化(密キー＋線形のまま出力する)。
+    p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction)
     return p
 
 

@@ -121,7 +121,7 @@ class TestCli:
     # --- 正常系(§9 コード0) ---------------------------------------------
     def test_bakes_and_writes_default_output(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
-        rc = cli.main([inp])
+        rc = cli.main([inp, "--no-smooth"])      # 密キーの被覆を検証するため疎化は無効化
         assert rc == 0
         out = tmp_path / "in_shake.vmd"          # 既定出力 = <入力名>_shake.vmd
         assert out.exists()
@@ -172,7 +172,7 @@ class TestCli:
 
     def test_overwrite_allowed(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
-        rc = cli.main([inp, "-o", inp, "--overwrite"])
+        rc = cli.main([inp, "-o", inp, "--overwrite", "--no-smooth"])
         assert rc == 0
         assert sorted(k.frame for k in read_camera(inp)) == list(range(0, 61))
 
@@ -182,7 +182,7 @@ class TestCli:
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
         out.write_bytes(b"old content")          # 既存だが入力とは別パス
-        assert cli.main([inp, "-o", str(out)]) == 0
+        assert cli.main([inp, "-o", str(out), "--no-smooth"]) == 0
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_overwrite_guard_via_symlink_exit2(self, tmp_path):
@@ -236,7 +236,7 @@ class TestCli:
         # `:`(両端省略)は全範囲 = 範囲指定なしと同じ(有効)
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--range", ":"]) == 0
+        assert cli.main([inp, "-o", str(out), "--range", ":", "--no-smooth"]) == 0
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_post_snap_overlap_exit2(self, tmp_path):
@@ -257,7 +257,7 @@ class TestCli:
     def test_range_limits_baking(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        rc = cli.main([inp, "-o", str(out), "--range", "30:60"])
+        rc = cli.main([inp, "-o", str(out), "--range", "30:60", "--no-smooth"])
         assert rc == 0
         out_keys = {k.frame: k for k in read_camera(out)}
         in_keys = {k.frame: k for k in read_camera(inp)}
@@ -271,7 +271,7 @@ class TestCli:
         # START 省略(:30)→ 先頭から30まで
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        rc = cli.main([inp, "-o", str(out), "--range", ":30"])
+        rc = cli.main([inp, "-o", str(out), "--range", ":30", "--no-smooth"])
         assert rc == 0
         frames = sorted(k.frame for k in read_camera(out))
         assert frames == list(range(0, 31)) + [60]   # 0..30 ベイク、frame60 原本
@@ -280,7 +280,7 @@ class TestCli:
         # END 省略(30:)→ 30 から末尾まで
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        rc = cli.main([inp, "-o", str(out), "--range", "30:"])
+        rc = cli.main([inp, "-o", str(out), "--range", "30:", "--no-smooth"])
         assert rc == 0
         frames = sorted(k.frame for k in read_camera(out))
         assert frames == [0] + list(range(30, 61))   # frame0 原本、30..60 ベイク
@@ -290,7 +290,7 @@ class TestCli:
         keys = [cam(0), cam(15), cam(30, persp=1), cam(45), cam(60)]
         inp = write_input(tmp_path / "in.vmd", keys)
         out = tmp_path / "out.vmd"
-        rc = cli.main([inp, "-o", str(out), "--range", "0:15", "--range", "45:60"])
+        rc = cli.main([inp, "-o", str(out), "--range", "0:15", "--range", "45:60", "--no-smooth"])
         assert rc == 0
         frames = sorted(k.frame for k in read_camera(out))
         assert frames == list(range(0, 16)) + [30] + list(range(45, 61))
@@ -331,7 +331,7 @@ class TestCli:
         # --amp-rot 0 かつ settle/impulse なし → 回転は原本サンプリングと一致(揺れなし)
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--amp-rot", "0", "--amp-pos", "0", "--settle", "0"]) == 0
+        assert cli.main([inp, "-o", str(out), "--amp-rot", "0", "--amp-pos", "0", "--settle", "0", "--no-smooth"]) == 0
         from mmd_toolbox.vmd import interp
         baked = {k.frame: k for k in read_camera(out)}
         for f in range(0, 61):
@@ -420,7 +420,7 @@ class TestCli:
         # --settle が効く(パン→停止後の減衰振動)。base ノイズは切る。
         inp = write_input(tmp_path / "ps.vmd", PAN_STOP_KEYS)
         a, b = tmp_path / "a.vmd", tmp_path / "b.vmd"
-        common = ["--amp-rot", "0", "--amp-pos", "0"]
+        common = ["--amp-rot", "0", "--amp-pos", "0", "--no-smooth"]
         assert cli.main([inp, "-o", str(a), *common, "--settle", "0"]) == 0
         assert cli.main([inp, "-o", str(b), *common, "--settle", "5"]) == 0
         assert a.read_bytes() != b.read_bytes()
@@ -488,8 +488,9 @@ class TestCli:
             src = read_camera(inp)                  # CLI が実際にベイクする入力キー
             out = tmp_path / f"cli_{i}.vmd"
             exp = tmp_path / f"exp_{i}.vmd"
-            assert cli.main([inp, "-o", str(out), *flag_args]) == 0
+            assert cli.main([inp, "-o", str(out), *flag_args, "--no-smooth"]) == 0
             # bake() は BakeResult(camera_keys, warnings) を返す。camera_keys を書き出して比較。
+            # 比較対象は bake() の密キーなので CLI 側も疎化を無効化して密のまま突き合わせる。
             io.write_file(VmdDocument(camera=bake(list(src), **kw).camera_keys), str(exp))
             assert read_camera(out) == read_camera(exp), f"flag misw-wired: {flag_args}"
 
@@ -519,10 +520,10 @@ class TestCli:
         inp = write_input(tmp_path / "in.vmd")
         a, b = tmp_path / "a.vmd", tmp_path / "b.vmd"
         # 26 は上側キー30が最近接(|26-30|=4 < |26-0|=26)。floor なら 0 になるので区別できる。
-        assert cli.main([inp, "-o", str(a), "--range", "26:60"]) == 0
+        assert cli.main([inp, "-o", str(a), "--range", "26:60", "--no-smooth"]) == 0
         assert sorted(k.frame for k in read_camera(a)) == [0] + list(range(30, 61))
         # 34 は下側キー30が最近接(|34-30|=4 < |34-60|=26)。ceil なら 60 になるので区別できる。
-        assert cli.main([inp, "-o", str(b), "--range", "0:34"]) == 0
+        assert cli.main([inp, "-o", str(b), "--range", "0:34", "--no-smooth"]) == 0
         assert sorted(k.frame for k in read_camera(b)) == list(range(0, 31)) + [60]
 
     def test_range_out_of_span_endpoint_snaps(self, tmp_path):
@@ -530,7 +531,7 @@ class TestCli:
         # END=999 は最終キー60が最近接 → [0,60] として全域ベイク。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--range", "0:999"]) == 0
+        assert cli.main([inp, "-o", str(out), "--range", "0:999", "--no-smooth"]) == 0
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_range_out_of_span_start_snaps(self, tmp_path):
@@ -539,7 +540,7 @@ class TestCli:
         keys = [cam(30), cam(45), cam(60)]
         inp = write_input(tmp_path / "off.vmd", keys)
         out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--range", "10:60"]) == 0
+        assert cli.main([inp, "-o", str(out), "--range", "10:60", "--no-smooth"]) == 0
         # START 10→先頭キー30へスナップ → [30,60] 全域ベイク(30より前のフレームは無い)。
         assert sorted(k.frame for k in read_camera(out)) == list(range(30, 61))
 
@@ -690,7 +691,7 @@ class TestCli:
         inp = tmp_path / "mixed.vmd"
         io.write_file(doc, str(inp))
         out = tmp_path / "out.vmd"
-        rc = cli.main([str(inp), "-o", str(out)])
+        rc = cli.main([str(inp), "-o", str(out), "--no-smooth"])
         assert rc == 0
         outdoc, _ = io.read(str(out))
         # ボーンキーが無傷で残る + カメラはベイクされている
@@ -782,7 +783,7 @@ class TestCliOps:
         inp = write_input(tmp_path / "in.vmd", PAN_STOP_KEYS)
         src = read_camera(inp)
         out, exp = tmp_path / "cli.vmd", tmp_path / "exp.vmd"
-        assert cli.main([inp, "-o", str(out), "--preset", "handheld"]) == 0
+        assert cli.main([inp, "-o", str(out), "--preset", "handheld", "--no-smooth"]) == 0
         hp = presets.get_preset("handheld")
         baked = bake(
             list(src), seed=1,
@@ -801,7 +802,7 @@ class TestCliOps:
         inp = write_input(tmp_path / "in.vmd", KEYS)
         src = read_camera(inp)
         out, exp = tmp_path / "cli.vmd", tmp_path / "exp.vmd"
-        assert cli.main([inp, "-o", str(out), "--preset", "walking"]) == 0
+        assert cli.main([inp, "-o", str(out), "--preset", "walking", "--no-smooth"]) == 0
         p = presets.get_preset("walking")
         baked = bake(
             list(src), seed=1,
@@ -1008,7 +1009,7 @@ class TestCliOps:
         from mmd_toolbox.vmd import interp
         inp = write_input(tmp_path / "in.vmd")
         out, csv_path = tmp_path / "out.vmd", tmp_path / "p.csv"
-        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path), "--seed", "3"]) == 0
+        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path), "--seed", "3", "--no-smooth"]) == 0
         header, data = self._read_csv(csv_path)
         col = {name: header.index(name)
                for name in ("rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z")}
@@ -1110,7 +1111,7 @@ class TestCliOps:
         # --verbose は通常出力(VMD)を書く。出力を抑止するのは --dry-run のみ(§2.7)。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--verbose"]) == 0
+        assert cli.main([inp, "-o", str(out), "--verbose", "--no-smooth"]) == 0
         assert out.exists()
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
@@ -1187,7 +1188,7 @@ class TestSmooth:
     def test_smooth_reduces_key_count(self, tmp_path):
         dense = tmp_path / "dense.vmd"
         smooth = tmp_path / "smooth.vmd"
-        assert self._bake(dense) == 0
+        assert self._bake(dense, "--no-smooth") == 0
         assert self._bake(smooth, "--smooth") == 0
         n_dense = len(read_camera(dense))
         n_smooth = len(read_camera(smooth))
@@ -1212,7 +1213,7 @@ class TestSmooth:
         # test_smooth_preserves_fov(FOV 変化入力)で別途検証する。
         dense = tmp_path / "dense.vmd"
         smooth = tmp_path / "smooth.vmd"
-        assert self._bake(dense) == 0
+        assert self._bake(dense, "--no-smooth") == 0
         assert self._bake(smooth, "--smooth") == 0
         dk, sk = read_camera(dense), read_camera(smooth)
         for i in range(0, 241):         # 0..60 を 0.25 刻み
@@ -1237,7 +1238,7 @@ class TestSmooth:
         inp = write_input(tmp_path / "in.vmd", keys=FOV_CUT_KEYS)
         dense = tmp_path / "dense.vmd"
         smooth = tmp_path / "smooth.vmd"
-        assert cli.main([inp, "-o", str(dense), *_SHAKE_ARGS]) == 0
+        assert cli.main([inp, "-o", str(dense), *_SHAKE_ARGS, "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(smooth), *_SHAKE_ARGS, "--smooth"]) == 0
         dk, sk = read_camera(dense), read_camera(smooth)
         for i in range(0, 241):         # 0..60 を 0.25 刻み(60fps超の FOV 補間も検証)
@@ -1254,7 +1255,7 @@ class TestSmooth:
         inp = write_input(tmp_path / "in.vmd", keys=CUT_KEYS)
         dense = tmp_path / "dense.vmd"
         smooth = tmp_path / "smooth.vmd"
-        assert cli.main([inp, "-o", str(dense), *_SHAKE_ARGS]) == 0
+        assert cli.main([inp, "-o", str(dense), *_SHAKE_ARGS, "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(smooth), *_SHAKE_ARGS, "--smooth"]) == 0
         dk, sk = read_camera(dense), read_camera(smooth)
         for i in range(0, 241):         # 0..60 を 0.25 刻み(カット境界 frame30 の前後も含む)
@@ -1304,7 +1305,7 @@ class TestSmooth:
         # 違うためバイト一致は前提にせず、両者がサブフレームで aggressive 許容内に一致すること。
         dense = tmp_path / "dense.vmd"
         smooth = tmp_path / "smooth.vmd"
-        assert self._bake(dense) == 0
+        assert self._bake(dense, "--no-smooth") == 0
         assert self._bake(smooth, "--smooth") == 0
         dk, sk = read_camera(dense), read_camera(smooth)
         tols = Tolerances(
@@ -1332,7 +1333,6 @@ class TestSmooth:
             assert abs(s["distance"] - p["distance"]) <= SMOOTH_DIST_TOL + 1e-6
             assert abs(s["fov"] - p["fov"]) <= SMOOTH_FOV_TOL + 1e-6
 
-    @pytest.mark.xfail(reason="impl pending: smooth default-on", strict=True)
     def test_smooth_on_by_default(self, tmp_path):
         # 既定 on: フラグ無し出力が --smooth 明示時とバイト完全一致し(同一の滑らか経路)、かつ
         # 密ベイク(全範囲0..60=61キー)より実質的に疎化する。キー数減少だけでは線形疎化等の誤実装も
@@ -1344,7 +1344,6 @@ class TestSmooth:
         assert default_out.read_bytes() == smooth_out.read_bytes()
         assert len(read_camera(default_out)) < 61 * 0.6
 
-    @pytest.mark.xfail(reason="impl pending: smooth default-on", strict=True)
     def test_no_smooth_produces_dense(self, tmp_path):
         # --no-smooth で従来どおり密キー＋線形のまま(全範囲0..60を毎フレーム密ベイク=61キー)。
         # 既定 on のオプトアウト経路。
