@@ -1331,3 +1331,29 @@ class TestSmooth:
                 assert diff_deg <= SMOOTH_ROT_TOL_DEG + 1e-6
             assert abs(s["distance"] - p["distance"]) <= SMOOTH_DIST_TOL + 1e-6
             assert abs(s["fov"] - p["fov"]) <= SMOOTH_FOV_TOL + 1e-6
+
+    @pytest.mark.xfail(reason="impl pending: smooth default-on", strict=True)
+    def test_smooth_on_by_default(self, tmp_path):
+        # 既定 on: フラグ無し出力が --smooth 明示時とバイト完全一致し(同一の滑らか経路)、かつ
+        # 密ベイク(全範囲0..60=61キー)より実質的に疎化する。キー数減少だけでは線形疎化等の誤実装も
+        # 満たすため、明示時との一致で「フラグ無し==--smooth」の契約を固める。
+        default_out = tmp_path / "default.vmd"
+        smooth_out = tmp_path / "smooth.vmd"
+        assert self._bake(default_out) == 0
+        assert self._bake(smooth_out, "--smooth") == 0
+        assert default_out.read_bytes() == smooth_out.read_bytes()
+        assert len(read_camera(default_out)) < 61 * 0.6
+
+    @pytest.mark.xfail(reason="impl pending: smooth default-on", strict=True)
+    def test_no_smooth_produces_dense(self, tmp_path):
+        # --no-smooth で従来どおり密キー＋線形のまま(全範囲0..60を毎フレーム密ベイク=61キー)。
+        # 既定 on のオプトアウト経路。
+        out = tmp_path / "raw.vmd"
+        assert self._bake(out, "--no-smooth") == 0
+        ks = read_camera(out)
+        assert len(ks) == 61
+        # 密ベイクは全チャンネル線形補間(MMD既定)。到達キー側の補間6チャンネル
+        # (位置X/Y/Z=0,4,8・回転=12・距離=16・視野角=20)が全て線形であること(先頭キーは区間評価外)。
+        for k in ks[1:]:
+            b = bytes(k.interpolation)
+            assert all(not _curved(b[j:j + 4]) for j in (0, 4, 8, 12, 16, 20))
