@@ -1138,6 +1138,7 @@ class TestCliOps:
 import math
 
 from mmd_toolbox.vmd import interp
+from mmd_toolbox.vmd.reduce import Tolerances, reduce_camera_track
 from mmd_toolbox.vmd.sample import perspective_series
 
 # --smooth が使う固定許容(shakevmd 側に持つ aggressive 値: 位置・回転[度]・距離・視野角[度])。
@@ -1292,3 +1293,41 @@ class TestSmooth:
         assert cli.main([inp, "-o", str(out), *_SHAKE_ARGS, "--smooth"]) == 0
         assert calls == [str(out)]    # 最終出力先へ1回だけ(中間VMDを書かない)
         assert out.exists()
+
+    def test_smooth_matches_sparsevmd_pipeline(self, tmp_path):
+        # --smooth の直接出力が、検証で用いた密VMD経由の sparsevmd CLI パイプライン(同設定)と
+        # 整合することを担保する。ツール間依存を作らない(計画 §2)ため sparsevmd は import せず、
+        # 密VMDを f32 で読み戻し、CLI が用いるのと同一設定で共有エンジン reduce_camera_track を
+        # 直接呼んでパイプラインを再現する(sparsevmd CLI の --curve-mode bezier --preset aggressive
+        # --max-segment-frames 5 --no-cut-detect 経路がこの関数をこの設定で呼ぶ)。基準は §6(a):
+        # 直接(プロセス内 f64 ソース)とパイプライン(密VMDの f32 ソース)で reduction 入力の精度が
+        # 違うためバイト一致は前提にせず、両者がサブフレームで aggressive 許容内に一致すること。
+        dense = tmp_path / "dense.vmd"
+        smooth = tmp_path / "smooth.vmd"
+        assert self._bake(dense) == 0
+        assert self._bake(smooth, "--smooth") == 0
+        dk, sk = read_camera(dense), read_camera(smooth)
+        tols = Tolerances(
+            bone_pos=1.0, bone_rot=30.0,
+            camera_pos=SMOOTH_POS_TOL, camera_rot=SMOOTH_ROT_TOL_DEG,
+            camera_distance=SMOOTH_DIST_TOL, camera_fov=SMOOTH_FOV_TOL,
+        )
+        first, last = dk[0].frame, dk[-1].frame
+        pk = reduce_camera_track(
+            dk, [(first, last)], tols,
+            cut_thresholds=(5.0, 20.0, 5.0),
+            keep_frames=(),                 # この素材はカット無し(bake の keep_frames も空)
+            no_cut_detect=True,
+            min_seg=1, max_seg=5, strict=False, curve_mode="bezier",
+        )
+        for i in range(0, 241):             # 0..60 を 0.25 刻み(60fps超サンプルを含む)
+            f = i * 0.25
+            s = interp.sample_camera(sk, f)
+            p = interp.sample_camera(pk, f)
+            assert math.dist(s["position"], p["position"]) <= SMOOTH_POS_TOL + 1e-6
+            for ax in range(3):             # 回転3軸(度)。±2π ラップ不変な最小角度差で比較。
+                diff = s["rotation"][ax] - p["rotation"][ax]
+                diff_deg = abs(math.degrees(math.atan2(math.sin(diff), math.cos(diff))))
+                assert diff_deg <= SMOOTH_ROT_TOL_DEG + 1e-6
+            assert abs(s["distance"] - p["distance"]) <= SMOOTH_DIST_TOL + 1e-6
+            assert abs(s["fov"] - p["fov"]) <= SMOOTH_FOV_TOL + 1e-6
