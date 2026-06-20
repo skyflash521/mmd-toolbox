@@ -12,6 +12,10 @@ add/commit (e.g. a launcher not in WRAPPERS such as watch/strace, or git inside 
 string) falls through here, but it does not begin with `git add`/`git commit`, so it misses the
 settings allow globs and prompts via allow-miss rather than auto-running. Unrelated commands pass.
 
+Additionally every `git reset` form is denied outright (it rewrites the index/HEAD and has no
+safe variant to allow); the agent must ask the user to add an explicit allow rule if one is ever
+truly needed, rather than running it.
+
 Usage: configured as a Bash PreToolUse hook. Run with --selftest.
 """
 
@@ -114,6 +118,38 @@ def _mentions_target(tokens):
     return False
 
 
+def _mentions_reset(tokens):
+    """True when a git invocation actually runs the reset subcommand (any form).
+
+    git reset is denied outright: it rewrites the index/HEAD and has no safe variant to allow.
+    Mirrors _mentions_target's prefix analysis so a non-executing mention (`echo git reset`) is
+    not denied -- only git at argv[0], behind a wrapper/control-op/VAR= prefix, or a non-plain
+    git path counts as a real invocation.
+    """
+    for index, token in enumerate(tokens):
+        if not _is_git(token):
+            continue
+        pos = index + 1
+        while pos < len(tokens) and tokens[pos].startswith("-"):
+            option = tokens[pos].split("=", 1)[0]
+            pos += 1
+            if option in GIT_VALUE_OPTIONS and "=" not in tokens[pos - 1]:
+                pos += 1
+        if pos >= len(tokens):
+            continue
+        if tokens[pos] != "reset":
+            continue
+        prefix = tokens[:index]
+        if (
+            index == 0
+            or not _is_plain_git(token)
+            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
+            or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
+        ):
+            return True
+    return False
+
+
 def _tracked_file(root, path):
     """True only when path exactly names one tracked file, including a deletion."""
     relative = path.relative_to(root).as_posix()
@@ -167,9 +203,14 @@ def classify(command, root=None):
     try:
         tokens = _tokens(command)
     except ValueError:
+        if re.search(r"\bgit\b", command) and re.search(r"\breset\b", command):
+            return "deny", "git reset is denied; ask the user to add an allow rule if truly needed"
         if re.search(r"\bgit\b", command) and TARGET_WORD.search(command):
             return "deny", "Unparseable git add/commit; retry with the regular form"
         return "pass", None
+
+    if _mentions_reset(tokens):
+        return "deny", "git reset is denied; ask the user to add an allow rule if truly needed"
 
     plain_target = (
         len(tokens) >= 2
@@ -248,6 +289,19 @@ def selftest():
         ("xargs git commit -m 'x'", "deny"),
         ("git.exe commit -m 'x'", "deny"),
         ("/usr/bin/git commit -m 'x'", "deny"),
+        ("git reset", "deny"),
+        ("git reset --soft HEAD~1", "deny"),
+        ("git reset --hard origin/main", "deny"),
+        ("git reset -- file.py", "deny"),
+        ("git -C repo reset --hard", "deny"),
+        ("git.exe reset", "deny"),
+        ("/usr/bin/git reset --hard", "deny"),
+        ("time git reset --hard", "deny"),
+        ("VAR=x git reset", "deny"),
+        ("cd repo && git reset --hard", "deny"),
+        ("echo git reset", "pass"),
+        ("echo 'git reset --hard'", "pass"),
+        ("git restore --staged a.py", "pass"),
         ("git status --short", "pass"),
         ("git diff --staged -- a.py", "pass"),
         ("git log --oneline -10", "pass"),
