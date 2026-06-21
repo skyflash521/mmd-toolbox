@@ -41,7 +41,8 @@ def _play_windows() -> bool:
     try:
         import winsound
 
-        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+        for frequency in (880, 1175, 1568):
+            winsound.Beep(frequency, 130)
         return True
     except Exception:
         return False
