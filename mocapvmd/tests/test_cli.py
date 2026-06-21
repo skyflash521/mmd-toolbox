@@ -34,6 +34,8 @@ def _full_doc(path):
         bone=[
             bone("センター", 0, interp=BONE_NONLINEAR),
             bone("センター", 1, pos=(1.0, 0.0, 0.0), interp=BONE_NONLINEAR),
+            bone("右足ＩＫ", 0),
+            bone("右足ＩＫ", 1, pos=(0.0, 0.0, 0.5)),
         ],
         morph=[morph("まばたき", 0, 0.0), morph("まばたき", 5, 1.0)],
         camera=[cam(0, interp=CAM_NONLINEAR), cam(10, center=(1.0, 1.0, 1.0), interp=CAM_NONLINEAR)],
@@ -175,4 +177,46 @@ def test_dry_run_does_not_write_default_output(tmp_path):
     _full_doc(src)
     code = cli.main([str(src), "--dry-run"])
     assert code == 0
+    assert not (tmp_path / "in_mocap.vmd").exists()
+
+
+# --- 診断レポート(report-json / dry-run 表示) ----------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: Step 1c report", strict=True)
+def test_report_json_written(tmp_path):
+    src = tmp_path / "in.vmd"
+    rep = tmp_path / "report.json"
+    _full_doc(src)
+    code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
+    assert code == 0
+    import json
+
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    names = [e["name"] for e in data["bones"]]
+    assert "センター" in names
+    center = next(e for e in data["bones"] if e["name"] == "センター")
+    assert center["category"] == "center"
+    # 足IK候補が分類結果として出る。
+    assert "右足ＩＫ" in data["foot_ik_candidates"]
+
+
+@pytest.mark.xfail(reason="impl pending: Step 1c report", strict=True)
+def test_dry_run_prints_report(tmp_path, capsys):
+    src = tmp_path / "in.vmd"
+    _full_doc(src)
+    code = cli.main([str(src), "--dry-run"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "センター" in out
+
+
+@pytest.mark.xfail(reason="impl pending: Step 1c report", strict=True)
+def test_report_json_with_dry_run_does_not_write_output(tmp_path):
+    src = tmp_path / "in.vmd"
+    rep = tmp_path / "report.json"
+    _full_doc(src)
+    code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
+    assert code == 0
+    assert rep.exists()
     assert not (tmp_path / "in_mocap.vmd").exists()
