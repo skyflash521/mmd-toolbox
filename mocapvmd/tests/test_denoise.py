@@ -12,15 +12,11 @@
 - カットは閾値 位置1.0/回転30度、境界の両側(F-1,F)を保護。範囲端も保護。
 """
 
-import importlib.util
 import math
 
 import pytest
 
-if importlib.util.find_spec("mocapvmd.denoise") is None:
-    pytest.skip("impl pending: Step 3a denoise detection", allow_module_level=True)
-
-from mocapvmd import denoise  # noqa: E402
+from mocapvmd import denoise
 
 IDENT = (0.0, 0.0, 0.0, 1.0)
 
@@ -181,6 +177,13 @@ def test_apparent_spike_at_cut_not_corrected():
     assert (6, 0) not in r.pos_spikes
 
 
+def test_cuts_reported_separately_from_boundaries():
+    # 検出カットフレームを boundaries(両側に潰した集合)とは別に保持する(§4.4 検出カット数用)。
+    pos = [(0.0, 0.0, 0.0)] * 6 + [(2.0, 0.0, 0.0)] * 5
+    r = detect(pos, idents(11))
+    assert r.cuts == {6}
+
+
 # --- 回転スパイク -----------------------------------------------------------
 
 
@@ -209,6 +212,15 @@ def test_rotation_sign_flip_is_not_spike():
     r = detect(still(11), rots)
     assert 5 not in r.rot_candidates
     assert 5 not in r.rot_spikes
+
+
+def test_non_unit_quaternion_is_normalized_before_detection():
+    # 非単位 quaternion(一律2倍)でも内部で正規化され、10度の単発スパイクを検出できる。
+    scale = lambda q: tuple(2.0 * c for c in q)  # noqa: E731
+    rots = [scale(IDENT)] * 11
+    rots[5] = scale(quat_y(10.0))
+    r = detect(still(11), rots)
+    assert 5 in r.rot_spikes
 
 
 def test_rotation_sustained_run_is_accent():
@@ -259,5 +271,12 @@ def test_zero_norm_quaternion_raises():
 
 @pytest.mark.parametrize("pw,rw", [(4, 5), (5, 4)])
 def test_even_window_raises(pw, rw):
+    with pytest.raises(ValueError):
+        denoise.detect_noise_events(still(11), idents(11), pos_window=pw, rot_window=rw)
+
+
+@pytest.mark.parametrize("pw,rw", [(-3, 5), (5, -3), (0, 5)])
+def test_non_positive_window_raises(pw, rw):
+    # 負の奇数やゼロは検出を黙って無効化しないよう引数エラーにする。
     with pytest.raises(ValueError):
         denoise.detect_noise_events(still(11), idents(11), pos_window=pw, rot_window=rw)
