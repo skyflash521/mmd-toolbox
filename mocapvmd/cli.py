@@ -13,7 +13,7 @@ import sys
 
 from mmd_toolbox.vmd import io
 
-from . import report
+from . import presets, report
 
 
 def _build_parser():
@@ -21,6 +21,7 @@ def _build_parser():
     p.add_argument("input")
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--preset", choices=presets.PRESET_NAMES, default="balanced")
     p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
@@ -77,7 +78,7 @@ def main(argv=None):
     # 診断レポート(dry-run 表示・report-json 出力)。どのボーンにどの処理が適用される予定かを
     # 出力を変更せずに確認できる。
     if args.dry_run or args.report_json:
-        rep = report.build_report(doc.bone)
+        rep = report.build_report(doc.bone, args.preset)
         if args.dry_run:
             print(report.format_dry_run(rep))
         if args.report_json:

@@ -222,7 +222,6 @@ def test_report_json_with_dry_run_does_not_write_output(tmp_path):
 # --- --preset(クリーニング強度) -------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2b --preset", strict=True)
 def test_preset_option_resolves_cleaning_in_report(tmp_path):
     from mocapvmd import presets
 
@@ -244,7 +243,6 @@ def test_invalid_preset_value_is_arg_error(tmp_path):
     assert cli.main([str(src), "--preset", "turbo"]) == 2
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2b --preset", strict=True)
 def test_default_preset_is_balanced_in_report_json(tmp_path):
     # --preset 省略時は balanced が適用されることを CLI レベルで検証する(誤って別プリセットを
     # 明示渡しする実装を排除)。

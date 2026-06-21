@@ -12,7 +12,7 @@
 import json
 import math
 
-from mocapvmd import classify
+from mocapvmd import classify, presets
 
 
 def _quat_angle_deg(q1, q0):
@@ -35,10 +35,12 @@ def _track_diagnostics(keys):
     return max_speed, max_ang
 
 
-def build_report(bone_keys):
+def build_report(bone_keys, preset="balanced"):
     """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
 
     名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。
+    各ボーンには、選択プリセットで解決したクリーニングパラメータ(presets.resolve_cleaning の戻り)を
+    付けてチューニングを確認できるようにする(§4.5)。
     """
     order = []
     groups = {}
@@ -66,6 +68,7 @@ def build_report(bone_keys):
                 "frame_last": keys[-1].frame,
                 "max_speed": max_speed,
                 "max_ang_speed_deg": max_ang,
+                "cleaning": presets.resolve_cleaning(preset, category),
             }
         )
         if category == "foot_ik":
@@ -74,6 +77,7 @@ def build_report(bone_keys):
             toe_ik.append(name)
 
     return {
+        "preset": preset,
         "range": [min(all_frames), max(all_frames)] if all_frames else [],
         "bones": bones,
         "foot_ik_candidates": foot_ik,
@@ -88,13 +92,17 @@ def write_json(report, path):
 
 
 def format_dry_run(report):
-    """dry-run のテキスト要約を返す(§4.4)。"""
-    lines = [f"range: {report['range']}"]
+    """dry-run のテキスト要約を返す(§4.4)。適用プリセットと、各ボーンの診断値・解決済み
+    クリーニングパラメータ・IK候補を表示する。"""
+    lines = [f"preset: {report['preset']}", f"range: {report['range']}"]
     for b in report["bones"]:
+        c = b["cleaning"]
         lines.append(
             f"{b['name']} [{b['category']}] keys={b['input_keys']} "
             f"frames=[{b['frame_first']},{b['frame_last']}] "
-            f"max_speed={b['max_speed']:.4g} max_rot={b['max_ang_speed_deg']:.4g}deg"
+            f"max_speed={b['max_speed']:.4g} max_rot={b['max_ang_speed_deg']:.4g}deg "
+            f"clean_pos={c['pos_strength']:.4g} clean_rot={c['rot_strength']:.4g} "
+            f"win=[{c['pos_window']},{c['rot_window']}]"
         )
     lines.append(f"足IK候補: {report['foot_ik_candidates']}")
     lines.append(f"つま先IK候補: {report['toe_ik_candidates']}")

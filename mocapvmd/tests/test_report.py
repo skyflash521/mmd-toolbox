@@ -24,7 +24,6 @@ def _entry(rep, name):
     return next(e for e in rep["bones"] if e["name"] == name)
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2b preset in report", strict=True)
 def test_report_includes_resolved_cleaning_params():
     # 各ボーンに、選択プリセットで解決したクリーニングパラメータが付く(チューニング確認用、§4.5)。
     keys = [bone("センター", 0), bone("右足ＩＫ", 0)]
@@ -35,14 +34,12 @@ def test_report_includes_resolved_cleaning_params():
     assert foot["cleaning"] == presets.resolve_cleaning("stable-foot", "foot_ik")
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2b preset in report", strict=True)
 def test_report_default_preset_is_balanced():
     keys = [bone("センター", 0)]
     rep = report.build_report(keys)
     assert _entry(rep, "センター")["cleaning"] == presets.resolve_cleaning("balanced", "center")
 
 
-@pytest.mark.xfail(reason="impl pending: Step 2b preset in report", strict=True)
 def test_format_dry_run_shows_cleaning_params():
     # dry-run も適用プリセットで解決したクリーニング強度を表示する(§4.4 は dry-run と report-json の双方に要求)。
     keys = [bone("センター", 0), bone("センター", 10)]
