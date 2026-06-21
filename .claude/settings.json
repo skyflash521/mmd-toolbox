@@ -52,6 +52,11 @@
       "Bash(.venv/Scripts/python.exe -m pytest *)",
       "Bash(./.venv/Scripts/python.exe -m pytest)",
       "Bash(./.venv/Scripts/python.exe -m pytest *)"
+    ],
+    "deny": [
+      "Bash(git -C *)",
+      "Bash(git --git-dir*)",
+      "Bash(git --work-tree*)"
     ]
   },
   "sandbox": {
