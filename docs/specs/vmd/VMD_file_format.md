@@ -138,9 +138,9 @@ Byte[60] = R_y2   Byte[61] = 01     Byte[62] = 00     Byte[63] = 00
 | フィールド | 型 | サイズ (bytes) | 説明 |
 |-----------|-----|---------------|------|
 | frame | uint32 | 4 | フレーム番号 |
-| distance | float | 4 | カメラとターゲット間の距離（負値で後方） |
-| position | float[3] | 12 | ターゲット位置 (X, Y, Z) |
-| rotation | float[3] | 12 | 回転角（ラジアン, X, Y, Z） |
+| distance | float | 4 | カメラとカメラ中心の間の距離（負値で後方） |
+| position | float[3] | 12 | カメラ中心の位置 (X, Y, Z) |
+| rotation | float[3] | 12 | 角度（ラジアン, X, Y, Z） |
 | interpolation | uint8[24] | 24 | 補間曲線パラメータ（後述） |
 | fov | uint32 | 4 | 視野角（度、整数） |
 | perspective | uint8 | 1 | パースペクティブフラグ（0: ON, 1: OFF） |
