@@ -49,6 +49,115 @@ def test_format_dry_run_shows_cleaning_params():
     assert "0.63" in center_line  # center 位置強度 0.45×1.4
 
 
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_report_counts_spike_candidate_frames():
+    # 単発スパイクを持つボーンは spike_candidates(候補フレーム数)が厳密に 1(frame5 の X のみ)。
+    keys = [bone("センター", f) for f in range(11)]
+    keys[5] = bone("センター", 5, pos=(0.5, 0.0, 0.0))
+    rep = report.build_report(keys)
+    assert _entry(rep, "センター")["spike_candidates"] == 1
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_report_spike_candidates_are_frame_based_not_axis_based():
+    # 同一フレームで複数軸が候補でも、spike_candidates はフレーム単位で数える(軸イベント数でない)。
+    keys = [bone("センター", f) for f in range(11)]
+    keys[5] = bone("センター", 5, pos=(0.5, 0.5, 0.0))  # X と Y が同時に候補
+    rep = report.build_report(keys)
+    assert _entry(rep, "センター")["spike_candidates"] == 1
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_report_counts_rotation_spike_candidates():
+    # 回転の単発スパイク(frame5 で10度跳ねて戻る)も spike_candidates に数える(位置だけの集計を排除)。
+    keys = [bone("頭", f) for f in range(11)]
+    keys[5] = bone("頭", 5, rot=_quat_y(10.0))
+    rep = report.build_report(keys)
+    assert _entry(rep, "頭")["spike_candidates"] == 1
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_report_counts_rotation_accent_protected():
+    # 回転の同方向継続(+8度/frame)アクセントも protected_frames に数える(位置だけの集計を排除)。
+    keys = [bone("頭", f, rot=_quat_y(8.0 * f)) for f in range(11)]
+    rep = report.build_report(keys)
+    assert _entry(rep, "頭")["protected_frames"] == 11
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_spike_candidates_union_same_frame():
+    # 位置と回転が同一フレームで候補なら、和集合のフレーム数は 1(加算でなく和集合)。
+    keys = [bone("センター", f) for f in range(11)]
+    keys[3] = bone("センター", 3, pos=(0.5, 0.0, 0.0), rot=_quat_y(10.0))
+    rep = report.build_report(keys)
+    assert _entry(rep, "センター")["spike_candidates"] == 1
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_spike_candidates_union_distinct_frames():
+    # 位置と回転が別フレームで候補なら、和集合のフレーム数は 2(max でなく和集合)。
+    keys = [bone("センター", f) for f in range(11)]
+    keys[3] = bone("センター", 3, pos=(0.5, 0.0, 0.0))
+    keys[7] = bone("センター", 7, rot=_quat_y(10.0))
+    rep = report.build_report(keys)
+    assert _entry(rep, "センター")["spike_candidates"] == 2
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_report_counts_protected_frames():
+    # 同方向継続(+0.5/frame)は全11フレームがアクセント保護対象。範囲端も含め protected_frames == 11。
+    keys = [bone("センター", f, pos=(0.5 * f, 0.0, 0.0)) for f in range(11)]
+    rep = report.build_report(keys)
+    assert _entry(rep, "センター")["protected_frames"] == 11
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_protected_frames_union_combines_boundaries_pos_rot():
+    # 保護フレームは boundaries・位置アクセント・回転アクセントの和集合。重複と別フレームを混ぜ、
+    # 和集合数だけが正解になるよう構成する。位置アクセント frames{2,3,4}、回転アクセント frames{4,5,6}
+    # (frame4 で重複)、範囲端{0,10} → 和集合 {0,2,3,4,5,6,10} = 7(sum=8・max=3 を排除)。
+    xs = [0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    ds = [0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 16.0, 16.0, 16.0, 16.0, 16.0]
+    keys = [bone("センター", f, pos=(xs[f], 0.0, 0.0), rot=_quat_y(ds[f])) for f in range(11)]
+    rep = report.build_report(keys)
+    assert _entry(rep, "センター")["protected_frames"] == 7
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_report_still_track_candidates_and_protected():
+    # 完全静止: スパイク候補0、保護は範囲端の2フレームのみ。
+    keys = [bone("センター", f) for f in range(11)]
+    rep = report.build_report(keys)
+    e = _entry(rep, "センター")
+    assert e["spike_candidates"] == 0
+    assert e["protected_frames"] == 2
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_report_single_key_track_zero_spikes_and_protected():
+    # キー1個のトラックは検出できないので spike_candidates・protected_frames とも 0。
+    keys = [bone("センター", 0)]
+    rep = report.build_report(keys)
+    e = _entry(rep, "センター")
+    assert e["spike_candidates"] == 0
+    assert e["protected_frames"] == 0
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3d spike report", strict=True)
+def test_format_dry_run_shows_spike_and_protected_counts():
+    # dry-run 表示にもスパイク候補数・保護フレーム数が出る(§4.4 は dry-run と report-json の双方に要求)。
+    keys = [bone("センター", f) for f in range(11)]
+    keys[5] = bone("センター", 5, pos=(0.5, 0.0, 0.0))
+    rep = report.build_report(keys)
+    text = report.format_dry_run(rep)
+    center_line = next(line for line in text.splitlines() if "センター" in line and "center" in line)
+    # スパイク候補1・保護フレーム2(範囲端のみ。アクセント・カットなし)。空白トークン完全一致で
+    # 桁違い(spikes=10 等)の誤実装を排除する。
+    tokens = center_line.split()
+    assert "spikes=1" in tokens
+    assert "protected=2" in tokens
+
+
 def test_report_classifies_and_counts():
     keys = [
         bone("センター", 0),
