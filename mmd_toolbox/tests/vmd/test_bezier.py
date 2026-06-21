@@ -100,7 +100,6 @@ _BEZIER_MANY_CASES = [
 ]
 
 
-@pytest.mark.xfail(reason="impl pending: Step B vectorize", strict=False)
 @pytest.mark.parametrize("cp", _BEZIER_MANY_CASES)
 def test_bezier_y_at_many_matches_scalar(cp):
     # 端点 0,1 と内部点・端点近傍を含む xs で単点版と一致する。
@@ -111,7 +110,6 @@ def test_bezier_y_at_many_matches_scalar(cp):
     np.testing.assert_allclose(many, scalar, atol=1e-9, rtol=0.0)
 
 
-@pytest.mark.xfail(reason="impl pending: Step B vectorize", strict=False)
 def test_bezier_y_at_many_endpoints_exact():
     # x<=0 は 0.0、x>=1 は 1.0(クランプ)。
     cp = (0.42, 0.0, 0.58, 1.0)
@@ -119,7 +117,6 @@ def test_bezier_y_at_many_endpoints_exact():
     np.testing.assert_array_equal(out, np.array([0.0, 0.0, 1.0, 1.0]))
 
 
-@pytest.mark.xfail(reason="impl pending: Step B vectorize", strict=False)
 def test_bezier_y_at_many_random_agrees():
     # ランダム xs・複数制御点で広く一致を確認する(決定論シード)。
     rng = np.random.default_rng(1234567)
@@ -130,7 +127,6 @@ def test_bezier_y_at_many_random_agrees():
         np.testing.assert_allclose(many, scalar, atol=1e-9, rtol=0.0)
 
 
-@pytest.mark.xfail(reason="impl pending: Step B vectorize", strict=False)
 def test_bezier_y_at_many_returns_ndarray_preserving_shape():
     # 戻り値は xs と同形の numpy.ndarray(flatten しない)。
     cp = (0.42, 0.0, 0.58, 1.0)
@@ -140,7 +136,6 @@ def test_bezier_y_at_many_returns_ndarray_preserving_shape():
     assert out.shape == xs.shape
 
 
-@pytest.mark.xfail(reason="impl pending: Step B vectorize", strict=False)
 def test_fit_bezier_curve_residual_uses_vectorized(monkeypatch):
     # フィットの残差評価は配列版を使い、単点版 _bezier_y_at を呼ばない(性能目的の契約)。
     # 単点版を素通しのスパイに差し替え、フィット完走後に呼び出しが無いことを固定する
