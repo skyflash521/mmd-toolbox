@@ -92,17 +92,18 @@ def test_overwrite_guard_via_symlink(tmp_path):
 
 
 def test_overwrite_allows_same_path(tmp_path):
+    # 同一パス上書きが許可され、出力が有効なVMDとして読め、対象外セクションが保持される
+    # (処理せず0を返す/入力を破損する実装を排除)。ボーン処理の有無に依存しない検証。
     src = tmp_path / "in.vmd"
     _full_doc(src)
     in_doc, _ = io.read(str(src))
     code = cli.main([str(src), "-o", str(src), "--overwrite"])
     assert code == 0
     out_doc, _ = io.read(str(src))
-    # 同一パス上書きでも基盤段階は全セクション逐語透過(処理せず0を返す/入力を破損する実装を排除)。
-    assert out_doc.bone == in_doc.bone
     assert out_doc.morph == in_doc.morph
     assert out_doc.camera == in_doc.camera
     assert out_doc.ik_property == in_doc.ik_property
+    assert len(out_doc.bone) >= 1
 
 
 def test_existing_distinct_output_allowed(tmp_path):
@@ -116,7 +117,7 @@ def test_existing_distinct_output_allowed(tmp_path):
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
-    assert out_doc.bone == in_doc.bone
+    assert out_doc.morph == in_doc.morph
 
 
 # --- 既定出力・書き出し -----------------------------------------------------
@@ -142,7 +143,8 @@ def test_explicit_output_written(tmp_path):
 # --- 対象外セクションの透過 -------------------------------------------------
 
 
-def test_passthrough_preserves_all_sections(tmp_path):
+def test_nonbone_sections_passthrough_with_denoise(tmp_path):
+    # 既定(denoise on)でも対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)は無加工透過。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
@@ -150,16 +152,26 @@ def test_passthrough_preserves_all_sections(tmp_path):
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
-    # 対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)は無加工で透過する。
     assert out_doc.morph == in_doc.morph
     assert out_doc.camera == in_doc.camera
     assert out_doc.light == in_doc.light
     assert out_doc.self_shadow == in_doc.self_shadow
     assert out_doc.ik_property == in_doc.ik_property
-    # 現基盤ではボーンも逐語透過する(クリーニング・疎化は後続実装)。非線形補間バイトも保持される。
+    assert out_doc.camera[0].interpolation == CAM_NONLINEAR
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
+def test_no_denoise_keeps_bones_verbatim(tmp_path):
+    # --no-denoise ではボーンも逐語透過する(非線形補間バイトも保持)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _full_doc(src)
+    code = cli.main([str(src), "-o", str(out), "--no-denoise"])
+    assert code == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
     assert out_doc.bone == in_doc.bone
     assert out_doc.bone[0].interpolation == BONE_NONLINEAR
-    assert out_doc.camera[0].interpolation == CAM_NONLINEAR
 
 
 # --- dry-run ----------------------------------------------------------------
@@ -256,3 +268,118 @@ def test_default_preset_is_balanced_in_report_json(tmp_path):
     data = json.loads(rep.read_text(encoding="utf-8"))
     center = next(e for e in data["bones"] if e["name"] == "センター")
     assert center["cleaning"] == presets.resolve_cleaning("balanced", "center")
+
+
+# --- denoise クリーニング統合 -----------------------------------------------
+
+
+# 全9カテゴリ(root/center/torso/arms/fingers/legs/foot_ik/toe_ik/unknown)の代表ボーン。
+# 一般ノイズ軽減は全ボーンへ適用されるため、カテゴリ分岐で一部をスキップする実装を排除する。
+_JITTER_BONES = (
+    "全ての親",      # root
+    "センター",      # center
+    "上半身",        # torso
+    "右腕",          # arms
+    "右人指1",       # fingers
+    "右足",          # legs
+    "右足ＩＫ",      # foot_ik
+    "右つま先ＩＫ",  # toe_ik
+    "謎ボーン",      # unknown
+)
+
+
+def _jitter_doc(path):
+    """X に微小ジッタを載せた密トラックを、全カテゴリの代表ボーンに対して書き出す(連続フレーム0-10)。
+
+    補間は非線形にしておき、クリーニングで線形へ組み直されたかを検出できるようにする。
+    """
+    xs = [0.0, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, 0.0]
+    keys = []
+    for name in _JITTER_BONES:
+        keys += [bone(name, f, pos=(x, 0.0, 0.0), interp=BONE_NONLINEAR) for f, x in enumerate(xs)]
+    write_vmd(path, bone=keys)
+
+
+def _x_variation(keys, name):
+    ks = sorted((k for k in keys if k.name == name), key=lambda k: k.frame)
+    return sum(abs(ks[i + 1].position[0] - ks[i].position[0]) for i in range(len(ks) - 1))
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
+def test_denoise_default_smooths_jitter(tmp_path):
+    # 既定(denoise on)で全ボーン(center/torso/arms/legs)の微小ジッタが平滑化され、X方向の総変動が減る。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _jitter_doc(src)
+    code = cli.main([str(src), "-o", str(out)])
+    assert code == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
+    for name in _JITTER_BONES:
+        assert _x_variation(out_doc.bone, name) < _x_variation(in_doc.bone, name)
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
+def test_explicit_denoise_smooths_jitter(tmp_path):
+    # 明示 --denoise でも(既定と同じく)微小ジッタが平滑化される(--denoise を受理しない実装を排除)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _jitter_doc(src)
+    code = cli.main([str(src), "-o", str(out), "--denoise"])
+    assert code == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
+    for name in _JITTER_BONES:
+        assert _x_variation(out_doc.bone, name) < _x_variation(in_doc.bone, name)
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
+def test_no_denoise_keeps_bones_verbatim_all_categories(tmp_path):
+    # --no-denoise では全カテゴリのボーンがキー列そのまま(値・フレーム・補間)逐語保持される
+    # (総変動量だけ一致させて中身を変える実装を排除)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _jitter_doc(src)
+    code = cli.main([str(src), "-o", str(out), "--no-denoise"])
+    assert code == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
+    for name in _JITTER_BONES:
+        in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
+        out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
+        assert out_keys == in_keys
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
+def test_no_denoise_preserves_nonbone_sections(tmp_path):
+    # --no-denoise 経路でも対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)を無加工透過する。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _full_doc(src)
+    code = cli.main([str(src), "-o", str(out), "--no-denoise"])
+    assert code == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
+    assert out_doc.morph == in_doc.morph
+    assert out_doc.camera == in_doc.camera
+    assert out_doc.light == in_doc.light
+    assert out_doc.self_shadow == in_doc.self_shadow
+    assert out_doc.ik_property == in_doc.ik_property
+
+
+@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
+def test_denoise_output_is_dense_linear(tmp_path):
+    # クリーニング後は連続フレームの密キーで、補間ブロックは線形(後段の疎化へ渡せる形)。
+    from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
+
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _jitter_doc(src)
+    code = cli.main([str(src), "-o", str(out)])
+    assert code == 0
+    out_doc, _ = io.read(str(out))
+    for name in _JITTER_BONES:
+        frames = sorted(k.frame for k in out_doc.bone if k.name == name)
+        assert frames == list(range(11))
+    for k in out_doc.bone:
+        assert k.interpolation == BONE_LINEAR_INTERP
