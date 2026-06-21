@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""commit-msg フック: シェル構文が漏れたコミットメッセージを拒否する。
+
+次の失敗モードを捕捉する:
+
+    git commit -m "$(cat <<'EOF' ... EOF )"
+
+が展開されず(PowerShell で実行された / リテラルとして単一引用された等)、ヒアドキュメントの
+テキストそのものがコミットメッセージになってしまうケース。この場合メッセージは `$(` で始まり、
+`<<'EOF'` 等を含む。
+
+ツール/シェル非依存: git は実際にどう発行されたコミットでも最終メッセージに対してこのフックを
+実行するため、Bash 限定の PreToolUse ガード(guard-git-write.py)が届かない経路(PowerShell
+ツール経由など)も保護できる。
+
+拒否パターンはヒアドキュメント/コマンド置換漏れの曖昧でない痕跡だけに限定する。通常の日本語
+コミットメッセージ(`$5` やバッククォートの `code` を含み得る)は決して拒否しない。
+
+導入: core.hooksPath=.githooks で有効化する。
+自己テスト: python3 .githooks/commit-msg --selftest
+"""
+import re
+import sys
+
+# ヒアドキュメントのリダイレクト演算子: <<EOF, <<'EOF', <<-"DELIM"。<< と区切り語の間に空白を
+# 許さない(`a << SHIFT` のような左シフト式を誤検出しないため)。空白付きの漏れ `$(cat << EOF` は
+# 下の `$(` 始まり/CMDSUBST_FILE 側で捕捉される。
+HEREDOC = re.compile(r"<<-?(['\"]?)[A-Za-z_][A-Za-z0-9_]*\1")
+# cat の直後は空白か閉じ括弧に限定する(`$(cat-file ...)` を誤検出しないため)。
+CMDSUBST_FILE = re.compile(r"\$\(\s*cat[\s)]")
+
+
+def malformed(message):
+    """漏れたシェル構文に見えれば理由文字列を、問題なければ None を返す。"""
+    # コメント行を特別扱いしない。git の cleanup モードは経路で異なり(-m 既定の whitespace は
+    # 行頭 # 行を残す)、漏れた heredoc は # で始まらないので、メッセージ全体をそのまま検査する。
+    # git 標準の雛形コメントは検出パターンを含まないため偽陽性にならない。
+    if not message.strip():
+        return None  # 空メッセージは git 本来の空メッセージ処理に委ねる
+    first = next((ln for ln in message.splitlines() if ln.strip()), "")
+    if first.lstrip().startswith("$("):
+        return "メッセージが `$(` で始まっています(コマンド置換が展開されずリテラル化した疑い)"
+    if HEREDOC.search(message):
+        return "ヒアドキュメント演算子(<<EOF 等)がメッセージに含まれています"
+    if CMDSUBST_FILE.search(message):
+        return "`$(cat ...)` がメッセージに含まれています(コマンド置換漏れの疑い)"
+    return None
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--selftest":
+        selftest()
+        return
+    if len(sys.argv) < 2:
+        return
+    try:
+        # errors="replace": メッセージが非 UTF-8(i18n.commitEncoding 等)でもデコード例外で
+        # 落ちない。検査パターンは ASCII なので置換文字は判定に影響しない。
+        with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
+            message = handle.read()
+    except OSError:
+        # 読込不能(git が渡したファイルが消えた等、通常起こらない)は fail-open とする。
+        # この種の便宜ガードで全コミットをブロックする方が実害が大きいため意図的。
+        return
+    reason = malformed(message)
+    if reason:
+        sys.stderr.write(
+            "commit-msg フック: 不正なコミットメッセージを拒否しました。\n"
+            "  理由: " + reason + "\n"
+            "  コミットメッセージにシェル構文(ヒアドキュメント/コマンド置換)が混入しています。\n"
+            "  単一の -m に単一引用で、展開済みの本文を渡してください。\n"
+        )
+        sys.exit(1)
+
+
+def selftest():
+    bad = [
+        "$(cat <<'EOF'\nmocapvmd: テスト追加\nEOF\n)",
+        "$(cat << EOF\nx\nEOF\n)",  # 空白付き heredoc 漏れ($( 始まり/$(cat で捕捉)
+        "件名\n\n本文 <<'EOF' が混入",
+        "$(cat foo)",
+        "<<EOF\nx\nEOF",
+        "# メモ <<'EOF'",  # # 行も除外しないので検出する(-m は # 行を残す)
+        "$(printf x)",  # $( 先頭判定の単独カバレッジ(heredoc/cat に該当しない)
+        "件名\n\n本文 $(cat file)",  # 本文中の $(cat ...) 単独カバレッジ($( 先頭でない)
+    ]
+    good = [
+        "mocapvmd: クリーニングプリセット解決のテストを追加",
+        "件名\n\n- コスト $5 を `code` で表現\n- a > b の比較",
+        "fix: it's quoted \"text\"",
+        "見出し<<重要>> な変更",
+        "perf: flags << SHIFT の左シフトを最適化",  # 空白付き << は左シフト式(誤検出しない)
+        "1 << 8 のビットシフト修正",
+        "説明: $(cat-file -t HEAD) の出力を使う",  # cat-file は $(cat ...) と区別する
+        "# 普通のメモ行\n本文だけの通常メッセージ",  # 行頭 # でもパターン無しなら通す
+        "",
+    ]
+    failures = []
+    for message in bad:
+        if malformed(message) is None:
+            failures.append(("不正のはずが pass", message))
+    for message in good:
+        reason = malformed(message)
+        if reason is not None:
+            failures.append(("正常のはずが拒否: " + reason, message))
+    if failures:
+        for why, message in failures:
+            print("FAIL:", why, "::", repr(message))
+        sys.exit(1)
+    print(f"ALL PASS ({len(bad)} bad + {len(good)} good)")
+
+
+if __name__ == "__main__":
+    main()
