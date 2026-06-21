@@ -346,9 +346,15 @@ def _quat_slerp(q0, q1, t):
 
 
 def _quat_angle_deg(a, b):
-    """2つの単位quaternion間の角度距離(度)。符号不変(|dot|)。"""
-    d = min(1.0, abs(_quat_dot(a, b)))
-    return math.degrees(2.0 * math.acos(d))
+    """2つの単位quaternion間の角度距離(度)。符号不変。
+
+    相対回転 r=b·conj(a) の (||虚部||, |実部|) から 2·atan2(||xyz||,|w|) で測る。
+    2·acos(|dot|) は dot≈1(微小角)で悪条件になり libm 差で偽差が出るが、atan2 形は
+    全域で安定。|w| を取ることで q と -q(同一回転)は厳密に角度0、最短弧(≤180度)を返す。
+    """
+    r = _quat_mul(b, _quat_conj(a))
+    v = math.sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2])
+    return math.degrees(2.0 * math.atan2(v, abs(r[3])))
 
 
 class CameraRotationChannel:

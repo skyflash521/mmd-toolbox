@@ -12,12 +12,35 @@ import math
 
 import pytest
 
-from mmd_toolbox.vmd.fit import BoneRotationChannel, CameraRotationChannel
+from mmd_toolbox.vmd.fit import BoneRotationChannel, CameraRotationChannel, _quat_angle_deg
 
 
 def quat_z(deg):
     a = math.radians(deg) / 2.0
     return (0.0, 0.0, math.sin(a), math.cos(a))
+
+
+# --- _quat_angle_deg 数値精度 ----------------------------------------------
+
+
+def test_quat_angle_deg_small_angle_precision():
+    # 微小角(0.1度刻み)を acos の悪条件域(dot≈1)で正確に測れること。
+    # 2·acos(|dot|) は dot≈1 で丸め誤差が増幅し、プラットフォームの libm 差で
+    # 軌道上のはずの角度に ~1e-6 度の偽差が出ていた。atan2 形は安定。
+    base = quat_z(0.0)
+    for deg in (0.05, 0.1, 0.2, 0.5, 1.0):
+        assert _quat_angle_deg(base, quat_z(deg)) == pytest.approx(deg, abs=1e-9)
+
+
+def test_quat_angle_deg_sign_invariant_exact_zero():
+    # q と -q は同一回転 → 角度0(符号反転でも厳密に0)。
+    q = quat_z(33.0)
+    assert _quat_angle_deg(q, tuple(-c for c in q)) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_quat_angle_deg_identical_exact_zero():
+    q = quat_z(17.0)
+    assert _quat_angle_deg(q, q) == 0.0
 
 
 def quat_x(deg):
