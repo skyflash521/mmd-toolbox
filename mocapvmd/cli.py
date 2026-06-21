@@ -13,12 +13,15 @@ import sys
 
 from mmd_toolbox.vmd import io
 
+from . import report
+
 
 def _build_parser():
     p = argparse.ArgumentParser(prog="mocapvmd", allow_abbrev=False)
     p.add_argument("input")
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
+    p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
 
@@ -71,12 +74,23 @@ def main(argv=None):
         where = f"({w.section})" if w.section else ""
         print(f"警告: {w.message}{where}", file=sys.stderr)
 
+    # 診断レポート(dry-run 表示・report-json 出力)。どのボーンにどの処理が適用される予定かを
+    # 出力を変更せずに確認できる。
+    if args.dry_run or args.report_json:
+        rep = report.build_report(doc.bone)
+        if args.dry_run:
+            print(report.format_dry_run(rep))
+        if args.report_json:
+            try:
+                report.write_json(rep, args.report_json)
+            except OSError:
+                return 3
+
     # dry-run は出力を書かずに終える。
     if args.dry_run:
         return 0
 
     # 読み込んだドキュメントをそのまま書き出す(対象外セクション・ボーンとも無加工で透過する)。
-
     try:
         io.write_file(doc, output)
     except Exception:

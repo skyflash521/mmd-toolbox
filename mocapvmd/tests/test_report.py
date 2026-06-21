@@ -4,19 +4,14 @@
 回転角速度をまとめる。速度は連続フレーム差をキー間フレーム差で1フレームあたりへ正規化する。
 """
 
-import importlib.util
 import json
 import math
 
 import pytest
 
-# report モジュール(実体ファイル)が無い間はモジュールごと skip する。
-if importlib.util.find_spec("mocapvmd.report") is None:
-    pytest.skip("impl pending: Step 1c report", allow_module_level=True)
+from mocapvmd import report
 
-from mocapvmd import report  # noqa: E402
-
-from .helpers import bone  # noqa: E402
+from .helpers import bone
 
 
 def _quat_y(deg):

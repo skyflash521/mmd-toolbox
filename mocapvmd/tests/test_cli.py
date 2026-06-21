@@ -183,7 +183,6 @@ def test_dry_run_does_not_write_default_output(tmp_path):
 # --- 診断レポート(report-json / dry-run 表示) ----------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: Step 1c report", strict=True)
 def test_report_json_written(tmp_path):
     src = tmp_path / "in.vmd"
     rep = tmp_path / "report.json"
@@ -201,7 +200,6 @@ def test_report_json_written(tmp_path):
     assert "右足ＩＫ" in data["foot_ik_candidates"]
 
 
-@pytest.mark.xfail(reason="impl pending: Step 1c report", strict=True)
 def test_dry_run_prints_report(tmp_path, capsys):
     src = tmp_path / "in.vmd"
     _full_doc(src)
@@ -211,7 +209,6 @@ def test_dry_run_prints_report(tmp_path, capsys):
     assert "センター" in out
 
 
-@pytest.mark.xfail(reason="impl pending: Step 1c report", strict=True)
 def test_report_json_with_dry_run_does_not_write_output(tmp_path):
     src = tmp_path / "in.vmd"
     rep = tmp_path / "report.json"
