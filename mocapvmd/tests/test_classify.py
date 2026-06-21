@@ -4,16 +4,9 @@
 unknown)を推定する。具体度の高い種別を優先し、足IK・つま先IKが legs より先に判定される。
 """
 
-import importlib.util
-
 import pytest
 
-# classify モジュール(実体ファイル)が無い間はモジュールごと skip する。find_spec で存在判定し、
-# 存在すれば通常 import して内部 import 失敗は表面化させる。
-if importlib.util.find_spec("mocapvmd.classify") is None:
-    pytest.skip("impl pending: Step 1b classify", allow_module_level=True)
-
-from mocapvmd import classify  # noqa: E402
+from mocapvmd import classify
 
 
 @pytest.mark.parametrize(
