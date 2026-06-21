@@ -25,7 +25,7 @@ sparsevmd = "sparsevmd.cli:main"
 include = ["mmd_toolbox*", "shakevmd*", "sparsevmd*"]
 
 [tool.pytest.ini_options]
-testpaths = ["mmd_toolbox", "shakevmd", "sparsevmd"]
+testpaths = ["mmd_toolbox", "mocapvmd", "shakevmd", "sparsevmd"]
 pythonpath = ["."]
 # 各ツールの tests に同名テストファイル(test_cli.py 等)があるため、basename 衝突を
 # 避ける importlib インポートモードを使う(prepend 既定だと collection で衝突する)。
