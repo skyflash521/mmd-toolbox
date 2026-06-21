@@ -85,12 +85,17 @@ def _format_errors(errors):
 
 
 def _format_diag(diag):
-    """診断の不連続検出位置・継ぎ目書き換えを簡潔な行にする(§2.7, §6.3)。"""
+    """診断の不連続検出位置・継ぎ目書き換え・出力後検証を簡潔な行にする(§2.7, §6.3, §7.3)。"""
     lines = []
     if diag.get("cuts"):
         lines.append(f"  cuts: {diag['cuts']}")
     if diag.get("seam_rewrites"):
         lines.append(f"  seam rewrites: {diag['seam_rewrites']}")
+    for v in diag.get("verify") or ():
+        lines.append(
+            f"  verify [{v['range'][0]}, {v['range'][1]}]: "
+            f"iterations={v['iterations']} added_total={v['added_total']}"
+        )
     return lines
 
 

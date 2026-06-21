@@ -211,7 +211,6 @@ def _force_linear_curve(monkeypatch):
     )
 
 
-@pytest.mark.xfail(reason="impl pending: Step C verify diagnostics", strict=False)
 def test_verify_diag_recorded_clean_no_densification():
     # 正常な bezier 削減は密化なしで検証通過。verify レコードは存在し added_total==0、
     # 最終反復の bad_count==0(超過なしで収束)。
@@ -229,7 +228,6 @@ def test_verify_diag_recorded_clean_no_densification():
     assert len(rec["added_counts"]) == rec["iterations"]
 
 
-@pytest.mark.xfail(reason="impl pending: Step C verify diagnostics", strict=False)
 def test_verify_diag_records_densification(monkeypatch):
     # 出力曲線を線形に壊すと密化ループが回る。added_total>0 で、added_counts の総和に一致。
     xs = _eased(-10.0, -110.0)
@@ -247,7 +245,6 @@ def test_verify_diag_records_densification(monkeypatch):
     assert rec["added_counts"][-1] == 0
 
 
-@pytest.mark.xfail(reason="impl pending: Step C verify diagnostics", strict=False)
 def test_verify_diag_bone_records_densification(monkeypatch):
     # bone トラックでも verify レコードが積まれること(camera/bone 両ループの契約を固定)。
     ys = _eased(0.0, 100.0)
@@ -263,7 +260,6 @@ def test_verify_diag_bone_records_densification(monkeypatch):
     assert len(rec["added_counts"]) == rec["iterations"]
 
 
-@pytest.mark.xfail(reason="impl pending: Step C verify diagnostics", strict=False)
 def test_verify_diag_per_range():
     # 複数範囲は範囲ごとに1レコード。
     src = [cam(f, dist=-30.0 - float(f)) for f in range(31)]
@@ -284,7 +280,6 @@ def test_build_report_preserves_verify_passthrough():
     assert rep["camera"]["diagnostics"]["verify"][0]["added_total"] == 0
 
 
-@pytest.mark.xfail(reason="impl pending: Step C verify diagnostics", strict=False)
 def test_cli_report_json_includes_verify(tmp_path):
     # CLI 経由の --report-json に verify レコードが出ることをエンドツーエンドで確認する。
     from mmd_toolbox.vmd import io
@@ -303,7 +298,6 @@ def test_cli_report_json_includes_verify(tmp_path):
     assert data["camera"]["diagnostics"]["verify"][0]["iterations"] >= 1
 
 
-@pytest.mark.xfail(reason="impl pending: Step C verify diagnostics", strict=False)
 def test_format_dry_run_shows_verify():
     # dry-run テキストに verify の反復回数・追加総数がまとまった形で出る。
     diag = dict(_diag())
@@ -319,7 +313,6 @@ def test_format_dry_run_shows_verify():
     assert "added_total=7" in text
 
 
-@pytest.mark.xfail(reason="impl pending: Step C verify diagnostics", strict=False)
 def test_log_diagnostics_shows_verify(capsys):
     # verbose の stderr ログにも出力後検証の反復・追加が出る(§C「JSON と verbose の両方」)。
     from sparsevmd import cli
@@ -332,3 +325,6 @@ def test_log_diagnostics_shows_verify(capsys):
     assert "出力後検証" in err
     assert "反復3" in err
     assert "追加7" in err
+    # 反復ごとの推移(bad_counts/added_counts)も出し、総数が同じで推移が違うループを区別できる。
+    assert "bad=[5, 2, 0]" in err
+    assert "added=[5, 2, 0]" in err

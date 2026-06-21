@@ -231,7 +231,7 @@ def _bone_reduced(bone_keys, selected, global_ranges):
 
 
 def _log_diagnostics(camera_diag, bone_diag):
-    """verbose 時に不連続検出位置・継ぎ目書き換え・分割理由を stderr に出す(§2.7/§6.3)。"""
+    """verbose 時に不連続検出位置・継ぎ目書き換え・分割理由・出力後検証を stderr に出す(§2.7/§6.3/§7.3)。"""
     def emit(label, d):
         if not d:
             return
@@ -241,6 +241,13 @@ def _log_diagnostics(camera_diag, bone_diag):
             print(f"詳細[{label}]: 継ぎ目書き換え {d['seam_rewrites']}", file=sys.stderr)
         if d.get("splits"):
             print(f"詳細[{label}]: 分割 {len(d['splits'])} 件", file=sys.stderr)
+        for v in d.get("verify") or ():
+            print(
+                f"詳細[{label}]: 出力後検証 範囲[{v['range'][0]},{v['range'][1]}] "
+                f"反復{v['iterations']} 追加{v['added_total']} "
+                f"bad={v['bad_counts']} added={v['added_counts']}",
+                file=sys.stderr,
+            )
 
     emit("camera", camera_diag)
     for name, d in (bone_diag or {}).items():

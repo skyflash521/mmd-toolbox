@@ -228,6 +228,23 @@ def verify_bone_track(source_keys, output_keys, ranges, tols):
     return sorted(bad)
 
 
+def _verify_record(f0, f1, bad_counts, added_counts):
+    """出力後検証(§7.3)の範囲ごとの反復記録を作る(§2.7 diagnostics)。
+
+    iterations は検証回数(=ループ反復数)。bad_counts/added_counts は反復ごとの許容超過
+    フレーム数/追加フレーム数で長さは iterations に一致する。added_total は密化で追加した
+    総フレーム数(added_counts の総和)。非strictで added_total が大きい範囲は密化早期切替の
+    観測対象になる。
+    """
+    return {
+        "range": [f0, f1],
+        "iterations": len(bad_counts),
+        "bad_counts": bad_counts,
+        "added_counts": added_counts,
+        "added_total": sum(added_counts),
+    }
+
+
 def _interval_clear_of_ranges(ranges, lo, hi):
     """開区間 (lo, hi) がどの処理範囲とも重ならないか(§6.3 継ぎ目の安全判定)。
 
@@ -516,6 +533,7 @@ def reduce_camera_track(
     diag_cuts = set()
     diag_splits = [] if diagnostics is not None else None
     diag_seams = set()
+    diag_verify = [] if diagnostics is not None else None
     # 全範囲のフレーム総数に対する処理経過(§2.7)。範囲ごとに base を進める。
     total_frames = sum(f1 - f0 for f0, f1 in ranges)
     progress_base = 0
@@ -574,17 +592,28 @@ def reduce_camera_track(
         # 超過フレームは出力キー上には現れない(キー上は元値格納でフィット誤差0)ため、
         # added は必ず非空 → range_frames は厳密に増え [f0,f1] 内で必ず収束する。
         # added が空になる進行不能は理論上到達しないが、無限ループ防止に明示ガードを置く。
+        record = diag_verify is not None  # 診断未指定時は記録のオーバーヘッドを持たない
+        bad_counts = [] if record else None
+        added_counts = [] if record else None
         while True:
             keys = build_camera_keys(source_keys, sorted(range_frames), segment_interp)
             bad = verify_camera_track(source_keys, keys, [(f0, f1)], tols)
+            if record:
+                bad_counts.append(len(bad))
             if not bad:
+                if record:
+                    added_counts.append(0)
                 break
             if strict:
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
             added = set(bad) - range_frames
             range_frames |= added
+            if record:
+                added_counts.append(len(added))
             if not added:
                 break
+        if record:
+            diag_verify.append(_verify_record(f0, f1, bad_counts, added_counts))
 
         # §6.3 範囲端の下側継ぎ目: 範囲開始キー f0(範囲内)の到達側曲線を元サンプルから
         # 再フィットし、手前の範囲外キーから f0 までの区間の動きを忠実に保つ(bezier のみ)。
@@ -604,6 +633,7 @@ def reduce_camera_track(
         diagnostics["cuts"] = sorted(diag_cuts)
         diagnostics["splits"] = diag_splits
         diagnostics["seam_rewrites"] = sorted(diag_seams)
+        diagnostics["verify"] = diag_verify
     return sorted(reduced + outside, key=lambda k: k.frame)
 
 
@@ -632,6 +662,7 @@ def reduce_bone_track(
     diag_cuts = set()
     diag_splits = [] if diagnostics is not None else None
     diag_seams = set()
+    diag_verify = [] if diagnostics is not None else None
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         quats = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
@@ -664,17 +695,28 @@ def reduce_bone_track(
         # §7.3 出力後検証(カメラと同様。非strictは密化で収束、strictはエラー)。
         # added は必ず非空(超過フレームは元値格納のキー上には現れない)ため厳密に増え収束する。
         # 進行不能(added 空)は理論上到達しないが、無限ループ防止に明示ガードを置く。
+        record = diag_verify is not None  # 診断未指定時は記録のオーバーヘッドを持たない
+        bad_counts = [] if record else None
+        added_counts = [] if record else None
         while True:
             keys = build_bone_keys(source_keys, sorted(range_frames), segment_interp)
             bad = verify_bone_track(source_keys, keys, [(f0, f1)], tols)
+            if record:
+                bad_counts.append(len(bad))
             if not bad:
+                if record:
+                    added_counts.append(0)
                 break
             if strict:
                 raise StrictError(f"出力後検証で許容を満たせない: 範囲[{f0},{f1}] フレーム{bad[:8]}")
             added = set(bad) - range_frames
             range_frames |= added
+            if record:
+                added_counts.append(len(added))
             if not added:
                 break
+        if record:
+            diag_verify.append(_verify_record(f0, f1, bad_counts, added_counts))
 
         # §6.3 範囲端の下側継ぎ目のみ(範囲内の範囲開始キーを再フィット)。範囲外キーは変更不可
         # なので上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。bezier のみ。
@@ -692,4 +734,5 @@ def reduce_bone_track(
         diagnostics["cuts"] = sorted(diag_cuts)
         diagnostics["splits"] = diag_splits
         diagnostics["seam_rewrites"] = sorted(diag_seams)
+        diagnostics["verify"] = diag_verify
     return sorted(reduced + outside, key=lambda k: k.frame)
