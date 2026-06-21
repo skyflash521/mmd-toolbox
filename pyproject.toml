@@ -18,11 +18,12 @@ dev = [
 ]
 
 [project.scripts]
+mocapvmd = "mocapvmd.cli:main"
 shakevmd = "shakevmd.cli:main"
 sparsevmd = "sparsevmd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*", "shakevmd*", "sparsevmd*"]
+include = ["mmd_toolbox*", "mocapvmd*", "shakevmd*", "sparsevmd*"]
 
 [tool.pytest.ini_options]
 testpaths = ["mmd_toolbox", "mocapvmd", "shakevmd", "sparsevmd"]

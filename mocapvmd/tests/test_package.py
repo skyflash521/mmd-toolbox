@@ -4,21 +4,11 @@
 公開・登録されていることを確認する。
 """
 
-import importlib.util
 import tomllib
 from pathlib import Path
 
-import pytest
-
-# cli モジュール(実体ファイル)が無い間はモジュールごと skip する。find_spec で「存在するか」
-# だけを判定し、存在すれば通常 import して内部 import の失敗はそのまま表面化させる
-# (importorskip は内部 import 失敗まで skip で握り潰すため使わない)。mocapvmd ディレクトリ自体は
-# __init__.py 不在でも namespace package として import 成功するので、cli を基準にする。
-if importlib.util.find_spec("mocapvmd.cli") is None:
-    pytest.skip("impl pending: Step 1a", allow_module_level=True)
-
-import mocapvmd  # noqa: E402
-from mocapvmd import cli  # noqa: E402
+import mocapvmd
+from mocapvmd import cli
 
 
 def test_package_imports():

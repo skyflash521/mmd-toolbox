@@ -6,18 +6,12 @@ CLI は引数解析 → VMD読み → クリーニング → 疎化 → VMD書�
 本テストは基盤(入出力・パス検証・上書きガード・dry-run・対象外セクション透過)を扱う。
 """
 
-import importlib.util
-
 import pytest
 
-# cli モジュール(実体ファイル)が無い間はモジュールごと skip する(test_package.py と同方式)。
-if importlib.util.find_spec("mocapvmd.cli") is None:
-    pytest.skip("impl pending: Step 1a", allow_module_level=True)
+from mmd_toolbox.vmd import io
+from mocapvmd import cli
 
-from mmd_toolbox.vmd import io  # noqa: E402
-from mocapvmd import cli  # noqa: E402
-
-from .helpers import (  # noqa: E402
+from .helpers import (
     BONE_NONLINEAR,
     CAM_NONLINEAR,
     bone,
