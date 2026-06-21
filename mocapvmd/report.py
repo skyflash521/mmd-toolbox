@@ -1,18 +1,16 @@
 """処理計画・診断レポート(mocapvmd.md §4.4)。
 
 ボーン一覧・分類結果・キー数・フレーム範囲・足IK/つま先IK候補と、各トラックの最大フレーム間
-速度・最大回転角速度をまとめる。速度はトラックを時系列順に並べ、連続キーの差をキー間フレーム差で
-1フレームあたりへ正規化した最大値とする。回転角は quaternion の角度距離で測り、符号反転
-(q と -q は同一姿勢)を見かけの大角速度にしない。
-
-スパイク候補・接地候補は検出が種別窓や足IK/つま先IKの対応付けに依存するため、それぞれの検出を
-備える段でレポートへ加える。
+速度・最大回転角速度・スパイク候補数・保護フレーム数をまとめる。速度はトラックを時系列順に並べ、
+連続キーの差をキー間フレーム差で1フレームあたりへ正規化した最大値とする。回転角は quaternion の
+角度距離で測り、符号反転(q と -q は同一姿勢)を見かけの大角速度にしない。スパイク候補・保護
+フレームは種別窓での検出(denoise)に基づく。
 """
 
 import json
 import math
 
-from mocapvmd import classify, presets
+from mocapvmd import classify, denoise, presets
 
 
 def _quat_angle_deg(q1, q0):
@@ -33,6 +31,30 @@ def _track_diagnostics(keys):
         max_speed = max(max_speed, math.dist(a.position, b.position) / gap)
         max_ang = max(max_ang, _quat_angle_deg(a.rotation, b.rotation) / gap)
     return max_speed, max_ang
+
+
+def _spike_protected_counts(keys, preset, category):
+    """トラックのスパイク候補フレーム数と保護フレーム数を返す(§4.4)。
+
+    種別の窓で検出し、スパイク候補は位置・回転候補フレームの和集合、保護フレームは境界(カット両側・
+    範囲端)と位置・回転アクセントの和集合のフレーム数。キー1個以下、または値が検証を通らないトラックは
+    (0, 0) を返す。
+    """
+    if len(keys) < 2:
+        return 0, 0
+    params = presets.resolve_cleaning(preset, category)
+    try:
+        det = denoise.detect_noise_events(
+            [k.position for k in keys],
+            [k.rotation for k in keys],
+            pos_window=params["pos_window"],
+            rot_window=params["rot_window"],
+        )
+    except ValueError:
+        return 0, 0
+    spike_frames = {f for f, _ in det.pos_candidates} | set(det.rot_candidates)
+    protected = set(det.boundaries) | {f for f, _ in det.pos_accent} | set(det.rot_accent)
+    return len(spike_frames), len(protected)
 
 
 def build_report(bone_keys, preset="balanced", denoise=True):
@@ -59,6 +81,7 @@ def build_report(bone_keys, preset="balanced", denoise=True):
         all_frames.extend(k.frame for k in keys)
         category = classify.classify(name)
         max_speed, max_ang = _track_diagnostics(keys)
+        spike_candidates, protected_frames = _spike_protected_counts(keys, preset, category)
         bones.append(
             {
                 "name": name,
@@ -68,6 +91,8 @@ def build_report(bone_keys, preset="balanced", denoise=True):
                 "frame_last": keys[-1].frame,
                 "max_speed": max_speed,
                 "max_ang_speed_deg": max_ang,
+                "spike_candidates": spike_candidates,
+                "protected_frames": protected_frames,
                 "cleaning": presets.resolve_cleaning(preset, category),
             }
         )
@@ -106,6 +131,7 @@ def format_dry_run(report):
             f"{b['name']} [{b['category']}] keys={b['input_keys']} "
             f"frames=[{b['frame_first']},{b['frame_last']}] "
             f"max_speed={b['max_speed']:.4g} max_rot={b['max_ang_speed_deg']:.4g}deg "
+            f"spikes={b['spike_candidates']} protected={b['protected_frames']} "
             f"clean_pos={c['pos_strength']:.4g} clean_rot={c['rot_strength']:.4g} "
             f"win=[{c['pos_window']},{c['rot_window']}]"
         )
