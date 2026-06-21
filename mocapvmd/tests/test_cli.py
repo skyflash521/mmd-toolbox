@@ -6,6 +6,8 @@ CLI は引数解析 → VMD読み → クリーニング → 疎化 → VMD書�
 本テストは基盤(入出力・パス検証・上書きガード・dry-run・対象外セクション透過)を扱う。
 """
 
+import json
+
 import pytest
 
 from mmd_toolbox.vmd import io
@@ -189,8 +191,6 @@ def test_report_json_written(tmp_path):
     _full_doc(src)
     code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
     assert code == 0
-    import json
-
     data = json.loads(rep.read_text(encoding="utf-8"))
     names = [e["name"] for e in data["bones"]]
     assert "センター" in names
@@ -217,3 +217,44 @@ def test_report_json_with_dry_run_does_not_write_output(tmp_path):
     assert code == 0
     assert rep.exists()
     assert not (tmp_path / "in_mocap.vmd").exists()
+
+
+# --- --preset(クリーニング強度) -------------------------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: Step 2b --preset", strict=True)
+def test_preset_option_resolves_cleaning_in_report(tmp_path):
+    from mocapvmd import presets
+
+    src = tmp_path / "in.vmd"
+    rep = tmp_path / "report.json"
+    _full_doc(src)
+    code = cli.main([str(src), "--dry-run", "--preset", "stable-foot", "--report-json", str(rep)])
+    assert code == 0
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    foot = next(e for e in data["bones"] if e["name"] == "右足ＩＫ")
+    assert foot["cleaning"]["pos_strength"] == pytest.approx(0.65 * 1.5)
+    assert foot["cleaning"] == presets.resolve_cleaning("stable-foot", "foot_ik")
+
+
+def test_invalid_preset_value_is_arg_error(tmp_path):
+    src = tmp_path / "in.vmd"
+    _full_doc(src)
+    # 未知のプリセット値は引数エラー(終了コード2)。
+    assert cli.main([str(src), "--preset", "turbo"]) == 2
+
+
+@pytest.mark.xfail(reason="impl pending: Step 2b --preset", strict=True)
+def test_default_preset_is_balanced_in_report_json(tmp_path):
+    # --preset 省略時は balanced が適用されることを CLI レベルで検証する(誤って別プリセットを
+    # 明示渡しする実装を排除)。
+    from mocapvmd import presets
+
+    src = tmp_path / "in.vmd"
+    rep = tmp_path / "report.json"
+    _full_doc(src)
+    code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
+    assert code == 0
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    center = next(e for e in data["bones"] if e["name"] == "センター")
+    assert center["cleaning"] == presets.resolve_cleaning("balanced", "center")
