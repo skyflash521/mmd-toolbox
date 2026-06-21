@@ -18,7 +18,7 @@ codex:rescue(read-only)にレビューさせ、Claude が各指摘を実コー�
 発行するコマンドは、すべて `.claude/settings.json` の `permissions.allow` に登録済みの単一コマンドに限る:
 
 - codex 起動: settings.json に登録済みの companion 起動 glob(`node <実パス>/codex-companion.mjs …` 形。正確なパターンは settings.json が正)。エージェント内部で実行
-- watchdog: `Bash(bash .claude/skills/codex-review-loop/watchdog.sh*)`(`watchdog.sh` の単一起動。先頭を相対パスに固定し `bash -c` 注入を防ぐ)
+- watchdog: `Bash(bash .claude/skills/codex-review-loop/watchdog.sh*)`(`watchdog.sh` の単一起動。先頭を相対パスに固定し `bash -c` 注入を防ぐ。末尾ワイルドカードが STALL/WALL/STATE_ROOT/GRACE/RUNID の各引数を覆うので settings.json の追加は不要)
 - 照合・テスト: 読み取り専用コマンド(`cat`/`sed -n`/`grep`/`rg`/`git` 系)と `pytest`
 - 結果取得・修正・停止: Read / Edit / `TaskStop` ツール(プロンプト無し)
 
@@ -40,6 +40,16 @@ codex:rescue(read-only)にレビューさせ、Claude が各指摘を実コー�
 
 1. **レビュー実行(1ラウンド)**: codex:rescue エージェントをタイムアウト制御付きで
    実行する(下記「レビュー実行とタイムアウト制御」)。プロンプトに必ず含める:
+   - **【同時起動対応】RUNID(相関トークン)をプロンプト最先頭に埋め込む**: このラウンドごとに
+     Claude が一意トークン RUNID(英数・`_`・`-` のみ。`.` は正規表現メタ文字なので使わない。12桁程度。
+     例: タイムスタンプ接頭+乱数で衝突回避)を生成し、レビュー指示文(`--` 以降)の**最先頭行**に
+     `REVIEW-RUNID: <RUNID>` という固定マーカー行を必ず置く。companion はプロンプト冒頭をジョブメタ
+     (`task-*.json` の `summary`)に保存するので、watchdog は `REVIEW-RUNID: <RUNID>` マーカーを
+     **境界付き**(RUNID 直後が token 文字でないこと)で照合し、**自ラウンドのジョブログを内容で一意
+     特定**できる(時刻・起動順依存の baseline ではなくなるため、同一リポジトリで複数セッションを同時に
+     回してもログの取り違えが起きない。あるトークンが別トークンの接頭辞でも誤一致しない)。RUNID は
+     コード差分には入らずマーカー行に限るので「作業過程参照の混入」観点には抵触しない。
+     **RUNID にバックティック・`$`・`.` 等の禁止/メタ文字を含めない**(上記記号規約と整合)
    - **【最優先】この変更の要件と目的(品質基準)を冒頭に明記する**: 何を達成するための変更か、
      満たすべき品質基準は何かを先に伝え、codex に**目的に照らして**評価させる。手段(差分の表層)だけを
      見せて文法的な正否を問う形にしない。目的が伝わらないとレビューは表層チェックに堕し、設計が目的を
@@ -161,17 +171,20 @@ codex:rescue(read-only)にレビューさせ、Claude が各指摘を実コー�
 
    #### 監視(stall 検知付き watchdog)
    - **エージェントより先に、コミット済みスクリプト `watchdog.sh` を `run_in_background: true` の
-     Bash で1つ起動**する(リポジトリルートから相対で `bash .claude/skills/codex-review-loop/watchdog.sh [STALL_SECS] [WALL_CAP_SECS]`)。
-     **起動順序が重要**: watchdog が baseline を取った**後に**エージェント(companion)が今回のログを作る、
-     という順序でないと、先に作られたログが baseline 側に入って「新規ログ無し」と誤判定され、起動猶予の
-     no-start が誤発火する。そこで **watchdog を先に(`run_in_background` で)起動し、その直後にエージェントを
-     起動する**。watchdog の baseline は約100msのfindで、companion の codex ログはエージェント起動の数秒後に
-     出るので baseline が先に取れる。**readiness のポーリングはしない**(`;`・`rm`・リダイレクト・`for`/`until`
+     Bash で1つ起動**する(リポジトリルートから相対で
+     `bash .claude/skills/codex-review-loop/watchdog.sh [STALL_SECS] [WALL_CAP_SECS] [STATE_ROOT] [STARTUP_GRACE_SECS] [RUNID]`)。
+     **第5引数 RUNID にこのラウンドのトークンを必ず渡す**(手順1で生成し、レビュー指示文の最先頭
+     `REVIEW-RUNID: <RUNID>` に埋めたものと同じ値)。RUNID を渡すと watchdog は**そのトークンを含む
+     ジョブログ(`task-*.json` の summary、無ければ `.log` 本文)だけを自ラウンドとして選ぶ**ので、
+     同一リポジトリで複数セッションを同時に回しても互いのログを誤掴みしない。**RUNID 方式では起動順序が
+     結果に影響しない**(内容で識別するため)。RUNID を省略すると後方互換の baseline 方式
+     (起動時に存在しなかった最新ログ)で動く。
+     **起動順序(推奨)**: RUNID を渡す場合は順序は正しさに不要だが、no-start 検出を早めるため従来どおり
+     watchdog を先に起動してよい。**readiness のポーリングはしない**(`;`・`rm`・リダイレクト・`for`/`until`
      等の複合コマンドは許可リスト不一致でプロンプトを出すため。万一順序が崩れても no-start→再試行で安全)。
-     スクリプトは**現リポジトリの state ディレクトリ(`<repo>-*/jobs`)に絞り**、**起動時に存在しなかった
-     (=このラウンドで新規作成された)ログのうち最新**を対象にする。上記の起動順序により今回のログは
-     baseline 取得後に作られて新規側に入り、前ラウンドのオーファン(走行中でも baseline 側)を誤掴みしない。選んだログの mtime と終了行を見張り、次の終局でだけ
-     exit する:
+     スクリプトは**現リポジトリの state ディレクトリ(`<repo>-*/jobs`)に絞り**、RUNID 指定時は RUNID を
+     含む最新ログを、未指定時は起動時に存在しなかった最新ログを対象にする。選んだログの mtime と
+     終了行を見張り、次の終局でだけ exit する:
      - **失敗**: `[ts] Turn failed.` 行 → `exit 2`(成功より先に判定)
      - **正常終了**: `[ts] Turn completed.` または `[ts] Final output` 行 → `exit 0`
      - **stall(ハング)**: ログの mtime が `STALL_SECS`(既定 420秒)前進しない → `exit 3`
@@ -213,7 +226,9 @@ codex:rescue(read-only)にレビューさせ、Claude が各指摘を実コー�
        **【安全規則】このフォールバックのログ走査ではラウンド同一性が保証されない**(オーファン誤選択の
        可能性)。よって**フォールバックでは収束を確定しない**: 抽出が指摘列挙なら参考にしつつ対処してよいが、
        **収束に見えても採用せず失敗ラウンド扱いで新規エージェントで取り直す**。**収束はエージェントの直接応答
-       (収束根拠＋末尾 `収束`)でのみ確定する**(ログ走査由来の収束で誤コミットに至らせない)。
+       (収束根拠＋末尾 `収束`)でのみ確定する**(ログ走査由来の収束で誤コミットに至らせない)。RUNID を渡して
+       いれば watchdog の `LOG=` は RUNID で内容一致したログを指すのでオーファン誤選択の確率は大きく下がるが、
+       それでもこの安全規則は緩めない(フォールバック由来の収束は採用しない)。
      - **watchdog `OUTCOME` が 2/3/4(失敗/stall/no-start/wall-cap)、または エージェントの失敗報告・
        「実行中です…」早期復帰** → 失敗ラウンド扱い。エージェントと watchdog を `TaskStop` し、新規に
        codex:rescue を起動してやり直す(プロンプトで「`task` をフォアグラウンド同期実行・バックグラウンド化
