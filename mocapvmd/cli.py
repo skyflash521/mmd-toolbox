@@ -1,19 +1,22 @@
 """mocapvmd CLI(mocapvmd.md §3)。
 
-引数解析 → VMD読み(mmd_toolbox.vmd.io)→ クリーニング → 疎化 → VMD書き。
-ボーン選択は持たず、全ボーンを処理対象とする。対象外セクション(モーフ・カメラ・
-照明・セルフ影)は無加工で透過する。
+引数解析 → VMD読み(mmd_toolbox.vmd.io)→ 全ボーンの一般ノイズ軽減(クリーニング)→ VMD書き。
+ボーン選択は持たず、全ボーンを処理対象とする。対象外セクション(モーフ・カメラ・照明・
+セルフ影)は無加工で透過する。クリーニング後は密キーを線形補間で出力する。
 
-終了コード: 0 正常 / 1 入力不正(VMDでない等)/ 2 引数エラー / 3 出力書き込み失敗。
+終了コード: 0 正常 / 1 入力不正(VMDでない・値が非有限等)/ 2 引数エラー / 3 出力書き込み失敗。
 """
 
 import argparse
+import dataclasses
 import os
 import sys
 
 from mmd_toolbox.vmd import io
+from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
+from mmd_toolbox.vmd.types import BoneKey
 
-from . import presets, report
+from . import classify, denoise, presets, report
 
 
 def _build_parser():
@@ -22,6 +25,8 @@ def _build_parser():
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="balanced")
+    p.add_argument("--denoise", dest="denoise", action="store_true", default=True)
+    p.add_argument("--no-denoise", dest="denoise", action="store_false")
     p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
@@ -37,6 +42,46 @@ def _same_path(a, b):
         return os.path.samefile(a, b)
     except OSError:
         return os.path.realpath(a) == os.path.realpath(b)
+
+
+def _clean_bones(bone_keys, preset):
+    """全ボーンを種別別パラメータで一般ノイズ軽減し、密キー(線形補間)で返す(§4.1, §4.2)。
+
+    各トラックを名前ごとに時系列順へまとめ、クリーニング後の密サンプルを線形補間キーとして組み直す
+    (§3.3 のクリーニング後の密キー形式)。キー1個以下のトラックは平滑化できないため逐語保持する。
+    """
+    order = []
+    groups = {}
+    for k in bone_keys:
+        if k.name not in groups:
+            groups[k.name] = []
+            order.append(k.name)
+        groups[k.name].append(k)
+
+    out = []
+    for name in order:
+        ks = sorted(groups[name], key=lambda k: k.frame)
+        positions = [k.position for k in ks]
+        rotations = [k.rotation for k in ks]
+        # 値の健全性は全トラックで検証する(1キーなど平滑化できないトラックも入力不正は弾く)。
+        denoise.validate_bone_values(positions, rotations)
+        if len(ks) < 2:
+            out.extend(ks)
+            continue
+        params = presets.resolve_cleaning(preset, classify.classify(name))
+        cpos, crot = denoise.apply_denoise(
+            positions,
+            rotations,
+            pos_window=params["pos_window"],
+            rot_window=params["rot_window"],
+            pos_strength=params["pos_strength"],
+            rot_strength=params["rot_strength"],
+        )
+        name_raw = ks[0].name_raw
+        for i, k in enumerate(ks):
+            out.append(BoneKey(name_raw, k.frame, cpos[i], crot[i], BONE_LINEAR_INTERP))
+    out.sort(key=lambda k: (k.name_raw, k.frame))
+    return out
 
 
 def main(argv=None):
@@ -78,7 +123,7 @@ def main(argv=None):
     # 診断レポート(dry-run 表示・report-json 出力)。どのボーンにどの処理が適用される予定かを
     # 出力を変更せずに確認できる。
     if args.dry_run or args.report_json:
-        rep = report.build_report(doc.bone, args.preset)
+        rep = report.build_report(doc.bone, args.preset, denoise=args.denoise)
         if args.dry_run:
             print(report.format_dry_run(rep))
         if args.report_json:
@@ -91,9 +136,18 @@ def main(argv=None):
     if args.dry_run:
         return 0
 
-    # 読み込んだドキュメントをそのまま書き出す(対象外セクション・ボーンとも無加工で透過する)。
+    # 一般ノイズ軽減を全ボーンへ適用する(--no-denoise 時はボーンを逐語透過)。対象外セクションは
+    # いずれの場合も無加工で透過する。値が非有限・ゼロノルム quaternion 等の入力不正は終了コード1。
+    if args.denoise:
+        try:
+            new_bone = _clean_bones(doc.bone, args.preset)
+        except ValueError:
+            return 1
+    else:
+        new_bone = doc.bone
+    out_doc = dataclasses.replace(doc, bone=new_bone)
     try:
-        io.write_file(doc, output)
+        io.write_file(out_doc, output)
     except Exception:
         return 3
     return 0

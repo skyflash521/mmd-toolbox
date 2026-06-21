@@ -1,9 +1,10 @@
 """mocapvmd CLI のテスト(mocapvmd.md §3)。
 
-CLI は引数解析 → VMD読み → クリーニング → 疎化 → VMD書き。終了コード:
+CLI は引数解析 → VMD読み → 全ボーンの一般ノイズ軽減(クリーニング)→ VMD書き。終了コード:
 0 正常 / 1 入力不正 / 2 引数エラー / 3 出力書き込み失敗。
 
-本テストは基盤(入出力・パス検証・上書きガード・dry-run・対象外セクション透過)を扱う。
+本テストは入出力・パス検証・上書きガード・dry-run・対象外セクション透過・診断レポート・
+クリーニング(--denoise/--no-denoise)を扱う。
 """
 
 import json
@@ -60,6 +61,45 @@ def test_non_vmd_input_is_input_error(tmp_path):
     src.write_bytes(b"not a vmd file at all")
     code = cli.main([str(src)])
     assert code == 1
+
+
+def test_non_finite_bone_value_is_input_error(tmp_path):
+    # クリーニング対象の値が非有限(NaN)ならクリーニングが ValueError を送出し、入力不正=終了コード1。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(
+        src,
+        bone=[bone("センター", 0, pos=(float("nan"), 0.0, 0.0)), bone("センター", 1)],
+    )
+    assert cli.main([str(src), "-o", str(out)]) == 1
+
+
+def test_single_key_bone_kept_verbatim(tmp_path):
+    # キー1個のトラックは平滑化できないため逐語保持(値・補間そのまま)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=[bone("センター", 0, pos=(1.0, 2.0, 3.0), interp=BONE_NONLINEAR)])
+    assert cli.main([str(src), "-o", str(out)]) == 0
+    out_doc, _ = io.read(str(out))
+    assert len(out_doc.bone) == 1
+    assert out_doc.bone[0].position == pytest.approx((1.0, 2.0, 3.0))
+    assert out_doc.bone[0].interpolation == BONE_NONLINEAR
+
+
+def test_single_key_non_finite_is_input_error(tmp_path):
+    # キー1個でも非有限値は検証を迂回せず入力不正=終了コード1。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=[bone("センター", 0, pos=(float("nan"), 0.0, 0.0))])
+    assert cli.main([str(src), "-o", str(out)]) == 1
+
+
+def test_single_key_zero_norm_quaternion_is_input_error(tmp_path):
+    # キー1個でもゼロノルム quaternion は入力不正=終了コード1。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=[bone("センター", 0, rot=(0.0, 0.0, 0.0, 0.0))])
+    assert cli.main([str(src), "-o", str(out)]) == 1
 
 
 def test_overwrite_guard_blocks_same_path(tmp_path):
@@ -160,7 +200,6 @@ def test_nonbone_sections_passthrough_with_denoise(tmp_path):
     assert out_doc.camera[0].interpolation == CAM_NONLINEAR
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
 def test_no_denoise_keeps_bones_verbatim(tmp_path):
     # --no-denoise ではボーンも逐語透過する(非線形補間バイトも保持)。
     src = tmp_path / "in.vmd"
@@ -210,6 +249,18 @@ def test_report_json_written(tmp_path):
     assert center["category"] == "center"
     # 足IK候補が分類結果として出る。
     assert "右足ＩＫ" in data["foot_ik_candidates"]
+
+
+def test_report_reflects_denoise_flag(tmp_path):
+    # dry-run の処理計画にクリーニング有効/無効が反映される。
+    src = tmp_path / "in.vmd"
+    rep_on = tmp_path / "on.json"
+    rep_off = tmp_path / "off.json"
+    _full_doc(src)
+    assert cli.main([str(src), "--dry-run", "--report-json", str(rep_on)]) == 0
+    assert cli.main([str(src), "--dry-run", "--no-denoise", "--report-json", str(rep_off)]) == 0
+    assert json.loads(rep_on.read_text(encoding="utf-8"))["denoise"] is True
+    assert json.loads(rep_off.read_text(encoding="utf-8"))["denoise"] is False
 
 
 def test_dry_run_prints_report(tmp_path, capsys):
@@ -305,7 +356,6 @@ def _x_variation(keys, name):
     return sum(abs(ks[i + 1].position[0] - ks[i].position[0]) for i in range(len(ks) - 1))
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
 def test_denoise_default_smooths_jitter(tmp_path):
     # 既定(denoise on)で全ボーン(center/torso/arms/legs)の微小ジッタが平滑化され、X方向の総変動が減る。
     src = tmp_path / "in.vmd"
@@ -319,7 +369,6 @@ def test_denoise_default_smooths_jitter(tmp_path):
         assert _x_variation(out_doc.bone, name) < _x_variation(in_doc.bone, name)
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
 def test_explicit_denoise_smooths_jitter(tmp_path):
     # 明示 --denoise でも(既定と同じく)微小ジッタが平滑化される(--denoise を受理しない実装を排除)。
     src = tmp_path / "in.vmd"
@@ -333,7 +382,6 @@ def test_explicit_denoise_smooths_jitter(tmp_path):
         assert _x_variation(out_doc.bone, name) < _x_variation(in_doc.bone, name)
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
 def test_no_denoise_keeps_bones_verbatim_all_categories(tmp_path):
     # --no-denoise では全カテゴリのボーンがキー列そのまま(値・フレーム・補間)逐語保持される
     # (総変動量だけ一致させて中身を変える実装を排除)。
@@ -350,7 +398,6 @@ def test_no_denoise_keeps_bones_verbatim_all_categories(tmp_path):
         assert out_keys == in_keys
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
 def test_no_denoise_preserves_nonbone_sections(tmp_path):
     # --no-denoise 経路でも対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)を無加工透過する。
     src = tmp_path / "in.vmd"
@@ -367,9 +414,8 @@ def test_no_denoise_preserves_nonbone_sections(tmp_path):
     assert out_doc.ik_property == in_doc.ik_property
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3c denoise cli", strict=True)
 def test_denoise_output_is_dense_linear(tmp_path):
-    # クリーニング後は連続フレームの密キーで、補間ブロックは線形(後段の疎化へ渡せる形)。
+    # クリーニング後は連続フレームの密キーで、補間ブロックは線形(§3.3 のクリーニング後の密キー形式)。
     from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 
     src = tmp_path / "in.vmd"

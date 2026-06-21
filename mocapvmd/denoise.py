@@ -121,12 +121,14 @@ def _clamp_rot(orig, target, max_deg):
 # --- 入力検証・区間分割 ------------------------------------------------------
 
 
-def _validate(positions, rotations, pos_window, rot_window):
+def validate_bone_values(positions, rotations):
+    """位置・回転の値が有効か検証する(非有限・ゼロノルム quaternion は ValueError)。
+
+    トラック長に依存しない値の健全性チェック。1キーなど平滑化できないトラックでも値検証だけは
+    行えるよう、窓・長さの検証とは分けて公開する。
+    """
     if len(positions) != len(rotations):
         raise ValueError("位置と回転のフレーム数が一致しません")
-    for w in (pos_window, rot_window):
-        if w < 1 or w % 2 == 0:
-            raise ValueError("窓幅は正の奇数である必要があります")
     for p in positions:
         if not all(math.isfinite(c) for c in p):
             raise ValueError("位置に非有限値が含まれます")
@@ -135,6 +137,13 @@ def _validate(positions, rotations, pos_window, rot_window):
             raise ValueError("回転に非有限値が含まれます")
         if _qnorm(q) < ZERO_EPS:
             raise ValueError("ノルムがゼロの quaternion が含まれます")
+
+
+def _validate(positions, rotations, pos_window, rot_window):
+    validate_bone_values(positions, rotations)
+    for w in (pos_window, rot_window):
+        if w < 1 or w % 2 == 0:
+            raise ValueError("窓幅は正の奇数である必要があります")
 
 
 def _segments(cuts, n):

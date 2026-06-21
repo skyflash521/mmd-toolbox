@@ -35,7 +35,7 @@ def _track_diagnostics(keys):
     return max_speed, max_ang
 
 
-def build_report(bone_keys, preset="balanced"):
+def build_report(bone_keys, preset="balanced", denoise=True):
     """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
 
     名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。
@@ -78,6 +78,7 @@ def build_report(bone_keys, preset="balanced"):
 
     return {
         "preset": preset,
+        "denoise": denoise,
         "range": [min(all_frames), max(all_frames)] if all_frames else [],
         "bones": bones,
         "foot_ik_candidates": foot_ik,
@@ -94,7 +95,11 @@ def write_json(report, path):
 def format_dry_run(report):
     """dry-run のテキスト要約を返す(§4.4)。適用プリセットと、各ボーンの診断値・解決済み
     クリーニングパラメータ・IK候補を表示する。"""
-    lines = [f"preset: {report['preset']}", f"range: {report['range']}"]
+    lines = [
+        f"preset: {report['preset']}",
+        f"denoise: {'on' if report['denoise'] else 'off'}",
+        f"range: {report['range']}",
+    ]
     for b in report["bones"]:
         c = b["cleaning"]
         lines.append(
