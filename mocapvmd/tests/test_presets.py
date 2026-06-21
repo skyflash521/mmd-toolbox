@@ -5,14 +5,9 @@
 strong=1.4(全種別)/ stable-foot=foot_ik のみ 1.5・他 1.0。
 """
 
-import importlib.util
-
 import pytest
 
-if importlib.util.find_spec("mocapvmd.presets") is None:
-    pytest.skip("impl pending: Step 2 presets", allow_module_level=True)
-
-from mocapvmd import presets  # noqa: E402
+from mocapvmd import presets
 
 
 def test_preset_names():
