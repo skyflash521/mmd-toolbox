@@ -625,57 +625,6 @@ def _bezier_y_at(px1, py1, px2, py2, x):
     return _bez(s, py1, py2)
 
 
-def _bezier_y_at_many(px1, py1, px2, py2, xs):
-    """_bezier_y_at の numpy 配列一括版(§5.2 のベクトル化)。
-
-    正規化制御点(px* in [0,1])と正規化時間配列 xs に対し、各要素で X(s)=x を
-    単点版 _bezier_y_at と同じニュートン法+二分法フォールバックで解き y を返す。
-    戻り値は xs と同形の ndarray。内部点ごとの Python 呼び出しを消して
-    fit_bezier_curve の残差評価を高速化する(単点版と同一アルゴリズムなので結果は一致)。
-    """
-    xs = np.asarray(xs, dtype=float)
-    out = np.empty_like(xs)
-    out[xs <= 0.0] = 0.0
-    out[xs >= 1.0] = 1.0
-    interior = (xs > 0.0) & (xs < 1.0)
-    if not np.any(interior):
-        return out
-
-    xi = xs[interior]
-    s = xi.copy()
-    converged = np.zeros(xi.shape, dtype=bool)
-    dead = np.zeros(xi.shape, dtype=bool)  # 発散・微小導関数で Newton 打ち切り → 二分法へ
-    for _ in range(20):
-        active = ~converged & ~dead
-        if not np.any(active):
-            break
-        err = _bez(s, px1, px2) - xi
-        converged |= active & (np.abs(err) < 1e-9)
-        active &= ~converged
-        u = 1.0 - s
-        d = 3.0 * (px1 * u * u + 2.0 * (px2 - px1) * u * s + (1.0 - px2) * s * s)
-        dead |= active & (d <= 1e-12)
-        active &= ~dead
-        s_cand = s - err / np.where(d > 1e-12, d, 1.0)
-        diverged = active & ((s_cand < 0.0) | (s_cand > 1.0))
-        dead |= diverged
-        s = np.where(active & ~diverged, s_cand, s)
-
-    need_bis = ~converged
-    if np.any(need_bis):
-        lo = np.zeros(xi.shape)
-        hi = np.ones(xi.shape)
-        for _ in range(60):
-            mid = (lo + hi) / 2.0
-            go_lo = _bez(mid, px1, px2) < xi
-            lo = np.where(need_bis & go_lo, mid, lo)
-            hi = np.where(need_bis & ~go_lo, mid, hi)
-        s = np.where(need_bis, (lo + hi) / 2.0, s)
-
-    out[interior] = _bez(s, py1, py2)
-    return out
-
-
 def _quantize_solution(sol_x):
     """最適化解 (x1,t,y1,y2) を 0..127 整数の制御点 (x1,y1,x2,y2) へ量子化する(§5.4)。"""
     x1, t, y1, y2 = sol_x
@@ -708,13 +657,10 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     if not xs:
         return (_BEZIER_LINEAR_CP, 0.0)
 
-    xs_arr = np.asarray(xs, dtype=float)
-    ys_arr = np.asarray(ys, dtype=float)
-
     def residual(v):
         x1, t, y1, y2 = v
         x2 = x1 + (1.0 - x1) * t
-        return _bezier_y_at_many(x1, y1, x2, y2, xs_arr) - ys_arr
+        return [_bezier_y_at(x1, y1, x2, y2, x) - y for x, y in zip(xs, ys)]
 
     def quantized_err(cp):
         return max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
