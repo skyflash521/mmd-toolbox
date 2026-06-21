@@ -14,6 +14,7 @@ import math
 
 import numpy as np
 from scipy.ndimage import median_filter
+from scipy.signal import savgol_filter
 
 from mmd_toolbox.vmd.cuts import detect_cuts_bone
 
@@ -92,6 +93,29 @@ def _vlen(v):
 
 def _vdot(a, b):
     return sum(x * y for x, y in zip(a, b))
+
+
+def _slerp(a, b, t):
+    """quaternion 球面線形補間。半球を揃えてから補間する(t=0でa, t=1でb)。"""
+    d = _vdot(a, b)
+    if d < 0.0:
+        b = tuple(-c for c in b)
+        d = -d
+    if d > 0.9995:  # ほぼ同一姿勢は正規化線形補間で十分(数値安定)
+        return _qnormalize(tuple(a[k] + t * (b[k] - a[k]) for k in range(4)))
+    th0 = math.acos(d)
+    th = th0 * t
+    s0 = math.sin(th0 - th) / math.sin(th0)
+    s1 = math.sin(th) / math.sin(th0)
+    return tuple(s0 * a[k] + s1 * b[k] for k in range(4))
+
+
+def _clamp_rot(orig, target, max_deg):
+    """target を、orig からの角度が max_deg を超えないよう slerp で引き戻す(§5.5)。"""
+    ang = _qangle_deg(orig, target)
+    if ang <= max_deg:
+        return target
+    return _slerp(orig, target, max_deg / ang)
 
 
 # --- 入力検証・区間分割 ------------------------------------------------------
@@ -321,3 +345,58 @@ def detect_noise_events(positions, rotations, *, pos_window, rot_window):
         boundaries=boundaries,
         cuts=cuts,
     )
+
+
+def _pos_smoothed(pos, segs, window):
+    """各区間・各軸の中央値フィルタ後 Savitzky-Golay(2次・端ミラー)。実効窓<3は元値。"""
+    out = pos.copy()
+    for s, e in segs:
+        weff = _effective_window(e - s + 1, window)
+        if not weff:
+            continue
+        for a in range(3):
+            med = median_filter(pos[s : e + 1, a], size=weff, mode="mirror")
+            out[s : e + 1, a] = savgol_filter(med, weff, 2, mode="mirror")
+    return out
+
+
+def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength, rot_strength):
+    """密サンプルに一般ノイズ軽減を適用し、平滑化済みの (位置列, 回転列) を返す(§4.1, §5.5)。
+
+    位置は中央値フィルタ後 Savitzky-Golay を位置強度でブレンド、回転は窓内正規化平均を回転強度で
+    ブレンドする。アクセント run・カット境界・範囲端は保護(変更しない)。スパイクは窓基準により
+    抑制される。1フレームの元値からの変更は 位置 各軸 0.3 / 回転 5度 にクランプする。
+    """
+    det = detect_noise_events(positions, rotations, pos_window=pos_window, rot_window=rot_window)
+    n = len(positions)
+    if n == 0:
+        return [], []
+
+    pos = np.asarray(positions, dtype=float).reshape(n, 3)
+    rots = [_qnormalize(tuple(float(c) for c in q)) for q in rotations]
+    segs = _segments(det.cuts, n)
+
+    smoothed = _pos_smoothed(pos, segs, pos_window)
+    rot_mean = _rot_reference(rots, segs, rot_window)
+
+    out_pos = []
+    for i in range(n):
+        vals = []
+        for a in range(3):
+            if i in det.boundaries or (i, a) in det.pos_accent:
+                vals.append(float(pos[i, a]))
+                continue
+            delta = pos_strength * (smoothed[i, a] - pos[i, a])
+            delta = max(-POS_SPIKE, min(POS_SPIKE, delta))  # §5.5 各軸クランプ
+            vals.append(float(pos[i, a] + delta))
+        out_pos.append(tuple(vals))
+
+    out_rot = []
+    for i in range(n):
+        if i in det.boundaries or i in det.rot_accent:
+            out_rot.append(rots[i])
+            continue
+        target = _slerp(rots[i], rot_mean[i], rot_strength)
+        out_rot.append(_clamp_rot(rots[i], target, ROT_SPIKE_DEG))  # §5.5 回転クランプ
+
+    return out_pos, out_rot

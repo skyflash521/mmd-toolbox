@@ -9,15 +9,11 @@ apply_denoise は密サンプル(位置・回転)とクリーニングパラメ�
 検証する。
 """
 
-import importlib.util
 import math
 
 import pytest
 
-if not hasattr(importlib.import_module("mocapvmd.denoise"), "apply_denoise"):
-    pytest.skip("impl pending: Step 3b denoise apply", allow_module_level=True)
-
-from mocapvmd import denoise  # noqa: E402
+from mocapvmd import denoise
 
 IDENT = (0.0, 0.0, 0.0, 1.0)
 
