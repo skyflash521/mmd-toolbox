@@ -167,3 +167,75 @@ def test_bone_rotation_zero_tol_zero_error():
     ch = BoneRotationChannel(0, quats, tol=0.0)
     nerr, frame = ch.normalized(0, 10)
     assert nerr == 0.0 and frame is None
+
+
+# --- Step B: 回転 curve() のベクトル化契約 ----------------------------------
+#
+# CameraRotationChannel.curve / BoneRotationChannel.curve は係数曲線フィット
+# (_fit_coeff_curve)で、残差評価に配列版 _bezier_y_at_many、量子化評価に配列版
+# interp._solve_factor_many を使う。単点版 _bezier_y_at / interp._solve_factor を
+# curve() の内部で呼ばないこと(§4 支配要因2 の解消=性能目的の契約)。
+
+
+def _spy_curve_paths(monkeypatch):
+    """curve() 内のベジェ評価をスパイする。
+
+    戻り値 (scalar_calls, bez_lens, sf_lens):
+    - scalar_calls: 単点版 _bezier_y_at / interp._solve_factor の呼び出し回数(配列版なら0)。
+    - bez_lens: 配列版 _bezier_y_at_many(残差経路)が受けた xs 長のリスト。
+    - sf_lens: 配列版 interp._solve_factor_many(量子化経路)が受けた xs 長のリスト。
+    残差側と量子化側を別リストで記録し、片側だけ配列化する不完全実装を弾く。1点ずつ呼ぶ
+    偽装も、全内部点を1回で受けること(長さ=内部点数)で検出する。interp._solve_factor_many は
+    未実装なら getattr で None になり差し替えない(その場合 sf_lens は空のまま)。
+    """
+    import mmd_toolbox.vmd.fit as fit
+    import mmd_toolbox.vmd.interp as interp_mod
+    import numpy as np
+
+    scalar_calls, bez_lens, sf_lens = [], [], []
+    real_bez, real_sf = fit._bezier_y_at, interp_mod._solve_factor
+    real_bez_many = fit._bezier_y_at_many
+    real_sf_many = getattr(interp_mod, "_solve_factor_many", None)
+
+    monkeypatch.setattr(fit, "_bezier_y_at",
+                        lambda *a, **k: (scalar_calls.append(1), real_bez(*a, **k))[1])
+    monkeypatch.setattr(interp_mod, "_solve_factor",
+                        lambda *a, **k: (scalar_calls.append(1), real_sf(*a, **k))[1])
+
+    def bez_many(px1, py1, px2, py2, xs):
+        bez_lens.append(np.asarray(xs).size)
+        return real_bez_many(px1, py1, px2, py2, xs)
+
+    monkeypatch.setattr(fit, "_bezier_y_at_many", bez_many)
+    if real_sf_many is not None:
+        def sf_many(x1, y1, x2, y2, xs):
+            sf_lens.append(np.asarray(xs).size)
+            return real_sf_many(x1, y1, x2, y2, xs)
+        monkeypatch.setattr(interp_mod, "_solve_factor_many", sf_many)
+    return scalar_calls, bez_lens, sf_lens
+
+
+@pytest.mark.xfail(reason="impl pending: Step B vectorize", strict=False)
+def test_camera_rotation_curve_uses_vectorized(monkeypatch):
+    # 内部点9個(範囲 0..10)を、単点版でなく配列版で一括評価する(§4 支配要因2 の解消)。
+    # 残差(_bezier_y_at_many)と量子化(_solve_factor_many)の両経路が全内部点を1回で受ける。
+    scalar_calls, bez_lens, sf_lens = _spy_curve_paths(monkeypatch)
+    degs = [0.0, 5.0, 12.0, 20.0, 30.0, 42.0, 55.0, 70.0, 82.0, 90.0, 95.0]
+    eulers = [(0.0, 0.0, math.radians(d)) for d in degs]  # 曲がった Z 回転(内部点で分割不要な曲線)
+    ch = CameraRotationChannel(0, eulers, tol=0.05, mode="bezier")
+    ch.curve(0, 10)
+    assert scalar_calls == []                 # 単点版は呼ばない
+    assert bez_lens and all(n == 9 for n in bez_lens)  # 残差は全内部点を1回で
+    assert sf_lens and all(n == 9 for n in sf_lens)    # 量子化も全内部点を1回で
+
+
+@pytest.mark.xfail(reason="impl pending: Step B vectorize", strict=False)
+def test_bone_rotation_curve_uses_vectorized(monkeypatch):
+    scalar_calls, bez_lens, sf_lens = _spy_curve_paths(monkeypatch)
+    degs = [0.0, 5.0, 12.0, 20.0, 30.0, 42.0, 55.0, 70.0, 82.0, 90.0, 95.0]
+    quats = [quat_z(d) for d in degs]
+    ch = BoneRotationChannel(0, quats, tol=0.1, mode="bezier")
+    ch.curve(0, 10)
+    assert scalar_calls == []
+    assert bez_lens and all(n == 9 for n in bez_lens)
+    assert sf_lens and all(n == 9 for n in sf_lens)
