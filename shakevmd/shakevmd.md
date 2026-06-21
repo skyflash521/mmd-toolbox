@@ -2,7 +2,7 @@
 
 MMDカメラモーション(VMD)に手ぶれを焼き込むCLIツール
 
-Version: 1.4 (draft)
+Version: 0.01
 実装言語: Python 3.11+
 依存: mmd_toolbox(同リポジトリの共通ライブラリ、../mmd_toolbox/mmd_toolbox.md), numpy, scipy, click または argparse
 
@@ -93,7 +93,7 @@ Version: 1.4 (draft)
 | 引数 | 説明 |
 |---|---|
 | `--preset NAME` | `handheld` / `telephoto` / `walking` / `earthquake`。公開引数を一括設定し、個別引数の明示指定が優先。`walking`は乱数ノイズに歩調周期成分(左右=歩調f、上下=2f)を混合し gait_freq/gait_amp も設定する。静止/移動プロファイル・オクターブ構成はプリセット未設定で bake() 既定値を継承する(転送機構はコアAPI/プリセット定義で設定可能だが、プリセット別のチューニングは未対応。§8) |
-| `--dry-run` | 出力せず統計表示(適用範囲、出力キー数、最大振幅、カット検出位置、警告)。VMD・preview-CSV の書き込みは抑制するが、引数検証(入出力パス衝突・preview-csv 衝突など)は dry-run でも実施し、衝突があれば終了コード2を返す(本実行と一致した fail-fast。§9) |
+| `--dry-run` | 出力せず統計表示(適用範囲、平滑化前のカメラキー総数(`--smooth` による整理はこの表示の後に行うため、出力 VMD のキー数とは別の値)、最大振幅、カット検出位置、警告)。VMD・preview-CSV の書き込みは抑制するが、引数検証(入出力パス衝突・preview-csv 衝突など)は dry-run でも実施し、衝突があれば終了コード2を返す(本実行と一致した fail-fast。§9) |
 | `--preview-csv PATH` | フレームごとの揺れ量(各チャンネル)をCSV出力。グラフ化はJupyter等での利用を想定(§8) |
 | `--smooth` / `--no-smooth` | ベイク後の密キーをプロセス内で疎ベジェへ削減し、30fps超再生の微振動(キー間速度の不連続)を低減する。**既定 on**。`--no-smooth` で無効化し密キー＋線形のまま出力する。固定設定と整合基準は §3.3 |
 | `-v, --verbose` | 詳細ログ |

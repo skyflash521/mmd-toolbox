@@ -2,7 +2,6 @@
 
 密なVMDキーフレームを疎なキーフレームと補間曲線へ変換するCLIツール
 
-Version: 0.1 (draft)
 実装言語: Python 3.11+
 依存: mmd_toolbox(同リポジトリの共通ライブラリ、../mmd_toolbox/mmd_toolbox.md), numpy, scipy, click または argparse
 
@@ -510,19 +509,26 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ mmd_
       mmd_toolbox/           # 共通ライブラリ
         vmd/
           types.py, io.py, interp.py, camera.py
+          sample.py       # サンプリング小ヘルパ(perspective 直近ホールド)
+          cuts.py         # 不連続検出・必須境界管理
+          fit.py          # VMD補間曲線フィット・量子化・誤差評価
+          reduce.py       # 区間分割・キー削減の全体制御
       sparsevmd/
         __init__.py
-        sample.py       # 対象トラックの正規化・サンプリング
-        fit.py          # VMD補間曲線フィット・量子化・誤差評価
-        reduce.py       # 区間分割・キー削減の全体制御
-        cuts.py         # 不連続検出・必須境界管理
+        sample.py       # 対象トラックの正規化・分割・サンプリング(評価は mmd_toolbox.vmd.interp に委譲)
+        ranges.py       # --range の解析・展開・積集合
+        selection.py    # ボーン選択ルールの解決
+        cuts.py         # 閾値文字列パース(検出本体は mmd_toolbox.vmd.cuts を再公開)
+        fit.py          # mmd_toolbox.vmd.fit の後方互換 re-export
+        reduce.py       # mmd_toolbox.vmd.reduce の後方互換 re-export
         report.py       # dry-run / JSON / CSV レポート
         presets.py      # 品質プリセット
         cli.py          # CLI(コアの薄いラッパー)
 
 - VMD読み書き・補間評価・カメラ座標変換はmmd_toolboxに委譲する。
 - コアはCLI非依存。Jupyter等からトラック単位で試行できるAPIを提供する。
-- fit.pyはVMD補間曲線の制約を集中管理し、reduce.pyは分割戦略に専念する。
+- 補間曲線の制約集中管理(fit)・分割戦略(reduce)・不連続検出(cuts)は共通ライブラリ
+  mmd_toolbox.vmd に置き、sparsevmd は旧 import パス維持のため同名モジュールで re-export する。
 
 ---
 

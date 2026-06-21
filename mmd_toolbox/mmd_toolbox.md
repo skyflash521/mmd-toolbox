@@ -2,9 +2,8 @@
 
 mmd-toolbox 共通ライブラリ — MMDファイルフォーマットの読み書きとMMD互換評価
 
-Version: 0.1 (draft)
 実装言語: Python 3.11+
-依存: numpy
+依存: numpy, scipy
 
 ---
 
@@ -114,4 +113,4 @@ MMDファイルフォーマット層の機能を提供する。
 
 | ツール | 利用機能 |
 |---|---|
-| shakevmd ([../shakevmd/shakevmd.md](../shakevmd/shakevmd.md)) | vmd/io, vmd/interp, vmd/camera |
+| shakevmd ([../shakevmd/shakevmd.md](../shakevmd/shakevmd.md)) | vmd/io, vmd/interp, vmd/camera, vmd/reduce |
