@@ -23,6 +23,8 @@ import math
 import re
 import statistics
 
+from . import presets
+
 MIN_GROUND_LEN = 4         # 最小接地長(フレーム)
 HORIZ_VEL_THRESH = 0.08    # 水平速度閾値(MMD単位/frame)
 VERT_VEL_THRESH = 0.04     # 垂直速度閾値(MMD単位/frame)
@@ -85,6 +87,29 @@ class SegmentLock:
     max_displacement: float
     coef_scale: float
     clamped: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class TrackStabilization:
+    """1トラックの接地安定化結果と診断(§4.4)。
+
+    side はトラック名から決まる側("left"/"right"/None)、paired は相方の有無、grounding は接地検出、
+    locks は接地区間ごとのロック記録、locked_positions はロック後位置列。max_change/mean_change は
+    ロック前後のユークリッド距離の最大・平均、lock_applied_ratio は接地区間内フレーム数の割合、
+    warnings はクランプされた区間(レポートの警告対象)。
+    """
+
+    name: str
+    category: str
+    side: str
+    paired: bool
+    grounding: GroundingDetection
+    locks: tuple
+    locked_positions: tuple
+    max_change: float
+    mean_change: float
+    lock_applied_ratio: float
+    warnings: tuple
 
 
 def _runs(frames, min_len):
@@ -331,3 +356,55 @@ def apply_foot_lock(positions, segments, strength, *, max_displacement=MAX_CORRE
         locks.append(SegmentLock(seg, anchor, raw_max * coef_scale, coef_scale, clamped))
 
     return out, locks
+
+
+# --- 統合(ペアリング→検出→ロック→診断)----------------------------------
+
+
+def stabilize_foot_ik(tracks, preset):
+    """足IK・つま先IKトラック群に接地安定化を適用し、トラックごとの結果と診断を返す(§4.3 / §4.4)。
+
+    tracks は dict name -> (category, frames, positions)。category は "foot_ik"/"toe_ik"、frames は
+    昇順の絶対フレーム列、positions は frames に整列した (x,y,z) 列(foot_ik/toe_ik 以外は呼び出し側で
+    除外する)。各トラックは左右ペアリング(pair_ik_tracks)で相方を決め、相方があればその位置を絶対
+    フレームで整列(欠けるフレームは None)して接地検出の相対位置参照に使い、種別別の接地ロック強度
+    (resolve_foot_lock)で接地ロックを適用する。曖昧・相方欠如のトラックは相対参照なしで処理する。
+    返り値は dict name -> TrackStabilization。
+    """
+    pairing = pair_ik_tracks([(name, cat) for name, (cat, _, _) in tracks.items()])
+    partner = {}
+    for pair in pairing.pairs:
+        partner[pair.foot] = pair.toe
+        partner[pair.toe] = pair.foot
+
+    frame_pos = {name: dict(zip(frames, positions)) for name, (_, frames, positions) in tracks.items()}
+
+    result = {}
+    for name, (category, frames, positions) in tracks.items():
+        mate = partner.get(name)
+        if mate is not None:
+            mate_map = frame_pos[mate]
+            paired_positions = [mate_map.get(f) for f in frames]
+        else:
+            paired_positions = None
+        grounding = detect_grounding_segments(positions, paired_positions=paired_positions)
+        locked, locks = apply_foot_lock(
+            positions, grounding.segments, presets.resolve_foot_lock(preset, category)
+        )
+
+        changes = [math.dist(o, l) for o, l in zip(positions, locked)]
+        in_seg = sum(s.end - s.start + 1 for s in grounding.segments)
+        result[name] = TrackStabilization(
+            name=name,
+            category=category,
+            side=detect_side(name),
+            paired=mate is not None,
+            grounding=grounding,
+            locks=tuple(locks),
+            locked_positions=tuple(locked),
+            max_change=max(changes) if changes else 0.0,
+            mean_change=sum(changes) / len(changes) if changes else 0.0,
+            lock_applied_ratio=in_seg / len(positions) if positions else 0.0,
+            warnings=tuple(s for s in locks if s.clamped),
+        )
+    return result

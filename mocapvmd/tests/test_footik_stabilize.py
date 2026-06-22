@@ -18,8 +18,6 @@ import pytest
 
 from mocapvmd import footik, presets
 
-pending = pytest.mark.xfail(reason="impl pending: Step 4d-integration", strict=True)
-
 
 def _still_then_move(n_still=8, n_move=4):
     # 緩いドリフトで接地し、その後速く動いて遊脚になる foot トラック。
@@ -32,7 +30,6 @@ def _euclid(a, b):
     return math.dist(a, b)
 
 
-@pending
 def test_unpaired_track_matches_building_blocks():
     # 相方の無い foot トラックは、相対条件なしの検出 + ロックを束ねた結果と一致する。
     pos = _still_then_move()
@@ -52,7 +49,6 @@ def test_unpaired_track_matches_building_blocks():
     assert tuple(ts.locks) == tuple(locks)
 
 
-@pending
 def test_paired_foot_uses_toe_as_relative_reference():
     # 同側に足IKとつま先IKがあると、足IKの検出は相方つま先IKを相対位置参照に使う(paired=True)。
     foot = [(0.0, 0.0, 0.0)] * 12
@@ -84,7 +80,6 @@ def test_paired_foot_uses_toe_as_relative_reference():
     assert tuple(toe_ts.locked_positions) == tuple(toe_locked)
 
 
-@pending
 def test_paired_alignment_uses_absolute_frames_both_directions():
     # 足IK frames [0..5]、つま先IK frames [2..7]。重なりは [2..5]。両IKとも相方が覆わない端で欠損が
     # 生じ、相方位置は絶対フレームで整列され、欠けるフレームは None(相対判定スキップ)になる。両方向を検証する。
@@ -111,7 +106,6 @@ def test_paired_alignment_uses_absolute_frames_both_directions():
     )
 
 
-@pending
 def test_ambiguous_tracks_processed_without_pairing():
     # 同側に足IKが2本(曖昧)→ どのトラックもペアにせず、相対参照なしの単独検出で処理する(paired=False)。
     foot1 = _still_then_move()
@@ -133,7 +127,6 @@ def test_ambiguous_tracks_processed_without_pairing():
     assert result["右足ＩＫ"].grounding.relative_rejected_frames == frozenset()
 
 
-@pending
 def test_diagnostics_change_and_ratio():
     # 最大・平均変更量はロック前後のユークリッド距離、接地ロック適用率は接地区間内フレーム数の割合。
     pos = _still_then_move()
@@ -147,7 +140,6 @@ def test_diagnostics_change_and_ratio():
     assert ts.lock_applied_ratio == pytest.approx(in_seg / len(pos))
 
 
-@pending
 def test_warning_lists_clamped_segments():
     # 低速で長く滑る接地区間。アンカー(中央値)から端が大きく離れ、内側フレームの補正が最大補正量
     # 0.5 を超えてクランプされる。警告はクランプされた区間そのものと一致する(件数だけでない)。
@@ -159,7 +151,6 @@ def test_warning_lists_clamped_segments():
     assert tuple(ts.warnings) == clamped
 
 
-@pending
 def test_non_grounding_track_is_unchanged():
     # 終始速く動くトラックは接地区間が無く、位置は不変・適用率0。
     pos = [(0.5 * i, 0.0, 0.0) for i in range(10)]
