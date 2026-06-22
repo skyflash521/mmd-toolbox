@@ -613,3 +613,117 @@ def test_denoise_output_is_dense_linear(tmp_path):
         assert frames == list(range(11))
     for k in out_doc.bone:
         assert k.interpolation == BONE_LINEAR_INTERP
+
+
+# --- 疎化レポートの CLI 配線(§4.4。疎化を実行して reduction 診断をレポートへ載せる) ------
+
+_red_cli_pending = pytest.mark.xfail(reason="impl pending: Step 5f-3", strict=True)
+
+
+@_red_cli_pending
+def test_report_includes_reduction_section(tmp_path):
+    # 既定(疎化 on)の dry-run/report-json は、全ボーン(多キー・単一キー)に疎化レポート(§4.4)を載せる。
+    # 特定ボーンだけ診断を渡す不完全な配線を排除する。
+    src = tmp_path / "in.vmd"
+    rep = tmp_path / "r.json"
+    keys = [bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0)) for f in range(11)]
+    keys.append(bone("右腕", 0, pos=(1.0, 0.0, 0.0)))  # 単一キー(逐語・削減なし)も診断に載る
+    write_vmd(src, bone=keys)
+    assert cli.main([str(src), "--dry-run", "--report-json", str(rep)]) == 0
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    for name in ("センター", "右腕"):
+        r = next(e for e in data["bones"] if e["name"] == name)["reduction"]
+        assert set(r) == {"output_keys", "reduction_rate", "tol_pos", "tol_rot", "cuts", "errors"}
+        assert set(r["errors"]) == {"pos_x", "pos_y", "pos_z", "rot_deg"}
+
+
+@_red_cli_pending
+def test_report_reduce_flag_follows_reduce_option(tmp_path):
+    # 既定はレポート reduce: true、--no-reduce は false かつ reduction セクション無し。
+    src = tmp_path / "in.vmd"
+    rep_on = tmp_path / "on.json"
+    rep_off = tmp_path / "off.json"
+    _curve_doc(src)
+    assert cli.main([str(src), "--dry-run", "--report-json", str(rep_on)]) == 0
+    assert cli.main([str(src), "--dry-run", "--no-reduce", "--report-json", str(rep_off)]) == 0
+    on = json.loads(rep_on.read_text(encoding="utf-8"))
+    off = json.loads(rep_off.read_text(encoding="utf-8"))
+    assert on["reduce"] is True
+    assert off["reduce"] is False
+    assert "reduction" not in next(e for e in off["bones"] if e["name"] == "センター")
+
+
+@_red_cli_pending
+def test_report_reduction_matches_reduce_bones(tmp_path):
+    # レポートの reduction 診断は、同じ入力を reduce_bones に diagnostics_out 付きで通した素データと一致する。
+    # --no-denoise --no-foot-ik-stabilize でパイプラインを疎化だけに絞り、配線(CLI が診断を載せる)を固定する。
+    from mocapvmd import reduce as mreduce
+
+    src = tmp_path / "in.vmd"
+    rep = tmp_path / "r.json"
+    _curve_doc(src)
+    assert cli.main(
+        [str(src), "--dry-run", "--no-denoise", "--no-foot-ik-stabilize", "--report-json", str(rep)]
+    ) == 0
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    in_doc, _ = io.read(str(src))
+    diag = {}
+    mreduce.reduce_bones(in_doc.bone, "balanced", diagnostics_out=diag)
+    d = diag["センター"]
+    r = next(e for e in data["bones"] if e["name"] == "センター")["reduction"]
+    assert r["output_keys"] == d["output_keys"]
+    assert r["cuts"] == d["cuts"]
+    assert r["tol_pos"] == d["tol_pos"]
+    assert r["tol_rot"] == d["tol_rot"]
+    assert r["errors"] == d["errors"]
+    assert r["reduction_rate"] == pytest.approx(1.0 - d["output_keys"] / d["input_keys"])
+
+
+@_red_cli_pending
+def test_dry_run_reduction_matches_full_pipeline(tmp_path):
+    # dry-run のレポート reduction は、クリーニング→足IK安定化→疎化の全段を通した診断と一致する
+    # (output_keys だけでなく最大再生誤差 errors まで)。clean・stabilize が実際に値を変える入力(接地中の
+    # ジッタ)を使い、各段を飛ばすと errors が全段と変わる(=どの段の省略も検出できる)ことを負例で保証する:
+    # 全前処理省略(raw 直接)・clean だけ省略(stabilize(raw))・stabilize だけ省略(clean(raw))。
+    from mocapvmd import reduce as mreduce
+    from mocapvmd.cli import _clean_bones, _stabilize_bones
+
+    src = tmp_path / "in.vmd"
+    rep = tmp_path / "r.json"
+    xs = [0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0]  # 接地中のジッタ(各ステップ<=0.08)
+    write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
+    assert cli.main([str(src), "--dry-run", "--report-json", str(rep)]) == 0
+    in_doc, _ = io.read(str(src))
+    cleaned = _clean_bones(in_doc.bone, "balanced")
+    full = {}
+    mreduce.reduce_bones(_stabilize_bones(cleaned, "balanced"), "balanced", diagnostics_out=full)
+    d = full["右足ＩＫ"]
+    # 負例: 全前処理省略・clean 省略・stabilize 省略は、いずれも errors が全段と異なる(各段が結果に効く入力)。
+    for skipped in (in_doc.bone, _stabilize_bones(in_doc.bone, "balanced"), cleaned):
+        diag = {}
+        mreduce.reduce_bones(skipped, "balanced", diagnostics_out=diag)
+        assert diag["右足ＩＫ"]["errors"] != d["errors"]
+    data = json.loads(rep.read_text(encoding="utf-8"))
+    r = next(e for e in data["bones"] if e["name"] == "右足ＩＫ")["reduction"]
+    assert r["output_keys"] == d["output_keys"]
+    assert r["cuts"] == d["cuts"]
+    assert r["errors"] == d["errors"]  # 各段を省略した負例(errors != d)では一致しない
+
+
+@_red_cli_pending
+@pytest.mark.parametrize(
+    "bad_key",
+    [
+        bone("センター", 4, pos=(float("inf"), 0.0, 0.0)),  # 非有限位置
+        bone("センター", 4, rot=(0.0, 0.0, 0.0, 0.0)),      # ゼロノルム quaternion
+    ],
+    ids=["non_finite_pos", "zero_norm_quat"],
+)
+def test_dry_run_invalid_input_is_error(tmp_path, bad_key):
+    # dry-run でも疎化レポートのため入力を検証し、非有限値・ゼロノルム quaternion とも入力不正=終了コード1
+    # (検証が dry-run 分岐より前段にあること、両ケースを弾くことを固定する)。
+    src = tmp_path / "in.vmd"
+    keys = [bone("センター", f) for f in range(4)]
+    keys.append(bad_key)
+    write_vmd(src, bone=keys)
+    assert cli.main([str(src), "--dry-run"]) == 1
