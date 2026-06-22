@@ -184,11 +184,44 @@ def main(argv=None):
         where = f"({w.section})" if w.section else ""
         print(f"警告: {w.message}{where}", file=sys.stderr)
 
-    # 診断レポート(dry-run 表示・report-json 出力)。どのボーンにどの処理が適用される予定かを
-    # 出力を変更せずに確認できる。
-    if args.dry_run or args.report_json:
+    # 入力ボーン値の健全性(非有限・ゼロノルム quaternion)は処理経路(クリーニング/疎化の有無・dry-run か)
+    # に依らず、パイプライン前に全キーを検証する(§3.3 入力不正=終了コード1)。dry-run でも疎化レポート
+    # (§4.4)のため疎化を実行するので、未検証の不正値が疎化へ流れて逐語透過・例外化するのを防ぐ。
+    try:
+        _validate_bones(doc.bone)
+    except ValueError:
+        return 1
+
+    # クリーニング → 足IK安定化 → 疎化のパイプライン。dry-run でも疎化レポート(§4.4)の素データを得るため
+    # 実行し、出力の書き出しだけを dry-run で省く。一般ノイズ軽減は全ボーン(--no-denoise 時は逐語透過)、
+    # 足IK安定化は分類 foot_ik / toe_ik(§4.3 / §6)、疎化は全ボーン(--no-reduce 時は密キーのまま)に適用する。
+    if args.denoise:
+        new_bone = _clean_bones(doc.bone, args.preset)
+    else:
+        new_bone = doc.bone
+    if args.foot_ik_stabilize:
+        new_bone = _stabilize_bones(new_bone, args.preset)
+    # 疎化レポートを出すときだけ診断 diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
+    want_report = args.dry_run or args.report_json
+    reduction_diag = {} if (args.reduce and want_report) else None
+    if args.reduce:
+        new_bone = reduce.reduce_bones(
+            new_bone,
+            args.reduce_preset,
+            override_pos=args.reduce_error_bone_pos,
+            override_rot=args.reduce_error_bone_rot,
+            curve_mode=args.curve_mode,
+            diagnostics_out=reduction_diag,
+        )
+
+    # 診断レポート(dry-run 表示・report-json 出力)。疎化したときは §4.4 の疎化レポート(reduction)も載せる。
+    if want_report:
         rep = report.build_report(
-            doc.bone, args.preset, denoise=args.denoise, foot_ik_stabilize=args.foot_ik_stabilize
+            doc.bone,
+            args.preset,
+            denoise=args.denoise,
+            foot_ik_stabilize=args.foot_ik_stabilize,
+            reduction=reduction_diag,
         )
         if args.dry_run:
             print(report.format_dry_run(rep))
@@ -202,32 +235,6 @@ def main(argv=None):
     if args.dry_run:
         return 0
 
-    # 入力ボーン値の健全性(非有限・ゼロノルム quaternion)は処理経路(クリーニング/疎化の有無)に
-    # 依らず、パイプライン前に全キーを検証する(§3.3 入力不正=終了コード1)。--no-denoise でも未検証の
-    # 不正値が疎化へ流れて逐語透過・例外化するのを防ぐ。
-    try:
-        _validate_bones(doc.bone)
-    except ValueError:
-        return 1
-
-    # 一般ノイズ軽減を全ボーンへ適用する(--no-denoise 時はボーンを逐語透過)。対象外セクションは
-    # いずれの場合も無加工で透過する。
-    if args.denoise:
-        new_bone = _clean_bones(doc.bone, args.preset)
-    else:
-        new_bone = doc.bone
-    # 足IK安定化は一般ノイズ軽減の後に、分類 foot_ik / toe_ik のボーンへ適用する(§4.3 / §6)。
-    if args.foot_ik_stabilize:
-        new_bone = _stabilize_bones(new_bone, args.preset)
-    # クリーニング・足IK安定化後の密信号を共通機構で疎化する(§3.3)。--no-reduce 時は密キーのまま出力。
-    if args.reduce:
-        new_bone = reduce.reduce_bones(
-            new_bone,
-            args.reduce_preset,
-            override_pos=args.reduce_error_bone_pos,
-            override_rot=args.reduce_error_bone_rot,
-            curve_mode=args.curve_mode,
-        )
     out_doc = dataclasses.replace(doc, bone=new_bone)
     try:
         io.write_file(out_doc, output)

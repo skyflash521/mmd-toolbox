@@ -617,10 +617,7 @@ def test_denoise_output_is_dense_linear(tmp_path):
 
 # --- 疎化レポートの CLI 配線(§4.4。疎化を実行して reduction 診断をレポートへ載せる) ------
 
-_red_cli_pending = pytest.mark.xfail(reason="impl pending: Step 5f-3", strict=True)
 
-
-@_red_cli_pending
 def test_report_includes_reduction_section(tmp_path):
     # 既定(疎化 on)の dry-run/report-json は、全ボーン(多キー・単一キー)に疎化レポート(§4.4)を載せる。
     # 特定ボーンだけ診断を渡す不完全な配線を排除する。
@@ -637,7 +634,6 @@ def test_report_includes_reduction_section(tmp_path):
         assert set(r["errors"]) == {"pos_x", "pos_y", "pos_z", "rot_deg"}
 
 
-@_red_cli_pending
 def test_report_reduce_flag_follows_reduce_option(tmp_path):
     # 既定はレポート reduce: true、--no-reduce は false かつ reduction セクション無し。
     src = tmp_path / "in.vmd"
@@ -653,7 +649,6 @@ def test_report_reduce_flag_follows_reduce_option(tmp_path):
     assert "reduction" not in next(e for e in off["bones"] if e["name"] == "センター")
 
 
-@_red_cli_pending
 def test_report_reduction_matches_reduce_bones(tmp_path):
     # レポートの reduction 診断は、同じ入力を reduce_bones に diagnostics_out 付きで通した素データと一致する。
     # --no-denoise --no-foot-ik-stabilize でパイプラインを疎化だけに絞り、配線(CLI が診断を載せる)を固定する。
@@ -679,7 +674,6 @@ def test_report_reduction_matches_reduce_bones(tmp_path):
     assert r["reduction_rate"] == pytest.approx(1.0 - d["output_keys"] / d["input_keys"])
 
 
-@_red_cli_pending
 def test_dry_run_reduction_matches_full_pipeline(tmp_path):
     # dry-run のレポート reduction は、クリーニング→足IK安定化→疎化の全段を通した診断と一致する
     # (output_keys だけでなく最大再生誤差 errors まで)。clean・stabilize が実際に値を変える入力(接地中の
@@ -710,7 +704,6 @@ def test_dry_run_reduction_matches_full_pipeline(tmp_path):
     assert r["errors"] == d["errors"]  # 各段を省略した負例(errors != d)では一致しない
 
 
-@_red_cli_pending
 @pytest.mark.parametrize(
     "bad_key",
     [
