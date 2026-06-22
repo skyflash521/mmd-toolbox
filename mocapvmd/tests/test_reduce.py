@@ -6,8 +6,6 @@ mmd_toolbox.vmd.reduce.reduce_bone_track により疎化する(全範囲・全�
 結果と突き合わせて検証する。疎化アルゴリズムそのものは mmd_toolbox 側のテストに委ねる。
 """
 
-import pytest
-
 from mmd_toolbox.vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
 
 from mocapvmd import presets
@@ -123,8 +121,6 @@ def test_deterministic():
 
 # --- 疎化診断(diagnostics_out。レポート §4.4 の削減率・適用許容・カット数・最大再生誤差の素データ) ---
 
-_diag_pending = pytest.mark.xfail(reason="impl pending: Step 5f-1", strict=True)
-
 
 def _expected_cuts(track_keys, tol):
     diag = {}
@@ -135,7 +131,6 @@ def _expected_cuts(track_keys, tol):
     return len(diag["cuts"])
 
 
-@_diag_pending
 def test_diagnostics_out_filled_per_track():
     # diagnostics_out に各トラックの入出力キー数・適用許容(種別別)・カット数・最大再生誤差を埋める。
     center = _curved("センター")     # frames 0-10
@@ -156,7 +151,6 @@ def test_diagnostics_out_filled_per_track():
         assert d["errors"] == measure_bone_errors(src, reduced, [(src[0].frame, src[-1].frame)])
 
 
-@_diag_pending
 def test_diagnostics_out_override_tolerance():
     # override は適用許容(tol_pos/tol_rot)へ反映される(基準値上書き×種別スケール)。
     keys = _curved("センター")
@@ -167,7 +161,6 @@ def test_diagnostics_out_override_tolerance():
     assert diag["センター"]["tol_rot"] == tol["bone_rot"]
 
 
-@_diag_pending
 def test_diagnostics_out_single_key_track_alongside_multikey():
     # 多キートラックと混在しても、キー1個(逐語透過)のトラックを削減なし(入出力1・カット0・誤差0・
     # 適用許容は種別の解決値)として診断に載せる(混在時に単一キーを診断から落とす実装を弾く)。
@@ -187,7 +180,6 @@ def test_diagnostics_out_single_key_track_alongside_multikey():
     assert d["errors"] == {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "rot_deg": 0.0}
 
 
-@_diag_pending
 def test_diagnostics_out_does_not_change_output():
     # 診断収集は疎化結果を変えない。diagnostics_out 省略時(既定 None)と同一の出力を返す。
     keys = _curved("右足ＩＫ")
