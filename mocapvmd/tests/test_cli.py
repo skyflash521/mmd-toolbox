@@ -720,3 +720,58 @@ def test_dry_run_invalid_input_is_error(tmp_path, bad_key):
     keys.append(bad_key)
     write_vmd(src, bone=keys)
     assert cli.main([str(src), "--dry-run"]) == 1
+
+
+# --- --list-bones(ボーン一覧と分類を表示して終了。§3.2) ------------------------
+
+_listbones_pending = pytest.mark.xfail(reason="impl pending: Step 6 list-bones", strict=True)
+
+
+def _list_lines(capsys):
+    return capsys.readouterr().out.splitlines()
+
+
+def _line_with(lines, name):
+    # 指定ボーン名を含む行を返す(表示形式を仮定せず、名前と分類が同一行に並ぶことだけを要求)。
+    return next(ln for ln in lines if name in ln)
+
+
+@_listbones_pending
+def test_list_bones_pairs_name_and_category_per_line(tmp_path, capsys):
+    # 各ボーンの行に「自分の分類だけ」が並ぶ。他分類を含まないことも検証し、全分類を各行へ出す誤実装
+    # (例「センター center foot_ik unknown」)も排除する(§3.2)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", 0), bone("右足ＩＫ", 0), bone("謎ボーン", 0)])
+    assert cli.main([str(src), "--list-bones"]) == 0
+    lines = _list_lines(capsys)
+    cats = {"センター": "center", "右足ＩＫ": "foot_ik", "謎ボーン": "unknown"}
+    all_cats = set(cats.values())
+    for name, cat in cats.items():
+        ln = _line_with(lines, name)
+        assert cat in ln
+        assert all(other not in ln for other in all_cats - {cat})  # 他ボーンの分類は混在しない
+
+
+@_listbones_pending
+def test_list_bones_appearance_order_and_dedup(tmp_path, capsys):
+    # 一覧は初出順・名前ごとに1回(重複キーで同名を複数行に出さない)。表示形式は仮定せず、各名前を含む
+    # 行の初出位置の順序と出現回数で検証する。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("右腕", 0), bone("センター", 0), bone("右腕", 5)])
+    assert cli.main([str(src), "--list-bones"]) == 0
+    lines = _list_lines(capsys)
+    first = lambda name: next(i for i, ln in enumerate(lines) if name in ln)
+    assert first("右腕") < first("センター")                       # 初出順
+    assert sum(1 for ln in lines if "右腕" in ln) == 1            # 重複キーでも1回
+    assert sum(1 for ln in lines if "センター" in ln) == 1
+
+
+@_listbones_pending
+def test_list_bones_does_not_write_output(tmp_path):
+    # --list-bones は表示して終了し、明示出力先(-o)も既定出力先も書かない。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "explicit.vmd"
+    write_vmd(src, bone=[bone("センター", 0)])
+    assert cli.main([str(src), "-o", str(out), "--list-bones"]) == 0
+    assert not out.exists()
+    assert not (tmp_path / "in_mocap.vmd").exists()
