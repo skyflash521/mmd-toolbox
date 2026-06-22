@@ -26,6 +26,43 @@ _BASE = {
 }
 
 
+# §5.4 接地ロック強度。アンカーへのブレンド係数(0〜1)で倍率でなく直接値。
+# foot_ik の X/Z 接地中央のみプリセット別(stable-foot が最強・light が最弱)。
+_FOOT_XZ_CENTER = {"light": 0.70, "balanced": 0.90, "strong": 0.93, "stable-foot": 0.97}
+_FOOT_LOCK_FADE_WIDTH = 3  # 接地端のフェード幅(端からのフレーム数)
+
+
+def resolve_foot_lock(preset, category):
+    """プリセットと種別(foot_ik / toe_ik)から接地ロック係数 dict を返す(§5.4)。
+
+    返す dict: xz_center / xz_edge / y_center / y_edge / fade_width。係数は接地アンカーへの
+    ブレンド係数(0〜1。1に近いほど強く固定)で、倍率でなく直接値。foot_ik の X/Z 接地中央のみ
+    プリセット別、foot_ik の Y と toe_ik の各チャンネルはプリセット非依存。接地ロックは
+    foot_ik / toe_ik のみ対象で、他種別・未知プリセットは ValueError。
+    """
+    if preset not in PRESET_NAMES:
+        raise ValueError(
+            f"未知のプリセット: {preset!r}(有効: {', '.join(PRESET_NAMES)})"
+        )
+    if category == "foot_ik":
+        return {
+            "xz_center": _FOOT_XZ_CENTER[preset],
+            "xz_edge": 0.25,
+            "y_center": 0.50,
+            "y_edge": 0.10,
+            "fade_width": _FOOT_LOCK_FADE_WIDTH,
+        }
+    if category == "toe_ik":
+        return {
+            "xz_center": 0.30,
+            "xz_edge": 0.10,
+            "y_center": 0.30,
+            "y_edge": 0.10,
+            "fade_width": _FOOT_LOCK_FADE_WIDTH,
+        }
+    raise ValueError(f"接地ロックの対象外の種別: {category!r}(foot_ik / toe_ik のみ)")
+
+
 def _strength_multiplier(preset, category):
     """§5.2 強度倍率。stable-foot は foot_ik のみ 1.5、他は 1.0。"""
     if preset == "stable-foot":
