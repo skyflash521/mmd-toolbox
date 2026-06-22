@@ -800,3 +800,109 @@ def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
     out = tmp_path / "out.vmd"
     src.write_bytes(b"not a vmd")
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "nan"]) == 2
+
+
+# --- --preview-csv(入力/出力サンプル比較 CSV。§3.2) ----------------------------
+
+_preview_pending = pytest.mark.xfail(reason="impl pending: preview-csv", strict=True)
+
+_PREVIEW_CHANNELS = ("pos_x", "pos_y", "pos_z", "rot_x", "rot_y", "rot_z", "rot_w")
+_PREVIEW_HEADER = ["track", "frame", "channel", "input", "output", "error"]
+
+
+def _read_preview_raw(path):
+    import csv
+
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.reader(f))
+
+
+def _read_preview(path):
+    import csv
+
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _track_by_name(path, name):
+    return sorted((k for k in io.read(str(path))[0].bone if k.name == name), key=lambda k: k.frame)
+
+
+@_preview_pending
+def test_preview_csv_header_order_and_full_cartesian(tmp_path):
+    # ヘッダは列順固定。行は各ボーンの (実在フレーム × 7チャンネル) の直積を漏れなく重複なく1回ずつ出す。
+    # フレーム範囲の異なる2ボーンで、フレーム1回ずつ出すだけの不完全CSVを排除する。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    csvp = tmp_path / "preview.csv"
+    keys = [bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(5)]          # 0-4
+    keys += [bone("右腕", f, pos=(float(f), 0.0, 0.0)) for f in range(10, 13)]         # 10-12
+    write_vmd(src, bone=keys)
+    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(csvp)]) == 0
+    raw = _read_preview_raw(csvp)
+    assert raw[0] == _PREVIEW_HEADER  # 列順を固定(集合一致では重複列を見逃す)
+    got = [(r[0], int(r[1]), r[2]) for r in raw[1:]]
+    expected = {
+        (name, f, ch)
+        for name, frames in (("センター", range(5)), ("右腕", range(10, 13)))
+        for f in frames
+        for ch in _PREVIEW_CHANNELS
+    }
+    assert set(got) == expected
+    assert len(got) == len(expected)  # 重複行なし
+
+
+@_preview_pending
+def test_preview_csv_input_output_error_match_samples(tmp_path):
+    # input は入力(クリーニング前)サンプル、output は出力VMDサンプル、error=abs(input-output)。値は6桁整形。
+    # クリーニングが値を変えるジッタ入力で、output が input と異なる行が存在することも確かめ、誤って
+    # output に input を流用する実装を排除する。
+    from mmd_toolbox.vmd import interp
+
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    csvp = tmp_path / "preview.csv"
+    xs = [0.0, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, 0.0]  # 接地ジッタ(clean が平滑)
+    write_vmd(src, bone=[bone("センター", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
+    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(csvp)]) == 0
+    in_track = _track_by_name(src, "センター")   # 出力VMDと同じく float32 往復後の値で照合する
+    out_track = _track_by_name(out, "センター")
+    differ = False
+    for r in _read_preview(csvp):
+        f = int(r["frame"])
+        ch = r["channel"]
+        if ch.startswith("pos_"):
+            exp_in = interp.sample(in_track, ch, f)
+            exp_out = interp.sample(out_track, ch, f)
+        else:
+            i = ("rot_x", "rot_y", "rot_z", "rot_w").index(ch)
+            exp_in = interp.sample(in_track, "rot", f)[i]
+            exp_out = interp.sample(out_track, "rot", f)[i]
+        assert r["input"] == f"{exp_in:.6f}"                      # input=raw・6桁整形
+        assert r["output"] == f"{exp_out:.6f}"                    # output=出力VMD・6桁整形
+        assert r["error"] == f"{abs(exp_in - exp_out):.6f}"       # error=abs(input-output)
+        if exp_in != exp_out:
+            differ = True
+    assert differ  # output が input と異なる行が存在する(output=input 流用を排除)
+
+
+@_preview_pending
+def test_preview_csv_also_writes_valid_output_vmd(tmp_path):
+    # --preview-csv は dry-run でないので出力 VMD も書き、それが有効な VMD として読める(出力抑止しない)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    csvp = tmp_path / "preview.csv"
+    write_vmd(src, bone=[bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(11)])
+    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(csvp)]) == 0
+    assert csvp.exists()
+    assert any(k.name == "センター" for k in io.read(str(out))[0].bone)  # 出力VMDが読める
+
+
+@_preview_pending
+def test_preview_csv_write_failure_is_exit3(tmp_path):
+    # CSV 書き込み失敗(存在しないディレクトリ)は終了コード3(report-json の書込失敗と同じ扱い)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=[bone("センター", 0), bone("センター", 10)])
+    bad = tmp_path / "nodir" / "preview.csv"
+    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(bad)]) == 3
