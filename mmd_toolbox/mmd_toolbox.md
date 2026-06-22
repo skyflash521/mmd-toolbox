@@ -42,6 +42,10 @@ MMDファイルフォーマット層の機能を提供する。
         io.py       # 読み書き・正規化(vmd-io.md)
         interp.py   # 補間曲線評価・サンプリング(vmd-interp.md)
         camera.py   # カメラ座標変換(vmd-camera.md)
+        reduce.py   # キーフレーム疎化の全体制御(区間分割・キー削減・継ぎ目処理・誤差検証・ベジェ採否)
+        cuts.py     # 不連続検出・必須境界の管理(reduce の支援)
+        fit.py      # 補間曲線フィット・チャンネル別誤差評価(reduce の支援)
+        sample.py   # サンプリング小ヘルパ(perspective の直近ホールド。reduce の支援)
       pmx/          # 将来: PMX読み込み(docs/specs/pmx/ 参照)
 
 機能別仕様書:
@@ -51,6 +55,14 @@ MMDファイルフォーマット層の機能を提供する。
 | [vmd-io.md](vmd-io.md) | vmd/types, vmd/io | VMD読み書き・データモデル・正規化・ラウンドトリップ保証 |
 | [vmd-interp.md](vmd-interp.md) | vmd/interp | MMD互換の補間曲線評価・サンプリング |
 | [vmd-camera.md](vmd-camera.md) | vmd/camera | カメラモデルの座標変換・符号規約 |
+
+キーフレーム疎化の共通機構 `vmd/reduce`(支援: `vmd/cuts`・`vmd/fit`・`vmd/sample`)は
+複数ツール(shakevmd・sparsevmd・mocapvmd)が共有する。疎化アルゴリズム(区間分割・キー削減・
+継ぎ目処理・誤差検証・ベジェ採否)の現行の詳細記述は
+[../sparsevmd/sparsevmd.md](../sparsevmd/sparsevmd.md) にあり、`vmd/reduce` の docstring もそこを
+参照する(共通ライブラリ側での正式な仕様化は未整備で、当面この記述を参照先とする暫定状態)。`reduce` は
+カメラ枠を含む共通 `Tolerances` を扱うが、ボーンだけを扱うツール向けに、ボーンの位置・回転許容誤差だけを
+受け取り未使用のカメラ枠を内部で埋めて `Tolerances` を返すヘルパ `build_bone_tolerances` を提供する。
 
 バイナリレイアウトの正は `docs/specs/vmd/VMD_file_format.md` とし、
 本ライブラリの仕様書ではバイトレイアウトを重複記載しない。
@@ -113,4 +125,6 @@ MMDファイルフォーマット層の機能を提供する。
 
 | ツール | 利用機能 |
 |---|---|
-| shakevmd ([../shakevmd/shakevmd.md](../shakevmd/shakevmd.md)) | vmd/io, vmd/interp, vmd/camera, vmd/reduce |
+| shakevmd ([../shakevmd/shakevmd.md](../shakevmd/shakevmd.md)) | vmd/io, vmd/types, vmd/interp, vmd/camera, vmd/reduce |
+| sparsevmd ([../sparsevmd/sparsevmd.md](../sparsevmd/sparsevmd.md)) | vmd/io, vmd/interp, vmd/reduce(+cuts, fit, sample) |
+| mocapvmd ([../mocapvmd/mocapvmd.md](../mocapvmd/mocapvmd.md)) | vmd/io, vmd/types, vmd/reduce(+cuts) |
