@@ -6,24 +6,12 @@ mmd_toolbox.vmd.reduce.reduce_bone_track により疎化する(全範囲・全�
 結果と突き合わせて検証する。疎化アルゴリズムそのものは mmd_toolbox 側のテストに委ねる。
 """
 
-import importlib.util
-
-import pytest
-
 from mmd_toolbox.vmd.reduce import build_bone_tolerances, reduce_bone_track
 
 from mocapvmd import presets
+from mocapvmd import reduce as mreduce
 
 from .helpers import BONE_NONLINEAR, bone
-
-# モジュール自体が未実装のときだけ収集をスキップする。
-_HAS_REDUCE = importlib.util.find_spec("mocapvmd.reduce") is not None
-if _HAS_REDUCE:
-    from mocapvmd import reduce as mreduce
-else:
-    mreduce = None
-
-pytestmark = pytest.mark.skipif(not _HAS_REDUCE, reason="impl pending: Step 5c")
 
 # reduce_bone_track へ渡す固定引数(設計確定値)。全範囲・カット検出あり。
 _FIXED = dict(
