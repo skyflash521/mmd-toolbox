@@ -4,18 +4,13 @@ build_bone_tolerances は bone_pos / bone_rot だけを受け取り、未使用�
 埋めた Tolerances を返す。ボーンのみを扱うツール(mocapvmd)がカメラ許容値を指定せずに済むようにする。
 """
 
-import pytest
-
 from mmd_toolbox.vmd import reduce
 from mmd_toolbox.vmd.reduce import Tolerances, reduce_bone_track
 from mmd_toolbox.vmd.types import BoneKey
 
-pending = pytest.mark.xfail(reason="impl pending: Step 5a", strict=True)
-
 LINEAR = reduce.BONE_LINEAR_INTERP
 
 
-@pending
 def test_build_bone_tolerances_sets_bone_fields_and_zeroes_camera():
     t = reduce.build_bone_tolerances(0.02, 0.20)
     assert isinstance(t, Tolerances)
@@ -27,7 +22,6 @@ def test_build_bone_tolerances_sets_bone_fields_and_zeroes_camera():
     assert t.camera_fov == 0.0
 
 
-@pending
 def test_build_bone_tolerances_usable_by_reduce_bone_track():
     # 返した Tolerances がそのまま reduce_bone_track に渡せる(ボーン疎化が成立する)。
     # 線形に並ぶ密キーは中間キーが省かれ、端の2キーへ削減される。

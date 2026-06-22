@@ -48,6 +48,23 @@ class Tolerances:
     camera_fov: float
 
 
+def build_bone_tolerances(bone_pos, bone_rot):
+    """ボーンの位置・回転許容値だけから Tolerances を構築する(カメラ欄は 0.0 で埋める)。
+
+    ボーンのみを扱うツール(mocapvmd 等)がカメラ用許容値を指定せず疎化できるようにする。返した
+    Tolerances はそのまま reduce_bone_track へ渡せる(reduce_bone_track は bone_pos / bone_rot のみ
+    参照する)。値の有限性・非負などの検証は呼び出し側(プリセット解決層)が担う。
+    """
+    return Tolerances(
+        bone_pos=bone_pos,
+        bone_rot=bone_rot,
+        camera_pos=0.0,
+        camera_rot=0.0,
+        camera_distance=0.0,
+        camera_fov=0.0,
+    )
+
+
 # linear mode の補間ブロック(真の線形: 各チャンネル x1==y1, x2==y2)。
 CAMERA_LINEAR_INTERP = bytes([20, 107, 20, 107]) * 6
 
