@@ -417,6 +417,87 @@ def test_write_json_roundtrip(tmp_path):
     assert loaded == rep
 
 
+# --- 疎化レポート(§4.4: キー削減率・適用許容・カット数・最大再生誤差) -------------
+
+_red_pending = pytest.mark.xfail(reason="impl pending: Step 5f-2", strict=True)
+
+
+def _reduction(name, input_keys, output_keys, *, tol_pos=0.014, tol_rot=0.14, cuts=0, errors=None):
+    # reduce.reduce_bones の diagnostics_out と同じ素データ schema(レポート層へ渡す入力)。
+    return {
+        name: {
+            "input_keys": input_keys,
+            "output_keys": output_keys,
+            "tol_pos": tol_pos,
+            "tol_rot": tol_rot,
+            "cuts": cuts,
+            "errors": errors or {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "rot_deg": 0.0},
+        }
+    }
+
+
+@_red_pending
+def test_report_adds_reduction_section_when_provided():
+    # reduction(診断素データ)を渡すと、各ボーンに出力キー数・削減率(派生)・適用許容・カット数・
+    # 最大再生誤差が付く(§4.4)。
+    keys = [bone("センター", f) for f in range(11)]
+    errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
+    red = _reduction("センター", 11, 3, tol_pos=0.014, tol_rot=0.14, cuts=2, errors=errors)
+    rep = report.build_report(keys, reduction=red)
+    r = _entry(rep, "センター")["reduction"]
+    assert r["output_keys"] == 3
+    assert r["reduction_rate"] == pytest.approx(1.0 - 3 / 11)  # 削減率は入出力キー数から派生
+    assert r["tol_pos"] == 0.014
+    assert r["tol_rot"] == 0.14
+    assert r["cuts"] == 2
+    assert r["errors"] == errors
+
+
+@_red_pending
+def test_report_reduce_flag_reflects_reduction_presence():
+    # reduction 省略時(--no-reduce 相当)は reduce フラグ False・reduction セクション無し。
+    keys = [bone("センター", f) for f in range(11)]
+    rep_off = report.build_report(keys)
+    assert rep_off["reduce"] is False
+    assert "reduction" not in _entry(rep_off, "センター")
+    rep_on = report.build_report(keys, reduction=_reduction("センター", 11, 3))
+    assert rep_on["reduce"] is True
+    assert "reduction" in _entry(rep_on, "センター")
+    # 疎化 on でも対象トラックが無い(空)とき reduction は空 dict になる。reduce フラグは渡された
+    # かどうか(is not None)で決め、bool(reduction) で False に倒す誤実装を排除する。
+    rep_empty = report.build_report([], reduction={})
+    assert rep_empty["reduce"] is True
+
+
+@_red_pending
+def test_format_dry_run_shows_reduction():
+    # dry-run 表示にも削減率・出力キー数・カット数・最大再生誤差が出る(§4.4 は dry-run と report-json 双方)。
+    keys = [bone("センター", f) for f in range(11)]
+    errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
+    red = _reduction("センター", 11, 3, cuts=2, errors=errors)
+    text = report.format_dry_run(report.build_report(keys, reduction=red))
+    assert "reduce: on" in text
+    center_line = next(line for line in text.splitlines() if "センター" in line and "center" in line)
+    tokens = center_line.split()
+    assert "out_keys=3" in tokens
+    assert "cuts=2" in tokens
+    assert "red=72.7%" in tokens                 # 1 - 3/11 = 72.7%
+    assert "tol=[0.014,0.14]" in tokens          # 適用許容(位置, 回転)
+    assert "err_pos=0.012" in tokens             # 最大再生誤差(位置軸の最大 = pos_x)
+    assert "err_rot=0.8deg" in tokens            # 最大再生誤差(回転角)
+
+
+@_red_pending
+def test_report_json_roundtrip_with_reduction(tmp_path):
+    keys = [bone("センター", f) for f in range(11)]
+    errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
+    rep = report.build_report(keys, reduction=_reduction("センター", 11, 3, cuts=2, errors=errors))
+    path = tmp_path / "report.json"
+    report.write_json(rep, str(path))
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    assert loaded == rep  # reduction セクションが JSON ネイティブ型で往復する
+
+
 def test_format_dry_run_shows_values_and_candidates():
     # dry-run は分類だけでなくキー数・フレーム範囲・速度を値として表示する(§4.4)。ラベル文言には
     # 依存せず、入力から確定する値とボーン名・分類・候補名で検証する。
