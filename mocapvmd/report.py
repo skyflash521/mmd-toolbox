@@ -97,12 +97,24 @@ def _stabilization(bone_keys, preset, denoise_on):
     return footik.stabilize_foot_ik(tracks, preset)
 
 
-def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=True):
+def _reduction_rate(input_count, output_count):
+    """キー削減率 = 1 - 出力/入力(§4.4)。入力0は0(ゼロ除算しない)。"""
+    if input_count <= 0:
+        return 0.0
+    return 1.0 - output_count / input_count
+
+
+def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=True, reduction=None):
     """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
 
     名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。
     各ボーンには、選択プリセットで解決したクリーニングパラメータ(presets.resolve_cleaning の戻り)を
     付けてチューニングを確認できるようにする(§4.5)。
+
+    reduction(reduce.reduce_bones の diagnostics_out。トラック名 -> {input_keys, output_keys,
+    tol_pos, tol_rot, cuts, errors})を渡すと、トップレベルに reduce フラグ(疎化したか= reduction を
+    渡したか)を、該当ボーンに reduction セクション(出力キー数・削減率(入出力から派生)・適用許容・
+    検出カット数・最大再生誤差)を付ける(§4.4)。疎化の実行は呼び出し側(CLI)が行い、本関数は表示のみ。
     """
     order = []
     groups = {}
@@ -147,6 +159,16 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
             entry["mean_change"] = ts.mean_change
             entry["lock_applied_ratio"] = ts.lock_applied_ratio
             entry["clamp_warnings"] = len(ts.warnings)
+        if reduction is not None and name in reduction:
+            r = reduction[name]
+            entry["reduction"] = {
+                "output_keys": r["output_keys"],
+                "reduction_rate": _reduction_rate(r["input_keys"], r["output_keys"]),
+                "tol_pos": r["tol_pos"],
+                "tol_rot": r["tol_rot"],
+                "cuts": r["cuts"],
+                "errors": r["errors"],
+            }
         bones.append(entry)
         if category == "foot_ik":
             foot_ik.append(name)
@@ -157,6 +179,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
         "preset": preset,
         "denoise": denoise,
         "foot_ik_stabilize": foot_ik_stabilize,
+        "reduce": reduction is not None,
         "range": [min(all_frames), max(all_frames)] if all_frames else [],
         "bones": bones,
         "foot_ik_candidates": foot_ik,
@@ -177,6 +200,7 @@ def format_dry_run(report):
         f"preset: {report['preset']}",
         f"denoise: {'on' if report['denoise'] else 'off'}",
         f"foot_ik_stabilize: {'on' if report.get('foot_ik_stabilize') else 'off'}",
+        f"reduce: {'on' if report.get('reduce') else 'off'}",
         f"range: {report['range']}",
     ]
     for b in report["bones"]:
@@ -195,6 +219,15 @@ def format_dry_run(report):
                 f" lock_rate={b['lock_applied_ratio']:.2f}"
                 f" max_chg={b['max_change']:.4g}"
                 f" warn={b['clamp_warnings']}"
+            )
+        if "reduction" in b:
+            r = b["reduction"]
+            e = r["errors"]
+            err_pos = max(e["pos_x"], e["pos_y"], e["pos_z"])
+            line += (
+                f" out_keys={r['output_keys']} red={r['reduction_rate'] * 100:.1f}%"
+                f" cuts={r['cuts']} tol=[{r['tol_pos']:.4g},{r['tol_rot']:.4g}]"
+                f" err_pos={err_pos:.4g} err_rot={e['rot_deg']:.4g}deg"
             )
         lines.append(line)
     lines.append(f"足IK候補: {report['foot_ik_candidates']}")

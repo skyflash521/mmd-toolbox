@@ -419,8 +419,6 @@ def test_write_json_roundtrip(tmp_path):
 
 # --- 疎化レポート(§4.4: キー削減率・適用許容・カット数・最大再生誤差) -------------
 
-_red_pending = pytest.mark.xfail(reason="impl pending: Step 5f-2", strict=True)
-
 
 def _reduction(name, input_keys, output_keys, *, tol_pos=0.014, tol_rot=0.14, cuts=0, errors=None):
     # reduce.reduce_bones の diagnostics_out と同じ素データ schema(レポート層へ渡す入力)。
@@ -436,7 +434,6 @@ def _reduction(name, input_keys, output_keys, *, tol_pos=0.014, tol_rot=0.14, cu
     }
 
 
-@_red_pending
 def test_report_adds_reduction_section_when_provided():
     # reduction(診断素データ)を渡すと、各ボーンに出力キー数・削減率(派生)・適用許容・カット数・
     # 最大再生誤差が付く(§4.4)。
@@ -453,7 +450,6 @@ def test_report_adds_reduction_section_when_provided():
     assert r["errors"] == errors
 
 
-@_red_pending
 def test_report_reduce_flag_reflects_reduction_presence():
     # reduction 省略時(--no-reduce 相当)は reduce フラグ False・reduction セクション無し。
     keys = [bone("センター", f) for f in range(11)]
@@ -469,7 +465,6 @@ def test_report_reduce_flag_reflects_reduction_presence():
     assert rep_empty["reduce"] is True
 
 
-@_red_pending
 def test_format_dry_run_shows_reduction():
     # dry-run 表示にも削減率・出力キー数・カット数・最大再生誤差が出る(§4.4 は dry-run と report-json 双方)。
     keys = [bone("センター", f) for f in range(11)]
@@ -487,7 +482,6 @@ def test_format_dry_run_shows_reduction():
     assert "err_rot=0.8deg" in tokens            # 最大再生誤差(回転角)
 
 
-@_red_pending
 def test_report_json_roundtrip_with_reduction(tmp_path):
     keys = [bone("センター", f) for f in range(11)]
     errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
@@ -496,6 +490,40 @@ def test_report_json_roundtrip_with_reduction(tmp_path):
     report.write_json(rep, str(path))
     loaded = json.loads(path.read_text(encoding="utf-8"))
     assert loaded == rep  # reduction セクションが JSON ネイティブ型で往復する
+
+
+def test_report_reduction_rate_derives_from_diagnostics_keys():
+    # 削減率は diagnostics の input_keys/output_keys から派生する(エントリの実キー数ではない)。
+    # 実トラック11キーに対し diagnostics input_keys=10 を渡し、1-3/10 になることで派生元を固定する。
+    keys = [bone("センター", f) for f in range(11)]
+    rep = report.build_report(keys, reduction=_reduction("センター", 10, 3))
+    assert _entry(rep, "センター")["reduction"]["reduction_rate"] == pytest.approx(1.0 - 3 / 10)
+    # 入力0は0(ゼロ除算しない)。
+    rep0 = report.build_report([bone("センター", 0)], reduction=_reduction("センター", 0, 0))
+    assert _entry(rep0, "センター")["reduction"]["reduction_rate"] == 0.0
+
+
+def test_report_reduction_only_on_named_bones():
+    # reduction に名前があるボーンだけ reduction セクションが付き、無いボーンには付かない。
+    keys = [bone("センター", 0), bone("センター", 10), bone("右腕", 0), bone("右腕", 10)]
+    rep = report.build_report(keys, reduction=_reduction("センター", 2, 2))
+    assert "reduction" in _entry(rep, "センター")
+    assert "reduction" not in _entry(rep, "右腕")
+
+
+def test_format_dry_run_reduce_off_when_no_reduction():
+    # reduction 省略時(--no-reduce 相当)は dry-run ヘッダに reduce: off を出す。
+    text = report.format_dry_run(report.build_report([bone("センター", 0)]))
+    assert "reduce: off" in text
+
+
+def test_format_dry_run_err_pos_is_max_of_position_axes():
+    # err_pos は位置3軸の最大(pos_x 固定でなく max(pos_x,pos_y,pos_z))。pos_z を最大にして固定する。
+    keys = [bone("センター", f) for f in range(11)]
+    errors = {"pos_x": 0.002, "pos_y": 0.004, "pos_z": 0.013, "rot_deg": 0.5}
+    text = report.format_dry_run(report.build_report(keys, reduction=_reduction("センター", 11, 3, errors=errors)))
+    center_line = next(line for line in text.splitlines() if "センター" in line and "center" in line)
+    assert "err_pos=0.013" in center_line.split()
 
 
 def test_format_dry_run_shows_values_and_candidates():
