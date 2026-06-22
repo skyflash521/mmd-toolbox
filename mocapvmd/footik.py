@@ -21,6 +21,7 @@
 import dataclasses
 import math
 import re
+import statistics
 
 MIN_GROUND_LEN = 4         # 最小接地長(フレーム)
 HORIZ_VEL_THRESH = 0.08    # 水平速度閾値(MMD単位/frame)
@@ -28,6 +29,7 @@ VERT_VEL_THRESH = 0.04     # 垂直速度閾値(MMD単位/frame)
 LOCAL_WINDOW = 5           # 接地Y局所窓(前後フレーム数)
 GROUND_Y_TOL = 0.08        # 接地Y許容幅(局所最小に足す MMD単位)
 RELATIVE_DELTA_THRESH = 0.08  # 相対位置急変の閾値(差分ベクトルの1フレーム変化ノルム MMD単位)
+MAX_CORRECTION = 0.5       # 接地ロックの最大補正量(接地区間内の1フレーム最大変位 MMD単位。§5.5)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,6 +69,22 @@ class PairingResult:
     pairs: tuple
     unpaired: tuple
     ambiguous: tuple
+
+
+@dataclasses.dataclass(frozen=True)
+class SegmentLock:
+    """接地区間ごとのロック記録。
+
+    anchor は接地アンカー(中央値)、max_displacement はロック後の1フレーム最大変位、coef_scale は
+    最大補正量クランプによる一律係数倍率(1.0 ならクランプ無し)、clamped はクランプの有無。レポートは
+    clamped が立った区間を警告として出す。
+    """
+
+    segment: GroundSegment
+    anchor: tuple
+    max_displacement: float
+    coef_scale: float
+    clamped: bool
 
 
 def _runs(frames, min_len):
@@ -234,3 +252,82 @@ def pair_ik_tracks(tracks):
             unpaired.extend(toes)
 
     return PairingResult(tuple(pairs), tuple(unpaired), tuple(ambiguous))
+
+
+# --- 接地ロック適用(§5.4 / §5.5)-----------------------------------------
+
+
+def compute_ground_anchor(positions, segment):
+    """接地区間の各IK位置の X/Y/Z 各軸独立の中央値を接地アンカーとして返す(§4.2)。
+
+    中央値は外れ値に強く、片足を置いた瞬間の1フレーム跳ねに引っ張られにくい。
+    """
+    rows = [positions[i] for i in range(segment.start, segment.end + 1)]
+    return (
+        statistics.median([p[0] for p in rows]),
+        statistics.median([p[1] for p in rows]),
+        statistics.median([p[2] for p in rows]),
+    )
+
+
+def _fade_coef(offset, length, center, edge, fade_width):
+    """区間内オフセット offset(0始まり)でのロック係数(§5.4)。
+
+    端は edge、端から fade_width 以上内側は center、間は線形フェード。接地長が 2*fade_width 未満
+    なら接地長の半分ずつに按分する(実効フェード幅 = min(fade_width, length//2))。
+    """
+    w = min(fade_width, length // 2)
+    if w <= 0:
+        return center
+    d = min(offset, length - 1 - offset)
+    if d >= w:
+        return center
+    return edge + (center - edge) * (d / w)
+
+
+def apply_foot_lock(positions, segments, strength, *, max_displacement=MAX_CORRECTION):
+    """接地区間で位置を接地アンカーへ寄せ、(ロック後位置列, SegmentLock 列)を返す(§5.4 / §5.5)。
+
+    strength は resolve_foot_lock の dict(xz_center/xz_edge/y_center/y_edge/fade_width)。各区間で
+    アンカー(中央値)を求め、X/Z は xz 係数、Y は y 係数でフェードしながら new=orig+coef*(anchor-orig)
+    へ寄せる。区間内の1フレーム最大変位(X/Y/Z ユークリッド)が max_displacement を超える場合は、その
+    区間の係数を一律 max_displacement/max でスケールしてクランプし、SegmentLock.clamped を立てる。
+    区間外のフレームは変更しない。
+    """
+    out = [tuple(float(c) for c in p) for p in positions]
+    locks = []
+    xz_c, xz_e = strength["xz_center"], strength["xz_edge"]
+    y_c, y_e = strength["y_center"], strength["y_edge"]
+    fade_width = strength["fade_width"]
+
+    for seg in segments:
+        anchor = compute_ground_anchor(positions, seg)
+        length = seg.end - seg.start + 1
+        frames = []  # (cxz, cy, dx, dy, dz)
+        raw_max = 0.0
+        for i in range(seg.start, seg.end + 1):
+            offset = i - seg.start
+            cxz = _fade_coef(offset, length, xz_c, xz_e, fade_width)
+            cy = _fade_coef(offset, length, y_c, y_e, fade_width)
+            dx = anchor[0] - positions[i][0]
+            dy = anchor[1] - positions[i][1]
+            dz = anchor[2] - positions[i][2]
+            raw_max = max(raw_max, math.hypot(cxz * dx, cy * dy, cxz * dz))
+            frames.append((cxz, cy, dx, dy, dz))
+
+        clamped = raw_max > max_displacement
+        coef_scale = max_displacement / raw_max if clamped else 1.0
+
+        for idx, i in enumerate(range(seg.start, seg.end + 1)):
+            cxz, cy, dx, dy, dz = frames[idx]
+            cxz *= coef_scale
+            cy *= coef_scale
+            out[i] = (
+                positions[i][0] + cxz * dx,
+                positions[i][1] + cy * dy,
+                positions[i][2] + cxz * dz,
+            )
+
+        locks.append(SegmentLock(seg, anchor, raw_max * coef_scale, coef_scale, clamped))
+
+    return out, locks

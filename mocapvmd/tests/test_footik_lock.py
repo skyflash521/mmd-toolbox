@@ -15,8 +15,6 @@ import pytest
 from mocapvmd import footik
 from mocapvmd.footik import GroundSegment
 
-pending = pytest.mark.xfail(reason="impl pending: Step 4c", strict=True)
-
 # テストを presets から切り離すための明示的な強度。foot_ik balanced 相当。
 FOOT = {"xz_center": 0.90, "xz_edge": 0.25, "y_center": 0.50, "y_edge": 0.10, "fade_width": 3}
 
@@ -31,7 +29,6 @@ def _track(xs, ys=None, zs=None):
 # --- 接地アンカー(中央値)-------------------------------------------------
 
 
-@pending
 def test_anchor_is_median_robust_to_outlier():
     # 区間内に1フレームの跳ねがあっても中央値は引っ張られない。
     pos = _track([1.0, 1.0, 5.0, 1.0, 1.0])
@@ -39,7 +36,6 @@ def test_anchor_is_median_robust_to_outlier():
     assert a == pytest.approx((1.0, 0.0, 0.0))
 
 
-@pending
 def test_anchor_per_axis_median():
     # X/Y/Z それぞれ独立に中央値を取る。
     pos = [(0.0, 10.0, 100.0), (2.0, 12.0, 100.0), (4.0, 14.0, 130.0)]
@@ -50,7 +46,6 @@ def test_anchor_per_axis_median():
 # --- ロック適用: フェード曲線 ----------------------------------------------
 
 
-@pending
 @pytest.mark.parametrize("offset,new_x", [
     (0, 0.15),            # 開始端: 端値 0.25 → 0.2*(1-0.25)
     (1, 0.10666667),      # 0.25 + 0.65*(1/3)
@@ -69,7 +64,6 @@ def test_fade_curve_from_edge_to_center(offset, new_x):
     assert locked[offset][0] == pytest.approx(new_x)
 
 
-@pending
 @pytest.mark.parametrize("offset", [1, 2])
 def test_fade_width_splits_for_short_segment(offset):
     # 長さ4の区間ではフェード幅が接地長の半分(2)に縮み、中央値0.90には達しない。両端側とも
@@ -83,7 +77,6 @@ def test_fade_width_splits_for_short_segment(offset):
 # --- ロック適用: チャンネル分離・区間外 ------------------------------------
 
 
-@pending
 def test_xz_and_y_use_separate_coefficients():
     # 内側フレームで X は xz中央0.90、Y は y中央0.50 を使う。
     xs = [0.0] * 7
@@ -98,7 +91,6 @@ def test_xz_and_y_use_separate_coefficients():
     assert locked[3][2] == pytest.approx(0.02)   # Z は X と同じ xz中央0.90
 
 
-@pending
 def test_frames_outside_segments_unchanged():
     xs = [9.0, 9.0, 9.0, 0.0, 0.5, 0.0, 0.0, 7.0, 7.0, 7.0]
     pos = _track(xs)
@@ -110,7 +102,6 @@ def test_frames_outside_segments_unchanged():
 # --- 最大補正量クランプ(§5.5)---------------------------------------------
 
 
-@pending
 def test_no_clamp_when_within_limit():
     xs = [0.0] * 7
     xs[3] = 0.2  # 内側変位 0.90*0.2=0.18 <= 0.5
@@ -121,7 +112,6 @@ def test_no_clamp_when_within_limit():
     assert locks[0].max_displacement == pytest.approx(0.18)
 
 
-@pending
 def test_clamp_is_euclidean_and_uniform_across_segment():
     # 内側 frame3 を X・Y・Z 同時に 0.6 ずらす。変位は X/Z が xz係数0.90、Y が y係数0.50 を掛けた
     # 3次元ユークリッド hypot(0.54, 0.30, 0.54)=0.8205 > 0.5(Y を無視する hypot(dx,dz) 実装を弾く)。
@@ -144,7 +134,6 @@ def test_clamp_is_euclidean_and_uniform_across_segment():
     assert locked[4][0] == pytest.approx(0.3 * (1 - 0.90 * scale))  # 一律スケール(区間全体)
 
 
-@pending
 def test_segment_anchor_is_per_segment():
     # 2区間それぞれが自身の中央値をアンカーにする。
     xs = [0.0, 0.0, 0.0, 0.0, 5.0, 5.0, 5.0, 5.0]
@@ -156,7 +145,6 @@ def test_segment_anchor_is_per_segment():
     assert locks[1].anchor == pytest.approx((5.0, 0.0, 0.0))
 
 
-@pending
 def test_clamp_is_independent_per_segment():
     # 片方の区間だけがクランプされ、もう片方は coef_scale=1.0 のまま(スケール漏洩しない)。
     xs = [0.0] * 14
