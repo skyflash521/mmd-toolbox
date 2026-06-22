@@ -102,6 +102,26 @@ def test_single_key_zero_norm_quaternion_is_input_error(tmp_path):
     assert cli.main([str(src), "-o", str(out)]) == 1
 
 
+def test_no_denoise_non_finite_is_input_error(tmp_path):
+    # クリーニングを切っても入力値検証は迂回されず、非有限値は疎化に渡る前に入力不正=終了コード1。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    keys = [bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(4)]
+    keys.append(bone("センター", 4, pos=(float("inf"), 0.0, 0.0)))
+    write_vmd(src, bone=keys)
+    assert cli.main([str(src), "-o", str(out), "--no-denoise"]) == 1
+
+
+def test_no_denoise_zero_norm_quaternion_is_input_error(tmp_path):
+    # クリーニングを切った密トラックのゼロノルム quaternion も、疎化(既定 on)に渡る前に入力不正=終了コード1。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    keys = [bone("センター", f) for f in range(4)]
+    keys.append(bone("センター", 4, rot=(0.0, 0.0, 0.0, 0.0)))
+    write_vmd(src, bone=keys)
+    assert cli.main([str(src), "-o", str(out), "--no-denoise"]) == 1
+
+
 def test_overwrite_guard_blocks_same_path(tmp_path):
     src = tmp_path / "in.vmd"
     _full_doc(src)
@@ -205,7 +225,7 @@ def test_no_denoise_keeps_bones_verbatim(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
-    code = cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"])
+    code = cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -361,7 +381,7 @@ def test_denoise_default_smooths_jitter(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _jitter_doc(src)
-    code = cli.main([str(src), "-o", str(out)])
+    code = cli.main([str(src), "-o", str(out), "--no-reduce"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -374,7 +394,7 @@ def test_explicit_denoise_smooths_jitter(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _jitter_doc(src)
-    code = cli.main([str(src), "-o", str(out), "--denoise"])
+    code = cli.main([str(src), "-o", str(out), "--denoise", "--no-reduce"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -388,7 +408,7 @@ def test_no_denoise_keeps_bones_verbatim_all_categories(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _jitter_doc(src)
-    code = cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"])
+    code = cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -437,7 +457,7 @@ def test_foot_ik_stabilize_default_reduces_grounded_foot_drift(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _foot_jitter_doc(src)
-    assert cli.main([str(src), "-o", str(out), "--no-denoise"]) == 0
+    assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-reduce"]) == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
     # 足IK・つま先IK とも接地中の水平変動が減る。
@@ -458,7 +478,7 @@ def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
     out = tmp_path / "out.vmd"
     xs = [round(0.05 * i, 6) for i in range(11)]  # 接地中の遅いランプ(中央値0.25からアンカー寄せが効く)
     write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
-    assert cli.main([str(src), "-o", str(out)]) == 0
+    assert cli.main([str(src), "-o", str(out), "--no-reduce"]) == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
     foot = sorted((k for k in in_doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
@@ -493,7 +513,7 @@ def test_no_foot_ik_stabilize_keeps_foot_and_toe_verbatim(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _foot_jitter_doc(src)
-    assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"]) == 0
+    assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"]) == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
     for name in ("右足ＩＫ", "右つま先ＩＫ"):
@@ -503,8 +523,6 @@ def test_no_foot_ik_stabilize_keeps_foot_and_toe_verbatim(tmp_path):
 
 
 # --- インプロセス疎化統合(--reduce-preset / --curve-mode / --no-reduce) ---------
-
-_reduce_pending = pytest.mark.xfail(reason="impl pending: Step 5d", strict=True)
 
 
 def _ramp_doc(path):
@@ -521,7 +539,6 @@ def _curve_doc(path):
     write_vmd(path, bone=[bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0)) for f in range(11)])
 
 
-@_reduce_pending
 def test_default_output_is_reduced(tmp_path):
     # 既定でクリーニング後に疎化し(キー数減)、既定の curve-mode は bezier(明示 bezier と一致・linear と相違)(§3.3)。
     src = tmp_path / "in.vmd"
@@ -540,7 +557,6 @@ def test_default_output_is_reduced(tmp_path):
     assert d != ll      # 曲線入力で bezier と linear は相違(既定が linear へ退行していない)
 
 
-@_reduce_pending
 def test_no_reduce_keeps_dense_linear(tmp_path):
     # --no-reduce ではクリーニング後の密キー(全フレーム・線形補間)を出力する(§3.3)。
     from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
@@ -556,7 +572,6 @@ def test_no_reduce_keeps_dense_linear(tmp_path):
             assert k.interpolation == BONE_LINEAR_INTERP
 
 
-@_reduce_pending
 def test_reduce_preset_validation(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -565,7 +580,6 @@ def test_reduce_preset_validation(tmp_path):
     assert cli.main([str(src), "--reduce-preset", "turbo"]) == 2  # 未知プリセットは引数エラー
 
 
-@_reduce_pending
 def test_curve_mode_validation(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -574,7 +588,6 @@ def test_curve_mode_validation(tmp_path):
     assert cli.main([str(src), "--curve-mode", "spline"]) == 2  # 未知 curve-mode は引数エラー
 
 
-@_reduce_pending
 def test_reduce_error_override_validation(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -592,7 +605,7 @@ def test_denoise_output_is_dense_linear(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _jitter_doc(src)
-    code = cli.main([str(src), "-o", str(out)])
+    code = cli.main([str(src), "-o", str(out), "--no-reduce"])
     assert code == 0
     out_doc, _ = io.read(str(out))
     for name in _JITTER_BONES:

@@ -1,15 +1,17 @@
 """mocapvmd CLI(mocapvmd.md §3)。
 
 引数解析 → VMD読み(mmd_toolbox.vmd.io)→ 全ボーンの一般ノイズ軽減(クリーニング)→
-足IK・つま先IKの接地安定化 → VMD書き。ボーン選択は持たず、一般ノイズ軽減は全ボーン、足IK安定化は
-分類 foot_ik / toe_ik のボーンに適用する。対象外セクション(モーフ・カメラ・照明・セルフ影)は無加工
-で透過する。処理後は密キーを線形補間で出力する。
+足IK・つま先IKの接地安定化 → 共通機構による疎化 → VMD書き。ボーン選択は持たず、一般ノイズ軽減と
+疎化は全ボーン、足IK安定化は分類 foot_ik / toe_ik のボーンに適用する。対象外セクション(モーフ・
+カメラ・照明・セルフ影)は無加工で透過する。既定では疎なキーとベジェ補間を出力し、--no-reduce 時のみ
+クリーニング後の密キー(線形補間)を出力する。
 
 終了コード: 0 正常 / 1 入力不正(VMDでない・値が非有限等)/ 2 引数エラー / 3 出力書き込み失敗。
 """
 
 import argparse
 import dataclasses
+import math
 import os
 import sys
 
@@ -17,7 +19,7 @@ from mmd_toolbox.vmd import io
 from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 from mmd_toolbox.vmd.types import BoneKey
 
-from . import classify, denoise, footik, presets, report
+from . import classify, denoise, footik, presets, reduce, report
 
 
 def _build_parser():
@@ -30,6 +32,13 @@ def _build_parser():
     p.add_argument("--no-denoise", dest="denoise", action="store_false")
     p.add_argument("--foot-ik-stabilize", dest="foot_ik_stabilize", action="store_true", default=True)
     p.add_argument("--no-foot-ik-stabilize", dest="foot_ik_stabilize", action="store_false")
+    p.add_argument(
+        "--reduce-preset", dest="reduce_preset", choices=presets.REDUCTION_PRESET_NAMES, default="balanced"
+    )
+    p.add_argument("--reduce-error-bone-pos", dest="reduce_error_bone_pos", type=float, default=None)
+    p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=float, default=None)
+    p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier")
+    p.add_argument("--no-reduce", dest="reduce", action="store_false", default=True)
     p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
@@ -47,11 +56,21 @@ def _same_path(a, b):
         return os.path.realpath(a) == os.path.realpath(b)
 
 
+def _validate_bones(bone_keys):
+    """全ボーンキーの値の健全性(非有限・ゼロノルム quaternion)を検証する(§3.3 入力不正検出)。
+
+    クリーニング/疎化の有無に依らず入力不正を弾くため、パイプライン前に全キーの位置・回転を検証する。
+    不正があれば ValueError を送出する。
+    """
+    denoise.validate_bone_values([k.position for k in bone_keys], [k.rotation for k in bone_keys])
+
+
 def _clean_bones(bone_keys, preset):
     """全ボーンを種別別パラメータで一般ノイズ軽減し、密キー(線形補間)で返す(§4.1, §4.2)。
 
     各トラックを名前ごとに時系列順へまとめ、クリーニング後の密サンプルを線形補間キーとして組み直す
     (§3.3 のクリーニング後の密キー形式)。キー1個以下のトラックは平滑化できないため逐語保持する。
+    値の健全性は呼び出し前に _validate_bones で検証済みとする。
     """
     order = []
     groups = {}
@@ -66,8 +85,6 @@ def _clean_bones(bone_keys, preset):
         ks = sorted(groups[name], key=lambda k: k.frame)
         positions = [k.position for k in ks]
         rotations = [k.rotation for k in ks]
-        # 値の健全性は全トラックで検証する(1キーなど平滑化できないトラックも入力不正は弾く)。
-        denoise.validate_bone_values(positions, rotations)
         if len(ks) < 2:
             out.extend(ks)
             continue
@@ -145,6 +162,11 @@ def main(argv=None):
     if not args.overwrite and _same_path(output, args.input):
         return 2
 
+    # 疎化の許容誤差 override は非有限・負を引数エラー(終了コード2)とする(§3.2 / §5.3)。
+    for v in (args.reduce_error_bone_pos, args.reduce_error_bone_rot):
+        if v is not None and (not math.isfinite(v) or v < 0.0):
+            return 2
+
     # 入力読み込み(VMDでない等 → 入力不正)。
     try:
         doc, read_warnings = io.read(args.input)
@@ -180,18 +202,32 @@ def main(argv=None):
     if args.dry_run:
         return 0
 
+    # 入力ボーン値の健全性(非有限・ゼロノルム quaternion)は処理経路(クリーニング/疎化の有無)に
+    # 依らず、パイプライン前に全キーを検証する(§3.3 入力不正=終了コード1)。--no-denoise でも未検証の
+    # 不正値が疎化へ流れて逐語透過・例外化するのを防ぐ。
+    try:
+        _validate_bones(doc.bone)
+    except ValueError:
+        return 1
+
     # 一般ノイズ軽減を全ボーンへ適用する(--no-denoise 時はボーンを逐語透過)。対象外セクションは
-    # いずれの場合も無加工で透過する。値が非有限・ゼロノルム quaternion 等の入力不正は終了コード1。
+    # いずれの場合も無加工で透過する。
     if args.denoise:
-        try:
-            new_bone = _clean_bones(doc.bone, args.preset)
-        except ValueError:
-            return 1
+        new_bone = _clean_bones(doc.bone, args.preset)
     else:
         new_bone = doc.bone
     # 足IK安定化は一般ノイズ軽減の後に、分類 foot_ik / toe_ik のボーンへ適用する(§4.3 / §6)。
     if args.foot_ik_stabilize:
         new_bone = _stabilize_bones(new_bone, args.preset)
+    # クリーニング・足IK安定化後の密信号を共通機構で疎化する(§3.3)。--no-reduce 時は密キーのまま出力。
+    if args.reduce:
+        new_bone = reduce.reduce_bones(
+            new_bone,
+            args.reduce_preset,
+            override_pos=args.reduce_error_bone_pos,
+            override_rot=args.reduce_error_bone_rot,
+            curve_mode=args.curve_mode,
+        )
     out_doc = dataclasses.replace(doc, bone=new_bone)
     try:
         io.write_file(out_doc, output)
