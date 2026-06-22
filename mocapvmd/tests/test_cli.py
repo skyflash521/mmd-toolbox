@@ -201,11 +201,11 @@ def test_nonbone_sections_passthrough_with_denoise(tmp_path):
 
 
 def test_no_denoise_keeps_bones_verbatim(tmp_path):
-    # --no-denoise ではボーンも逐語透過する(非線形補間バイトも保持)。
+    # 一般ノイズ軽減・足IK安定化をともに無効化するとボーンは逐語透過する(非線形補間バイトも保持)。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
-    code = cli.main([str(src), "-o", str(out), "--no-denoise"])
+    code = cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -383,12 +383,12 @@ def test_explicit_denoise_smooths_jitter(tmp_path):
 
 
 def test_no_denoise_keeps_bones_verbatim_all_categories(tmp_path):
-    # --no-denoise では全カテゴリのボーンがキー列そのまま(値・フレーム・補間)逐語保持される
-    # (総変動量だけ一致させて中身を変える実装を排除)。
+    # 一般ノイズ軽減・足IK安定化をともに無効化すると、全カテゴリのボーンがキー列そのまま(値・フレーム・
+    # 補間)逐語保持される(総変動量だけ一致させて中身を変える実装を排除)。foot_ik/toe_ik も含む。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _jitter_doc(src)
-    code = cli.main([str(src), "-o", str(out), "--no-denoise"])
+    code = cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -416,8 +416,6 @@ def test_no_denoise_preserves_nonbone_sections(tmp_path):
 
 # --- 足IK安定化統合(--foot-ik-stabilize) -----------------------------------
 
-_foot_stab_pending = pytest.mark.xfail(reason="impl pending: Step 4d-cli", strict=True)
-
 
 def _foot_jitter_doc(path):
     """右足ＩＫ・右つま先ＩＫ(接地中の遅い水平ぐらつき)とセンター(同じ揺れ)を密トラックで書き出す。
@@ -433,7 +431,6 @@ def _foot_jitter_doc(path):
     write_vmd(path, bone=keys)
 
 
-@_foot_stab_pending
 def test_foot_ik_stabilize_default_reduces_grounded_foot_drift(tmp_path):
     # 既定 on の足IK安定化は、一般平滑化を切った(--no-denoise)状態でも接地中の足IK水平ぐらつきを抑える。
     # 足IK安定化の対象外であるセンターは --no-denoise なので逐語(変動不変)。
@@ -452,7 +449,6 @@ def test_foot_ik_stabilize_default_reduces_grounded_foot_drift(tmp_path):
     assert out_center == in_center
 
 
-@_foot_stab_pending
 def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
     # 既定(denoise on + stabilize on)で、足IK出力が denoise→stabilize の順に処理された結果と一致する。
     # 逆順(stabilize→denoise)では結果が変わるため、処理順を固定する。
@@ -481,7 +477,6 @@ def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
         assert got.position == pytest.approx(exp)
 
 
-@_foot_stab_pending
 def test_explicit_foot_ik_stabilize_matches_default(tmp_path):
     # 明示 --foot-ik-stabilize は既定(省略)と同一結果(別プリセット/強度を使う誤実装を排除)。
     src = tmp_path / "in.vmd"
@@ -493,7 +488,6 @@ def test_explicit_foot_ik_stabilize_matches_default(tmp_path):
     assert io.read(str(out_explicit))[0].bone == io.read(str(out_default))[0].bone
 
 
-@_foot_stab_pending
 def test_no_foot_ik_stabilize_keeps_foot_and_toe_verbatim(tmp_path):
     # --no-denoise --no-foot-ik-stabilize では足IK・つま先IKも逐語保持(値・フレーム・非線形補間)。
     src = tmp_path / "in.vmd"

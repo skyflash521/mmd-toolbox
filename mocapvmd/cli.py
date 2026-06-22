@@ -1,8 +1,9 @@
 """mocapvmd CLI(mocapvmd.md §3)。
 
-引数解析 → VMD読み(mmd_toolbox.vmd.io)→ 全ボーンの一般ノイズ軽減(クリーニング)→ VMD書き。
-ボーン選択は持たず、全ボーンを処理対象とする。対象外セクション(モーフ・カメラ・照明・
-セルフ影)は無加工で透過する。クリーニング後は密キーを線形補間で出力する。
+引数解析 → VMD読み(mmd_toolbox.vmd.io)→ 全ボーンの一般ノイズ軽減(クリーニング)→
+足IK・つま先IKの接地安定化 → VMD書き。ボーン選択は持たず、一般ノイズ軽減は全ボーン、足IK安定化は
+分類 foot_ik / toe_ik のボーンに適用する。対象外セクション(モーフ・カメラ・照明・セルフ影)は無加工
+で透過する。処理後は密キーを線形補間で出力する。
 
 終了コード: 0 正常 / 1 入力不正(VMDでない・値が非有限等)/ 2 引数エラー / 3 出力書き込み失敗。
 """
@@ -16,7 +17,7 @@ from mmd_toolbox.vmd import io
 from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 from mmd_toolbox.vmd.types import BoneKey
 
-from . import classify, denoise, presets, report
+from . import classify, denoise, footik, presets, report
 
 
 def _build_parser():
@@ -27,6 +28,8 @@ def _build_parser():
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="balanced")
     p.add_argument("--denoise", dest="denoise", action="store_true", default=True)
     p.add_argument("--no-denoise", dest="denoise", action="store_false")
+    p.add_argument("--foot-ik-stabilize", dest="foot_ik_stabilize", action="store_true", default=True)
+    p.add_argument("--no-foot-ik-stabilize", dest="foot_ik_stabilize", action="store_false")
     p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
@@ -80,6 +83,45 @@ def _clean_bones(bone_keys, preset):
         name_raw = ks[0].name_raw
         for i, k in enumerate(ks):
             out.append(BoneKey(name_raw, k.frame, cpos[i], crot[i], BONE_LINEAR_INTERP))
+    out.sort(key=lambda k: (k.name_raw, k.frame))
+    return out
+
+
+def _stabilize_bones(bone_keys, preset):
+    """分類 foot_ik / toe_ik の密トラックに接地安定化を適用し、密キー(線形補間)で返す(§4.3)。
+
+    左右ペアリング・接地検出・接地ロックは footik.stabilize_foot_ik に委譲する。foot_ik / toe_ik 以外の
+    ボーンと、キー1個以下のトラックは逐語透過する。回転は接地ロック対象外なので元の値を保つ。
+    """
+    order = []
+    groups = {}
+    for k in bone_keys:
+        if k.name not in groups:
+            groups[k.name] = []
+            order.append(k.name)
+        groups[k.name].append(k)
+
+    tracks = {}
+    for name in order:
+        ks = sorted(groups[name], key=lambda k: k.frame)
+        category = classify.classify(name)
+        if category in ("foot_ik", "toe_ik") and len(ks) >= 2:
+            tracks[name] = (category, [k.frame for k in ks], [k.position for k in ks])
+    if not tracks:
+        return bone_keys
+
+    stabilized = footik.stabilize_foot_ik(tracks, preset)
+
+    out = []
+    for name in order:
+        ks = sorted(groups[name], key=lambda k: k.frame)
+        if name in stabilized:
+            locked = stabilized[name].locked_positions
+            name_raw = ks[0].name_raw
+            for i, k in enumerate(ks):
+                out.append(BoneKey(name_raw, k.frame, locked[i], k.rotation, BONE_LINEAR_INTERP))
+        else:
+            out.extend(ks)
     out.sort(key=lambda k: (k.name_raw, k.frame))
     return out
 
@@ -145,6 +187,9 @@ def main(argv=None):
             return 1
     else:
         new_bone = doc.bone
+    # 足IK安定化は一般ノイズ軽減の後に、分類 foot_ik / toe_ik のボーンへ適用する(§4.3 / §6)。
+    if args.foot_ik_stabilize:
+        new_bone = _stabilize_bones(new_bone, args.preset)
     out_doc = dataclasses.replace(doc, bone=new_bone)
     try:
         io.write_file(out_doc, output)
