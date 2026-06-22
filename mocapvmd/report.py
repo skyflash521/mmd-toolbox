@@ -7,8 +7,11 @@
 フレームは種別窓での検出(denoise)に基づく。
 """
 
+import csv
 import json
 import math
+
+from mmd_toolbox.vmd import interp
 
 from mocapvmd import classify, denoise, footik, presets
 
@@ -233,3 +236,59 @@ def format_dry_run(report):
     lines.append(f"足IK候補: {report['foot_ik_candidates']}")
     lines.append(f"つま先IK候補: {report['toe_ik_candidates']}")
     return "\n".join(lines)
+
+
+_PREVIEW_HEADER = ["track", "frame", "channel", "input", "output", "error"]
+
+
+def _preview_row(track, frame, channel, inp, outp):
+    inp = float(inp)
+    outp = float(outp)
+    return {"track": track, "frame": frame, "channel": channel, "input": inp, "output": outp, "error": abs(inp - outp)}
+
+
+def bone_preview_rows(in_bone, out_bone):
+    """全ボーンのフレーム毎・チャンネル毎の入力/出力サンプル比較行を返す(--preview-csv / §3.2)。
+
+    入力(クリーニング前)と出力(クリーニング→足IK安定化→疎化後)を各トラックの実在フレーム範囲で
+    フレーム毎にサンプルし、位置3軸(pos_x/pos_y/pos_z)と回転4成分(rot_x/rot_y/rot_z/rot_w)の
+    {track, frame, channel, input, output, error=abs(input-output)} を初出順に返す。出力に同名トラックが
+    無い場合はそのトラックを飛ばす。
+    """
+    order = []
+    in_groups = {}
+    for k in in_bone:
+        if k.name not in in_groups:
+            in_groups[k.name] = []
+            order.append(k.name)
+        in_groups[k.name].append(k)
+    out_groups = {}
+    for k in out_bone:
+        out_groups.setdefault(k.name, []).append(k)
+
+    rows = []
+    for name in order:
+        src = sorted(in_groups[name], key=lambda k: k.frame)
+        out = sorted(out_groups.get(name, []), key=lambda k: k.frame)
+        if not out:
+            continue
+        for f in range(src[0].frame, src[-1].frame + 1):
+            for ax in ("pos_x", "pos_y", "pos_z"):
+                rows.append(_preview_row(name, f, ax, interp.sample(src, ax, f), interp.sample(out, ax, f)))
+            sr = interp.sample(src, "rot", f)
+            orr = interp.sample(out, "rot", f)
+            for i, ax in enumerate(("rot_x", "rot_y", "rot_z", "rot_w")):
+                rows.append(_preview_row(name, f, ax, sr[i], orr[i]))
+    return rows
+
+
+def write_preview_csv(rows, path):
+    """プレビュー行を CSV で書き出す(数値は6桁整形)。失敗時は例外(CLIで終了コード3)。"""
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(_PREVIEW_HEADER)
+        for r in rows:
+            writer.writerow([
+                r["track"], r["frame"], r["channel"],
+                f"{r['input']:.6f}", f"{r['output']:.6f}", f"{r['error']:.6f}",
+            ])

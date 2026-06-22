@@ -804,8 +804,6 @@ def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
 
 # --- --preview-csv(入力/出力サンプル比較 CSV。§3.2) ----------------------------
 
-_preview_pending = pytest.mark.xfail(reason="impl pending: preview-csv", strict=True)
-
 _PREVIEW_CHANNELS = ("pos_x", "pos_y", "pos_z", "rot_x", "rot_y", "rot_z", "rot_w")
 _PREVIEW_HEADER = ["track", "frame", "channel", "input", "output", "error"]
 
@@ -828,7 +826,6 @@ def _track_by_name(path, name):
     return sorted((k for k in io.read(str(path))[0].bone if k.name == name), key=lambda k: k.frame)
 
 
-@_preview_pending
 def test_preview_csv_header_order_and_full_cartesian(tmp_path):
     # ヘッダは列順固定。行は各ボーンの (実在フレーム × 7チャンネル) の直積を漏れなく重複なく1回ずつ出す。
     # フレーム範囲の異なる2ボーンで、フレーム1回ずつ出すだけの不完全CSVを排除する。
@@ -852,7 +849,6 @@ def test_preview_csv_header_order_and_full_cartesian(tmp_path):
     assert len(got) == len(expected)  # 重複行なし
 
 
-@_preview_pending
 def test_preview_csv_input_output_error_match_samples(tmp_path):
     # input は入力(クリーニング前)サンプル、output は出力VMDサンプル、error=abs(input-output)。値は6桁整形。
     # クリーニングが値を変えるジッタ入力で、output が input と異なる行が存在することも確かめ、誤って
@@ -886,7 +882,6 @@ def test_preview_csv_input_output_error_match_samples(tmp_path):
     assert differ  # output が input と異なる行が存在する(output=input 流用を排除)
 
 
-@_preview_pending
 def test_preview_csv_also_writes_valid_output_vmd(tmp_path):
     # --preview-csv は dry-run でないので出力 VMD も書き、それが有効な VMD として読める(出力抑止しない)。
     src = tmp_path / "in.vmd"
@@ -898,7 +893,6 @@ def test_preview_csv_also_writes_valid_output_vmd(tmp_path):
     assert any(k.name == "センター" for k in io.read(str(out))[0].bone)  # 出力VMDが読める
 
 
-@_preview_pending
 def test_preview_csv_write_failure_is_exit3(tmp_path):
     # CSV 書き込み失敗(存在しないディレクトリ)は終了コード3(report-json の書込失敗と同じ扱い)。
     src = tmp_path / "in.vmd"

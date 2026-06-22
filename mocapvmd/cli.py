@@ -41,6 +41,7 @@ def _build_parser():
     p.add_argument("--no-reduce", dest="reduce", action="store_false", default=True)
     p.add_argument("--list-bones", dest="list_bones", action="store_true")
     p.add_argument("--report-json", dest="report_json")
+    p.add_argument("--preview-csv", dest="preview_csv")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
 
@@ -231,7 +232,7 @@ def main(argv=None):
     if args.foot_ik_stabilize:
         new_bone = _stabilize_bones(new_bone, args.preset)
     # 疎化レポートを出すときだけ診断 diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
-    want_report = args.dry_run or args.report_json
+    want_report = args.dry_run or args.report_json or args.preview_csv
     reduction_diag = {} if (args.reduce and want_report) else None
     if args.reduce:
         new_bone = reduce.reduce_bones(
@@ -257,6 +258,12 @@ def main(argv=None):
         if args.report_json:
             try:
                 report.write_json(rep, args.report_json)
+            except OSError:
+                return 3
+        # --preview-csv: 入力(クリーニング前)と出力(疎化後)のフレーム毎サンプル比較を CSV 出力する(§3.2)。
+        if args.preview_csv:
+            try:
+                report.write_preview_csv(report.bone_preview_rows(doc.bone, new_bone), args.preview_csv)
             except OSError:
                 return 3
 
