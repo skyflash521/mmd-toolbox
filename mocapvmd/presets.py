@@ -1,12 +1,15 @@
-"""クリーニング強度プリセットと種別別パラメータの解決(mocapvmd.md §5.2)。
+"""プリセットと種別別パラメータの解決(mocapvmd.md §5.2 / §5.3 / §5.4)。
 
-種別ごとの基準パラメータ(位置窓・回転窓・位置強度・回転強度)を balanced 基準で持ち、
-`--preset` の強度倍率を**強度のみ**に掛けて解決する(窓幅は倍率で変えない)。位置強度・
+クリーニング強度(§5.2): 種別ごとの基準パラメータ(位置窓・回転窓・位置強度・回転強度)を balanced
+基準で持ち、`--preset` の強度倍率を**強度のみ**に掛けて解決する(窓幅は倍率で変えない)。位置強度・
 回転強度は元値と平滑化値のブレンド係数(0で元値保持、1で平滑化値採用)。
 
-疎化の許容誤差プリセット(`--reduce-preset`)とその種別スケールは運用ポリシーが別なので、
-本モジュールではなく疎化側で持つ(§5.3)。
+接地ロック強度(§5.4)は resolve_foot_lock、疎化の許容誤差(§5.3。`--reduce-preset` の基準値 × 種別
+スケール)は resolve_reduction_tolerances で解決する。疎化プリセット値は mocapvmd 独自で sparsevmd と
+共有しない。
 """
+
+import math
 
 # クリーニング強度プリセット名(§5.2)。
 PRESET_NAMES = ("light", "balanced", "stable-foot", "strong")
@@ -92,3 +95,55 @@ def resolve_cleaning(preset, category):
         "pos_strength": pos_strength * m,
         "rot_strength": rot_strength * m,
     }
+
+
+# §5.3 疎化トレランス。プリセット基準値(位置 MMD単位 / 回転 度)と種別スケール(位置, 回転)。
+# mocapvmd 独自値で sparsevmd と共有しない。
+REDUCTION_PRESET_NAMES = ("precise", "balanced", "aggressive")
+_REDUCTION_BASE = {
+    "precise": (0.01, 0.10),
+    "balanced": (0.02, 0.20),
+    "aggressive": (0.05, 0.40),
+}
+_REDUCTION_SCALE = {
+    "root": (1.0, 1.0),
+    "center": (0.7, 0.8),
+    "torso": (0.8, 0.9),
+    "arms": (1.0, 1.0),
+    "fingers": (1.5, 1.5),
+    "legs": (1.0, 1.0),
+    "foot_ik": (0.7, 1.0),
+    "toe_ik": (1.0, 0.8),
+    "unknown": (1.0, 1.0),
+}
+
+
+def _validate_tolerance(value, name):
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} は有限の非負値である必要があります: {value!r}")
+
+
+def resolve_reduction_tolerances(preset, category, override_pos=None, override_rot=None):
+    """プリセットと種別から疎化の許容誤差 dict を返す(§5.3)。
+
+    各ボーンの許容誤差 = プリセット基準値 × その種別のスケール。返す dict: bone_pos / bone_rot。
+    override_pos / override_rot を渡すとプリセット基準値を上書きし(種別スケールは引き続き掛ける)、
+    基準値より優先する。未知の疎化プリセット名・種別、非有限・負の上書き値は ValueError。
+    """
+    if preset not in _REDUCTION_BASE:
+        raise ValueError(
+            f"未知の疎化プリセット: {preset!r}(有効: {', '.join(REDUCTION_PRESET_NAMES)})"
+        )
+    if category not in _REDUCTION_SCALE:
+        raise ValueError(f"未知の種別: {category!r}")
+
+    base_pos, base_rot = _REDUCTION_BASE[preset]
+    if override_pos is not None:
+        _validate_tolerance(override_pos, "override_pos")
+        base_pos = override_pos
+    if override_rot is not None:
+        _validate_tolerance(override_rot, "override_rot")
+        base_rot = override_rot
+
+    scale_pos, scale_rot = _REDUCTION_SCALE[category]
+    return {"bone_pos": base_pos * scale_pos, "bone_rot": base_rot * scale_rot}

@@ -83,8 +83,6 @@ def test_invalid_category_raises():
 # 各ボーンの許容誤差 = プリセット基準値 × 種別スケール。--reduce-error-* 明示時は基準値を上書き
 # (種別スケールは引き続き掛ける)。precise/balanced/aggressive と種別スケールは mocapvmd 独自値。
 
-reduce_pending = pytest.mark.xfail(reason="impl pending: Step 5b", strict=True)
-
 # §5.3 プリセット基準値(位置 MMD単位 / 回転 度)。
 _REDUCE_BASE = {"precise": (0.01, 0.10), "balanced": (0.02, 0.20), "aggressive": (0.05, 0.40)}
 
@@ -96,7 +94,6 @@ _REDUCE_SCALE = {
 }
 
 
-@reduce_pending
 @pytest.mark.parametrize("preset", list(_REDUCE_BASE))
 @pytest.mark.parametrize("category", list(_REDUCE_SCALE))
 def test_reduction_tolerance_base_times_scale(preset, category):
@@ -107,7 +104,6 @@ def test_reduction_tolerance_base_times_scale(preset, category):
     assert t["bone_rot"] == pytest.approx(base_rot * srot)
 
 
-@reduce_pending
 def test_reduction_tolerance_override_replaces_base_then_scales():
     # --reduce-error-* の明示はプリセット基準値を上書きし、種別スケールは引き続き掛かる。
     t = presets.resolve_reduction_tolerances("balanced", "center", override_pos=0.1, override_rot=2.0)
@@ -115,7 +111,6 @@ def test_reduction_tolerance_override_replaces_base_then_scales():
     assert t["bone_rot"] == pytest.approx(2.0 * 0.8)   # center 回転スケール 0.8
 
 
-@reduce_pending
 def test_reduction_tolerance_partial_override_pos_only():
     # 位置のみ上書き。回転はプリセット基準値のまま種別スケールが掛かる。
     t = presets.resolve_reduction_tolerances("precise", "fingers", override_pos=0.2)
@@ -123,7 +118,6 @@ def test_reduction_tolerance_partial_override_pos_only():
     assert t["bone_rot"] == pytest.approx(0.10 * 1.5)   # precise回転0.10 × fingers回転1.5
 
 
-@reduce_pending
 def test_reduction_tolerance_partial_override_rot_only():
     # 回転のみ上書き。位置はプリセット基準値のまま種別スケールが掛かる(回転側だけの処理漏れを弾く)。
     t = presets.resolve_reduction_tolerances("precise", "fingers", override_rot=2.0)
@@ -131,7 +125,6 @@ def test_reduction_tolerance_partial_override_rot_only():
     assert t["bone_rot"] == pytest.approx(2.0 * 1.5)    # override × fingers回転1.5
 
 
-@reduce_pending
 @pytest.mark.parametrize("kw", [{"override_pos": 0.0}, {"override_rot": 0.0}])
 def test_reduction_tolerance_zero_override_is_valid(kw):
     # 非負を許容するので 0 は有効(ValueError にしない)。0 は全キー保持の設定。
@@ -144,19 +137,16 @@ def test_reduction_tolerance_zero_override_is_valid(kw):
         assert t["bone_pos"] == pytest.approx(0.02 * 0.7)
 
 
-@reduce_pending
 def test_reduction_tolerance_invalid_preset_raises():
     with pytest.raises(ValueError):
         presets.resolve_reduction_tolerances("turbo", "center")
 
 
-@reduce_pending
 def test_reduction_tolerance_invalid_category_raises():
     with pytest.raises(ValueError):
         presets.resolve_reduction_tolerances("balanced", "nonexistent")
 
 
-@reduce_pending
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -0.01])
 def test_reduction_tolerance_invalid_override_raises(bad):
     # 非有限(符号問わず)・負の上書き値は ValueError(CLI で終了コード2 へ変換される)。
