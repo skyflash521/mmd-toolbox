@@ -724,8 +724,6 @@ def test_dry_run_invalid_input_is_error(tmp_path, bad_key):
 
 # --- --list-bones(ボーン一覧と分類を表示して終了。§3.2) ------------------------
 
-_listbones_pending = pytest.mark.xfail(reason="impl pending: Step 6 list-bones", strict=True)
-
 
 def _list_lines(capsys):
     return capsys.readouterr().out.splitlines()
@@ -736,7 +734,6 @@ def _line_with(lines, name):
     return next(ln for ln in lines if name in ln)
 
 
-@_listbones_pending
 def test_list_bones_pairs_name_and_category_per_line(tmp_path, capsys):
     # 各ボーンの行に「自分の分類だけ」が並ぶ。他分類を含まないことも検証し、全分類を各行へ出す誤実装
     # (例「センター center foot_ik unknown」)も排除する(§3.2)。
@@ -752,7 +749,6 @@ def test_list_bones_pairs_name_and_category_per_line(tmp_path, capsys):
         assert all(other not in ln for other in all_cats - {cat})  # 他ボーンの分類は混在しない
 
 
-@_listbones_pending
 def test_list_bones_appearance_order_and_dedup(tmp_path, capsys):
     # 一覧は初出順・名前ごとに1回(重複キーで同名を複数行に出さない)。表示形式は仮定せず、各名前を含む
     # 行の初出位置の順序と出現回数で検証する。
@@ -766,7 +762,6 @@ def test_list_bones_appearance_order_and_dedup(tmp_path, capsys):
     assert sum(1 for ln in lines if "センター" in ln) == 1
 
 
-@_listbones_pending
 def test_list_bones_does_not_write_output(tmp_path):
     # --list-bones は表示して終了し、明示出力先(-o)も既定出力先も書かない。
     src = tmp_path / "in.vmd"
@@ -775,3 +770,33 @@ def test_list_bones_does_not_write_output(tmp_path):
     assert cli.main([str(src), "-o", str(out), "--list-bones"]) == 0
     assert not out.exists()
     assert not (tmp_path / "in_mocap.vmd").exists()
+
+
+def test_list_bones_unaffected_by_write_and_reduce_validation(tmp_path, capsys):
+    # --list-bones は書き込み・疎化をしないので、処理固有の検証(出力先=入力の上書きガード、不正な疎化
+    # 許容値、非有限ボーン値)に阻まれず一覧を表示して終了コード0(短絡が両ガード・値検証より前にある)。
+    src = tmp_path / "in.vmd"
+    keys = [bone("センター", 0), bone("センター", 1, pos=(float("inf"), 0.0, 0.0))]  # 非有限値を含む
+    write_vmd(src, bone=keys)
+    before = src.read_bytes()
+    # 出力先が入力自身(上書きガード対象)・不正 override(終了コード2対象)でも一覧は成功する。
+    assert cli.main([str(src), "-o", str(src), "--reduce-error-bone-pos", "nan", "--list-bones"]) == 0
+    assert "center" in _line_with(_list_lines(capsys), "センター")
+    assert src.read_bytes() == before  # 入力は書き換えられない
+
+
+def test_overwrite_guard_priority_over_unreadable_input(tmp_path):
+    # 通常経路では上書きガード(引数エラー2)を読み込み(入力不正1)より先に判定する。読めない入力でも
+    # 出力先=入力なら終了コード2(--list-bones 配線で読み込みを早期化しても通常経路の優先順位を保つ)。
+    src = tmp_path / "in.vmd"
+    src.write_bytes(b"not a vmd")
+    assert cli.main([str(src), "-o", str(src)]) == 2
+
+
+def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
+    # 通常経路では override 検証(引数エラー2)を読み込み(入力不正1)より先に判定する。読めない入力でも
+    # 不正 override なら終了コード2。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    src.write_bytes(b"not a vmd")
+    assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "nan"]) == 2

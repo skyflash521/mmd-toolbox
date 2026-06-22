@@ -39,6 +39,7 @@ def _build_parser():
     p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=float, default=None)
     p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier")
     p.add_argument("--no-reduce", dest="reduce", action="store_false", default=True)
+    p.add_argument("--list-bones", dest="list_bones", action="store_true")
     p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
@@ -54,6 +55,32 @@ def _same_path(a, b):
         return os.path.samefile(a, b)
     except OSError:
         return os.path.realpath(a) == os.path.realpath(b)
+
+
+def _print_read_warnings(read_warnings):
+    """読み込み警告(デコード不能な名前フィールド等)を surface する。
+
+    同一(コード・セクション・メッセージ)はキー毎の重複を避けて1行にまとめる。
+    """
+    seen_warn = set()
+    for w in read_warnings:
+        key = (w.code, w.section, w.message)
+        if key in seen_warn:
+            continue
+        seen_warn.add(key)
+        where = f"({w.section})" if w.section else ""
+        print(f"警告: {w.message}{where}", file=sys.stderr)
+
+
+def _list_bones_text(bone_keys):
+    """各ボーンの名前と分類を初出順・名前ごとに1行で返す(--list-bones / §3.2)。"""
+    order = []
+    seen = set()
+    for k in bone_keys:
+        if k.name not in seen:
+            seen.add(k.name)
+            order.append(k.name)
+    return "\n".join(f"{name} [{classify.classify(name)}]" for name in order)
 
 
 def _validate_bones(bone_keys):
@@ -157,6 +184,18 @@ def main(argv=None):
     if not os.path.isfile(args.input):
         return 2
 
+    # --list-bones は書き込み・疎化をしない診断モード。出力先・上書きガードや疎化許容値の検証(処理・
+    # 書き込み固有)を行わず、読み込んでボーン一覧と分類を表示して終了する(§3.2)。通常経路の引数エラー
+    # (終了コード2)優先順位を保つため、これらの検証は通常経路でのみ読み込み前に行う。
+    if args.list_bones:
+        try:
+            doc, read_warnings = io.read(args.input)
+        except Exception:
+            return 1
+        _print_read_warnings(read_warnings)
+        print(_list_bones_text(doc.bone))
+        return 0
+
     # 出力先・上書きガード(§3.2)。入力と同一パスへの出力は --overwrite が必要。
     output = args.output if args.output is not None else _default_output(args.input)
     if not args.overwrite and _same_path(output, args.input):
@@ -172,17 +211,7 @@ def main(argv=None):
         doc, read_warnings = io.read(args.input)
     except Exception:
         return 1
-
-    # 読み込み時の警告(デコード不能な名前フィールド等)を surface する。
-    # 同一(コード・セクション・メッセージ)はキー毎の重複を避けて1行にまとめる。
-    seen_warn = set()
-    for w in read_warnings:
-        key = (w.code, w.section, w.message)
-        if key in seen_warn:
-            continue
-        seen_warn.add(key)
-        where = f"({w.section})" if w.section else ""
-        print(f"警告: {w.message}{where}", file=sys.stderr)
+    _print_read_warnings(read_warnings)
 
     # 入力ボーン値の健全性(非有限・ゼロノルム quaternion)は処理経路(クリーニング/疎化の有無・dry-run か)
     # に依らず、パイプライン前に全キーを検証する(§3.3 入力不正=終了コード1)。dry-run でも疎化レポート
