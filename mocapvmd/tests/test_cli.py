@@ -414,6 +414,100 @@ def test_no_denoise_preserves_nonbone_sections(tmp_path):
     assert out_doc.ik_property == in_doc.ik_property
 
 
+# --- 足IK安定化統合(--foot-ik-stabilize) -----------------------------------
+
+_foot_stab_pending = pytest.mark.xfail(reason="impl pending: Step 4d-cli", strict=True)
+
+
+def _foot_jitter_doc(path):
+    """右足ＩＫ・右つま先ＩＫ(接地中の遅い水平ぐらつき)とセンター(同じ揺れ)を密トラックで書き出す。
+
+    足IK・つま先IK は X が ±0.05 で揺れる(各ステップ <= 0.08 で接地・Y=0)。足IK安定化でアンカー
+    (中央値0)へ寄り、水平変動が減るべき対象。センターは足IK安定化の対象外で、--no-denoise なら逐語の
+    まま。補間は非線形にし、安定化で線形へ組み直されたかを検出できるようにする。
+    """
+    xs = [0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0]
+    keys = []
+    for name in ("右足ＩＫ", "右つま先ＩＫ", "センター"):
+        keys += [bone(name, f, pos=(x, 0.0, 0.0), interp=BONE_NONLINEAR) for f, x in enumerate(xs)]
+    write_vmd(path, bone=keys)
+
+
+@_foot_stab_pending
+def test_foot_ik_stabilize_default_reduces_grounded_foot_drift(tmp_path):
+    # 既定 on の足IK安定化は、一般平滑化を切った(--no-denoise)状態でも接地中の足IK水平ぐらつきを抑える。
+    # 足IK安定化の対象外であるセンターは --no-denoise なので逐語(変動不変)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _foot_jitter_doc(src)
+    assert cli.main([str(src), "-o", str(out), "--no-denoise"]) == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
+    # 足IK・つま先IK とも接地中の水平変動が減る。
+    for name in ("右足ＩＫ", "右つま先ＩＫ"):
+        assert _x_variation(out_doc.bone, name) < _x_variation(in_doc.bone, name)
+    # センターは足IK安定化の対象外で、--no-denoise なのでキー列そのまま(値・フレーム・補間)逐語保持。
+    in_center = sorted((k for k in in_doc.bone if k.name == "センター"), key=lambda k: k.frame)
+    out_center = sorted((k for k in out_doc.bone if k.name == "センター"), key=lambda k: k.frame)
+    assert out_center == in_center
+
+
+@_foot_stab_pending
+def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
+    # 既定(denoise on + stabilize on)で、足IK出力が denoise→stabilize の順に処理された結果と一致する。
+    # 逆順(stabilize→denoise)では結果が変わるため、処理順を固定する。
+    from mocapvmd import denoise, footik, presets
+
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    xs = [round(0.05 * i, 6) for i in range(11)]  # 接地中の遅いランプ(中央値0.25からアンカー寄せが効く)
+    write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
+    assert cli.main([str(src), "-o", str(out)]) == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
+    foot = sorted((k for k in in_doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
+    params = presets.resolve_cleaning("balanced", "foot_ik")
+    cpos, _ = denoise.apply_denoise(
+        [k.position for k in foot], [k.rotation for k in foot],
+        pos_window=params["pos_window"], rot_window=params["rot_window"],
+        pos_strength=params["pos_strength"], rot_strength=params["rot_strength"],
+    )
+    expected = footik.stabilize_foot_ik(
+        {"右足ＩＫ": ("foot_ik", [k.frame for k in foot], cpos)}, "balanced"
+    )["右足ＩＫ"].locked_positions
+    out_foot = sorted((k for k in out_doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
+    assert [k.frame for k in out_foot] == [k.frame for k in foot]  # 件数・フレーム列の一致
+    for got, exp in zip(out_foot, expected):
+        assert got.position == pytest.approx(exp)
+
+
+@_foot_stab_pending
+def test_explicit_foot_ik_stabilize_matches_default(tmp_path):
+    # 明示 --foot-ik-stabilize は既定(省略)と同一結果(別プリセット/強度を使う誤実装を排除)。
+    src = tmp_path / "in.vmd"
+    out_default = tmp_path / "default.vmd"
+    out_explicit = tmp_path / "explicit.vmd"
+    _foot_jitter_doc(src)
+    assert cli.main([str(src), "-o", str(out_default), "--no-denoise"]) == 0
+    assert cli.main([str(src), "-o", str(out_explicit), "--no-denoise", "--foot-ik-stabilize"]) == 0
+    assert io.read(str(out_explicit))[0].bone == io.read(str(out_default))[0].bone
+
+
+@_foot_stab_pending
+def test_no_foot_ik_stabilize_keeps_foot_and_toe_verbatim(tmp_path):
+    # --no-denoise --no-foot-ik-stabilize では足IK・つま先IKも逐語保持(値・フレーム・非線形補間)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _foot_jitter_doc(src)
+    assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"]) == 0
+    in_doc, _ = io.read(str(src))
+    out_doc, _ = io.read(str(out))
+    for name in ("右足ＩＫ", "右つま先ＩＫ"):
+        in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
+        out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
+        assert out_keys == in_keys
+
+
 def test_denoise_output_is_dense_linear(tmp_path):
     # クリーニング後は連続フレームの密キーで、補間ブロックは線形(§3.3 のクリーニング後の密キー形式)。
     from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
