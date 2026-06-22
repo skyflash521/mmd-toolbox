@@ -24,8 +24,6 @@ def _entry(rep, name):
     return next(e for e in rep["bones"] if e["name"] == name)
 
 
-_report_stab_pending = pytest.mark.xfail(reason="impl pending: Step 4d-report", strict=True)
-
 # §4.4 で foot_ik/toe_ik のボーンエントリに付く接地診断項目。
 _GROUNDING_FIELDS = (
     "grounding_candidates", "grounding_segments", "max_change",
@@ -39,7 +37,6 @@ def _grounded_foot_keys(name="右足ＩＫ"):
     return [bone(name, f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)]
 
 
-@_report_stab_pending
 def test_report_adds_grounding_diagnostics_for_foot():
     # foot_ik ボーンに接地候補・接地区間・最大/平均変更量・ロック適用率・警告数が付く(§4.4)。
     rep = report.build_report(_grounded_foot_keys(), denoise=False)
@@ -52,7 +49,13 @@ def test_report_adds_grounding_diagnostics_for_foot():
     assert e["clamp_warnings"] == 0
 
 
-@_report_stab_pending
+def test_report_grounding_segments_are_absolute_frames():
+    # 接地区間はVMDフレーム番号で出す。トラックがフレーム100始まりなら相対index [0,10] でなく [[100,110]]。
+    keys = [bone("右足ＩＫ", 100 + f, pos=(round(0.05 * f, 6), 0.0, 0.0)) for f in range(11)]
+    rep = report.build_report(keys, denoise=False)
+    assert _entry(rep, "右足ＩＫ")["grounding_segments"] == [[100, 110]]
+
+
 def test_report_adds_grounding_diagnostics_for_toe():
     # つま先IK(toe_ik)にも接地診断が付く(foot_ik だけ処理する実装を排除)。
     rep = report.build_report(_grounded_foot_keys("右つま先ＩＫ"), denoise=False)
@@ -62,7 +65,6 @@ def test_report_adds_grounding_diagnostics_for_toe():
     assert e["lock_applied_ratio"] == pytest.approx(1.0)
 
 
-@_report_stab_pending
 def test_report_grounding_reflects_denoise_then_stabilize():
     # denoise on のとき接地診断は denoise 後のトラックを安定化した結果と一致する(パイプライン整合)。
     from mocapvmd import denoise as dn, footik
@@ -93,7 +95,6 @@ def test_report_non_foot_bone_has_no_grounding_fields():
     assert all(f not in entry for f in _GROUNDING_FIELDS)
 
 
-@_report_stab_pending
 def test_report_foot_ik_stabilize_flag_and_off_skips_grounding():
     rep_on = report.build_report(_grounded_foot_keys())
     rep_off = report.build_report(_grounded_foot_keys(), foot_ik_stabilize=False)
@@ -104,7 +105,6 @@ def test_report_foot_ik_stabilize_flag_and_off_skips_grounding():
     assert all(f not in off_entry for f in _GROUNDING_FIELDS)
 
 
-@_report_stab_pending
 def test_report_counts_clamp_warnings():
     # 最大補正量を超える低速ランプ(24フレーム)はクランプされ、警告数が1以上になる。
     xs = [round(0.07 * i, 6) for i in range(24)]
@@ -113,7 +113,6 @@ def test_report_counts_clamp_warnings():
     assert _entry(rep, "右足ＩＫ")["clamp_warnings"] >= 1
 
 
-@_report_stab_pending
 def test_report_json_roundtrip_with_grounding(tmp_path):
     rep = report.build_report(_grounded_foot_keys(), denoise=False)
     path = tmp_path / "report.json"
@@ -123,7 +122,6 @@ def test_report_json_roundtrip_with_grounding(tmp_path):
     assert "grounding_segments" in next(e for e in loaded["bones"] if e["name"] == "右足ＩＫ")
 
 
-@_report_stab_pending
 def test_format_dry_run_shows_grounding_for_foot():
     text = report.format_dry_run(report.build_report(_grounded_foot_keys(), denoise=False))
     foot_line = next(line for line in text.splitlines() if "右足ＩＫ" in line and "foot_ik" in line)

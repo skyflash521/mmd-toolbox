@@ -10,7 +10,7 @@
 import json
 import math
 
-from mocapvmd import classify, denoise, presets
+from mocapvmd import classify, denoise, footik, presets
 
 
 def _quat_angle_deg(q1, q0):
@@ -57,7 +57,47 @@ def _spike_protected_counts(keys, preset, category):
     return len(spike_frames), len(protected)
 
 
-def build_report(bone_keys, preset="balanced", denoise=True):
+def _stabilization(bone_keys, preset, denoise_on):
+    """foot_ik/toe_ik トラックを接地安定化し、name -> TrackStabilization を返す(§4.4)。
+
+    パイプライン(一般ノイズ軽減→足IK安定化)と同じ順序で診断を出すため、denoise_on のときは
+    クリーニング(apply_denoise)後の位置で安定化する。値が検証を通らない・キー1個以下のトラックは
+    対象外とする。
+    """
+    order = []
+    groups = {}
+    for k in bone_keys:
+        if k.name not in groups:
+            groups[k.name] = []
+            order.append(k.name)
+        groups[k.name].append(k)
+
+    tracks = {}
+    for name in order:
+        ks = sorted(groups[name], key=lambda k: k.frame)
+        category = classify.classify(name)
+        if category not in ("foot_ik", "toe_ik") or len(ks) < 2:
+            continue
+        positions = [k.position for k in ks]
+        rotations = [k.rotation for k in ks]
+        try:
+            denoise.validate_bone_values(positions, rotations)
+        except ValueError:
+            continue
+        if denoise_on:
+            params = presets.resolve_cleaning(preset, category)
+            positions, _ = denoise.apply_denoise(
+                positions, rotations,
+                pos_window=params["pos_window"], rot_window=params["rot_window"],
+                pos_strength=params["pos_strength"], rot_strength=params["rot_strength"],
+            )
+        tracks[name] = (category, [k.frame for k in ks], positions)
+    if not tracks:
+        return {}
+    return footik.stabilize_foot_ik(tracks, preset)
+
+
+def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=True):
     """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
 
     名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。
@@ -72,6 +112,8 @@ def build_report(bone_keys, preset="balanced", denoise=True):
             order.append(k.name)
         groups[k.name].append(k)
 
+    stab = _stabilization(bone_keys, preset, denoise) if foot_ik_stabilize else {}
+
     bones = []
     foot_ik = []
     toe_ik = []
@@ -82,20 +124,30 @@ def build_report(bone_keys, preset="balanced", denoise=True):
         category = classify.classify(name)
         max_speed, max_ang = _track_diagnostics(keys)
         spike_candidates, protected_frames = _spike_protected_counts(keys, preset, category)
-        bones.append(
-            {
-                "name": name,
-                "category": category,
-                "input_keys": len(keys),
-                "frame_first": keys[0].frame,
-                "frame_last": keys[-1].frame,
-                "max_speed": max_speed,
-                "max_ang_speed_deg": max_ang,
-                "spike_candidates": spike_candidates,
-                "protected_frames": protected_frames,
-                "cleaning": presets.resolve_cleaning(preset, category),
-            }
-        )
+        entry = {
+            "name": name,
+            "category": category,
+            "input_keys": len(keys),
+            "frame_first": keys[0].frame,
+            "frame_last": keys[-1].frame,
+            "max_speed": max_speed,
+            "max_ang_speed_deg": max_ang,
+            "spike_candidates": spike_candidates,
+            "protected_frames": protected_frames,
+            "cleaning": presets.resolve_cleaning(preset, category),
+        }
+        if name in stab:
+            ts = stab[name]
+            entry["grounding_candidates"] = len(ts.grounding.candidate_frames)
+            # 接地区間は0始まり相対サンプルインデックス。整列済みキー列で絶対VMDフレーム番号へ戻す。
+            entry["grounding_segments"] = [
+                [keys[s.start].frame, keys[s.end].frame] for s in ts.grounding.segments
+            ]
+            entry["max_change"] = ts.max_change
+            entry["mean_change"] = ts.mean_change
+            entry["lock_applied_ratio"] = ts.lock_applied_ratio
+            entry["clamp_warnings"] = len(ts.warnings)
+        bones.append(entry)
         if category == "foot_ik":
             foot_ik.append(name)
         elif category == "toe_ik":
@@ -104,6 +156,7 @@ def build_report(bone_keys, preset="balanced", denoise=True):
     return {
         "preset": preset,
         "denoise": denoise,
+        "foot_ik_stabilize": foot_ik_stabilize,
         "range": [min(all_frames), max(all_frames)] if all_frames else [],
         "bones": bones,
         "foot_ik_candidates": foot_ik,
@@ -123,11 +176,12 @@ def format_dry_run(report):
     lines = [
         f"preset: {report['preset']}",
         f"denoise: {'on' if report['denoise'] else 'off'}",
+        f"foot_ik_stabilize: {'on' if report.get('foot_ik_stabilize') else 'off'}",
         f"range: {report['range']}",
     ]
     for b in report["bones"]:
         c = b["cleaning"]
-        lines.append(
+        line = (
             f"{b['name']} [{b['category']}] keys={b['input_keys']} "
             f"frames=[{b['frame_first']},{b['frame_last']}] "
             f"max_speed={b['max_speed']:.4g} max_rot={b['max_ang_speed_deg']:.4g}deg "
@@ -135,6 +189,14 @@ def format_dry_run(report):
             f"clean_pos={c['pos_strength']:.4g} clean_rot={c['rot_strength']:.4g} "
             f"win=[{c['pos_window']},{c['rot_window']}]"
         )
+        if "grounding_segments" in b:
+            line += (
+                f" ground_seg={len(b['grounding_segments'])}"
+                f" lock_rate={b['lock_applied_ratio']:.2f}"
+                f" max_chg={b['max_change']:.4g}"
+                f" warn={b['clamp_warnings']}"
+            )
+        lines.append(line)
     lines.append(f"足IK候補: {report['foot_ik_candidates']}")
     lines.append(f"つま先IK候補: {report['toe_ik_candidates']}")
     return "\n".join(lines)

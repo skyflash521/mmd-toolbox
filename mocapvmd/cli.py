@@ -165,7 +165,9 @@ def main(argv=None):
     # 診断レポート(dry-run 表示・report-json 出力)。どのボーンにどの処理が適用される予定かを
     # 出力を変更せずに確認できる。
     if args.dry_run or args.report_json:
-        rep = report.build_report(doc.bone, args.preset, denoise=args.denoise)
+        rep = report.build_report(
+            doc.bone, args.preset, denoise=args.denoise, foot_ik_stabilize=args.foot_ik_stabilize
+        )
         if args.dry_run:
             print(report.format_dry_run(rep))
         if args.report_json:
