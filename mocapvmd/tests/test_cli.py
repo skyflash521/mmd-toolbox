@@ -502,6 +502,89 @@ def test_no_foot_ik_stabilize_keeps_foot_and_toe_verbatim(tmp_path):
         assert out_keys == in_keys
 
 
+# --- インプロセス疎化統合(--reduce-preset / --curve-mode / --no-reduce) ---------
+
+_reduce_pending = pytest.mark.xfail(reason="impl pending: Step 5d", strict=True)
+
+
+def _ramp_doc(path):
+    # センターの直線ランプ(密11フレーム)。疎化で端2キーへ削減される。
+    write_vmd(path, bone=[bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(11)])
+
+
+def _center_frames(bones):
+    return sorted(k.frame for k in bones if k.name == "センター")
+
+
+def _curve_doc(path):
+    # センターの曲線(2次)。疎化でキーが減り、bezier と linear で結果が相違する。
+    write_vmd(path, bone=[bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0)) for f in range(11)])
+
+
+@_reduce_pending
+def test_default_output_is_reduced(tmp_path):
+    # 既定でクリーニング後に疎化し(キー数減)、既定の curve-mode は bezier(明示 bezier と一致・linear と相違)(§3.3)。
+    src = tmp_path / "in.vmd"
+    out_default = tmp_path / "default.vmd"
+    out_bezier = tmp_path / "bezier.vmd"
+    out_linear = tmp_path / "linear.vmd"
+    _curve_doc(src)
+    assert cli.main([str(src), "-o", str(out_default)]) == 0
+    assert cli.main([str(src), "-o", str(out_bezier), "--curve-mode", "bezier"]) == 0
+    assert cli.main([str(src), "-o", str(out_linear), "--curve-mode", "linear"]) == 0
+    d = sorted((k for k in io.read(str(out_default))[0].bone if k.name == "センター"), key=lambda k: k.frame)
+    b = sorted((k for k in io.read(str(out_bezier))[0].bone if k.name == "センター"), key=lambda k: k.frame)
+    ll = sorted((k for k in io.read(str(out_linear))[0].bone if k.name == "センター"), key=lambda k: k.frame)
+    assert len(d) < 11  # 疎化されている
+    assert d == b       # 既定の curve-mode は bezier
+    assert d != ll      # 曲線入力で bezier と linear は相違(既定が linear へ退行していない)
+
+
+@_reduce_pending
+def test_no_reduce_keeps_dense_linear(tmp_path):
+    # --no-reduce ではクリーニング後の密キー(全フレーム・線形補間)を出力する(§3.3)。
+    from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
+
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _ramp_doc(src)
+    assert cli.main([str(src), "-o", str(out), "--no-reduce"]) == 0
+    out_doc, _ = io.read(str(out))
+    assert _center_frames(out_doc.bone) == list(range(11))
+    for k in out_doc.bone:
+        if k.name == "センター":
+            assert k.interpolation == BONE_LINEAR_INTERP
+
+
+@_reduce_pending
+def test_reduce_preset_validation(tmp_path):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _ramp_doc(src)
+    assert cli.main([str(src), "-o", str(out), "--reduce-preset", "precise"]) == 0
+    assert cli.main([str(src), "--reduce-preset", "turbo"]) == 2  # 未知プリセットは引数エラー
+
+
+@_reduce_pending
+def test_curve_mode_validation(tmp_path):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _ramp_doc(src)
+    assert cli.main([str(src), "-o", str(out), "--curve-mode", "linear"]) == 0
+    assert cli.main([str(src), "--curve-mode", "spline"]) == 2  # 未知 curve-mode は引数エラー
+
+
+@_reduce_pending
+def test_reduce_error_override_validation(tmp_path):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _ramp_doc(src)
+    assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "0.05"]) == 0
+    assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-rot", "0.5"]) == 0  # 有効な回転許容値は受理
+    assert cli.main([str(src), "--reduce-error-bone-pos", "-1"]) == 2  # 負の許容値は引数エラー
+    assert cli.main([str(src), "--reduce-error-bone-rot", "nan"]) == 2  # 非有限は引数エラー
+
+
 def test_denoise_output_is_dense_linear(tmp_path):
     # クリーニング後は連続フレームの密キーで、補間ブロックは線形(§3.3 のクリーニング後の密キー形式)。
     from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
