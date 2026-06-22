@@ -11,19 +11,9 @@
 - candidate_frames は速度・Y を満たすフレーム集合(接地候補)、segments は長さ4以上の接地区間。
 """
 
-import importlib.util
-
 import pytest
 
-# モジュール自体が未実装のときだけスキップする。footik が在ってその内部 import が壊れた場合は
-# find_spec が spec を返す(本体は実行しない)ので、後続の import で実エラーが表面化する。
-_HAS_FOOTIK = importlib.util.find_spec("mocapvmd.footik") is not None
-if _HAS_FOOTIK:
-    from mocapvmd import footik
-else:
-    footik = None
-
-pytestmark = pytest.mark.skipif(not _HAS_FOOTIK, reason="impl pending: Step 4a1")
+from mocapvmd import footik
 
 
 def detect(positions, **kw):
