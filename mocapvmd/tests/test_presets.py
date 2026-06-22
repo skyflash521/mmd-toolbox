@@ -77,3 +77,73 @@ def test_invalid_preset_raises():
 def test_invalid_category_raises():
     with pytest.raises(ValueError):
         presets.resolve_cleaning("balanced", "nonexistent")
+
+
+# --- 接地ロック強度(§5.4)---------------------------------------------------
+# 接地ロックは接地中に足IK・つま先IKを接地アンカーへ寄せるブレンド係数(0〜1)。倍率でなく直接値。
+# foot_ik の X/Z 接地中央はプリセット別、他(foot_ik の Y、toe_ik の全チャンネル)はプリセット非依存。
+
+foot_pending = pytest.mark.xfail(reason="impl pending: Step 4b", strict=True)
+
+# §5.4 foot_ik X/Z 接地中央のプリセット別確定値。stable-foot が最強、light が最弱。
+_FOOT_XZ_CENTER = {"light": 0.70, "balanced": 0.90, "strong": 0.93, "stable-foot": 0.97}
+
+
+@foot_pending
+@pytest.mark.parametrize("preset,xz_center", list(_FOOT_XZ_CENTER.items()))
+def test_foot_lock_foot_ik_xz_center_by_preset(preset, xz_center):
+    # foot_ik の X/Z 接地中央はプリセット別、接地端は 0.25 固定(§5.4)。
+    p = presets.resolve_foot_lock(preset, "foot_ik")
+    assert p["xz_center"] == pytest.approx(xz_center)
+    assert p["xz_edge"] == pytest.approx(0.25)
+
+
+@foot_pending
+@pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
+def test_foot_lock_foot_ik_y_is_preset_independent(preset):
+    # foot_ik の Y は中央0.50・端0.10 でプリセット非依存(§5.4)。
+    p = presets.resolve_foot_lock(preset, "foot_ik")
+    assert p["y_center"] == pytest.approx(0.50)
+    assert p["y_edge"] == pytest.approx(0.10)
+
+
+@foot_pending
+@pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
+def test_foot_lock_toe_ik_is_preset_independent(preset):
+    # toe_ik は X/Z・Y とも中央0.30・端0.10 でプリセット非依存(つま先の動き・回転を保つ。§5.4)。
+    p = presets.resolve_foot_lock(preset, "toe_ik")
+    assert p["xz_center"] == pytest.approx(0.30)
+    assert p["xz_edge"] == pytest.approx(0.10)
+    assert p["y_center"] == pytest.approx(0.30)
+    assert p["y_edge"] == pytest.approx(0.10)
+
+
+@foot_pending
+def test_foot_lock_foot_ik_xz_center_ordering():
+    # 接地固定の強さは stable-foot > strong > balanced > light(§5.4)。
+    centers = [presets.resolve_foot_lock(p, "foot_ik")["xz_center"]
+               for p in ("light", "balanced", "strong", "stable-foot")]
+    assert centers == sorted(centers)
+    assert len(set(centers)) == 4
+
+
+@foot_pending
+@pytest.mark.parametrize("category", ["foot_ik", "toe_ik"])
+@pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
+def test_foot_lock_fade_width_default_3(preset, category):
+    # フェード幅は端から既定3フレーム(§5.4)。
+    assert presets.resolve_foot_lock(preset, category)["fade_width"] == 3
+
+
+@foot_pending
+def test_foot_lock_invalid_preset_raises():
+    with pytest.raises(ValueError):
+        presets.resolve_foot_lock("turbo", "foot_ik")
+
+
+@foot_pending
+@pytest.mark.parametrize("category", ["center", "legs", "toe", "unknown"])
+def test_foot_lock_non_footik_category_raises(category):
+    # 接地ロックは foot_ik / toe_ik のみ対象。他種別は対象外で ValueError。
+    with pytest.raises(ValueError):
+        presets.resolve_foot_lock("balanced", category)
