@@ -79,6 +79,93 @@ def test_invalid_category_raises():
         presets.resolve_cleaning("balanced", "nonexistent")
 
 
+# --- 疎化の許容誤差解決(§5.3)-----------------------------------------------
+# 各ボーンの許容誤差 = プリセット基準値 × 種別スケール。--reduce-error-* 明示時は基準値を上書き
+# (種別スケールは引き続き掛ける)。precise/balanced/aggressive と種別スケールは mocapvmd 独自値。
+
+reduce_pending = pytest.mark.xfail(reason="impl pending: Step 5b", strict=True)
+
+# §5.3 プリセット基準値(位置 MMD単位 / 回転 度)。
+_REDUCE_BASE = {"precise": (0.01, 0.10), "balanced": (0.02, 0.20), "aggressive": (0.05, 0.40)}
+
+# §5.3 種別スケール(位置, 回転)。
+_REDUCE_SCALE = {
+    "root": (1.0, 1.0), "center": (0.7, 0.8), "torso": (0.8, 0.9), "arms": (1.0, 1.0),
+    "fingers": (1.5, 1.5), "legs": (1.0, 1.0), "foot_ik": (0.7, 1.0),
+    "toe_ik": (1.0, 0.8), "unknown": (1.0, 1.0),
+}
+
+
+@reduce_pending
+@pytest.mark.parametrize("preset", list(_REDUCE_BASE))
+@pytest.mark.parametrize("category", list(_REDUCE_SCALE))
+def test_reduction_tolerance_base_times_scale(preset, category):
+    base_pos, base_rot = _REDUCE_BASE[preset]
+    spos, srot = _REDUCE_SCALE[category]
+    t = presets.resolve_reduction_tolerances(preset, category)
+    assert t["bone_pos"] == pytest.approx(base_pos * spos)
+    assert t["bone_rot"] == pytest.approx(base_rot * srot)
+
+
+@reduce_pending
+def test_reduction_tolerance_override_replaces_base_then_scales():
+    # --reduce-error-* の明示はプリセット基準値を上書きし、種別スケールは引き続き掛かる。
+    t = presets.resolve_reduction_tolerances("balanced", "center", override_pos=0.1, override_rot=2.0)
+    assert t["bone_pos"] == pytest.approx(0.1 * 0.7)   # center 位置スケール 0.7
+    assert t["bone_rot"] == pytest.approx(2.0 * 0.8)   # center 回転スケール 0.8
+
+
+@reduce_pending
+def test_reduction_tolerance_partial_override_pos_only():
+    # 位置のみ上書き。回転はプリセット基準値のまま種別スケールが掛かる。
+    t = presets.resolve_reduction_tolerances("precise", "fingers", override_pos=0.2)
+    assert t["bone_pos"] == pytest.approx(0.2 * 1.5)    # override × fingers位置1.5
+    assert t["bone_rot"] == pytest.approx(0.10 * 1.5)   # precise回転0.10 × fingers回転1.5
+
+
+@reduce_pending
+def test_reduction_tolerance_partial_override_rot_only():
+    # 回転のみ上書き。位置はプリセット基準値のまま種別スケールが掛かる(回転側だけの処理漏れを弾く)。
+    t = presets.resolve_reduction_tolerances("precise", "fingers", override_rot=2.0)
+    assert t["bone_pos"] == pytest.approx(0.01 * 1.5)   # precise位置0.01 × fingers位置1.5
+    assert t["bone_rot"] == pytest.approx(2.0 * 1.5)    # override × fingers回転1.5
+
+
+@reduce_pending
+@pytest.mark.parametrize("kw", [{"override_pos": 0.0}, {"override_rot": 0.0}])
+def test_reduction_tolerance_zero_override_is_valid(kw):
+    # 非負を許容するので 0 は有効(ValueError にしない)。0 は全キー保持の設定。
+    t = presets.resolve_reduction_tolerances("balanced", "center", **kw)
+    if "override_pos" in kw:
+        assert t["bone_pos"] == pytest.approx(0.0)
+        assert t["bone_rot"] == pytest.approx(0.20 * 0.8)
+    else:
+        assert t["bone_rot"] == pytest.approx(0.0)
+        assert t["bone_pos"] == pytest.approx(0.02 * 0.7)
+
+
+@reduce_pending
+def test_reduction_tolerance_invalid_preset_raises():
+    with pytest.raises(ValueError):
+        presets.resolve_reduction_tolerances("turbo", "center")
+
+
+@reduce_pending
+def test_reduction_tolerance_invalid_category_raises():
+    with pytest.raises(ValueError):
+        presets.resolve_reduction_tolerances("balanced", "nonexistent")
+
+
+@reduce_pending
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -0.01])
+def test_reduction_tolerance_invalid_override_raises(bad):
+    # 非有限(符号問わず)・負の上書き値は ValueError(CLI で終了コード2 へ変換される)。
+    with pytest.raises(ValueError):
+        presets.resolve_reduction_tolerances("balanced", "center", override_pos=bad)
+    with pytest.raises(ValueError):
+        presets.resolve_reduction_tolerances("balanced", "center", override_rot=bad)
+
+
 # --- 接地ロック強度(§5.4)---------------------------------------------------
 # 接地ロックは接地中に足IK・つま先IKを接地アンカーへ寄せるブレンド係数(0〜1)。倍率でなく直接値。
 # foot_ik の X/Z 接地中央はプリセット別、他(foot_ik の Y、toe_ik の全チャンネル)はプリセット非依存。
