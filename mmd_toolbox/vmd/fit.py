@@ -582,6 +582,24 @@ _BEZIER_INITS = (
 )
 _BEZIER_LINEAR_CP = (20, 20, 107, 107)
 
+# least_squares の収束許容(§6.3)。采否は量子化後誤差で判定するので scipy 既定精度(~1e-8)まで
+# 詰める必要はない。緩めると反復が減って速くなるが、緩めすぎるとフィット精度が必要精度に届かず
+# 分割が増えて圧縮率が落ちる。緩和の速度効果は「区間のサンプル数 × 反復」に比例するので、サンプル数が
+# 多い高コスト区間だけ緩める(小区間は緩めても速度効果がほぼ無く、圧縮劣化だけ招くので締めたまま)。
+_LSQ_LOOSE_TOL = 1e-3       # 高コスト区間で用いる緩い収束許容
+_LSQ_LOOSEN_MIN_SAMPLES = 30  # この数以上のサンプルを持つ区間だけ緩める(速度効果が出る規模)
+
+
+def _lsq_kwargs(n_samples):
+    """サンプル数に応じた least_squares 収束許容(ftol/xtol/gtol)を返す(§6.3)。
+
+    緩和の速度効果はサンプル数に比例する。少数サンプルの区間を緩めても効果は乏しく圧縮劣化だけ
+    招くため、サンプル数が閾値以上の高コスト区間に限って緩める。閾値未満は既定の高精度のまま。
+    """
+    if n_samples < _LSQ_LOOSEN_MIN_SAMPLES:
+        return {}
+    return {"ftol": _LSQ_LOOSE_TOL, "xtol": _LSQ_LOOSE_TOL, "gtol": _LSQ_LOOSE_TOL}
+
 
 def _bez(s, c1, c2):
     u = 1.0 - s
@@ -678,6 +696,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
         if lin_err <= early_exit_err:
             return (_BEZIER_LINEAR_CP, lin_err)
 
+    lsq_kw = _lsq_kwargs(len(xs))
     best_cost = math.inf
     best_cp = None
     best_err = None
@@ -685,7 +704,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
-            sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4))
+            sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4), **lsq_kw)
         except Exception:
             continue
         cost = float(np.sum(np.square(residual(sol.x))))
@@ -734,13 +753,14 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     if early_exit_err is not None and quantized_err(_BEZIER_LINEAR_CP) <= early_exit_err:
         return _BEZIER_LINEAR_CP
 
+    lsq_kw = _lsq_kwargs(len(xs))
     best_cost = math.inf
     best_cp = None
     for ix1, iy1, ix2, iy2 in _BEZIER_INITS:
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
-            sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4))
+            sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4), **lsq_kw)
         except Exception:
             continue
         cost = float(np.sum(np.square(residual(sol.x))))

@@ -1,4 +1,4 @@
-"""線形ファストパスのテスト(reduce-fit-perf-plan.md レバー1, mmd_toolbox.md §6.3)。
+"""線形ファストパスのテスト(mmd_toolbox.md §6.3)。
 
 線形制御点で許容内(`early_exit_err` 以内)に収まる区間は `least_squares` を呼ばず即採用し、
 最適化の呼び出し回数そのものを減らす。許容(`early_exit_err`)が無い全探索ではファストパスを
