@@ -17,10 +17,8 @@ ProgressReporter は疎化など重い処理の進行を stderr へ1行ライブ
 import io
 import time
 
-import pytest
+from mocapvmd import progress
 
-# 実装未着手のうちはモジュール import 自体が失敗し収集できないため skip(印は実装フェーズで外す)。
-progress = pytest.importorskip("mocapvmd.progress", reason="impl pending: ProgressReporter")
 ProgressReporter = progress.ProgressReporter
 
 
@@ -47,6 +45,28 @@ def test_format_line_shows_label_count_elapsed():
 def test_format_line_hides_count_when_total_unset():
     # total 未確定(begin_stage 直後・最初の update 前)はカウントを出さず経過のみ。
     assert progress._format_line("疎化", 0, None, 2.0) == "[疎化] 経過 0:02"
+
+
+def test_format_line_width_counts_fullwidth_as_two():
+    assert progress._display_width("疎化") == 4  # 全角2文字=4
+    assert progress._display_width("[X] 0/5") == 7  # 半角はそのまま
+
+
+def test_draw_pads_to_clear_leftover_from_longer_line():
+    # 長い行のあと短い行で同じ行を上書きするとき、差ぶんを空白で埋めて旧行の残像を消す。
+    # interval 大でハートビート未発火にし、_draw を2回直接呼んで決定的に確かめる。
+    stream = io.StringIO()
+    clock = [0.0]
+    r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
+    r.begin_stage("X")
+    r.update(0, 1000000)  # 長い行
+    r._draw()
+    r.update(0, 5)  # 短い行
+    r._draw()
+    last = stream.getvalue().rsplit("\r", 1)[1]  # 最後に描いた行ぶん
+    assert last.startswith("[X] 0/5 経過 0:00")
+    assert last.endswith(" ")  # 旧行(0/1000000)を覆う空白が続く
+    r.close()
 
 
 def test_disabled_is_noop_no_thread_no_output():
@@ -133,6 +153,21 @@ def test_end_stage_stops_live_heartbeat_thread():
     r.end_stage()
     assert not live.is_alive()  # end_stage が実スレッドを停止・join した
     assert r._thread is None
+
+
+def test_begin_stage_while_active_stops_old_heartbeat():
+    # end_stage を挟まずに begin_stage を再呼びしても、旧ハートビートを止めてから新段を起こす。
+    # 旧スレッドが残って後から描画し混線する漏れを弾く(計画 §2 単一描画所有者)。
+    stream = io.StringIO()
+    clock = [0.0]
+    r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=0.01)
+    r.begin_stage("クリーニング")
+    first = r._thread
+    assert first is not None and first.is_alive()
+    r.begin_stage("疎化")  # end_stage を経ずに再開始
+    assert not first.is_alive()  # 旧ハートビートは停止・join された
+    assert r._thread is not None and r._thread is not first and r._thread.is_alive()
+    r.close()
 
 
 def test_heartbeat_runs_after_stage_reuse():

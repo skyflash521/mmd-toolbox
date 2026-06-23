@@ -1,0 +1,118 @@
+"""進捗のライブ表示(mocapvmd.md 進捗表示、実装計画 §2-§4)。
+
+重い処理(主に疎化)の進行を stderr へ1行ライブ表示する。既定は出力先が端末(TTY)のときだけ有効で、
+リダイレクト・パイプ時や無効化時は完全な no-op(オーバーヘッドなし)。
+
+停滞回避の要は「完了イベントと再描画の分離」。完了通知 update(done, total) は進行カウンタを更新するだけで
+描画しない。実際に行を描くのは一定間隔で回るハートビート用デーモンスレッドで、update が来ない待ち時間
+(重いボーン1本の疎化中など)でも経過時間を進め続けるため、表示が固まって見えない。
+
+単一描画所有者: 進捗行を stderr へ書くのはハートビートスレッドだけ。メインが書く場面(段終了 end_stage /
+全体終了 close)は、書く前にハートビートを停止イベントで止めて join し(描画所有権を回収)、最終行を1度
+描いてから改行で確定する。これにより同時に stderr へ書くスレッドが常に1つになり、行の混線を防ぐ。
+
+経過時間は now() - 段階開始時刻で測る。表示器は表示の判断だけを持ち、何を1段とするか・各段の総数の
+決め方は呼び出し側に委ねる(このモジュールは他モジュールを参照しない)。
+"""
+
+import sys
+import threading
+import time
+import unicodedata
+
+
+def _format_line(label, done, total, elapsed):
+    """1行ぶんの表示文字列を組む。total が None(未確定)のときはカウントを出さず経過のみ。"""
+    secs = int(elapsed)
+    count = "" if total is None else f" {done}/{total}"
+    return f"[{label}]{count} 経過 {secs // 60}:{secs % 60:02d}"
+
+
+def _display_width(text):
+    """端末表示幅。全角(東アジア幅 W/F)を2、その他を1として数える(残像消去の埋め幅算出に使う)。"""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+class ProgressReporter:
+    """段階単位の進捗をライブ表示する。begin_stage(label) で段を開始、update(done, total) で進行を通知、
+    end_stage() で段を確定、close() で全体を終える。enabled 省略時は stream.isatty() で自動判定し、無効時は
+    全メソッド no-op。詳細はモジュール docstring を参照。
+    """
+
+    def __init__(self, stream=None, *, enabled=None, now=None, interval=0.15):
+        self._stream = stream if stream is not None else sys.stderr
+        if enabled is None:
+            isatty = getattr(self._stream, "isatty", None)
+            enabled = bool(isatty()) if callable(isatty) else False
+        self._enabled = enabled
+        self._now = now if now is not None else time.monotonic
+        self._interval = interval
+        self._snap = None  # (label, done, total, start) または None。単一参照代入で原子的に差し替える
+        self._thread = None
+        self._stop = None
+        self._last_width = 0  # 直前に同じ行へ描いた表示幅。短い行で上書きするとき残像を埋めるのに使う
+
+    def begin_stage(self, label):
+        """段を開始する。総数は未確定(最初の update で確定)。ハートビートを起こす。
+
+        直前段の end_stage を挟まずに呼ばれても旧ハートビートが残らないよう、起こす前に既存を止める。
+        """
+        if not self._enabled:
+            return
+        self._stop_heartbeat()
+        self._snap = (label, 0, None, self._now())
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._heartbeat, daemon=True)
+        self._thread.start()
+
+    def update(self, done, total):
+        """進行を通知する(描画はしない)。総数は毎回 total で更新する。段が無いときは無視する。"""
+        snap = self._snap
+        if snap is None:
+            return
+        self._snap = (snap[0], done, total, snap[3])
+
+    def end_stage(self):
+        """段を確定する。ハートビートを止め join してから最終行を描き改行する。"""
+        self._finalize()
+
+    def close(self):
+        """全体を終える。活動中の段があれば end_stage と同様に確定する。無ければ no-op。"""
+        self._finalize()
+
+    def _heartbeat(self):
+        # 停止イベントが立つまで一定間隔で再描画する。wait は間隔経過で False、停止で True を返す。
+        while not self._stop.wait(self._interval):
+            self._draw()
+
+    def _stop_heartbeat(self):
+        # ハートビートが動いていれば停止イベントで止めて join し、描画所有権を回収する。
+        if self._thread is not None:
+            self._stop.set()
+            self._thread.join()
+            self._thread = None
+
+    def _draw(self):
+        snap = self._snap
+        if snap is None:
+            return
+        label, done, total, start = snap
+        line = _format_line(label, done, total, self._now() - start)
+        width = _display_width(line)
+        # 直前の行が今より長ければ、その差ぶん空白で埋めて残像を消す(次の \r で行頭へ戻る)。
+        pad = " " * max(0, self._last_width - width)
+        self._stream.write("\r" + line + pad)
+        self._stream.flush()
+        self._last_width = width
+
+    def _finalize(self):
+        # 活動段があるときだけ確定する。先にハートビートを止め join して描画所有権を回収し、最終行を
+        # メインが1度描いてから改行で確定する(単一描画所有者)。
+        if self._snap is None:
+            return
+        self._stop_heartbeat()
+        self._draw()
+        self._stream.write("\n")
+        self._stream.flush()
+        self._snap = None
+        self._last_width = 0  # 改行で次の行頭へ移ったので残像はない
