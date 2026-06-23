@@ -24,7 +24,7 @@ mocapvmd はボーン選択を行わず全ボーンを処理するため、ボ�
 
 - `source_keys`: **範囲内はクリーニング済みの密キー(線形補間)、範囲外は元キーを逐語**で合成した1本のトラックを渡す。共通機構は範囲外要素をそのまま返すため、この合成により要求仕様3.3の範囲外逐語保持を満たす。
 - `tols`: ボーン種別ごとに解決する(要求仕様 5.3)。プリセット基準値(`--reduce-preset` / `--reduce-error-bone-*`)に種別スケールを掛けた `bone_pos` / `bone_rot` を、その種別のトラックに渡す。`reduce_bone_track` はトラック単位に呼ぶため、トラックの種別に応じた `tols` を都度与える。共通の `Tolerances` はカメラ4フィールド(`camera_pos` / `camera_rot` / `camera_distance` / `camera_fov`)も既定値なしで必須なので、mocapvmd 側でカメラ値を指定せずに済むよう、`mmd_toolbox.vmd.reduce` にボーン専用のトレランス構築ヘルパ(`bone_pos` / `bone_rot` だけ受け取り、未使用のカメラフィールドはヘルパ内部で埋めて `Tolerances` を返す)を追加し、mocapvmd はそれ経由で `tols` を作る。
-- `cut_thresholds / keep_frames / no_cut_detect / min_seg / max_seg / strict`: 初期実装は `sparsevmd` 既定相当の固定値(`cut_thresholds=(1.0, 30.0)`(POS, ROT)、`no_cut_detect=False`、`keep_frames` 空、`min_seg=1`、`max_seg=180`、`strict=False`)を `mocapvmd.reduce` 内で与える。CLI公開はしない。
+- `cut_thresholds / keep_frames / no_cut_detect / min_seg / max_seg / strict`: 固定値(`cut_thresholds=(1.0, 30.0)`(POS, ROT)、`no_cut_detect=False`、`keep_frames` 空、`min_seg=1`、`max_seg=15`、`strict=False`)を `mocapvmd.reduce` 内で与える。CLI公開はしない。`max_seg` は1区間を短く抑えて手編集しやすくし、区間長探索を減らして疎化を速くするため小さくする。
 - `ranges`: 各トラックに渡す範囲は、処理範囲(`--range` または全範囲)と**そのトラックの実在キー区間との積集合**にする(`sparsevmd` の `_reduce_bones` と同じく `ranges.intersect(global, first, last)`)。`reduce_bone_track` は与えた範囲全体をサンプリングし、トラック外の範囲には端値を延長した人工キーを作るため、トラック区間外を渡さない。
 - キーが1個以下のトラックは疎化できないため、`reduce_bone_track` に渡さず逐語保持する(`sparsevmd` 同様)。
 - `curve_mode`: `--curve-mode`(既定 `bezier`)。

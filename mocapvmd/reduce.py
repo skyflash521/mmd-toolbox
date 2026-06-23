@@ -18,10 +18,12 @@ from mmd_toolbox.vmd.reduce import build_bone_tolerances, measure_bone_errors, r
 
 from . import classify, presets
 
-# reduce_bone_track へ渡す固定引数(全範囲・カット検出あり。sparsevmd の決め方を踏襲)。
+# reduce_bone_track へ渡す固定引数(全範囲・カット検出あり)。
 _CUT_THRESHOLDS = (1.0, 30.0)  # (位置 MMD単位 / 回転 度)
 _MIN_SEG = 1
-_MAX_SEG = 180
+# 1区間あたりの最大フレーム数を短く抑える。長大区間を1本のベジェに畳まず細かいキーを残すことで
+# 後段の手編集をしやすくし、併せて区間長探索(per-fit の scipy 呼び出し)を減らして疎化を高速化する。
+_MAX_SEG = 15
 
 # 多キートラックがこの本数以上のときだけプロセス並列化する。未満はプール起動・データ転送のコストが
 # 並列の利得を上回るのでシリアルにフォールバックする。判定は疎化対象(多キー)トラック数で行う

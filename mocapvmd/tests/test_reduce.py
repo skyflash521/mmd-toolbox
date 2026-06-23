@@ -18,7 +18,7 @@ from .helpers import BONE_NONLINEAR, bone
 # reduce_bone_track へ渡す固定引数(設計確定値)。全範囲・カット検出あり。
 _FIXED = dict(
     cut_thresholds=(1.0, 30.0), keep_frames=[], no_cut_detect=False,
-    min_seg=1, max_seg=180, strict=False,
+    min_seg=1, max_seg=15, strict=False,
 )
 
 
@@ -86,7 +86,7 @@ def test_per_track_range_tolerance_and_fixed_args(monkeypatch):
         kw = calls[name][2]
         for key, val in {
             "cut_thresholds": (1.0, 30.0), "keep_frames": [], "no_cut_detect": False,
-            "min_seg": 1, "max_seg": 180, "strict": False, "curve_mode": "bezier",
+            "min_seg": 1, "max_seg": 15, "strict": False, "curve_mode": "bezier",
         }.items():
             assert kw[key] == val
 
