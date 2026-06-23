@@ -1,4 +1,4 @@
-"""mocapvmd インプロセス疎化のオーケストレーション(mocapvmd.md §3.3 / §5.3、実装計画 §3.5)。
+"""mocapvmd の疎化オーケストレーション(mocapvmd.md §3.3 / §5.3、実装計画 §3.5)。
 
 クリーニング(一般ノイズ軽減)+足IK安定化の後、全密ボーントラックを mmd_toolbox.vmd.reduce の
 共通機構で疎化する。種別ごとに resolve_reduction_tolerances で解決した許容誤差を build_bone_tolerances
