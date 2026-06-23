@@ -19,7 +19,7 @@ from mmd_toolbox.vmd import io
 from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 from mmd_toolbox.vmd.types import BoneKey
 
-from . import classify, denoise, footik, presets, reduce, report
+from . import classify, denoise, footik, presets, progress, reduce, report
 
 
 def _build_parser():
@@ -39,6 +39,7 @@ def _build_parser():
     p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=float, default=None)
     p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier")
     p.add_argument("--no-reduce", dest="reduce", action="store_false", default=True)
+    p.add_argument("--quiet", dest="quiet", action="store_true")
     p.add_argument("--list-bones", dest="list_bones", action="store_true")
     p.add_argument("--report-json", dest="report_json")
     p.add_argument("--preview-csv", dest="preview_csv")
@@ -225,24 +226,38 @@ def main(argv=None):
     # クリーニング → 足IK安定化 → 疎化のパイプライン。dry-run でも疎化レポート(§4.4)の素データを得るため
     # 実行し、出力の書き出しだけを dry-run で省く。一般ノイズ軽減は全ボーン(--no-denoise 時は逐語透過)、
     # 足IK安定化は分類 foot_ik / toe_ik(§4.3 / §6)、疎化は全ボーン(--no-reduce 時は密キーのまま)に適用する。
-    if args.denoise:
-        new_bone = _clean_bones(doc.bone, args.preset)
-    else:
-        new_bone = doc.bone
-    if args.foot_ik_stabilize:
-        new_bone = _stabilize_bones(new_bone, args.preset)
+    # 進捗のライブ表示。重い疎化の進行を端末へ出す(--quiet で無効、既定は stderr が端末のときだけ)。
+    # 各段を begin_stage/end_stage で囲み、疎化は per-bone の reporter.update を progress に渡す。例外時も
+    # finally でハートビートを止め行を確定するため try/finally で囲む。読み書きは速い I/O なので段にしない。
+    reporter = progress.ProgressReporter(sys.stderr, enabled=False if args.quiet else None)
     # 疎化レポートを出すときだけ診断 diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
     want_report = args.dry_run or args.report_json or args.preview_csv
     reduction_diag = {} if (args.reduce and want_report) else None
-    if args.reduce:
-        new_bone = reduce.reduce_bones(
-            new_bone,
-            args.reduce_preset,
-            override_pos=args.reduce_error_bone_pos,
-            override_rot=args.reduce_error_bone_rot,
-            curve_mode=args.curve_mode,
-            diagnostics_out=reduction_diag,
-        )
+    try:
+        if args.denoise:
+            reporter.begin_stage("クリーニング")
+            new_bone = _clean_bones(doc.bone, args.preset)
+            reporter.end_stage()
+        else:
+            new_bone = doc.bone
+        if args.foot_ik_stabilize:
+            reporter.begin_stage("足IK安定化")
+            new_bone = _stabilize_bones(new_bone, args.preset)
+            reporter.end_stage()
+        if args.reduce:
+            reporter.begin_stage("疎化")
+            new_bone = reduce.reduce_bones(
+                new_bone,
+                args.reduce_preset,
+                override_pos=args.reduce_error_bone_pos,
+                override_rot=args.reduce_error_bone_rot,
+                curve_mode=args.curve_mode,
+                diagnostics_out=reduction_diag,
+                progress=reporter.update,
+            )
+            reporter.end_stage()
+    finally:
+        reporter.close()
 
     # 診断レポート(dry-run 表示・report-json 出力)。疎化したときは §4.4 の疎化レポート(reduction)も載せる。
     if want_report:

@@ -12,8 +12,6 @@ from mocapvmd import cli
 
 from .helpers import bone, write_vmd
 
-_PENDING = "impl pending: cli progress wiring"
-
 
 def _curve_doc(path):
     # センターの曲線(疎化でキーが減る)。疎化段で progress(0,1)→progress(1,1) が呼ばれる。
@@ -43,7 +41,6 @@ class _RecordingReporter:
         self.events.append(("close",))
 
 
-@pytest.mark.xfail(strict=True, reason=_PENDING)
 def test_quiet_does_not_change_output(tmp_path):
     # 進捗表示は副作用専用: --quiet あり/なしで出力VMDのボーンが完全一致する。
     src = tmp_path / "in.vmd"
@@ -55,7 +52,6 @@ def test_quiet_does_not_change_output(tmp_path):
     assert io.read(str(out_q))[0].bone == io.read(str(out_n))[0].bone
 
 
-@pytest.mark.xfail(strict=True, reason=_PENDING)
 def test_quiet_sets_enabled_false_default_auto(tmp_path, monkeypatch):
     # --quiet は表示器を enabled=False で作る(無効化)。既定は enabled=None(stream.isatty で自動判定)。
     _RecordingReporter.instances = []
@@ -69,7 +65,6 @@ def test_quiet_sets_enabled_false_default_auto(tmp_path, monkeypatch):
     assert _RecordingReporter.instances[-1].enabled is None
 
 
-@pytest.mark.xfail(strict=True, reason=_PENDING)
 def test_stages_wired_and_reduce_gets_update(tmp_path, monkeypatch):
     # クリーニング→足IK安定化→疎化の順に begin_stage で囲まれ、疎化段で reporter.update が呼ばれる
     # (reduce_bones が progress=reporter.update を受け取る)。各段に end があり、最後に close。
@@ -86,7 +81,6 @@ def test_stages_wired_and_reduce_gets_update(tmp_path, monkeypatch):
     assert rep.events[-1] == ("close",)
 
 
-@pytest.mark.xfail(strict=True, reason=_PENDING)
 def test_close_called_even_when_pipeline_raises(tmp_path, monkeypatch):
     # try/finally 保証: 段の途中(疎化)で例外が起きても、例外を伝播する前に finally で close() される
     # (ハートビートを止め行を確定する例外時経路)。
