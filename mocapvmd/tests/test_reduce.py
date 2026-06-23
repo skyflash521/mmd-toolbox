@@ -328,3 +328,96 @@ def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch)
     serial = mreduce.reduce_bones(keys, "balanced", workers=1, diagnostics_out=d_ser)
     assert out == serial
     assert list(d_par.items()) == list(d_ser.items())
+
+
+# --- 進捗コールバック(progress)。疎化の進行をボーン完了単位で親へ通知する副作用専用フック。 ---
+#
+# 計画 §4 / §6.1 の契約: reduce_bones に任意の progress=None を足し、疎化対象(多キー)トラックの確定時に
+# progress(0, len(multikey))、各ボーン完了ごとに progress(done, total) を呼ぶ。total は常に多キー本数で、
+# done は 0→total を1ずつ進む(単一キー逐語トラックは数えない)。並列(完了順 unordered)でも done は
+# 単なる完了カウンタなので、(done, total) 列はシリアルと一致する。副作用専用で疎化結果は変えない。
+_PROG_PENDING = "impl pending: reduce progress callback"
+
+
+class _GenSpyPool:
+    """imap_unordered を遅延ジェネレータで返し、各 yield 時点を events に記録する疑似プール。
+    親が完了(yield)ごとに progress を呼ぶか(=完了イベント単位通知)を yield と progress の
+    interleave で検証するために使う。完了順は入力の逆順。"""
+
+    def __init__(self, events):
+        self._events = events
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def imap_unordered(self, func, items, chunksize=1):
+        for i, it in enumerate(reversed(list(items))):
+            self._events.append(("yield", i))
+            yield func(it)
+
+
+@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
+def test_progress_param_does_not_change_output():
+    # progress を渡しても疎化結果(キー列・診断)は progress 省略時と完全一致する(副作用専用)。並列・シリアル両経路。
+    keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
+    for workers in (1, 2):
+        d_cb, d_no = {}, {}
+        with_cb = mreduce.reduce_bones(
+            keys, "balanced", workers=workers, progress=lambda d, t: None, diagnostics_out=d_cb
+        )
+        without = mreduce.reduce_bones(keys, "balanced", workers=workers, diagnostics_out=d_no)
+        assert with_cb == without
+        assert list(d_cb.items()) == list(d_no.items())  # 診断も値・first-seen 順とも不変
+
+
+@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
+def test_progress_contract_serial():
+    # シリアル経路: total=多キー本数で固定、done は 0→total を1ずつ。混在する単一キーは数えない。
+    # workers=1 と「workers>1 だが多キーが閾値未満でシリアルフォールバック」の両方で同じ列になることを固定
+    # する(フォールバック経路で progress 通知が漏れる実装を弾く)。
+    multi = mreduce._MIN_PARALLEL_TRACKS - 1  # 閾値未満でシリアル経路(workers>1 でもフォールバック)
+    keys = _many_tracks(multi)
+    keys += [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(3)]  # 単一キーは progress 対象外
+    for workers in (1, 4):
+        calls = []
+        mreduce.reduce_bones(keys, "balanced", workers=workers, progress=lambda d, t: calls.append((d, t)))
+        assert calls == [(d, multi) for d in range(multi + 1)]  # (0,M),(1,M),…,(M,M)
+
+
+@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
+def test_progress_reports_zero_total_when_no_multikey():
+    # 疎化対象(多キー)が皆無でも、確定時通知 progress(0, 0) を1回だけ呼ぶ(total を確定させる)。
+    # 「多キーがあるときだけ初回通知する」実装だと total 未確定のままになるのを弾く。
+    keys = [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(5)]  # 全て単一キー
+    calls = []
+    mreduce.reduce_bones(keys, "balanced", workers=4, progress=lambda d, t: calls.append((d, t)))
+    assert calls == [(0, 0)]
+
+
+@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
+def test_progress_contract_parallel(monkeypatch):
+    # 並列経路: (done, total) 列はシリアルと同一(total 固定・done は 0→total、単一キーは数えない)。加えて
+    # 「imap_unordered の完了(yield)ごとに progress を呼ぶ」完了イベント単位通知を、yield と progress の
+    # interleave で固定する。全ワーカ結果を溜め終えてから一括で progress を呼ぶ誤実装(末尾まで進捗が
+    # 動かず停滞して見える)を弾く。
+    events = []
+    monkeypatch.setattr(mreduce, "_make_pool", lambda workers: _GenSpyPool(events))
+    multi = mreduce._MIN_PARALLEL_TRACKS  # 閾値ちょうどで並列発火
+    keys = _many_tracks(multi)
+    keys += [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(3)]
+    done_calls = []
+
+    def _prog(d, t):
+        events.append(("progress", d, t))
+        done_calls.append((d, t))
+
+    mreduce.reduce_bones(keys, "balanced", workers=3, progress=_prog)
+    assert done_calls == [(d, multi) for d in range(multi + 1)]  # total 固定・done 0→total
+    # 確定時に progress(0,M)、以後 yield ごとに progress(done,M)。yield と progress が交互に並ぶ。
+    expected = [("progress", 0, multi)]
+    for i in range(multi):
+        expected += [("yield", i), ("progress", i + 1, multi)]
+    assert events == expected
