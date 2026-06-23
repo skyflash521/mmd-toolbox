@@ -199,9 +199,6 @@ def test_diagnostics_out_does_not_change_output():
 #   reduce_bones(..., workers=N)   : ワーカ数(None=コア数基準, 1=シリアル)。
 #   mreduce._MIN_PARALLEL_TRACKS   : 並列化する多キートラック数の下限(未満はシリアルへフォールバック)。
 #   mreduce._make_pool(workers)    : プール生成シーム(発火・配分の検証で差し替える)。imap_unordered で配分。
-# 並列実装が入るまでは xfail で印を付ける(strict で、実装後に通れば XPASS となり印の取り残しを検出する)。
-
-_IMPL_PENDING = "impl pending: 並列reduce_bones"
 
 # 種別ごとに許容値が異なるので、種別を混在させると per-bone 許容値を取り違える/共通化する誤実装を弾ける。
 # 各接頭辞は分類で fingers / arms / legs / torso になり、fingers・torso・legs(=arms) で許容値が分かれる。
@@ -236,7 +233,6 @@ class _SpyPool:
         return [func(it) for it in reversed(items)]
 
 
-@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
 def test_parallel_output_matches_serial_exact():
     # 実プロセス並列(workers=2)の出力キー列がシリアル(workers=1)と完全一致する。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)  # 閾値超で並列経路を確実に通す
@@ -245,7 +241,6 @@ def test_parallel_output_matches_serial_exact():
     assert parallel == serial
 
 
-@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
 def test_parallel_diagnostics_match_serial_exact():
     # 診断データ(カット数・誤差・入出力キー数・適用許容)が並列とシリアルで、値も first-seen 順も一致する。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
@@ -255,14 +250,12 @@ def test_parallel_diagnostics_match_serial_exact():
     assert list(d_par.items()) == list(d_ser.items())
 
 
-@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
 def test_workers_one_equals_default_serial():
     # workers=1 は workers 既定(省略)と同一出力(後方互換: 既存呼び出しを変えない)。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
     assert mreduce.reduce_bones(keys, "balanced", workers=1) == mreduce.reduce_bones(keys, "balanced")
 
 
-@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
 def test_parallel_fires_at_threshold_with_worker_count(monkeypatch):
     # 発火: 多キートラック数が閾値ちょうど・workers>1 でプールが指定ワーカ数で生成され全トラックが配分される。
     # spy は完了順を逆順で返すので、出力キー列・診断の両方が first-seen 順へ復元されることを決定的に検証する
@@ -285,7 +278,6 @@ def test_parallel_fires_at_threshold_with_worker_count(monkeypatch):
     assert list(d_par.items()) == list(d_ser.items())  # 診断も first-seen 順へ復元される
 
 
-@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
 def test_below_threshold_runs_serial(monkeypatch):
     # 閾値未満の小入力はプールを作らずシリアルにフォールバックする(並列オーバーヘッド回避)。
     made = {"pool": False}
@@ -301,7 +293,6 @@ def test_below_threshold_runs_serial(monkeypatch):
     assert out == mreduce.reduce_bones(keys, "balanced", workers=1)
 
 
-@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
 def test_threshold_counts_reducible_tracks_only(monkeypatch):
     # 閾値は疎化対象(多キー)トラック数で判定する。単一キートラックは逐語透過で配分対象外なので、
     # 総トラック数が閾値以上でも多キーが閾値未満ならシリアル(プール未生成)になる。閾値判定に
@@ -321,7 +312,6 @@ def test_threshold_counts_reducible_tracks_only(monkeypatch):
     assert out == mreduce.reduce_bones(keys, "balanced", workers=1)
 
 
-@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
 def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch):
     # 並列発火時(多キーが閾値以上)に、間に挟まった単一キー(逐語透過)トラックも first-seen 位置を保ち、
     # 出力列・診断 first-seen 順がシリアルと一致する。spy は多キーを逆順返却するので、単一キーをまとめて
