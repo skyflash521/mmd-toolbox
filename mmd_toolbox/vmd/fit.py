@@ -670,6 +670,14 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     def quantized_err(cp):
         return max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
 
+    # 線形ファストパス(§6.3): 線形制御点で許容内に収まる区間は least_squares を呼ばず即採用する。
+    # 采否は量子化後誤差 <= 許容 の二値なので区間境界(キー数)は変わらず、最適化呼び出しを丸ごと
+    # 省ける。閾値(early_exit_err)が無い全探索では行わない。
+    if early_exit_err is not None:
+        lin_err = quantized_err(_BEZIER_LINEAR_CP)
+        if lin_err <= early_exit_err:
+            return (_BEZIER_LINEAR_CP, lin_err)
+
     best_cost = math.inf
     best_cp = None
     best_err = None
@@ -720,6 +728,11 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     def quantized_err(cp):
         res = resid_at(lambda x: interp._solve_factor(*cp, x))
         return max((abs(r) for r in res), default=0.0)
+
+    # 線形ファストパス(§6.3): 線形制御点で許容内に収まれば least_squares を呼ばず即採用する。
+    # 閾値(early_exit_err)が無い全探索では行わない。
+    if early_exit_err is not None and quantized_err(_BEZIER_LINEAR_CP) <= early_exit_err:
+        return _BEZIER_LINEAR_CP
 
     best_cost = math.inf
     best_cp = None

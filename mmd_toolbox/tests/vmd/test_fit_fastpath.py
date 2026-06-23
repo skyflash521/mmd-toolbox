@@ -24,7 +24,6 @@ def _count_least_squares(monkeypatch):
     return counter
 
 
-@pytest.mark.xfail(reason="impl pending: レバー1-線形ファストパス", strict=True)
 def test_linear_scalar_skips_least_squares(monkeypatch):
     # 完全に線形なサンプル(線形制御点で誤差ほぼ0)は least_squares を呼ばずに即採用する。
     calls = _count_least_squares(monkeypatch)
@@ -36,7 +35,6 @@ def test_linear_scalar_skips_least_squares(monkeypatch):
     assert err <= 0.01
 
 
-@pytest.mark.xfail(reason="impl pending: レバー1-線形ファストパス", strict=True)
 def test_coeff_linear_skips_least_squares(monkeypatch):
     # 回転の係数曲線も、係数が線形なら least_squares を呼ばず線形制御点で即採用する。
     calls = _count_least_squares(monkeypatch)
