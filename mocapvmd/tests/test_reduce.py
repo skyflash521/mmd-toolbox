@@ -6,6 +6,8 @@ mmd_toolbox.vmd.reduce.reduce_bone_track により疎化する(全範囲・全�
 結果と突き合わせて検証する。疎化アルゴリズムそのものは mmd_toolbox 側のテストに委ねる。
 """
 
+import pytest
+
 from mmd_toolbox.vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
 
 from mocapvmd import presets
@@ -185,3 +187,154 @@ def test_diagnostics_out_does_not_change_output():
     keys = _curved("右足ＩＫ")
     diag = {}
     assert mreduce.reduce_bones(keys, "balanced", diagnostics_out=diag) == mreduce.reduce_bones(keys, "balanced")
+
+
+# --- ボーン並列疎化(出力はシリアルと完全一致) ---
+#
+# 不変条件: ボーン単位の reduce は決定論的かつ実行順に非依存なので、並列化(ボーンを並行に
+# reduce し固定順 first-seen へ再結合)しても reduce_bones の出力はシリアル(workers=1)と完全に
+# 一致する。出力キー列・診断 diagnostics_out(値と first-seen 順)・ワーカ数によらない決定性を検証する。
+#
+# テストが触れる実装シーム:
+#   reduce_bones(..., workers=N)   : ワーカ数(None=コア数基準, 1=シリアル)。
+#   mreduce._MIN_PARALLEL_TRACKS   : 並列化する多キートラック数の下限(未満はシリアルへフォールバック)。
+#   mreduce._make_pool(workers)    : プール生成シーム(発火・配分の検証で差し替える)。imap_unordered で配分。
+# 並列実装が入るまでは xfail で印を付ける(strict で、実装後に通れば XPASS となり印の取り残しを検出する)。
+
+_IMPL_PENDING = "impl pending: 並列reduce_bones"
+
+# 種別ごとに許容値が異なるので、種別を混在させると per-bone 許容値を取り違える/共通化する誤実装を弾ける。
+# 各接頭辞は分類で fingers / arms / legs / torso になり、fingers・torso・legs(=arms) で許容値が分かれる。
+_PARALLEL_PREFIXES = ("右人指", "右腕", "右足", "上半身")
+
+
+def _many_tracks(n_tracks, n=11):
+    # 互いに曲率の異なる多キートラックを n_tracks 本。名前は一意で、種別(=許容値)が混在する。
+    keys = []
+    for i in range(n_tracks):
+        name = f"{_PARALLEL_PREFIXES[i % len(_PARALLEL_PREFIXES)]}{i:02d}"
+        keys.extend(_curved(name, n=n, k=0.01 + 0.001 * i))
+    return keys
+
+
+class _SpyPool:
+    """_make_pool 差し替え用の疑似プール。配分数を記録し、ワーカ関数を完了順=入力の逆順で
+    シリアル実行する。完了順に結果を連結して first-seen 順を壊す誤実装(順序復元の欠落)を弾く。"""
+
+    def __init__(self, recorder):
+        self._rec = recorder
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def imap_unordered(self, func, items, chunksize=1):
+        items = list(items)
+        self._rec["dispatched"] = len(items)
+        return [func(it) for it in reversed(items)]
+
+
+@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
+def test_parallel_output_matches_serial_exact():
+    # 実プロセス並列(workers=2)の出力キー列がシリアル(workers=1)と完全一致する。
+    keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)  # 閾値超で並列経路を確実に通す
+    parallel = mreduce.reduce_bones(keys, "balanced", workers=2)
+    serial = mreduce.reduce_bones(keys, "balanced", workers=1)
+    assert parallel == serial
+
+
+@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
+def test_parallel_diagnostics_match_serial_exact():
+    # 診断データ(カット数・誤差・入出力キー数・適用許容)が並列とシリアルで、値も first-seen 順も一致する。
+    keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
+    d_par, d_ser = {}, {}
+    mreduce.reduce_bones(keys, "balanced", workers=2, diagnostics_out=d_par)
+    mreduce.reduce_bones(keys, "balanced", workers=1, diagnostics_out=d_ser)
+    assert list(d_par.items()) == list(d_ser.items())
+
+
+@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
+def test_workers_one_equals_default_serial():
+    # workers=1 は workers 既定(省略)と同一出力(後方互換: 既存呼び出しを変えない)。
+    keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
+    assert mreduce.reduce_bones(keys, "balanced", workers=1) == mreduce.reduce_bones(keys, "balanced")
+
+
+@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
+def test_parallel_fires_at_threshold_with_worker_count(monkeypatch):
+    # 発火: 多キートラック数が閾値ちょうど・workers>1 でプールが指定ワーカ数で生成され全トラックが配分される。
+    # spy は完了順を逆順で返すので、出力キー列・診断の両方が first-seen 順へ復元されることを決定的に検証する
+    # (完了順のまま格納して first-seen 順を壊す誤実装を、出力・診断の双方で弾く)。
+    rec = {}
+
+    def fake_make_pool(workers):
+        rec["workers"] = workers
+        return _SpyPool(rec)
+
+    monkeypatch.setattr(mreduce, "_make_pool", fake_make_pool)
+    n = mreduce._MIN_PARALLEL_TRACKS  # 閾値ちょうど(>= で並列)
+    keys = _many_tracks(n)
+    d_par, d_ser = {}, {}
+    out = mreduce.reduce_bones(keys, "balanced", workers=3, diagnostics_out=d_par)
+    assert rec["workers"] == 3
+    assert rec["dispatched"] == n  # 全多キートラックがワーカへ配分される
+    serial = mreduce.reduce_bones(keys, "balanced", workers=1, diagnostics_out=d_ser)
+    assert out == serial  # 逆順返却でも出力キーは first-seen 順に一致
+    assert list(d_par.items()) == list(d_ser.items())  # 診断も first-seen 順へ復元される
+
+
+@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
+def test_below_threshold_runs_serial(monkeypatch):
+    # 閾値未満の小入力はプールを作らずシリアルにフォールバックする(並列オーバーヘッド回避)。
+    made = {"pool": False}
+
+    def fake_make_pool(workers):
+        made["pool"] = True
+        return _SpyPool({})
+
+    monkeypatch.setattr(mreduce, "_make_pool", fake_make_pool)
+    keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS - 1)  # 閾値未満
+    out = mreduce.reduce_bones(keys, "balanced", workers=4)
+    assert made["pool"] is False
+    assert out == mreduce.reduce_bones(keys, "balanced", workers=1)
+
+
+@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
+def test_threshold_counts_reducible_tracks_only(monkeypatch):
+    # 閾値は疎化対象(多キー)トラック数で判定する。単一キートラックは逐語透過で配分対象外なので、
+    # 総トラック数が閾値以上でも多キーが閾値未満ならシリアル(プール未生成)になる。閾値判定に
+    # 「全トラック数」を誤用する実装を弾く。
+    made = {"pool": False}
+
+    def fake_make_pool(workers):
+        made["pool"] = True
+        return _SpyPool({})
+
+    monkeypatch.setattr(mreduce, "_make_pool", fake_make_pool)
+    multi = _many_tracks(mreduce._MIN_PARALLEL_TRACKS - 1)  # 多キーは閾値未満
+    singles = [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(mreduce._MIN_PARALLEL_TRACKS)]
+    keys = multi + singles  # 総トラック数は閾値以上だが、多キーは閾値未満
+    out = mreduce.reduce_bones(keys, "balanced", workers=4)
+    assert made["pool"] is False
+    assert out == mreduce.reduce_bones(keys, "balanced", workers=1)
+
+
+@pytest.mark.xfail(reason=_IMPL_PENDING, strict=True)
+def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch):
+    # 並列発火時(多キーが閾値以上)に、間に挟まった単一キー(逐語透過)トラックも first-seen 位置を保ち、
+    # 出力列・診断 first-seen 順がシリアルと一致する。spy は多キーを逆順返却するので、単一キーをまとめて
+    # 先頭/末尾へ別結合する誤実装や、多キーの順序復元漏れを決定的に弾く。
+    rec = {}
+    monkeypatch.setattr(mreduce, "_make_pool", lambda workers: _SpyPool(rec))
+    keys = []
+    for i in range(mreduce._MIN_PARALLEL_TRACKS):  # 多キーは閾値ちょうど(並列発火)
+        name = f"{_PARALLEL_PREFIXES[i % len(_PARALLEL_PREFIXES)]}{i:02d}"
+        keys.extend(_curved(name, k=0.01 + 0.001 * i))
+        keys.append(bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)))  # 各多キーの直後に単一キーを挟む
+    d_par, d_ser = {}, {}
+    out = mreduce.reduce_bones(keys, "balanced", workers=3, diagnostics_out=d_par)
+    serial = mreduce.reduce_bones(keys, "balanced", workers=1, diagnostics_out=d_ser)
+    assert out == serial
+    assert list(d_par.items()) == list(d_ser.items())
