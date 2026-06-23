@@ -89,7 +89,7 @@ def _resolve_workers(workers):
 
 def reduce_bones(
     cleaned_keys, preset, *, override_pos=None, override_rot=None, curve_mode="bezier",
-    diagnostics_out=None, workers=None,
+    diagnostics_out=None, workers=None, progress=None,
 ):
     """クリーニング後の全密ボーントラックを種別別許容誤差で疎化し、疎なキー列を返す(§5.3)。
 
@@ -106,6 +106,13 @@ def reduce_bones(
     {input_keys, output_keys, tol_pos, tol_rot, cuts, errors} を埋める。cuts は reduce_bone_track の
     検出カット数、errors は measure_bone_errors の軸別最大再生誤差(疎化前の密 vs 疎化後)。キー1個以下の
     逐語トラックは削減なし(入出力同数・カット0・誤差0)として載せる。収集は疎化結果を変えない。
+
+    progress に callable(done, total) を渡すと疎化の進行を通知する(副作用専用で結果は変えない)。
+    疎化対象=多キートラックの確定時に progress(0, total)(total=多キー本数。皆無でも (0, 0) を1回)、
+    以後ボーンが1本疎化完了するたびに progress(done, total) を呼ぶ(done は 0→total)。キー1個以下の
+    逐語トラックは対象外で数えない。並列経路では完了(imap_unordered の yield)ごとに、シリアル経路では
+    各トラックの疎化完了時に呼ぶので、done の進み方は完了順(並列では非決定)だが (done, total) の値列は
+    ワーカ数・完了順に依らず一致する。
     """
     order = []
     groups = {}
@@ -119,13 +126,20 @@ def reduce_bones(
     sorted_tracks = {name: sorted(groups[name], key=lambda k: k.frame) for name in order}
     multikey = [name for name in order if len(sorted_tracks[name]) > 1]
 
+    # 疎化対象(多キー)の確定を total として通知する。done は完了ごとに進める(多キー皆無なら (0, 0) のみ)。
+    total = len(multikey)
+    done = 0
+    if progress is not None:
+        progress(done, total)
+
     def _tol(name):
         return presets.resolve_reduction_tolerances(
             preset, classify.classify(name), override_pos=override_pos, override_rot=override_rot
         )
 
     # 多キートラックが閾値以上・workers>1 ならプロセス並列で先に疎化する。結果は name でひいて後段の
-    # first-seen ループへ渡すので、ワーカの完了順に依存しない(出力・診断はシリアルと完全一致)。
+    # first-seen ループへ渡すので、ワーカの完了順に依存しない(出力・診断はシリアルと完全一致)。進捗は
+    # 完了(imap_unordered の yield)ごとに通知し、待ち時間に進行が見えるようにする。
     precomputed = {}
     n_workers = _resolve_workers(workers)
     if n_workers > 1 and len(multikey) >= _MIN_PARALLEL_TRACKS:
@@ -136,6 +150,9 @@ def reduce_bones(
         with _make_pool(n_workers) as pool:
             for name, reduced, payload in pool.imap_unordered(_reduce_one, work, chunksize=1):
                 precomputed[name] = (reduced, payload)
+                done += 1
+                if progress is not None:
+                    progress(done, total)
 
     out = []
     for name in order:
@@ -157,7 +174,11 @@ def reduce_bones(
         if name in precomputed:
             reduced, payload = precomputed[name]
         else:
+            # シリアル経路(並列フォールバック含む)。ここで疎化したぶんだけ完了を進める(並列ぶんは imap で通知済み)。
             reduced, payload = _reduce_track(ks, tol["bone_pos"], tol["bone_rot"], curve_mode, want_diag)
+            done += 1
+            if progress is not None:
+                progress(done, total)
         out.extend(reduced)
         if want_diag:
             f0, f1 = ks[0].frame, ks[-1].frame

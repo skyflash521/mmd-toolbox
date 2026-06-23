@@ -336,7 +336,6 @@ def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch)
 # progress(0, len(multikey))、各ボーン完了ごとに progress(done, total) を呼ぶ。total は常に多キー本数で、
 # done は 0→total を1ずつ進む(単一キー逐語トラックは数えない)。並列(完了順 unordered)でも done は
 # 単なる完了カウンタなので、(done, total) 列はシリアルと一致する。副作用専用で疎化結果は変えない。
-_PROG_PENDING = "impl pending: reduce progress callback"
 
 
 class _GenSpyPool:
@@ -359,7 +358,6 @@ class _GenSpyPool:
             yield func(it)
 
 
-@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
 def test_progress_param_does_not_change_output():
     # progress を渡しても疎化結果(キー列・診断)は progress 省略時と完全一致する(副作用専用)。並列・シリアル両経路。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
@@ -373,7 +371,6 @@ def test_progress_param_does_not_change_output():
         assert list(d_cb.items()) == list(d_no.items())  # 診断も値・first-seen 順とも不変
 
 
-@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
 def test_progress_contract_serial():
     # シリアル経路: total=多キー本数で固定、done は 0→total を1ずつ。混在する単一キーは数えない。
     # workers=1 と「workers>1 だが多キーが閾値未満でシリアルフォールバック」の両方で同じ列になることを固定
@@ -387,7 +384,6 @@ def test_progress_contract_serial():
         assert calls == [(d, multi) for d in range(multi + 1)]  # (0,M),(1,M),…,(M,M)
 
 
-@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
 def test_progress_reports_zero_total_when_no_multikey():
     # 疎化対象(多キー)が皆無でも、確定時通知 progress(0, 0) を1回だけ呼ぶ(total を確定させる)。
     # 「多キーがあるときだけ初回通知する」実装だと total 未確定のままになるのを弾く。
@@ -397,7 +393,6 @@ def test_progress_reports_zero_total_when_no_multikey():
     assert calls == [(0, 0)]
 
 
-@pytest.mark.xfail(strict=True, reason=_PROG_PENDING)
 def test_progress_contract_parallel(monkeypatch):
     # 並列経路: (done, total) 列はシリアルと同一(total 固定・done は 0→total、単一キーは数えない)。加えて
     # 「imap_unordered の完了(yield)ごとに progress を呼ぶ」完了イベント単位通知を、yield と progress の
