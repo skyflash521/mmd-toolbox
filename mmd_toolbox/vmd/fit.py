@@ -580,6 +580,8 @@ _BEZIER_INITS = (
     (0.0, 0.0, 0.58, 1.0),   # ease-out
     (0.42, 0.0, 0.58, 1.0),  # ease-in-out
 )
+# 高コスト区間で試す初期値の部分集合(線形 + ease-in-out)。先勝ち順は維持する。
+_BEZIER_INITS_LARGE = (_BEZIER_INITS[0], _BEZIER_INITS[3])
 _BEZIER_LINEAR_CP = (20, 20, 107, 107)
 
 # least_squares の収束許容(§6.3)。采否は量子化後誤差で判定するので scipy 既定精度(~1e-8)まで
@@ -599,6 +601,17 @@ def _lsq_kwargs(n_samples):
     if n_samples < _LSQ_LOOSEN_MIN_SAMPLES:
         return {}
     return {"ftol": _LSQ_LOOSE_TOL, "xtol": _LSQ_LOOSE_TOL, "gtol": _LSQ_LOOSE_TOL}
+
+
+def _bezier_inits(n_samples):
+    """サンプル数に応じて試す初期値集合を返す(§6.3)。
+
+    初期値数を減らすと least_squares 呼び出しが減って速くなるが、当たる曲線形が減るので
+    フィットが悪化し分割が増えうる。削減の速度効果はサンプル数に比例するため、閾値以上の高コスト
+    区間だけ部分集合(線形+ease-in-out)に絞り、小区間は全初期値を試す(削っても効果が乏しく
+    圧縮劣化だけ招くため)。
+    """
+    return _BEZIER_INITS_LARGE if n_samples >= _LSQ_LOOSEN_MIN_SAMPLES else _BEZIER_INITS
 
 
 def _bez(s, c1, c2):
@@ -700,7 +713,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     best_cost = math.inf
     best_cp = None
     best_err = None
-    for ix1, iy1, ix2, iy2 in _BEZIER_INITS:
+    for ix1, iy1, ix2, iy2 in _bezier_inits(len(xs)):
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
@@ -756,7 +769,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     lsq_kw = _lsq_kwargs(len(xs))
     best_cost = math.inf
     best_cp = None
-    for ix1, iy1, ix2, iy2 in _BEZIER_INITS:
+    for ix1, iy1, ix2, iy2 in _bezier_inits(len(xs)):
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
