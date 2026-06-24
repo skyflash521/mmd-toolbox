@@ -229,21 +229,23 @@ def main(argv=None):
     # 進捗のライブ表示。重い疎化の進行を端末へ出す(--quiet で無効、既定は stderr が端末のときだけ)。
     # 各段を stage で1本の行に切り替えて表示し、疎化は per-bone の reporter.update を progress に渡す。
     # 例外時もハートビートを止め行を消すため try/finally で囲む。読み書きは速い I/O なので段にしない。
+    # 段ラベルは厳密な仕様用語でなく利用者向けの平易な文言にする(平滑化=クリーニング、足IK最適化=足IK
+    # 安定化、キーフレーム圧縮=疎化)。
     reporter = progress.ProgressReporter(sys.stderr, enabled=False if args.quiet else None)
     # 疎化レポートを出すときだけ診断 diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
     want_report = args.dry_run or args.report_json or args.preview_csv
     reduction_diag = {} if (args.reduce and want_report) else None
     try:
         if args.denoise:
-            reporter.stage("クリーニング")
+            reporter.stage("平滑化")
             new_bone = _clean_bones(doc.bone, args.preset)
         else:
             new_bone = doc.bone
         if args.foot_ik_stabilize:
-            reporter.stage("足IK安定化")
+            reporter.stage("足IK最適化")
             new_bone = _stabilize_bones(new_bone, args.preset)
         if args.reduce:
-            reporter.stage("疎化")
+            reporter.stage("キーフレーム圧縮")
             new_bone = reduce.reduce_bones(
                 new_bone,
                 args.reduce_preset,

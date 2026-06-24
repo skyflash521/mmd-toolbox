@@ -76,8 +76,8 @@ def test_stages_wired_reduce_update_and_completion(tmp_path, monkeypatch):
     _curve_doc(src)
     assert cli.main([str(src), "-o", str(out)]) == 0
     rep = _RecordingReporter.instances[-1]
-    assert [e[1] for e in rep.events if e[0] == "stage"] == ["クリーニング", "足IK安定化", "疎化"]
-    assert any(e[0] == "update" for e in rep.events)  # 疎化が update を呼ぶ
+    assert [e[1] for e in rep.events if e[0] == "stage"] == ["平滑化", "足IK最適化", "キーフレーム圧縮"]
+    assert any(e[0] == "update" for e in rep.events)  # 疎化(キーフレーム圧縮)が update を呼ぶ
     assert ("close",) in rep.events
     assert rep.events[-1] == ("summary", f"完了 {out}")  # 書き込み後に完了行を出す
 
@@ -91,7 +91,7 @@ def test_disabled_stages_are_skipped(tmp_path, monkeypatch):
     out = tmp_path / "out.vmd"
     _curve_doc(src)
     assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"]) == 0
-    assert [e[1] for e in _RecordingReporter.instances[-1].events if e[0] == "stage"] == ["疎化"]
+    assert [e[1] for e in _RecordingReporter.instances[-1].events if e[0] == "stage"] == ["キーフレーム圧縮"]
     assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"]) == 0
     assert [e[1] for e in _RecordingReporter.instances[-1].events if e[0] == "stage"] == []
 
