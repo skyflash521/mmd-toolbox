@@ -117,6 +117,71 @@ def test_adjacent_segment_accepted():
     assert keys == [0, 1]
 
 
+@pytest.mark.xfail(
+    reason="impl pending: _presplit 定数区間非分割", raises=AssertionError
+)
+def test_constant_span_not_presplit():
+    # 全フレーム同値(定数)の span は max_seg を超えても等分されず両端2キーになる
+    # (定数区間には編集すべき曲がりが無いため max_seg 事前分割の対象外。§4.3)。
+    ch = lin(0, [5.0] * 101, tol=0.01)
+    keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
+    assert keys == [0, 100]
+
+
+def test_loose_non_constant_span_still_presplit():
+    # 緩い線形(定数でない)長い span は従来通り max_seg 等分される(編集容易性の回帰防止)。
+    ch = lin(0, [float(i) for i in range(101)], tol=1.0)
+    keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
+    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    assert all(g <= 40 for g in gaps)
+    assert len(gaps) == 3  # 定数判定が誤発火せず従来の事前分割が残る
+
+
+def test_mixed_constant_and_varying_span_presplit():
+    # 前半定数＋後半変化が1 span に混在。span 全体が定数でないため従来通り max_seg 等分される
+    # (初期実装は span 全体が定数のときだけ非分割。部分定数は最適化対象外=§7 の既知の限界)。
+    vals = [5.0] * 61 + [5.0 + float(i + 1) for i in range(40)]  # 0..60 定数, 61..100 上昇
+    ch = lin(0, vals, tol=1.0)
+    keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
+    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    assert all(g <= 40 for g in gaps)
+    # 定数前半 (0,60) は tol 分割を生まないため、そこに内部キーがあれば事前分割が
+    # 前半まで及んだ証拠(混在 span は畳まず従来等分される)。max_seg=40・span=100 で
+    # 事前分割点は 33 に置かれ、定数前半に入る。
+    assert any(0 < k < 60 for k in keys)
+
+
+def test_presplit_requires_all_channels_constant():
+    # 片方のチャンネルが変化していれば span 全体は定数でない → 従来通り等分(全チャンネル定数が条件)。
+    const_ch = lin(0, [5.0] * 101, tol=0.01)
+    vary_ch = lin(0, [float(i) for i in range(101)], tol=1.0)
+    keys = reduce_track([0, 100], [const_ch, vary_ch], min_seg=1, max_seg=40, strict=False)
+    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    assert all(g <= 40 for g in gaps)
+    assert len(gaps) == 3
+
+
+def test_fallback_presplit_when_channel_lacks_is_constant():
+    # is_constant を持たないチャンネル(StubChannel 等)では従来の _presplit 動作にフォールバックする。
+    class StubChannel:
+        def normalized(self, a, b):
+            return (0.0, None)  # 常に許容内(tol 分割しない)
+
+    keys = reduce_track([0, 100], [StubChannel()], min_seg=1, max_seg=40, strict=False)
+    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    assert all(g <= 40 for g in gaps)
+    assert len(gaps) == 3  # is_constant 不在 → 従来どおり等分
+
+
+def test_constant_span_presplit_deterministic():
+    # 同入力・同引数で同出力(決定論)。
+    def run():
+        ch = lin(0, [5.0] * 101, tol=0.01)
+        return reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
+
+    assert run() == run()
+
+
 def test_reduce_uses_only_normalized_contract():
     # reduce_track はチャンネルの normalized(a,b) のみに依存する(ダックタイプ)。
     # 余計な属性を持たない最小スタブでも動作すること。
