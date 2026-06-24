@@ -142,6 +142,25 @@ def _span_length(group: list[MouthEvent]) -> float:
     return group[-1].end - group[0].start
 
 
+def _preceding_event(events: Sequence[MouthEvent], start: float) -> MouthEvent | None:
+    """終端フレームが start に一致する直前イベント(連続契約により一意。無ければ None)。"""
+    for ev in events:
+        if ev.end == start:
+            return ev
+    return None
+
+
+def _anticipation_frames(prev: MouthEvent | None, params: GenerationParams) -> int:
+    """先行準備の前倒し量 A_eff(implementation-plan.md §4.10)。
+
+    直前が無音区間のときのみ、先行フレーム数を直前区間長の 1/2 で自動短縮した値。直前が無い・母音・
+    両唇閉鎖のときは 0(先行しない)。前区間長の 1/2 上限により前区間を侵食せず負フレームにも出ない。
+    """
+    if prev is None or prev.shape is not MouthShape.SILENCE:
+        return 0
+    return min(params.anticipation_frames, math.floor((prev.end - prev.start) / 2))
+
+
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
@@ -163,8 +182,10 @@ def generate_morph_keys(
         coart_in = i > 0 and _adjacent(groups[i - 1], group)
         coart_out = i < len(groups) - 1 and _adjacent(group, groups[i + 1])
         if not coart_in:
-            f_start = round(group[0].start)
-            f_attack = round(group[0].start + params.attack_frames)
+            # §4.10 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(アタック長は不変)。
+            antic = _anticipation_frames(_preceding_event(events, group[0].start), params)
+            f_start = round(group[0].start - antic)
+            f_attack = round(group[0].start - antic + params.attack_frames)
             for morph, weight in gw[0].items():
                 keys.append(_morph_key(morph, f_start, 0.0))
                 keys.append(_morph_key(morph, f_attack, weight))
