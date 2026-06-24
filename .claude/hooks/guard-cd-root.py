@@ -85,8 +85,10 @@ def _target_arg(seg):
     """Return (is_cd, target) where target is the first positional directory argument or None.
 
     Flags (`cd -L`, `cd -P`, `cd --`) take no value and are skipped; the first non-flag token is
-    the directory. `cd` with no positional argument targets HOME and yields None. `pushd -n` only
-    manipulates the directory stack without changing cwd, so it is not treated as a cd.
+    the directory. The cmd.exe drive-switch flag `cd /d <dir>` is also skipped (a committer may emit
+    this Windows form), so the path after it is matched. `cd` with no positional argument targets
+    HOME and yields None. `pushd -n` only manipulates the directory stack without changing cwd, so it
+    is not treated as a cd.
     """
     if not seg or not _is_cd_verb(seg[0]):
         return False, None
@@ -95,6 +97,8 @@ def _target_arg(seg):
         return False, None
     for token in args:
         if token.startswith("-") and token != "-":
+            continue
+        if token.lower() == "/d":  # cmd.exe の cd /d はドライブ切替フラグでありディレクトリでない
             continue
         return True, token
     return True, None
@@ -184,6 +188,13 @@ def selftest():
         ("cd f:/Repositories/Skyflash/sub/../mmd-toolbox", "deny"),
         ("pushd f:/Repositories/Skyflash/mmd-toolbox", "deny"),
         ("chdir f:/Repositories/Skyflash/mmd-toolbox", "deny"),
+        # cmd.exe の cd /d <dir> 形式(コミッタが出すことがある) -> /d を読み飛ばしルートを捕捉 -> deny
+        ("cd /d f:/Repositories/Skyflash/mmd-toolbox", "deny"),
+        ("cd /d \"f:/Repositories/Skyflash/mmd-toolbox\" && git status --short", "deny"),
+        ("cd /D f:/Repositories/Skyflash/mmd-toolbox", "deny"),
+        # /d 単体(対象なし)や MSYS のドライブ表記 /d/... はルートでない -> pass
+        ("cd /d", "pass"),
+        ("cd /d/other", "pass"),
         # pushd -n はディレクトリスタック操作のみで cwd を変えない(ルート移動でない) -> pass
         ("pushd -n .", "pass"),
         ("pushd -n f:/Repositories/Skyflash/mmd-toolbox && dirs -v", "pass"),
