@@ -51,7 +51,6 @@ class GenerationParams:
     vowel_scale: tuple[float, float, float, float, float] = (1.0, 1.0, 1.0, 1.0, 1.0)
     attack_frames: int = 2
     release_frames: int = 2
-    transition_frames: int = 2
     min_hold_frames: int = 3
     coartic_overlap_max: int = 2  # 協調調音の重なり上限(=基準長)
     anticipation_frames: int = 1  # 母音口形の先行準備

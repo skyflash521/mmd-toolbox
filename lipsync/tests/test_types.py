@@ -33,7 +33,6 @@ def test_generation_params_defaults():
     assert p.vowel_scale == (1.0, 1.0, 1.0, 1.0, 1.0)
     assert p.attack_frames == 2
     assert p.release_frames == 2
-    assert p.transition_frames == 2
     assert p.min_hold_frames == 3
     assert p.coartic_overlap_max == 2
     assert p.anticipation_frames == 1
