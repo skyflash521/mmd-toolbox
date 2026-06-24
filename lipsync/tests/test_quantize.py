@@ -28,7 +28,6 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-@pytest.mark.xfail(reason="impl pending: L-9 量子化")
 def test_t1_coartic_collision_resolved():
     # あ[0,10]op0.5・う[10,20]op0.5、既定(overlap_max=2)。diff(あ,う)=1 で T=1、境界10。
     # 遷移目標は s=9.5・b=10.0・e=10.5。四捨五入(半上げ)で 9.5→10・10.0→10・10.5→11。

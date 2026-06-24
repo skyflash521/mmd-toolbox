@@ -52,6 +52,14 @@ def _morph_key(name: str, frame: int, weight: float) -> MorphKey:
     return MorphKey(name.encode("cp932").ljust(15, b"\x00"), frame, weight)
 
 
+def _half_up(value: float) -> int:
+    """四捨五入(0.5 は切り上げ)。Python の round() の銀行家丸めを避ける(implementation-plan.md §4.5)。
+
+    フレーム番号の偶奇に依存せず `.5` 目標(協調調音で遷移長 T が奇数のときの b ± T/2 等)を確定する。
+    """
+    return math.floor(value + 0.5)
+
+
 def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) -> dict[str, float]:
     """母音の合成プロファイルから各口モーフの重みを求める(implementation-plan.md §4.1)。
 
@@ -105,7 +113,7 @@ def _transition_frames(diff: float, shorter_len: float, params: GenerationParams
     base = params.coartic_overlap_max
     value = base * (1.0 - 0.5 * diff)
     cap = min(float(base), shorter_len / 2.0)
-    return round(max(1.0, min(value, cap)))
+    return _half_up(max(1.0, min(value, cap)))
 
 
 def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
@@ -251,6 +259,43 @@ def _anticipation_frames(prev: MouthEvent | None, params: GenerationParams) -> i
     return min(params.anticipation_frames, math.floor((prev.end - prev.start) / 2))
 
 
+def _quantize_targets(targets: Sequence[tuple[str, float, float]]) -> list[MorphKey]:
+    """float 目標位置の (モーフ名, フレーム, 重み) 列を整数フレームへ量子化する(implementation-plan.md §4.5)。
+
+    `targets` は生成順(=列の添字が生成順)。手順:
+    (1) 各目標を `_half_up`(四捨五入)で整数フレーム化する。
+    (2) 同一モーフ・同一整数フレームへ潰れた目標は、量子化前フレームが最も後ろ(タイは生成順が後)の
+        目標値へ統合する(協調調音 T=1 の b ± T/2 が同フレームへ潰れる衝突もここで解消)。
+    (3) モーフごとに (整数フレーム, 量子化前フレーム, 生成順) 昇順で走査し、直前に確定した同一モーフの
+        キーと同じフレームかそれ以前へ来るキーを `直前 + 1` へずらして厳密昇順化する(1フレーム以上離れた
+        キーは動かさない)。
+
+    返すのは時間順(§4.7)の MorphKey 列。
+    """
+    # (1)+(2) 同一(モーフ,整数フレーム)へ統合。量子化前フレーム最後尾、タイは生成順が後を残す。
+    best: dict[tuple[str, int], tuple[float, int, float]] = {}
+    for seq, (morph, frame_f, weight) in enumerate(targets):
+        cell = (morph, _half_up(frame_f))
+        current = best.get(cell)
+        if current is None or (frame_f, seq) > (current[0], current[1]):
+            best[cell] = (frame_f, seq, weight)
+    # (3) モーフごとに昇順走査して単調化する。
+    by_morph: dict[str, list[tuple[int, float, int, float]]] = {}
+    for (morph, frame), (frame_f, seq, weight) in best.items():
+        by_morph.setdefault(morph, []).append((frame, frame_f, seq, weight))
+    keys: list[MorphKey] = []
+    for morph, items in by_morph.items():
+        items.sort()
+        prev: int | None = None
+        for frame, _frame_f, _seq, weight in items:
+            if prev is not None and frame <= prev:
+                frame = prev + 1
+            prev = frame
+            keys.append(_morph_key(morph, frame, weight))
+    keys.sort(key=lambda k: k.frame)
+    return keys
+
+
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
@@ -267,7 +312,8 @@ def generate_morph_keys(
     """
     groups = _normalize_groups(events, params)
     weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g.events] for g in groups]
-    keys: list[MorphKey] = []
+    # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、§4.5 で一括量子化する。
+    targets: list[tuple[str, float, float]] = []
     # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
     for i, g in enumerate(groups):
         gw = weights[i]
@@ -276,22 +322,22 @@ def generate_morph_keys(
         if not coart_in:
             # §4.10 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(実効アタック長は不変)。
             antic = _anticipation_frames(_preceding_event(events, g.start), params)
-            f_start = round(g.start - antic)
-            f_attack = round(g.start - antic + g.attack)
+            f_start = g.start - antic
+            f_attack = g.start - antic + g.attack
             for morph, weight in gw[0].items():
-                keys.append(_morph_key(morph, f_start, 0.0))
-                keys.append(_morph_key(morph, f_attack, weight))
+                targets.append((morph, f_start, 0.0))
+                targets.append((morph, f_attack, weight))
         if not coart_out:
-            f_hold_end = round(g.end - g.release)
-            f_end = round(g.end)
+            f_hold_end = g.end - g.release
+            f_end = g.end
             for morph, weight in gw[-1].items():
-                keys.append(_morph_key(morph, f_hold_end, weight))
-                keys.append(_morph_key(morph, f_end, 0.0))
+                targets.append((morph, f_hold_end, weight))
+                targets.append((morph, f_end, 0.0))
         if len(g.events) >= 2:
             for ev, w in zip(g.events, gw):
-                f_mid = round((ev.start + ev.end) / 2)
+                f_mid = (ev.start + ev.end) / 2.0
                 for morph, weight in w.items():
-                    keys.append(_morph_key(morph, f_mid, weight))
+                    targets.append((morph, f_mid, weight))
     # 隣接する異母音グループ境界の協調調音(§4.3)。閉口を挟まず中間口形へ線形遷移する。
     for i in range(len(groups) - 1):
         if groups[i].end != groups[i + 1].start:
@@ -301,13 +347,12 @@ def generate_morph_keys(
         diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
         shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
         half = _transition_frames(diff, shorter, params) / 2.0
-        f_s, f_b, f_e = round(boundary - half), round(boundary), round(boundary + half)
+        f_s, f_b, f_e = boundary - half, boundary, boundary + half
         for morph in _VOWEL_ORDER:
             a, b = wa.get(morph, 0.0), wb.get(morph, 0.0)
             if a == 0.0 and b == 0.0:
                 continue
-            keys.append(_morph_key(morph, f_s, a))
-            keys.append(_morph_key(morph, f_b, (a + b) / 2.0))
-            keys.append(_morph_key(morph, f_e, b))
-    keys.sort(key=lambda k: k.frame)
-    return keys
+            targets.append((morph, f_s, a))
+            targets.append((morph, f_b, (a + b) / 2.0))
+            targets.append((morph, f_e, b))
+    return _quantize_targets(targets)
