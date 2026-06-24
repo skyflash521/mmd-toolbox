@@ -227,25 +227,23 @@ def main(argv=None):
     # 実行し、出力の書き出しだけを dry-run で省く。一般ノイズ軽減は全ボーン(--no-denoise 時は逐語透過)、
     # 足IK安定化は分類 foot_ik / toe_ik(§4.3 / §6)、疎化は全ボーン(--no-reduce 時は密キーのまま)に適用する。
     # 進捗のライブ表示。重い疎化の進行を端末へ出す(--quiet で無効、既定は stderr が端末のときだけ)。
-    # 各段を begin_stage/end_stage で囲み、疎化は per-bone の reporter.update を progress に渡す。例外時も
-    # finally でハートビートを止め行を確定するため try/finally で囲む。読み書きは速い I/O なので段にしない。
+    # 各段を stage で1本の行に切り替えて表示し、疎化は per-bone の reporter.update を progress に渡す。
+    # 例外時もハートビートを止め行を消すため try/finally で囲む。読み書きは速い I/O なので段にしない。
     reporter = progress.ProgressReporter(sys.stderr, enabled=False if args.quiet else None)
     # 疎化レポートを出すときだけ診断 diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
     want_report = args.dry_run or args.report_json or args.preview_csv
     reduction_diag = {} if (args.reduce and want_report) else None
     try:
         if args.denoise:
-            reporter.begin_stage("クリーニング")
+            reporter.stage("クリーニング")
             new_bone = _clean_bones(doc.bone, args.preset)
-            reporter.end_stage()
         else:
             new_bone = doc.bone
         if args.foot_ik_stabilize:
-            reporter.begin_stage("足IK安定化")
+            reporter.stage("足IK安定化")
             new_bone = _stabilize_bones(new_bone, args.preset)
-            reporter.end_stage()
         if args.reduce:
-            reporter.begin_stage("疎化")
+            reporter.stage("疎化")
             new_bone = reduce.reduce_bones(
                 new_bone,
                 args.reduce_preset,
@@ -255,7 +253,6 @@ def main(argv=None):
                 diagnostics_out=reduction_diag,
                 progress=reporter.update,
             )
-            reporter.end_stage()
     finally:
         reporter.close()
 
@@ -291,4 +288,6 @@ def main(argv=None):
         io.write_file(out_doc, output)
     except Exception:
         return 3
+    # 進捗表示が有効だった(端末・非 quiet)ときだけ、消した進捗行のあとに完了行を1行残す。
+    reporter.summary(f"完了 {output}")
     return 0

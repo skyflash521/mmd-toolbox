@@ -1,8 +1,9 @@
-"""mocapvmd CLI の進捗表示配線のテスト(実装計画 §4・§6.4)。
+"""mocapvmd CLI の進捗表示配線のテスト(mocapvmd.md §3.2 進捗表示)。
 
 進捗表示は副作用専用で出力VMDを変えない。--quiet で無効化(表示器 enabled=False)、既定は TTY 自動判定
-(enabled=None)。クリーニング・足IK安定化・疎化の各段が begin_stage/end_stage で囲まれ、重い疎化は
-reporter.update を progress コールバックとして受け取る。表示器は注入(差し替え)で配線を検証する。
+(enabled=None)。クリーニング・足IK安定化・疎化の各段を 1 本の行で stage 切り替えし、重い疎化は
+reporter.update を progress コールバックとして受け取る。出力書き込み成功時のみ完了行(summary)を出す。
+表示器は注入(差し替え)で配線を検証する。
 """
 
 import pytest
@@ -19,7 +20,7 @@ def _curve_doc(path):
 
 
 class _RecordingReporter:
-    """ProgressReporter 差し替え用。構築引数(enabled)と段操作を記録する。実描画はしない。"""
+    """ProgressReporter 差し替え用。構築引数(enabled)と段操作・完了行を記録する。実描画はしない。"""
 
     instances = []
 
@@ -28,17 +29,17 @@ class _RecordingReporter:
         self.events = []
         _RecordingReporter.instances.append(self)
 
-    def begin_stage(self, label):
-        self.events.append(("begin", label))
+    def stage(self, label):
+        self.events.append(("stage", label))
 
     def update(self, done, total):
         self.events.append(("update", done, total))
 
-    def end_stage(self):
-        self.events.append(("end",))
-
     def close(self):
         self.events.append(("close",))
+
+    def summary(self, message):
+        self.events.append(("summary", message))
 
 
 def test_quiet_does_not_change_output(tmp_path):
@@ -65,9 +66,9 @@ def test_quiet_sets_enabled_false_default_auto(tmp_path, monkeypatch):
     assert _RecordingReporter.instances[-1].enabled is None
 
 
-def test_stages_wired_and_reduce_gets_update(tmp_path, monkeypatch):
-    # クリーニング→足IK安定化→疎化の順に begin_stage で囲まれ、疎化段で reporter.update が呼ばれる
-    # (reduce_bones が progress=reporter.update を受け取る)。各段に end があり、最後に close。
+def test_stages_wired_reduce_update_and_completion(tmp_path, monkeypatch):
+    # クリーニング→足IK安定化→疎化の順に 1 行で stage 切り替えし、疎化段で reporter.update が呼ばれる。
+    # 最後に close(行を消す)→ 出力書き込み後に完了行 summary("完了 <出力>") を出す。
     _RecordingReporter.instances = []
     monkeypatch.setattr(cli.progress, "ProgressReporter", _RecordingReporter)
     src = tmp_path / "in.vmd"
@@ -75,15 +76,41 @@ def test_stages_wired_and_reduce_gets_update(tmp_path, monkeypatch):
     _curve_doc(src)
     assert cli.main([str(src), "-o", str(out)]) == 0
     rep = _RecordingReporter.instances[-1]
-    assert [e[1] for e in rep.events if e[0] == "begin"] == ["クリーニング", "足IK安定化", "疎化"]
+    assert [e[1] for e in rep.events if e[0] == "stage"] == ["クリーニング", "足IK安定化", "疎化"]
     assert any(e[0] == "update" for e in rep.events)  # 疎化が update を呼ぶ
-    assert rep.events.count(("end",)) == 3
-    assert rep.events[-1] == ("close",)
+    assert ("close",) in rep.events
+    assert rep.events[-1] == ("summary", f"完了 {out}")  # 書き込み後に完了行を出す
 
 
-def test_close_called_even_when_pipeline_raises(tmp_path, monkeypatch):
-    # try/finally 保証: 段の途中(疎化)で例外が起きても、例外を伝播する前に finally で close() される
-    # (ハートビートを止め行を確定する例外時経路)。
+def test_disabled_stages_are_skipped(tmp_path, monkeypatch):
+    # 無効化された段は stage を呼ばない。クリーニング・足IK安定化を切ると疎化だけが stage される。
+    # さらに疎化も切ると stage は1つも呼ばれない。配線の段スキップ分岐を固定する。
+    _RecordingReporter.instances = []
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _RecordingReporter)
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _curve_doc(src)
+    assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"]) == 0
+    assert [e[1] for e in _RecordingReporter.instances[-1].events if e[0] == "stage"] == ["疎化"]
+    assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"]) == 0
+    assert [e[1] for e in _RecordingReporter.instances[-1].events if e[0] == "stage"] == []
+
+
+def test_no_summary_on_dry_run(tmp_path, monkeypatch):
+    # dry-run は出力を書かないので完了行(summary)を出さない。進捗の close は通る。
+    _RecordingReporter.instances = []
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _RecordingReporter)
+    src = tmp_path / "in.vmd"
+    _curve_doc(src)
+    assert cli.main([str(src), "--dry-run"]) == 0
+    rep = _RecordingReporter.instances[-1]
+    assert ("close",) in rep.events
+    assert not any(e[0] == "summary" for e in rep.events)
+
+
+def test_close_called_and_no_summary_when_pipeline_raises(tmp_path, monkeypatch):
+    # try/finally 保証: 疎化で例外が起きても、例外を伝播する前に finally で close される。書き込みに
+    # 至らないので完了行(summary)は出さない。
     _RecordingReporter.instances = []
     monkeypatch.setattr(cli.progress, "ProgressReporter", _RecordingReporter)
 
@@ -96,4 +123,6 @@ def test_close_called_even_when_pipeline_raises(tmp_path, monkeypatch):
     _curve_doc(src)
     with pytest.raises(RuntimeError):
         cli.main([str(src), "-o", str(out)])
-    assert ("close",) in _RecordingReporter.instances[-1].events
+    rep = _RecordingReporter.instances[-1]
+    assert ("close",) in rep.events
+    assert not any(e[0] == "summary" for e in rep.events)

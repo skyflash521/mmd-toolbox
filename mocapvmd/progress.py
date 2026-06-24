@@ -1,18 +1,21 @@
-"""進捗のライブ表示(mocapvmd.md 進捗表示、実装計画 §2-§4)。
+"""進捗のライブ表示(mocapvmd.md 進捗表示)。
 
 重い処理(主に疎化)の進行を stderr へ1行ライブ表示する。既定は出力先が端末(TTY)のときだけ有効で、
 リダイレクト・パイプ時や無効化時は完全な no-op(オーバーヘッドなし)。
+
+表示は全段を通して1本のライブ行を上書きする。段を切り替えても改行せず同じ行を書き換えるので、終わった
+段の行が画面に残らない。処理が終わると行を消し、必要なら呼び出し側が完了行を1行残す(summary)。
 
 停滞回避の要は「完了イベントと再描画の分離」。完了通知 update(done, total) は進行カウンタを更新するだけで
 描画しない。実際に行を描くのは一定間隔で回るハートビート用デーモンスレッドで、update が来ない待ち時間
 (重いボーン1本の疎化中など)でも経過時間を進め続けるため、表示が固まって見えない。
 
-単一描画所有者: 進捗行を stderr へ書くのはハートビートスレッドだけ。メインが書く場面(段終了 end_stage /
-全体終了 close)は、書く前にハートビートを停止イベントで止めて join し(描画所有権を回収)、最終行を1度
-描いてから改行で確定する。これにより同時に stderr へ書くスレッドが常に1つになり、行の混線を防ぐ。
+単一描画所有者: 進捗行を stderr へ書くのはハートビートスレッドだけ。メインが書く場面(段切り替え stage /
+終了 close)は、書く前にハートビートを停止イベントで止めて join し(描画所有権を回収)てから書く。これにより
+同時に stderr へ書くスレッドが常に1つになり、行の混線を防ぐ。
 
 経過時間は now() - 段階開始時刻で測る。表示器は表示の判断だけを持ち、何を1段とするか・各段の総数の
-決め方は呼び出し側に委ねる(このモジュールは他モジュールを参照しない)。
+決め方・完了行の文言は呼び出し側に委ねる(このモジュールは他モジュールを参照しない)。
 """
 
 import sys
@@ -34,9 +37,9 @@ def _display_width(text):
 
 
 class ProgressReporter:
-    """段階単位の進捗をライブ表示する。begin_stage(label) で段を開始、update(done, total) で進行を通知、
-    end_stage() で段を確定、close() で全体を終える。enabled 省略時は stream.isatty() で自動判定し、無効時は
-    全メソッド no-op。詳細はモジュール docstring を参照。
+    """段単位の進捗を1本のライブ行で表示する。stage(label) で段を開始/切り替え、update(done, total) で
+    進行を通知、close() で行を消して終える。summary(message) は完了行を1行残す。enabled 省略時は
+    stream.isatty() で自動判定し、無効時は全メソッド no-op。詳細はモジュール docstring を参照。
     """
 
     def __init__(self, stream=None, *, enabled=None, now=None, interval=0.15):
@@ -44,7 +47,7 @@ class ProgressReporter:
         if enabled is None:
             isatty = getattr(self._stream, "isatty", None)
             enabled = bool(isatty()) if callable(isatty) else False
-        self._enabled = enabled
+        self.enabled = enabled
         self._now = now if now is not None else time.monotonic
         self._interval = interval
         self._snap = None  # (label, done, total, start) または None。単一参照代入で原子的に差し替える
@@ -52,12 +55,12 @@ class ProgressReporter:
         self._stop = None
         self._last_width = 0  # 直前に同じ行へ描いた表示幅。短い行で上書きするとき残像を埋めるのに使う
 
-    def begin_stage(self, label):
-        """段を開始する。総数は未確定(最初の update で確定)。ハートビートを起こす。
+    def stage(self, label):
+        """段を開始/切り替える。同じライブ行を使い、改行しない。総数は未確定(最初の update で確定)。
 
-        直前段の end_stage を挟まずに呼ばれても旧ハートビートが残らないよう、起こす前に既存を止める。
+        直前段のハートビートを止めてから新しい段のハートビートを起こす(旧スレッドが残らないように)。
         """
-        if not self._enabled:
+        if not self.enabled:
             return
         self._stop_heartbeat()
         self._snap = (label, 0, None, self._now())
@@ -72,13 +75,24 @@ class ProgressReporter:
             return
         self._snap = (snap[0], done, total, snap[3])
 
-    def end_stage(self):
-        """段を確定する。ハートビートを止め join してから最終行を描き改行する。"""
-        self._finalize()
-
     def close(self):
-        """全体を終える。活動中の段があれば end_stage と同様に確定する。無ければ no-op。"""
-        self._finalize()
+        """進捗を終える。ハートビートを止め join してから、ライブ行を消して何も残さない。"""
+        if not self.enabled:
+            return
+        self._stop_heartbeat()
+        if self._last_width:
+            # 行を空白で上書きし、行頭へ戻して消す(改行しないので画面に残らない)。
+            self._stream.write("\r" + " " * self._last_width + "\r")
+            self._stream.flush()
+        self._snap = None
+        self._last_width = 0
+
+    def summary(self, message):
+        """完了行を1行残す(有効時のみ)。close で行を消した後に呼び、結果を1行で示すのに使う。"""
+        if not self.enabled:
+            return
+        self._stream.write(message + "\n")
+        self._stream.flush()
 
     def _heartbeat(self):
         # 停止イベントが立つまで一定間隔で再描画する。wait は間隔経過で False、停止で True を返す。
@@ -104,15 +118,3 @@ class ProgressReporter:
         self._stream.write("\r" + line + pad)
         self._stream.flush()
         self._last_width = width
-
-    def _finalize(self):
-        # 活動段があるときだけ確定する。先にハートビートを止め join して描画所有権を回収し、最終行を
-        # メインが1度描いてから改行で確定する(単一描画所有者)。
-        if self._snap is None:
-            return
-        self._stop_heartbeat()
-        self._draw()
-        self._stream.write("\n")
-        self._stream.flush()
-        self._snap = None
-        self._last_width = 0  # 改行で次の行頭へ移ったので残像はない
