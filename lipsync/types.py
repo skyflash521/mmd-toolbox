@@ -55,6 +55,6 @@ class GenerationParams:
     coartic_overlap_max: int = 2  # 協調調音の重なり上限(=基準長)
     anticipation_frames: int = 1  # 母音口形の先行準備
     exaggeration: float = 1.0  # 母音合成プロファイルの誇張係数
-    vibrato_threshold: int = 18  # 伸び表現を適用する母音長の下限
+    vibrato_threshold: int = 18  # 伸び表現を適用する保持プラトー長の下限
     vibrato_amp: float = 0.05
     vibrato_period: int = 15
