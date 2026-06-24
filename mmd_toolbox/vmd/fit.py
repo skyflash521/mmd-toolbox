@@ -22,6 +22,15 @@ from mmd_toolbox.vmd import interp
 # 実質ゼロ誤差の閾値(回転は unwrap/slerp の浮動小数誤差で厳密0にならないため)。
 _ZERO_EPS = 1e-9
 
+# 定数(無変化)区間判定 is_constant のしきい値(§4.2)。種別ごとに単位が異なる
+# (位置/距離/FOV は各値の単位、カメラ回転は rad、ボーン回転は度)ので種別ごとに持つ。
+# exact-constant(do-nothing・厳密静止区間)を捕らえる量子化下限相当の小さい値から始める。
+_CONST_EPS_SCALAR = 1e-9  # LinearScalarChannel(距離など、値の単位)
+_CONST_EPS_POS = 1e-9     # EuclideanVectorChannel(位置、軸別)
+_CONST_EPS_FOV = 1e-9     # FovChannel(度、生サンプル)
+_CONST_EPS_RAD = 1e-9     # CameraRotationChannel(unwrap 済み Euler、rad)
+_CONST_EPS_DEG = 1e-9     # BoneRotationChannel(度)
+
 
 def _normalize(err, frame, tol):
     """誤差・フレームを正規化誤差へ変換する(§5.5)。
@@ -158,6 +167,22 @@ class LinearScalarChannel:
             return _BEZIER_LINEAR_CP
         return self._axis_cp(a, b)
 
+    def is_constant(self, a, b):
+        """区間 [a,b] のサンプル変動幅(max-min)がしきい値以下なら定数とみなす(§4.2)。
+
+        最初の逸脱で早期に False を返す(無駄走査の抑制)。
+        """
+        lo = hi = self._value(a)
+        for f in range(a + 1, b + 1):
+            v = self._value(f)
+            if v < lo:
+                lo = v
+            elif v > hi:
+                hi = v
+            if hi - lo > _CONST_EPS_SCALAR:
+                return False
+        return True
+
 
 class EuclideanVectorChannel:
     """カメラ中心位置などのベクトルチャンネル(§4.2, §7.2)。
@@ -237,6 +262,25 @@ class EuclideanVectorChannel:
             return (_BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP)
         return tuple(self._axis_cp(a, b, i) for i in range(3))
 
+    def is_constant(self, a, b):
+        """各成分 X/Y/Z の区間サンプル変動幅(max-min)がいずれもしきい値以下なら定数(§4.2)。
+
+        いずれかの軸が最初に逸脱した時点で早期に False を返す。
+        """
+        v0 = self._vec(a)
+        lo = list(v0)
+        hi = list(v0)
+        for f in range(a + 1, b + 1):
+            v = self._vec(f)
+            for i in range(3):
+                if v[i] < lo[i]:
+                    lo[i] = v[i]
+                elif v[i] > hi[i]:
+                    hi[i] = v[i]
+                if hi[i] - lo[i] > _CONST_EPS_POS:
+                    return False
+        return True
+
 
 class FovChannel:
     """視野角チャンネル(§4.2, §7.2)。
@@ -303,6 +347,23 @@ class FovChannel:
         if self.mode != "bezier":
             return _BEZIER_LINEAR_CP
         return self._axis_cp(a, b)
+
+    def is_constant(self, a, b):
+        """生サンプルの変動幅(max-min)がしきい値以下なら定数(§4.2)。
+
+        出力時の整数丸めは判定に使わない(丸めで畳まれる微小変動も非定数として残す)。
+        最初の逸脱で早期に False を返す。
+        """
+        lo = hi = self._value(a)
+        for f in range(a + 1, b + 1):
+            v = self._value(f)
+            if v < lo:
+                lo = v
+            elif v > hi:
+                hi = v
+            if hi - lo > _CONST_EPS_FOV:
+                return False
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +526,26 @@ class CameraRotationChannel:
         self._cp_cache[(a, b)] = cp
         return cp
 
+    def is_constant(self, a, b):
+        """unwrap 済み Euler の各軸変動幅(max-min)がいずれもしきい値(rad)以下なら定数(§4.2)。
+
+        __init__ で軸別 unwrap 済みのため、±π をまたぐ定値オリエンテーションも変動幅0に畳まれる。
+        いずれかの軸が最初に逸脱した時点で早期に False を返す。
+        """
+        e0 = self._euler(a)
+        lo = [e0[i] for i in range(3)]
+        hi = [e0[i] for i in range(3)]
+        for f in range(a + 1, b + 1):
+            e = self._euler(f)
+            for i in range(3):
+                if e[i] < lo[i]:
+                    lo[i] = e[i]
+                elif e[i] > hi[i]:
+                    hi[i] = e[i]
+                if hi[i] - lo[i] > _CONST_EPS_RAD:
+                    return False
+        return True
+
 
 class BoneRotationChannel:
     """ボーン回転(quaternion slerp、§5.3, §7.2)。
@@ -566,6 +647,18 @@ class BoneRotationChannel:
         cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol)
         self._cp_cache[(a, b)] = cp
         return cp
+
+    def is_constant(self, a, b):
+        """各サンプルと先頭 quaternion の角度距離(度)の最大がしきい値以下なら定数(§4.2)。
+
+        __init__ で正規化・同一半球整列済みのため q と -q(同一回転)は角度0扱い。
+        最初の逸脱で早期に False を返す。
+        """
+        q0 = self._q(a)
+        for f in range(a + 1, b + 1):
+            if _quat_angle_deg(self._q(f), q0) > _CONST_EPS_DEG:
+                return False
+        return True
 
 
 # ---------------------------------------------------------------------------

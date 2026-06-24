@@ -14,18 +14,12 @@
 
 import math
 
-import pytest
-
 from mmd_toolbox.vmd.fit import (
     BoneRotationChannel,
     CameraRotationChannel,
     EuclideanVectorChannel,
     FovChannel,
     LinearScalarChannel,
-)
-
-pytestmark = pytest.mark.xfail(
-    reason="impl pending: is_constant をチャンネル種別に実装", raises=AttributeError
 )
 
 # 各種別で「量子化下限以下(定数扱い)」「明確な実変化(非定数)」とみなす代表値。
@@ -64,6 +58,18 @@ def test_scalar_deviation_at_span_end_detected():
     vals[-1] = 9.0  # 末尾でのみ逸脱(早期打ち切りで取りこぼさない)
     ch = LinearScalarChannel(0, vals, tol=0.01)
     assert ch.is_constant(0, 49) is False
+
+
+def test_scalar_endpoint_a_included_in_subrange():
+    # 区間先頭 a のサンプルも比較に含む。a だけ別値なら非定数(基準を a+1 に取らない)。
+    ch = LinearScalarChannel(0, [9.0, 9.0, 0.0, 5.0, 5.0, 5.0], tol=0.01)
+    assert ch.is_constant(2, 5) is False
+
+
+def test_scalar_single_sample_span_is_constant():
+    # 単一サンプル区間(a==b)は内部点が無く空走査 → 定数(True)。
+    ch = LinearScalarChannel(0, [5.0, 999.0], tol=0.01)
+    assert ch.is_constant(0, 0) is True
 
 
 # --- EuclideanVectorChannel -------------------------------------------------
@@ -214,6 +220,14 @@ def test_bone_rotation_deviation_at_span_end_detected():
     quats[-1] = quat_z(40.0)
     ch = BoneRotationChannel(0, quats, tol=0.1)
     assert ch.is_constant(0, 49) is False
+
+
+def test_bone_rotation_endpoint_a_included_in_subrange():
+    # 区間先頭 a の quaternion も比較に含む。a だけ別角度なら非定数。
+    quats = [quat_z(90.0)] * 6
+    quats[2] = quat_z(33.0)  # 区間先頭 a(=2)だけ別角度
+    ch = BoneRotationChannel(0, quats, tol=0.1)
+    assert ch.is_constant(2, 5) is False
 
 
 def test_bone_rotation_subrange_constant_true():
