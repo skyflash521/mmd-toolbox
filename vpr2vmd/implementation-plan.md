@@ -44,7 +44,7 @@
   モック)を入力に決定論的に検証する。
 - **共有コア回帰は既知値フィクスチャで担保**: モーフ生成コア(`lipsync`)の正しさ・回帰は、`vpr2vmd` と
   音声入力ツールの**ツール間比較では捉えられない**(同じ `lipsync` コアを通るため相殺される)。コアの回帰は
-  [lipsync 実装計画](../lipsync/implementation-plan.md) の既知値フィクスチャで別途担保する(ツール間比較で
+  [lipsync 仕様](../lipsync/lipsync.md) §7 の既知値フィクスチャで別途担保する(ツール間比較で
   代替しない)。
 - **E2E**: 小さなサンプル vpr で vpr→VMD を通し、モーフキーVMDが生成されることを確認する。
 - 出力VMDはラウンドトリップと既知値フィクスチャで検証する(モーフキーの値・フレーム・名称(Shift-JIS))。
@@ -76,7 +76,7 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
 入力は `vpr_io` の各 `Note`(`phonemes: list[str]`(音符内の音素列。空可)・`start_tick`・`duration_tick`・
 `velocity` 等)。休符(無音区間)は `vpr2vmd` が重複音符の解決後の採用音符列から再導出する(下記「解析範囲・休符の
 再導出」。`vpr_io` も発音区間の補集合として休符を導出するが、`vpr2vmd` は自前の解決後区間を基準にする)。次の規則で
-口形イベント列(母音 A/I/U/E/O・両唇閉鎖 BILABIAL・無音 SILENCE。[lipsync 実装計画](../lipsync/implementation-plan.md) §4.7)へ
+口形イベント列(母音 A/I/U/E/O・両唇閉鎖 BILABIAL・無音 SILENCE。[lipsync 仕様](../lipsync/lipsync.md) §4.7)へ
 決定論的に写像する。
 
 写像は**音素のカテゴリ**(母音 / 語頭両唇音 / その他子音 / 未知)で規則を定める。各音素記号がどのカテゴリに
@@ -88,9 +88,9 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
   日本語では a→あ / i→い / u(M)→う / e→え / o→お が該当する見込みだが、正確な記号綴りは §5.4 の vpr_io 確定に
   従う)。1音符に複数母音があれば各母音を順に1モーラずつのイベントにする(時間配分は下記)。
 - **両唇閉鎖**: 音符の語頭(phonemes 先頭)に両唇音があれば両唇閉鎖イベントにし、後続母音の開始までに閉口を
-  完成させる(閉口完成のタイミングは `lipsync` §4.5)。語中・語末の両唇音は自前イベントを作らない。両唇音の
+  完成させる(閉口完成のタイミングは `lipsync` 仕様 §4.10・§4.11)。語中・語末の両唇音は自前イベントを作らない。両唇音の
   記号集合(VOCALOID 日本語では m / b / p が該当する見込み)は §5.4 の vpr_io 確定に従う。
-- **その他の子音**: 自前の口形イベントを作らず、隣接母音の協調調音へ委ねる([lipsync 実装計画](../lipsync/implementation-plan.md) §4.3。
+- **その他の子音**: 自前の口形イベントを作らず、隣接母音の協調調音へ委ねる([lipsync 仕様](../lipsync/lipsync.md) §4.3。
   両唇閉鎖以外の子音種別は `lipsync` が将来対応)。
 - **休符**: 発音区間どうしの隙間を無音イベント(SILENCE)にする。休符区間は `vpr_io` の元発音区間ではなく、
   重複音符の解決後の**採用音符列の補集合**として再導出する(基準・範囲は下記「解析範囲(全時間軸)・休符の
@@ -161,7 +161,7 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
   `(t − tick_k) × 現区間の 1tick秒数`(`tick_k` は `t` を含む区間の開始)。最初の `TempoEvent.tick` が 0 で
   なければ、その bpm を tick 0 まで遡って適用する。
 - **秒→フレーム**: `frame_float = 秒 × 30`(30fps、`mmd_toolbox` 規約)。各音符・休符の開始/終了 tick をこの式で
-  float フレームに変換し、`lipsync` の `MouthEvent.start`/`end`(float)へ渡す([lipsync 実装計画](../lipsync/implementation-plan.md) §4.7)。
+  float フレームに変換し、`lipsync` の `MouthEvent.start`/`end`(float)へ渡す([lipsync 仕様](../lipsync/lipsync.md) §4.7)。
 - **整数フレーム量子化は `lipsync` が行う**(同 §4.5)。`vpr2vmd` 側では float フレームのまま渡し、量子化・キー
   衝突解決は持たない。
 - **拍子は使わない**: `TimeSignature`(numerator/denominator)は小節・拍の構造であり、tick→秒の絶対時間変換には
@@ -175,14 +175,14 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
 - **写像式**: 正規化 `n = velocity / 127`、累乗 `γ`(初期 0.6。[song2vmd 実装計画](../song2vmd/implementation-plan.md) §4.4 の
   RMS→開き量と整合)で `open = lo + (hi − lo) × n^γ`、開き量レンジ `[lo, hi]`(プリセット)へクランプ、`--open-max`
   で上限。決まった開き量を `lipsync` へ渡す(合成プロファイルへの適用・合成総量の上限クランプは `lipsync` 側。
-  [lipsync 実装計画](../lipsync/implementation-plan.md) §4.1)。
+  [lipsync 仕様](../lipsync/lipsync.md) §4.1)。
 - **`--default-open`**: 全ノートのベロシティが一様で強弱差(ダイナミックレンジ)が 0 のとき、写像式が定数に退化
   するため全モーラへ用いる既定開き量。既定はプリセット開き量レンジの中央 `(lo + hi)/2`。ベロシティが変化する
   通常入力では写像式を用い、`--default-open` は使わない(旧仕様の「強弱が無いとき」を、ベロシティ常在の事実に
   合わせ「ベロシティが一様で強弱差が無いとき」と確定)。
 - **プリセット**(`--style`、既定 `pop`): 開き量レンジとタイミング/誇張を切り替える。[song2vmd 実装計画](../song2vmd/implementation-plan.md) §4.4
   のプリセット表と整合させた出発点(タイミング・誇張は `lipsync` の `GenerationParams` へ渡す。値の意味は
-  [lipsync 実装計画](../lipsync/implementation-plan.md) §4.8)。
+  [lipsync 仕様](../lipsync/lipsync.md) §4.8)。
 
   | 項目 | pop | ballad | powerful | whisper | rap |
   |---|--:|--:|--:|--:|--:|
@@ -199,7 +199,7 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
 
 - **プリセット具体値の調整**: §5.3 の開き量レンジ・タイミング・誇張・`γ`、および §5.1 の両唇閉鎖の公称長
   (3フレーム)・取り分上限(0.5)は出発点で、実データ(MMD/MMM 視覚確認)で調整する。`lipsync` の既定プロファイル・
-  アルゴリズムは [lipsync 実装計画](../lipsync/implementation-plan.md) §4 を用いる。
+  アルゴリズムは [lipsync 仕様](../lipsync/lipsync.md) §4 を用いる。
 - **vpr 形式の確定**: `vpr_io` の read 実装(vpr レイアウト確定。[vpr_io 実装計画](../vpr_io/implementation-plan.md) §4.2)が
   `vpr2vmd` の前提になる。§5.1 が用いる音素記号の具体集合・各記号のカテゴリ割当(母音/両唇音/他子音)はこの
   インベントリ確定で定まる(写像規則自体は §5.1 で確定済みで、記号集合に依存しない)。
