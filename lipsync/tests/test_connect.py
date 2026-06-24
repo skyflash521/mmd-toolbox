@@ -74,12 +74,14 @@ def test_multi_morph_same_vowel_merge():
 def test_three_same_vowels_single_attack_release():
     # あ×3(各長12)を連結。開き量は cap 未満の 0.3/0.5/0.7 で、hold_start=2/hold_end=34、
     # mid=6,18,30、w=0.3,0.5,0.7。先頭アタック1回・末尾リリース1回、内部に強弱節点3つ。
+    # プラトー長32は伸び表現の閾値を超えるため、§4.2 連結の検証へ分離する目的で揺らぎを無効化する。
     env = _envelope(
         [
             MouthEvent(MouthShape.A, 0.0, 12.0, 0.3),
             MouthEvent(MouthShape.A, 12.0, 24.0, 0.5),
             MouthEvent(MouthShape.A, 24.0, 36.0, 0.7),
-        ]
+        ],
+        GenerationParams(vibrato_amp=0.0),
     )
     _approx_envelope(
         env["あ"],

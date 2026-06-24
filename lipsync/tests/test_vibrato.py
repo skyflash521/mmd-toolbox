@@ -28,7 +28,6 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-@pytest.mark.xfail(reason="impl pending: §4.6 伸び表現")
 def test_long_vowel_vibrato_known_values():
     # あ[0,40]op0.5、既定(threshold18・amp0.05・period15・attack2・release2)。
     # プラトー[2,38]、長さ36>18。hold=0.5、amp_eff=min(0.05,0.5)=0.05。

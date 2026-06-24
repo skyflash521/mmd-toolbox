@@ -60,26 +60,38 @@ def _half_up(value: float) -> int:
     return math.floor(value + 0.5)
 
 
+def _effective_profile(shape: MouthShape, params: GenerationParams) -> dict[str, float]:
+    """有効プロファイル(補助重みに誇張係数を乗算した相対重み。implementation-plan.md §4.1)。"""
+    main = _MAIN_MORPH[shape]
+    return {
+        morph: weight if morph == main else weight * params.exaggeration
+        for morph, weight in _PROFILES[shape].items()
+    }
+
+
+def _hold_value(shape: MouthShape, open_amount: float, params: GenerationParams) -> float:
+    """保持値 hold(母音別倍率を掛け open_cap で上限クランプした開き量。implementation-plan.md §4.1)。"""
+    hold = open_amount * params.vowel_scale[_VOWEL_INDEX[shape]]
+    return min(max(hold, 0.0), params.open_cap)
+
+
+def _weights_from_hold(shape: MouthShape, hold: float, params: GenerationParams) -> dict[str, float]:
+    """保持値 hold から各口モーフ重みを求める(有効プロファイル × hold、合成総量の比例縮小。§4.1)。"""
+    weights = {morph: weight * hold for morph, weight in _effective_profile(shape, params).items()}
+    total = sum(weights.values())
+    if total > params.open_cap:
+        factor = params.open_cap / total
+        weights = {morph: weight * factor for morph, weight in weights.items()}
+    return weights
+
+
 def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) -> dict[str, float]:
     """母音の合成プロファイルから各口モーフの重みを求める(implementation-plan.md §4.1)。
 
     手順: (1)プロファイル選択 →(2)補助重みに誇張係数を乗算 →(3)保持値 hold を上限クランプ →
     (4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小。
     """
-    profile = _PROFILES[shape]
-    main = _MAIN_MORPH[shape]
-    effective = {
-        morph: weight if morph == main else weight * params.exaggeration
-        for morph, weight in profile.items()
-    }
-    hold = open_amount * params.vowel_scale[_VOWEL_INDEX[shape]]
-    hold = min(max(hold, 0.0), params.open_cap)
-    weights = {morph: weight * hold for morph, weight in effective.items()}
-    total = sum(weights.values())
-    if total > params.open_cap:
-        factor = params.open_cap / total
-        weights = {morph: weight * factor for morph, weight in weights.items()}
-    return weights
+    return _weights_from_hold(shape, _hold_value(shape, open_amount, params), params)
 
 
 def _shape_diff(shape_a: MouthShape, shape_b: MouthShape, params: GenerationParams) -> float:
@@ -296,6 +308,56 @@ def _quantize_targets(targets: Sequence[tuple[str, float, float]]) -> list[Morph
     return keys
 
 
+def _interp_open(points: Sequence[tuple[float, float]], t: float) -> float:
+    """制御点列(フレーム昇順の (フレーム, 開き量))を時刻 t で線形補間する。端の外側は端値で一定。"""
+    if t <= points[0][0]:
+        return points[0][1]
+    if t >= points[-1][0]:
+        return points[-1][1]
+    for (f0, v0), (f1, v1) in zip(points, points[1:]):
+        if f0 <= t <= f1:
+            return v0 if f1 == f0 else v0 + (v1 - v0) * (t - f0) / (f1 - f0)
+    return points[-1][1]
+
+
+def _vibrato_targets(
+    group: _Group, plateau_start: float, plateau_end: float, params: GenerationParams
+) -> list[tuple[str, float, float]]:
+    """保持プラトーに伸び表現の揺らぎ節点を生成する(implementation-plan.md §4.6)。
+
+    公称開き量 `base_open(t)` を保持・強弱節点の線形補間で求め、正弦波で変調した実効開き量 `open_v` から
+    §4.1 と同じ合成で各モーフ重みを出す。節点は正弦波の極値(`t_k = plateau_start + P·(1/4 + k/2)`)の
+    厳密内側のみ。返すのは float 目標 `(モーフ名, フレーム, 重み)` 列(量子化は §4.5)。
+    """
+    holds = [_hold_value(group.shape, ev.open_amount, params) for ev in group.events]
+    # 公称開き量の制御点: プラトー始端(先頭 hold)・プラトー内の各イベント中央(その hold)・終端(末尾 hold)。
+    points: list[tuple[float, float]] = [(plateau_start, holds[0])]
+    if len(group.events) >= 2:
+        for ev, hold in zip(group.events, holds):
+            mid = (ev.start + ev.end) / 2.0
+            if plateau_start < mid < plateau_end:
+                points.append((mid, hold))
+    points.append((plateau_end, holds[-1]))
+    points.sort()
+    period = params.vibrato_period
+    nodes: list[tuple[str, float, float]] = []
+    k = 0
+    while True:
+        t = plateau_start + period * (0.25 + 0.5 * k)
+        if t >= plateau_end:
+            break
+        k += 1
+        base = _interp_open(points, t)
+        if base <= 0.0:
+            continue
+        amp_eff = min(params.vibrato_amp, base)
+        offset = amp_eff * math.sin(2.0 * math.pi * (t - plateau_start) / period)
+        open_v = min(max(base + offset, 0.0), params.open_cap)
+        for morph, weight in _weights_from_hold(group.shape, open_v, params).items():
+            nodes.append((morph, t, weight))
+    return nodes
+
+
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
@@ -306,19 +368,30 @@ def generate_morph_keys(
     先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量
     の強弱節点を置いて節点間を線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、§4.3 の
     協調調音(境界 b を中心とした幅 T の窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、
-    境界に中間口形を置く)へ置き換える。無音直後の母音は §4.10 の先行準備でアタックを前倒す。両唇閉鎖・無音は
-    隣接母音の 0.0 キーとキー不在(MMD 上 0.0)で閉口を表し、専用の閉口キーは置かない(§4.11)。量子化は
-    後続ステップ(§4.5/L-9)で行う。返すキーは時間順(§4.7)。
+    境界に中間口形を置く)へ置き換える。無音直後の母音は §4.10 の先行準備でアタックを前倒す。長く伸ばす母音の
+    保持プラトーには §4.6 の伸び表現で揺らぎ節点を任意に加える。両唇閉鎖・無音は隣接母音の 0.0 キーとキー不在
+    (MMD 上 0.0)で閉口を表し、専用の閉口キーは置かない(§4.11)。整数フレームへの量子化は §4.5 で一括して
+    行う。返すキーは時間順(§4.7)。
     """
     groups = _normalize_groups(events, params)
     weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g.events] for g in groups]
+    n = len(groups)
+    # 直接隣接する異母音グループ境界の協調調音の半幅 T/2(境界 i と i+1 の間)。保持プラトー端の算出にも使う。
+    coart_half: dict[int, float] = {}
+    for i in range(n - 1):
+        if groups[i].end != groups[i + 1].start:
+            continue
+        diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
+        shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
+        coart_half[i] = _transition_frames(diff, shorter, params) / 2.0
     # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、§4.5 で一括量子化する。
     targets: list[tuple[str, float, float]] = []
+    plateaus: list[tuple[float, float]] = []  # グループごとの保持プラトー [始端, 終端](§4.6 の対象)。
     # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
     for i, g in enumerate(groups):
         gw = weights[i]
         coart_in = i > 0 and groups[i - 1].end == g.start
-        coart_out = i < len(groups) - 1 and groups[i + 1].start == g.end
+        coart_out = i < n - 1 and groups[i + 1].start == g.end
         if not coart_in:
             # §4.10 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(実効アタック長は不変)。
             antic = _anticipation_frames(_preceding_event(events, g.start), params)
@@ -327,26 +400,31 @@ def generate_morph_keys(
             for morph, weight in gw[0].items():
                 targets.append((morph, f_start, 0.0))
                 targets.append((morph, f_attack, weight))
+            plateau_start = f_attack
+        else:
+            plateau_start = groups[i - 1].end + coart_half[i - 1]
         if not coart_out:
             f_hold_end = g.end - g.release
             f_end = g.end
             for morph, weight in gw[-1].items():
                 targets.append((morph, f_hold_end, weight))
                 targets.append((morph, f_end, 0.0))
+            plateau_end = f_hold_end
+        else:
+            plateau_end = g.end - coart_half[i]
         if len(g.events) >= 2:
             for ev, w in zip(g.events, gw):
                 f_mid = (ev.start + ev.end) / 2.0
                 for morph, weight in w.items():
                     targets.append((morph, f_mid, weight))
+        plateaus.append((plateau_start, plateau_end))
     # 隣接する異母音グループ境界の協調調音(§4.3)。閉口を挟まず中間口形へ線形遷移する。
-    for i in range(len(groups) - 1):
-        if groups[i].end != groups[i + 1].start:
+    for i in range(n - 1):
+        if i not in coart_half:
             continue
         wa, wb = weights[i][-1], weights[i + 1][0]
         boundary = groups[i].end
-        diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
-        shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
-        half = _transition_frames(diff, shorter, params) / 2.0
+        half = coart_half[i]
         f_s, f_b, f_e = boundary - half, boundary, boundary + half
         for morph in _VOWEL_ORDER:
             a, b = wa.get(morph, 0.0), wb.get(morph, 0.0)
@@ -355,4 +433,10 @@ def generate_morph_keys(
             targets.append((morph, f_s, a))
             targets.append((morph, f_b, (a + b) / 2.0))
             targets.append((morph, f_e, b))
+    # §4.6 伸び表現: 公称エンベロープ・強弱・協調調音の後に、長い保持プラトーへ揺らぎ節点を加える(任意)。
+    if params.vibrato_amp > 0.0 and params.vibrato_period > 0:
+        for i, g in enumerate(groups):
+            plateau_start, plateau_end = plateaus[i]
+            if plateau_end - plateau_start > params.vibrato_threshold:
+                targets.extend(_vibrato_targets(g, plateau_start, plateau_end, params))
     return _quantize_targets(targets)
