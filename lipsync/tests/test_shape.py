@@ -10,9 +10,6 @@ import pytest
 import lipsync
 from lipsync import GenerationParams, MouthEvent, MouthShape
 
-# L-2 未実装のため印を付ける(実装フェーズで除去)。現状は単一キー出力で全テストが赤=xfail。
-pytestmark = pytest.mark.xfail(reason="impl pending: L-2 形状")
-
 
 def _envelope(events, params=None):
     """イベント列を変換し、モーフ名→(frame, weight) の時間順リストの辞書を返す。"""

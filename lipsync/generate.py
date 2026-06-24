@@ -72,18 +72,27 @@ def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) ->
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
-    """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7)。
+    """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7/§4.9)。
 
-    各母音イベントを §4.1 の合成プロファイルで複数の口モーフへ展開する。形状(アタック・
-    保持・リリース)・協調調音・量子化などは後続ステップで段階的に加える。両唇閉鎖・無音の
-    閉口キーは後続ステップ(L-8)で置く。
+    各母音イベントを §4.1 の合成プロファイルで複数の口モーフへ展開し、§4.9 の形状
+    エンベロープ(各モーフに 開始0.0・アタックで保持値・リリース直前まで保持値・終了0.0 の
+    4点)で配置する。協調調音・同母音連結・きびきび遷移・量子化などは後続ステップで段階的に
+    加える。両唇閉鎖・無音の閉口キーは後続ステップ(L-8)で置く。返すキーは時間順(§4.7)。
     """
     keys: list[MorphKey] = []
     for ev in events:
         if ev.shape not in _PROFILES:
             continue
-        frame = round(ev.start)
         weights: Mapping[str, float] = _compose(ev.shape, ev.open_amount, params)
+        # §4.9 のエンベロープ目標位置(整数量子化は L-0/L-1 と同様 round。厳密化は §4.5/L-9)。
+        f_start = round(ev.start)
+        f_attack = round(ev.start + params.attack_frames)
+        f_release = round(ev.end - params.release_frames)
+        f_end = round(ev.end)
         for morph, weight in weights.items():
-            keys.append(_morph_key(morph, frame, weight))
+            keys.append(_morph_key(morph, f_start, 0.0))
+            keys.append(_morph_key(morph, f_attack, weight))
+            keys.append(_morph_key(morph, f_release, weight))
+            keys.append(_morph_key(morph, f_end, 0.0))
+    keys.sort(key=lambda k: k.frame)
     return keys
