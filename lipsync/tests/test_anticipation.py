@@ -54,7 +54,7 @@ def test_no_anticipation_at_timeline_start():
 
 
 def test_no_anticipation_after_bilabial():
-    # 両唇閉鎖の直後の母音は閉口完成を優先し先行しない(A_eff=0)。両唇閉鎖の閉口キーは L-8 で置く。
+    # 両唇閉鎖の直後の母音は閉口完成を優先し先行しない(A_eff=0)。両唇閉鎖は専用キーを持たず閉口は規約で表す(§4.11)。
     env = _envelope(
         [
             MouthEvent(MouthShape.SILENCE, 0.0, 8.0),

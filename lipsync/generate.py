@@ -111,8 +111,8 @@ def _transition_frames(diff: float, shorter_len: float, params: GenerationParams
 def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
     """連続する同一母音イベントを極大グループへ束ねる(implementation-plan.md §4.2)。
 
-    プロファイル対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない
-    (閉口キーは L-8 で置く)。
+    プロファイル対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音の
+    リリース/アタックの 0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない。§4.11)。
     """
     groups: list[list[MouthEvent]] = []
     current: list[MouthEvent] = []
@@ -261,9 +261,9 @@ def generate_morph_keys(
     先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量
     の強弱節点を置いて節点間を線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、§4.3 の
     協調調音(境界 b を中心とした幅 T の窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、
-    境界に中間口形を置く)へ置き換える。無音直後の母音は §4.10 の先行準備でアタックを前倒す。量子化は
-    後続ステップ(§4.5/L-9)で行う。両唇閉鎖・無音の閉口キーは後続ステップ(L-8)で置く。返すキーは時間順
-    (§4.7)。
+    境界に中間口形を置く)へ置き換える。無音直後の母音は §4.10 の先行準備でアタックを前倒す。両唇閉鎖・無音は
+    隣接母音の 0.0 キーとキー不在(MMD 上 0.0)で閉口を表し、専用の閉口キーは置かない(§4.11)。量子化は
+    後続ステップ(§4.5/L-9)で行う。返すキーは時間順(§4.7)。
     """
     groups = _normalize_groups(events, params)
     weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g.events] for g in groups]
