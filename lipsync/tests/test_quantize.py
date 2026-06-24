@@ -1,9 +1,9 @@
-"""L-9 疎キー配置・30fps量子化のテスト(implementation-plan.md §4.5, lipsync.md §3/§4)。
+"""疎キー配置・30fps量子化のテスト(lipsync.md §3/§4)。
 
 生成側が出した float 目標位置を、四捨五入(floor(x+0.5)・0.5は切り上げ)で整数フレーム化し、同一モーフ・
 同一フレームへ潰れた目標値を量子化前 float が最も後ろの値へ統合して、量子化後に重複キーが出ないことを
 検証する。協調調音の遷移長 T が奇数(=1)になる既定 overlap_max=2 の境界で b±0.5 が潰れる衝突を扱う。
-協調調音が T=2 になる overlap_max=4 では衝突が起きないことを回帰ガードで確認する(L-4 と同じ既知値)。
+協調調音が T=2 になる overlap_max=4 では衝突が起きないことを回帰ガードで確認する(協調調音と同じ既知値)。
 """
 
 import pytest
@@ -52,7 +52,7 @@ def test_t1_coartic_collision_resolved():
 
 
 def test_no_collision_overlap4_unchanged():
-    # overlap_max=4 では T=2、窓[9,11]が整数で衝突なし。L-4 の既知値と同じ(L-9 で不変)。
+    # overlap_max=4 では T=2、窓[9,11]が整数で衝突なし。協調調音の既知値と同じ(量子化後も不変)。
     p = GenerationParams(coartic_overlap_max=4)
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)], p

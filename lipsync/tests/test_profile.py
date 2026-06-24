@@ -1,6 +1,6 @@
-"""L-1 母音合成プロファイルのテスト(implementation-plan.md §4.1, lipsync.md §3/§4)。
+"""母音合成プロファイルのテスト(lipsync.md §3/§4)。
 
-各母音が §4.1 のプロファイルで複数の標準口モーフへ重みを置き、誇張係数・母音別倍率・
+各母音がプロファイルで複数の標準口モーフへ重みを置き、誇張係数・母音別倍率・
 保持値クランプ・合成後総量の比例縮小が確定算法どおり適用されることを既知値で検証する。
 """
 
@@ -13,8 +13,8 @@ from lipsync import GenerationParams, MouthEvent, MouthShape
 def _peak_weights(events, params=None):
     """単一区間のイベント列を変換し、モーフ名→ピーク(保持)ウェイトの辞書を返す。
 
-    形状(§4.9)で各モーフは 0→保持値→保持値→0 のエンベロープになるため、各モーフの最大重み
-    (=プラトーの保持値=L-1 の合成重み)を取り出す。単一キーのみのときは恒等。
+    形状で各モーフは 0→保持値→保持値→0 のエンベロープになるため、各モーフの最大重み
+    (=プラトーの保持値=合成重み)を取り出す。単一キーのみのときは恒等。
     """
     params = params or GenerationParams()
     keys = lipsync.generate_morph_keys(events, params)
@@ -134,6 +134,6 @@ def test_vowel_scale_indexed_per_vowel(shape, index, expected):
     ],
 )
 def test_profile_known_weights(shape, expected):
-    # 各母音が §4.1 の非ゼロプロファイルのモーフだけに、相対重み×hold の既知値を置く
+    # 各母音が非ゼロプロファイルのモーフだけに、相対重み×hold の既知値を置く
     # (0.0 のモーフは出さない)。open_amount=0.4 はどの母音でも総量 < cap で縮小なし。
     assert _peak_weights(_vowel(shape, 0.4)) == pytest.approx(expected)

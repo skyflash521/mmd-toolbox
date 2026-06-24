@@ -1,4 +1,4 @@
-"""L-0 雛形・データ型と mmd_toolbox 連携のテスト(implementation-plan.md §2 L-0, §4.7/§4.8)。
+"""雛形・データ型と mmd_toolbox 連携のテスト(lipsync.md §3/§4)。
 
 公開データ型(MouthShape / MouthEvent / GenerationParams)とコア関数
 generate_morph_keys の契約、および出力モーフキーが mmd_toolbox.vmd の
@@ -12,13 +12,13 @@ from mmd_toolbox.vmd import MorphKey, VmdDocument, read, write
 
 
 def test_mouth_shape_members():
-    """MouthShape は母音5種＋両唇閉鎖＋無音を持つ(§4.7)。"""
+    """MouthShape は母音5種＋両唇閉鎖＋無音を持つ。"""
     names = {m.name for m in lipsync.MouthShape}
     assert names == {"A", "I", "U", "E", "O", "BILABIAL", "SILENCE"}
 
 
 def test_mouth_event_defaults():
-    """MouthEvent は shape/start/end を取り、open_amount 既定 0.0(§4.7)。"""
+    """MouthEvent は shape/start/end を取り、open_amount 既定 0.0。"""
     ev = lipsync.MouthEvent(shape=lipsync.MouthShape.A, start=0.0, end=10.0)
     assert ev.shape is lipsync.MouthShape.A
     assert ev.start == 0.0
@@ -27,7 +27,7 @@ def test_mouth_event_defaults():
 
 
 def test_generation_params_defaults():
-    """GenerationParams の既定値が §4.8 の初期目安と一致する。"""
+    """GenerationParams の既定値が初期目安と一致する。"""
     p = lipsync.GenerationParams()
     assert p.open_cap == 0.8
     assert p.vowel_scale == (1.0, 1.0, 1.0, 1.0, 1.0)
@@ -47,7 +47,7 @@ STANDARD_MORPHS = {"あ", "い", "う", "え", "お"}
 
 def test_generate_morph_keys_output_contract():
     """generate_morph_keys は MouthEvent 列と GenerationParams を受け取り、
-    出力契約(§4.7/§4.1)を満たす MorphKey 列を返す: 母音イベントに対し非空、
+    出力契約を満たす MorphKey 列を返す: 母音イベントに対し非空、
     各キーは cp932・15バイト固定の name_raw・標準5モーフ名・整数 frame で、
     時間順に並ぶ。"""
     events = [
@@ -69,7 +69,7 @@ def test_generate_morph_keys_output_contract():
 def test_generated_keys_roundtrip_through_vmd():
     """generate_morph_keys の出力を VmdDocument に組み立て、mmd_toolbox.vmd の
     write/read でラウンドトリップしてもモーフ名・フレーム・ウェイトが保たれる
-    (L-0 受入条件「VMD出力がラウンドトリップする」)。"""
+    (受入条件「VMD出力がラウンドトリップする」)。"""
     events = [
         lipsync.MouthEvent(lipsync.MouthShape.A, 0.0, 10.0, 0.5),
         lipsync.MouthEvent(lipsync.MouthShape.I, 10.0, 20.0, 0.5),

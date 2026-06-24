@@ -1,4 +1,4 @@
-"""lipsync コアのモーフキー生成(lipsync.md §4, implementation-plan.md §4.1/§4.7)。
+"""lipsync コアのモーフキー生成(要求仕様 lipsync.md §4)。
 
 入力(開き量を同梱した口形イベント列＋生成パラメータ)から、標準口モーフ
 (あ・い・う・え・お)のモーフキー列を決定論的に生成する。VMD への組み立て・
@@ -15,7 +15,7 @@ from mmd_toolbox.vmd import MorphKey
 
 from .types import GenerationParams, MouthEvent, MouthShape
 
-# 各母音の主モーフ(目的母音と同名の標準口モーフ。implementation-plan.md §4.1)。
+# 各母音の主モーフ(目的母音と同名の標準口モーフ)。
 _MAIN_MORPH = {
     MouthShape.A: "あ",
     MouthShape.I: "い",
@@ -24,7 +24,7 @@ _MAIN_MORPH = {
     MouthShape.O: "お",
 }
 
-# 母音合成プロファイル(保持値1.0時の相対重み。implementation-plan.md §4.1)。主モーフ以外の
+# 母音合成プロファイル(保持値1.0時の相対重み)。主モーフ以外の
 # 非ゼロ重みが補助モーフ。表中 0.0 のモーフは持たない。`GenerationParams` とは別の lipsync 既定。
 _PROFILES: dict[MouthShape, dict[str, float]] = {
     MouthShape.A: {"あ": 1.0},
@@ -34,7 +34,7 @@ _PROFILES: dict[MouthShape, dict[str, float]] = {
     MouthShape.O: {"う": 0.2, "お": 1.0},
 }
 
-# vowel_scale=(a, i, u, e, o) の添字(implementation-plan.md §4.8)。
+# vowel_scale=(a, i, u, e, o) の添字。
 _VOWEL_INDEX = {
     MouthShape.A: 0,
     MouthShape.I: 1,
@@ -53,7 +53,7 @@ def _morph_key(name: str, frame: int, weight: float) -> MorphKey:
 
 
 def _half_up(value: float) -> int:
-    """四捨五入(0.5 は切り上げ)。Python の round() の銀行家丸めを避ける(implementation-plan.md §4.5)。
+    """四捨五入(0.5 は切り上げ)。Python の round() の銀行家丸めを避ける。
 
     フレーム番号の偶奇に依存せず `.5` 目標(協調調音で遷移長 T が奇数のときの b ± T/2 等)を確定する。
     """
@@ -61,7 +61,7 @@ def _half_up(value: float) -> int:
 
 
 def _effective_profile(shape: MouthShape, params: GenerationParams) -> dict[str, float]:
-    """有効プロファイル(補助重みに誇張係数を乗算した相対重み。implementation-plan.md §4.1)。"""
+    """有効プロファイル(補助重みに誇張係数を乗算した相対重み)。"""
     main = _MAIN_MORPH[shape]
     return {
         morph: weight if morph == main else weight * params.exaggeration
@@ -70,13 +70,13 @@ def _effective_profile(shape: MouthShape, params: GenerationParams) -> dict[str,
 
 
 def _hold_value(shape: MouthShape, open_amount: float, params: GenerationParams) -> float:
-    """保持値 hold(母音別倍率を掛け open_cap で上限クランプした開き量。implementation-plan.md §4.1)。"""
+    """保持値 hold(母音別倍率を掛け open_cap で上限クランプした開き量)。"""
     hold = open_amount * params.vowel_scale[_VOWEL_INDEX[shape]]
     return min(max(hold, 0.0), params.open_cap)
 
 
 def _weights_from_hold(shape: MouthShape, hold: float, params: GenerationParams) -> dict[str, float]:
-    """保持値 hold から各口モーフ重みを求める(有効プロファイル × hold、合成総量の比例縮小。§4.1)。"""
+    """保持値 hold から各口モーフ重みを求める(有効プロファイル × hold、合成総量の比例縮小)。"""
     weights = {morph: weight * hold for morph, weight in _effective_profile(shape, params).items()}
     total = sum(weights.values())
     if total > params.open_cap:
@@ -86,7 +86,7 @@ def _weights_from_hold(shape: MouthShape, hold: float, params: GenerationParams)
 
 
 def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) -> dict[str, float]:
-    """母音の合成プロファイルから各口モーフの重みを求める(implementation-plan.md §4.1)。
+    """母音の合成プロファイルから各口モーフの重みを求める。
 
     手順: (1)プロファイル選択 →(2)補助重みに誇張係数を乗算 →(3)保持値 hold を上限クランプ →
     (4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小。
@@ -95,7 +95,7 @@ def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) ->
 
 
 def _shape_diff(shape_a: MouthShape, shape_b: MouthShape, params: GenerationParams) -> float:
-    """両母音の口形差(0〜1。implementation-plan.md §4.3)。
+    """両母音の口形差(0〜1)。
 
     各母音の有効プロファイル(誇張適用後・保持値非依存の相対重み)を標準口モーフ5次元ベクトルとし、
     L2 正規化したうえでユークリッド距離を取り sqrt(2) で割る。同一口形は 0.0、互いに重ならない口形
@@ -117,7 +117,7 @@ def _shape_diff(shape_a: MouthShape, shape_b: MouthShape, params: GenerationPara
 
 
 def _transition_frames(diff: float, shorter_len: float, params: GenerationParams) -> int:
-    """協調調音の遷移長(implementation-plan.md §4.3)。
+    """協調調音の遷移長。
 
     基準長(=重なり上限)× (1 − 0.5・口形差) を、下限1・上限 min(重なり上限, 短い側区間長/2) で
     クランプして整数フレーム化する。
@@ -129,10 +129,10 @@ def _transition_frames(diff: float, shorter_len: float, params: GenerationParams
 
 
 def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
-    """連続する同一母音イベントを極大グループへ束ねる(implementation-plan.md §4.2)。
+    """連続する同一母音イベントを極大グループへ束ねる。
 
     プロファイル対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音の
-    リリース/アタックの 0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない。§4.11)。
+    リリース/アタックの 0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない)。
     """
     groups: list[list[MouthEvent]] = []
     current: list[MouthEvent] = []
@@ -155,7 +155,7 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
 
 @dataclass
 class _Group:
-    """正規化対象の母音グループ(implementation-plan.md §4.4)。
+    """正規化対象の母音グループ。
 
     `start`/`end` は吸収で延長されうる実効区間、`attack`/`release` は競合短縮後の実効値(浮動小数)。
     """
@@ -170,7 +170,7 @@ class _Group:
 
 
 def _opening(event: MouthEvent, params: GenerationParams) -> float:
-    """境界イベントの開き量(吸収先タイブレーク用。implementation-plan.md §4.4)。"""
+    """境界イベントの開き量(吸収先タイブレーク用)。"""
     scale = params.vowel_scale[_VOWEL_INDEX[event.shape]]
     return min(max(event.open_amount * scale, 0.0), params.open_cap)
 
@@ -178,7 +178,7 @@ def _opening(event: MouthEvent, params: GenerationParams) -> float:
 def _effective_attack_release(
     length: float, params: GenerationParams
 ) -> tuple[float, float]:
-    """競合短縮後の実効アタック/リリース(implementation-plan.md §4.4)。
+    """競合短縮後の実効アタック/リリース。
 
     保持を最優先で確保した残り `available = max(0, length − min_hold_frames)` に収まるよう、アタック+
     リリース全量が入らない区間で比例縮小する(各最小1フレーム)。`available ≥ a+r` なら縮小しない。
@@ -198,7 +198,7 @@ def _effective_attack_release(
 def _absorb_winner(
     prev: _Group | None, nxt: _Group | None, params: GenerationParams
 ) -> _Group | None:
-    """短区間の吸収先を選ぶ(開き量大 → 長い側 → 前側。implementation-plan.md §4.4)。"""
+    """短区間の吸収先を選ぶ(開き量大 → 長い側 → 前側)。"""
     if prev is None or nxt is None:
         return prev or nxt
     po, no = _opening(prev.events[-1], params), _opening(nxt.events[0], params)
@@ -210,9 +210,9 @@ def _absorb_winner(
 def _normalize_groups(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[_Group]:
-    """§4.2 の母音グループを §4.4 で正規化する: 短区間の吸収/除去・吸収後の同母音連結・競合短縮。
+    """母音グループを正規化する: 短区間の吸収/除去・吸収後の同母音連結・競合短縮。
 
-    出力は実効スパンと実効アタック/リリースを持つ生き残りグループ列(フレーム浮動小数。量子化は §4.5)。
+    出力は実効スパンと実効アタック/リリースを持つ生き残りグループ列(フレーム浮動小数。量子化は後段)。
     """
     groups = [_Group(g, g[0].start, g[-1].end, g[0].shape) for g in _vowel_groups(events)]
     for g in groups:
@@ -239,7 +239,7 @@ def _normalize_groups(
         elif winner is nxt_anchor and nxt_anchor is not None:
             nxt_anchor.start = run_start
         i = j
-    # 吸収後に直接隣接した同一母音グループを §4.2 の連結へ統合する。
+    # 吸収後に直接隣接した同一母音グループを連結へ統合する。
     merged: list[_Group] = []
     for g in survivors:
         if merged and merged[-1].shape == g.shape and merged[-1].end == g.start:
@@ -261,7 +261,7 @@ def _preceding_event(events: Sequence[MouthEvent], start: float) -> MouthEvent |
 
 
 def _anticipation_frames(prev: MouthEvent | None, params: GenerationParams) -> int:
-    """先行準備の前倒し量 A_eff(implementation-plan.md §4.10)。
+    """先行準備の前倒し量 A_eff。
 
     直前が無音区間のときのみ、先行フレーム数を直前区間長の 1/2 で自動短縮した値。直前が無い・母音・
     両唇閉鎖のときは 0(先行しない)。前区間長の 1/2 上限により前区間を侵食せず負フレームにも出ない。
@@ -272,7 +272,7 @@ def _anticipation_frames(prev: MouthEvent | None, params: GenerationParams) -> i
 
 
 def _quantize_targets(targets: Sequence[tuple[str, float, float]]) -> list[MorphKey]:
-    """float 目標位置の (モーフ名, フレーム, 重み) 列を整数フレームへ量子化する(implementation-plan.md §4.5)。
+    """float 目標位置の (モーフ名, フレーム, 重み) 列を整数フレームへ量子化する。
 
     `targets` は生成順(=列の添字が生成順)。手順:
     (1) 各目標を `_half_up`(四捨五入)で整数フレーム化する。
@@ -282,7 +282,7 @@ def _quantize_targets(targets: Sequence[tuple[str, float, float]]) -> list[Morph
         キーと同じフレームかそれ以前へ来るキーを `直前 + 1` へずらして厳密昇順化する(1フレーム以上離れた
         キーは動かさない)。
 
-    返すのは時間順(§4.7)の MorphKey 列。
+    返すのは時間順の MorphKey 列。
     """
     # (1)+(2) 同一(モーフ,整数フレーム)へ統合。量子化前フレーム最後尾、タイは生成順が後を残す。
     best: dict[tuple[str, int], tuple[float, int, float]] = {}
@@ -323,11 +323,11 @@ def _interp_open(points: Sequence[tuple[float, float]], t: float) -> float:
 def _vibrato_targets(
     group: _Group, plateau_start: float, plateau_end: float, params: GenerationParams
 ) -> list[tuple[str, float, float]]:
-    """保持プラトーに伸び表現の揺らぎ節点を生成する(implementation-plan.md §4.6)。
+    """保持プラトーに伸び表現の揺らぎ節点を生成する。
 
     公称開き量 `base_open(t)` を保持・強弱節点の線形補間で求め、正弦波で変調した実効開き量 `open_v` から
-    §4.1 と同じ合成で各モーフ重みを出す。節点は正弦波の極値(`t_k = plateau_start + P·(1/4 + k/2)`)の
-    厳密内側のみ。返すのは float 目標 `(モーフ名, フレーム, 重み)` 列(量子化は §4.5)。
+    合成手順で各モーフ重みを出す。節点は正弦波の極値(`t_k = plateau_start + P·(1/4 + k/2)`)の
+    厳密内側のみ。返すのは float 目標 `(モーフ名, フレーム, 重み)` 列(量子化は後段)。
     """
     holds = [_hold_value(group.shape, ev.open_amount, params) for ev in group.events]
     # 公称開き量の制御点: プラトー始端(先頭 hold)・プラトー内の各イベント中央(その hold)・終端(末尾 hold)。
@@ -361,17 +361,16 @@ def _vibrato_targets(
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
-    """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7/§4.9/§4.2/§4.3)。
+    """口形イベント列からモーフキー列を生成する(要求仕様 lipsync.md §4)。
 
-    連続する同一母音イベントを1グループへ連結し(§4.2)、§4.4 で最小保持未満の短区間を隣接母音へ吸収/
-    除去し競合短縮で実効アタック/リリースを求めたうえで、グループごとに §4.9 のエンベロープを置く:
-    先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量
-    の強弱節点を置いて節点間を線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、§4.3 の
-    協調調音(境界 b を中心とした幅 T の窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、
-    境界に中間口形を置く)へ置き換える。無音直後の母音は §4.10 の先行準備でアタックを前倒す。長く伸ばす母音の
-    保持プラトーには §4.6 の伸び表現で揺らぎ節点を任意に加える。両唇閉鎖・無音は隣接母音の 0.0 キーとキー不在
-    (MMD 上 0.0)で閉口を表し、専用の閉口キーは置かない(§4.11)。整数フレームへの量子化は §4.5 で一括して
-    行う。返すキーは時間順(§4.7)。
+    連続する同一母音イベントを1グループへ連結し、最小保持未満の短区間を隣接母音へ吸収/除去し競合短縮で
+    実効アタック/リリースを求めたうえで、グループごとにエンベロープを置く: 先頭にのみアタック(開始0.0・
+    保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量の強弱節点を置いて節点間を
+    線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、協調調音(境界 b を中心とした幅 T の
+    窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、境界に中間口形を置く)へ置き換える。
+    無音直後の母音は先行準備でアタックを前倒す。長く伸ばす母音の保持プラトーには伸び表現で揺らぎ節点を
+    任意に加える。両唇閉鎖・無音は隣接母音の 0.0 キーとキー不在(MMD 上 0.0)で閉口を表し、専用の閉口
+    キーは置かない。整数フレームへの量子化は最後に一括して行う。返すキーは時間順。
     """
     groups = _normalize_groups(events, params)
     weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g.events] for g in groups]
@@ -384,16 +383,16 @@ def generate_morph_keys(
         diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
         shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
         coart_half[i] = _transition_frames(diff, shorter, params) / 2.0
-    # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、§4.5 で一括量子化する。
+    # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、最後に一括量子化する。
     targets: list[tuple[str, float, float]] = []
-    plateaus: list[tuple[float, float]] = []  # グループごとの保持プラトー [始端, 終端](§4.6 の対象)。
+    plateaus: list[tuple[float, float]] = []  # グループごとの保持プラトー [始端, 終端](伸び表現の対象)。
     # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
     for i, g in enumerate(groups):
         gw = weights[i]
         coart_in = i > 0 and groups[i - 1].end == g.start
         coart_out = i < n - 1 and groups[i + 1].start == g.end
         if not coart_in:
-            # §4.10 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(実効アタック長は不変)。
+            # 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(実効アタック長は不変)。
             antic = _anticipation_frames(_preceding_event(events, g.start), params)
             f_start = g.start - antic
             f_attack = g.start - antic + g.attack
@@ -418,7 +417,7 @@ def generate_morph_keys(
                 for morph, weight in w.items():
                     targets.append((morph, f_mid, weight))
         plateaus.append((plateau_start, plateau_end))
-    # 隣接する異母音グループ境界の協調調音(§4.3)。閉口を挟まず中間口形へ線形遷移する。
+    # 隣接する異母音グループ境界の協調調音。閉口を挟まず中間口形へ線形遷移する。
     for i in range(n - 1):
         if i not in coart_half:
             continue
@@ -433,7 +432,7 @@ def generate_morph_keys(
             targets.append((morph, f_s, a))
             targets.append((morph, f_b, (a + b) / 2.0))
             targets.append((morph, f_e, b))
-    # §4.6 伸び表現: 公称エンベロープ・強弱・協調調音の後に、長い保持プラトーへ揺らぎ節点を加える(任意)。
+    # 伸び表現: 公称エンベロープ・強弱・協調調音の後に、長い保持プラトーへ揺らぎ節点を加える(任意)。
     if params.vibrato_amp > 0.0 and params.vibrato_period > 0:
         for i, g in enumerate(groups):
             plateau_start, plateau_end = plateaus[i]

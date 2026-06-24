@@ -1,4 +1,4 @@
-"""L-5 先行準備(anticipation)のテスト(implementation-plan.md §4.10, lipsync.md §3/§4)。
+"""先行準備(anticipation)のテスト(lipsync.md §3/§4)。
 
 無音区間の後に始まる母音グループの先頭アタックを A_eff=min(anticipation_frames, floor(前区間長/2))
 だけ前倒しすること、前区間長で自動短縮されること、時間軸先頭・両唇閉鎖直後・極短無音では先行しない
@@ -54,7 +54,7 @@ def test_no_anticipation_at_timeline_start():
 
 
 def test_no_anticipation_after_bilabial():
-    # 両唇閉鎖の直後の母音は閉口完成を優先し先行しない(A_eff=0)。両唇閉鎖は専用キーを持たず閉口は規約で表す(§4.11)。
+    # 両唇閉鎖の直後の母音は閉口完成を優先し先行しない(A_eff=0)。両唇閉鎖は専用キーを持たず閉口は規約で表す。
     env = _envelope(
         [
             MouthEvent(MouthShape.SILENCE, 0.0, 8.0),

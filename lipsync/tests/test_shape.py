@@ -1,6 +1,6 @@
-"""L-2 形状(アタック・保持・リリース)のテスト(implementation-plan.md §4.9, lipsync.md §3/§4)。
+"""形状(アタック・保持・リリース)のテスト(lipsync.md §3/§4)。
 
-各母音区間が §4.9 のエンベロープ(各出力モーフに (start,0.0)・(start+attack,w_m)・
+各母音区間がエンベロープ(各出力モーフに (start,0.0)・(start+attack,w_m)・
 (end-release,w_m)・(end,0.0) の4点)を出力し、短いアタックで保持値まで開き・区間の大半を
 一定保持・短いリリースで閉口へ戻ることを既知値で検証する。保持中はフレーム単位で揺れない。
 """
@@ -78,7 +78,7 @@ def test_envelope_respects_interval_start():
 
 
 def test_total_clamp_plateau_value():
-    # え open=1.0 は合成総量が cap 超で比例縮小(L-1)。プラトー値はその縮小後の合成重みで一定。
+    # え open=1.0 は合成総量が cap 超で比例縮小。プラトー値はその縮小後の合成重みで一定。
     # raw={あ:0.16,い:0.16,え:0.8} 総量1.12>0.8 → factor=0.8/1.12。
     env = _envelope([MouthEvent(MouthShape.E, 0.0, 10.0, 1.0)])
     factor = 0.8 / 1.12

@@ -1,7 +1,7 @@
-"""lipsync コアの公開データ型(implementation-plan.md §4.7/§4.8)。
+"""lipsync コアの公開データ型。
 
 時刻はすべてフレーム(30fps、float)。生成パラメータの意味は lipsync.md §2.3 が
-正本で、既定値は implementation-plan.md §4.8 の初期目安。
+正本で、既定値はその初期目安。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from enum import Enum
 
 
 class MouthShape(Enum):
-    """口形種別(implementation-plan.md §4.7)。
+    """口形種別。
 
     BILABIAL と SILENCE は出力上どちらも閉口(全母音 0.0)だが、両唇閉鎖は
     閉口完成のタイミングを持つため生成上の扱いを区別する。
@@ -28,7 +28,7 @@ class MouthShape(Enum):
 
 @dataclass
 class MouthEvent:
-    """口形イベント。1イベント=1モーラ(implementation-plan.md §4.7)。
+    """口形イベント。1イベント=1モーラ。
 
     イベント列は時間順・隙間なく連続(終端=次の始端)・非重複・全時間軸被覆を
     前提とする(呼び出し側の責務)。
@@ -42,7 +42,7 @@ class MouthEvent:
 
 @dataclass
 class GenerationParams:
-    """キーフレーム生成パラメータ(implementation-plan.md §4.8)。
+    """キーフレーム生成パラメータ。
 
     既定値は出発点で、各CLIプリセットが上書きする。フレーム単位は 30fps。
     """
