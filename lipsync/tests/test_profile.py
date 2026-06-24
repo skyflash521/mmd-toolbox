@@ -9,10 +9,6 @@ import pytest
 import lipsync
 from lipsync import GenerationParams, MouthEvent, MouthShape
 
-pytestmark = pytest.mark.xfail(
-    reason="impl pending: L-1 母音合成プロファイル", strict=False
-)
-
 
 def _weights_at(events, params=None):
     """単一区間のイベント列を変換し、モーフ名→ウェイトの辞書を返す。"""
