@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from mmd_toolbox.vmd import MorphKey
 
@@ -69,30 +69,58 @@ def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) ->
     return weights
 
 
+def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
+    """連続する同一母音イベントを極大グループへ束ねる(implementation-plan.md §4.2)。
+
+    プロファイル対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない
+    (閉口キーは L-8 で置く)。
+    """
+    groups: list[list[MouthEvent]] = []
+    current: list[MouthEvent] = []
+    for ev in events:
+        if ev.shape not in _PROFILES:
+            if current:
+                groups.append(current)
+                current = []
+            continue
+        if current and ev.shape == current[-1].shape:
+            current.append(ev)
+        else:
+            if current:
+                groups.append(current)
+            current = [ev]
+    if current:
+        groups.append(current)
+    return groups
+
+
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
-    """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7/§4.9)。
+    """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7/§4.9/§4.2)。
 
-    各母音イベントを §4.1 の合成プロファイルで複数の口モーフへ展開し、§4.9 の形状
-    エンベロープ(各モーフに 開始0.0・アタックで保持値・リリース直前まで保持値・終了0.0 の
-    4点)で配置する。協調調音・同母音連結・きびきび遷移・量子化などは後続ステップで段階的に
-    加える。両唇閉鎖・無音の閉口キーは後続ステップ(L-8)で置く。返すキーは時間順(§4.7)。
+    連続する同一母音イベントを1グループへ連結し(§4.2)、グループごとに §4.9 のエンベロープを
+    置く: 先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の
+    中央に開き量の強弱節点を置いて節点間を線形に変える。単一区間のグループは §4.9 の4点に帰着する。
+    協調調音・きびきび遷移・量子化などは後続ステップで段階的に加える。両唇閉鎖・無音の閉口キーは
+    後続ステップ(L-8)で置く。返すキーは時間順(§4.7)。
     """
     keys: list[MorphKey] = []
-    for ev in events:
-        if ev.shape not in _PROFILES:
-            continue
-        weights: Mapping[str, float] = _compose(ev.shape, ev.open_amount, params)
-        # §4.9 のエンベロープ目標位置(整数量子化は L-0/L-1 と同様 round。厳密化は §4.5/L-9)。
-        f_start = round(ev.start)
-        f_attack = round(ev.start + params.attack_frames)
-        f_release = round(ev.end - params.release_frames)
-        f_end = round(ev.end)
-        for morph, weight in weights.items():
+    for group in _vowel_groups(events):
+        weights = [_compose(ev.shape, ev.open_amount, params) for ev in group]
+        # §4.2/§4.9 のエンベロープ目標位置(整数量子化は L-0/L-1 と同様 round。厳密化は §4.5/L-9)。
+        f_start = round(group[0].start)
+        f_end = round(group[-1].end)
+        f_hold_start = round(group[0].start + params.attack_frames)
+        f_hold_end = round(group[-1].end - params.release_frames)
+        for morph in weights[0]:
             keys.append(_morph_key(morph, f_start, 0.0))
-            keys.append(_morph_key(morph, f_attack, weight))
-            keys.append(_morph_key(morph, f_release, weight))
+            keys.append(_morph_key(morph, f_hold_start, weights[0][morph]))
+            if len(group) >= 2:
+                for ev, w in zip(group, weights):
+                    f_mid = round((ev.start + ev.end) / 2)
+                    keys.append(_morph_key(morph, f_mid, w[morph]))
+            keys.append(_morph_key(morph, f_hold_end, weights[-1][morph]))
             keys.append(_morph_key(morph, f_end, 0.0))
     keys.sort(key=lambda k: k.frame)
     return keys

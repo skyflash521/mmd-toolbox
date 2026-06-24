@@ -11,8 +11,6 @@ import pytest
 import lipsync
 from lipsync import GenerationParams, MouthEvent, MouthShape
 
-_L3 = pytest.mark.xfail(reason="impl pending: L-3 同母音連結")
-
 
 def _envelope(events, params=None):
     """イベント列を変換し、モーフ名→(frame, weight) の時間順リストの辞書を返す。"""
@@ -33,7 +31,6 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-@_L3
 def test_two_same_vowels_merge_into_one_envelope():
     # あ[0,10]op0.4・あ[10,20]op0.7 を連結。hold_start=2/hold_end=18、mid=5,15、w=0.4,0.7。
     # 先頭アタック・末尾リリースのみ、内部境界に閉口/再アタックなし。
@@ -46,7 +43,6 @@ def test_two_same_vowels_merge_into_one_envelope():
     )
 
 
-@_L3
 def test_no_reattack_or_close_at_internal_boundary():
     # 連結区間の内部境界フレーム10に0キーや再アタックを置かない。端点以外は全て非ゼロ重み。
     env = _envelope(
@@ -60,7 +56,6 @@ def test_no_reattack_or_close_at_internal_boundary():
             assert weight > 0.0
 
 
-@_L3
 def test_multi_morph_same_vowel_merge():
     # い[0,10]op0.4・い[10,20]op0.6 を連結。い:{あ:0.1,い:1.0}。主・補助モーフとも連結エンベロープ。
     env = _envelope(
@@ -75,20 +70,19 @@ def test_multi_morph_same_vowel_merge():
     )
 
 
-@_L3
 def test_three_same_vowels_single_attack_release():
-    # あ×3(各長12)を連結。hold_start=2/hold_end=34、mid=6,18,30、w=0.3,0.6,0.9。
-    # 先頭アタック1回・末尾リリース1回、内部に強弱節点3つ。
+    # あ×3(各長12)を連結。開き量は cap 未満の 0.3/0.5/0.7 で、hold_start=2/hold_end=34、
+    # mid=6,18,30、w=0.3,0.5,0.7。先頭アタック1回・末尾リリース1回、内部に強弱節点3つ。
     env = _envelope(
         [
             MouthEvent(MouthShape.A, 0.0, 12.0, 0.3),
-            MouthEvent(MouthShape.A, 12.0, 24.0, 0.6),
-            MouthEvent(MouthShape.A, 24.0, 36.0, 0.9),
+            MouthEvent(MouthShape.A, 12.0, 24.0, 0.5),
+            MouthEvent(MouthShape.A, 24.0, 36.0, 0.7),
         ]
     )
     _approx_envelope(
         env["あ"],
-        [(0, 0.0), (2, 0.3), (6, 0.3), (18, 0.6), (30, 0.9), (34, 0.9), (36, 0.0)],
+        [(0, 0.0), (2, 0.3), (6, 0.3), (18, 0.5), (30, 0.7), (34, 0.7), (36, 0.0)],
     )
 
 
