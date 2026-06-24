@@ -375,7 +375,7 @@ def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, pr
     max_seg フレーム)の途中でも確定した部分区間の分だけ進捗が進むため、表示が長く停滞しない。
     """
     bounds = sorted(set(boundaries))
-    presplit = _presplit(bounds, max_seg)
+    presplit = _presplit(bounds, max_seg, channels)
 
     keys = set(presplit)
     span0, span1 = presplit[0], presplit[-1]
@@ -394,12 +394,18 @@ def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, pr
     return sorted(keys)
 
 
-def _presplit(bounds, max_seg):
-    """必須境界間を max_seg 以下に事前分割する(§5.1 step3)。"""
+def _presplit(bounds, max_seg, channels):
+    """必須境界間を max_seg 以下に事前分割する(§5.1 step3)。
+
+    span が max_seg を超えても、その span が全チャンネル定数なら等分しない(§4.2)。定数区間には
+    編集すべき曲がりが無く、max_seg 等分は純粋な無駄(キー過多＋フィット評価増)になるため。
+    曲がった区間は従来通り max_seg で短く保つ。定数判定 _span_is_constant はダックタイプ契約を
+    壊さないフォールバックを持つ(下記)。
+    """
     out = [bounds[0]]
     for a, b in zip(bounds, bounds[1:]):
         span = b - a
-        if span > max_seg:
+        if span > max_seg and not _span_is_constant(a, b, channels):
             pieces = math.ceil(span / max_seg)
             for i in range(1, pieces):
                 out.append(a + round(i * span / pieces))
@@ -410,6 +416,20 @@ def _presplit(bounds, max_seg):
         if not dedup or dedup[-1] != x:
             dedup.append(x)
     return dedup
+
+
+def _span_is_constant(a, b, channels):
+    """span [a,b] の全チャンネルが定数(無変化)か(§4.2)。
+
+    全チャンネルが is_constant(a, b) を実装し、かつ全て True のときだけ True を返す。is_constant を
+    持たないチャンネルが1つでもあれば False を返し、従来の max_seg 等分へフォールバックする
+    (reduce_track のチャンネルは normalized のみのダックタイプ契約なので、属性に直結させない)。
+    """
+    for ch in channels:
+        is_const = getattr(ch, "is_constant", None)
+        if is_const is None or not is_const(a, b):
+            return False
+    return True
 
 
 def _worst_channel(a, b, channels):

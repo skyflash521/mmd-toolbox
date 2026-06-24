@@ -117,9 +117,6 @@ def test_adjacent_segment_accepted():
     assert keys == [0, 1]
 
 
-@pytest.mark.xfail(
-    reason="impl pending: _presplit 定数区間非分割", raises=AssertionError
-)
 def test_constant_span_not_presplit():
     # 全フレーム同値(定数)の span は max_seg を超えても等分されず両端2キーになる
     # (定数区間には編集すべき曲がりが無いため max_seg 事前分割の対象外。§4.3)。
