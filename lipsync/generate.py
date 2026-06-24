@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 from mmd_toolbox.vmd import MorphKey
@@ -41,6 +42,9 @@ _VOWEL_INDEX = {
     MouthShape.O: 4,
 }
 
+# 標準口モーフの固定列(口形差ベクトルの軸・同フレーム出力の決定論的順序)。
+_VOWEL_ORDER = ("あ", "い", "う", "え", "お")
+
 
 def _morph_key(name: str, frame: int, weight: float) -> MorphKey:
     """標準口モーフ名を cp932・15バイト固定の name_raw に符号化したキーを作る。"""
@@ -69,6 +73,40 @@ def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) ->
     return weights
 
 
+def _shape_diff(shape_a: MouthShape, shape_b: MouthShape, params: GenerationParams) -> float:
+    """両母音の口形差(0〜1。implementation-plan.md §4.3)。
+
+    各母音の有効プロファイル(誇張適用後・保持値非依存の相対重み)を標準口モーフ5次元ベクトルとし、
+    L2 正規化したうえでユークリッド距離を取り sqrt(2) で割る。同一口形は 0.0、互いに重ならない口形
+    方向は 1.0。
+    """
+    def _unit(shape: MouthShape) -> list[float]:
+        main = _MAIN_MORPH[shape]
+        eff = {
+            morph: weight if morph == main else weight * params.exaggeration
+            for morph, weight in _PROFILES[shape].items()
+        }
+        vec = [eff.get(morph, 0.0) for morph in _VOWEL_ORDER]
+        norm = math.sqrt(sum(x * x for x in vec))
+        return [x / norm for x in vec] if norm > 0.0 else vec
+
+    ua, ub = _unit(shape_a), _unit(shape_b)
+    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ua, ub)))
+    return dist / math.sqrt(2.0)
+
+
+def _transition_frames(diff: float, shorter_len: float, params: GenerationParams) -> int:
+    """協調調音の遷移長(implementation-plan.md §4.3)。
+
+    基準長(=重なり上限)× (1 − 0.5・口形差) を、下限1・上限 min(重なり上限, 短い側区間長/2) で
+    クランプして整数フレーム化する。
+    """
+    base = params.coartic_overlap_max
+    value = base * (1.0 - 0.5 * diff)
+    cap = min(float(base), shorter_len / 2.0)
+    return round(max(1.0, min(value, cap)))
+
+
 def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
     """連続する同一母音イベントを極大グループへ束ねる(implementation-plan.md §4.2)。
 
@@ -94,33 +132,69 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
     return groups
 
 
+def _adjacent(prev: list[MouthEvent], nxt: list[MouthEvent]) -> bool:
+    """2グループが両唇閉鎖・無音を挟まず直接隣接するか(前グループ終端=次グループ始端)。"""
+    return prev[-1].end == nxt[0].start
+
+
+def _span_length(group: list[MouthEvent]) -> float:
+    """グループ(連結後の母音区間)の総フレーム長。"""
+    return group[-1].end - group[0].start
+
+
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
-    """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7/§4.9/§4.2)。
+    """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7/§4.9/§4.2/§4.3)。
 
-    連続する同一母音イベントを1グループへ連結し(§4.2)、グループごとに §4.9 のエンベロープを
-    置く: 先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の
-    中央に開き量の強弱節点を置いて節点間を線形に変える。単一区間のグループは §4.9 の4点に帰着する。
-    協調調音・きびきび遷移・量子化などは後続ステップで段階的に加える。両唇閉鎖・無音の閉口キーは
-    後続ステップ(L-8)で置く。返すキーは時間順(§4.7)。
+    連続する同一母音イベントを1グループへ連結し(§4.2)、グループごとに §4.9 のエンベロープを置く:
+    先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量
+    の強弱節点を置いて節点間を線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、§4.3 の
+    協調調音(境界 b を中心とした幅 T の窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、
+    境界に中間口形を置く)へ置き換える。きびきび遷移・量子化などは後続ステップで加える。両唇閉鎖・無音の
+    閉口キーは後続ステップ(L-8)で置く。返すキーは時間順(§4.7)。
     """
+    groups = _vowel_groups(events)
+    weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g] for g in groups]
     keys: list[MorphKey] = []
-    for group in _vowel_groups(events):
-        weights = [_compose(ev.shape, ev.open_amount, params) for ev in group]
-        # §4.2/§4.9 のエンベロープ目標位置(整数量子化は L-0/L-1 と同様 round。厳密化は §4.5/L-9)。
-        f_start = round(group[0].start)
-        f_end = round(group[-1].end)
-        f_hold_start = round(group[0].start + params.attack_frames)
-        f_hold_end = round(group[-1].end - params.release_frames)
-        for morph in weights[0]:
-            keys.append(_morph_key(morph, f_start, 0.0))
-            keys.append(_morph_key(morph, f_hold_start, weights[0][morph]))
-            if len(group) >= 2:
-                for ev, w in zip(group, weights):
-                    f_mid = round((ev.start + ev.end) / 2)
-                    keys.append(_morph_key(morph, f_mid, w[morph]))
-            keys.append(_morph_key(morph, f_hold_end, weights[-1][morph]))
-            keys.append(_morph_key(morph, f_end, 0.0))
+    # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。
+    for i, group in enumerate(groups):
+        gw = weights[i]
+        coart_in = i > 0 and _adjacent(groups[i - 1], group)
+        coart_out = i < len(groups) - 1 and _adjacent(group, groups[i + 1])
+        if not coart_in:
+            f_start = round(group[0].start)
+            f_attack = round(group[0].start + params.attack_frames)
+            for morph, weight in gw[0].items():
+                keys.append(_morph_key(morph, f_start, 0.0))
+                keys.append(_morph_key(morph, f_attack, weight))
+        if not coart_out:
+            f_hold_end = round(group[-1].end - params.release_frames)
+            f_end = round(group[-1].end)
+            for morph, weight in gw[-1].items():
+                keys.append(_morph_key(morph, f_hold_end, weight))
+                keys.append(_morph_key(morph, f_end, 0.0))
+        if len(group) >= 2:
+            for ev, w in zip(group, gw):
+                f_mid = round((ev.start + ev.end) / 2)
+                for morph, weight in w.items():
+                    keys.append(_morph_key(morph, f_mid, weight))
+    # 隣接する異母音グループ境界の協調調音(§4.3)。閉口を挟まず中間口形へ線形遷移する。
+    for i in range(len(groups) - 1):
+        if not _adjacent(groups[i], groups[i + 1]):
+            continue
+        wa, wb = weights[i][-1], weights[i + 1][0]
+        boundary = groups[i][-1].end
+        diff = _shape_diff(groups[i][-1].shape, groups[i + 1][0].shape, params)
+        shorter = min(_span_length(groups[i]), _span_length(groups[i + 1]))
+        half = _transition_frames(diff, shorter, params) / 2.0
+        f_s, f_b, f_e = round(boundary - half), round(boundary), round(boundary + half)
+        for morph in _VOWEL_ORDER:
+            a, b = wa.get(morph, 0.0), wb.get(morph, 0.0)
+            if a == 0.0 and b == 0.0:
+                continue
+            keys.append(_morph_key(morph, f_s, a))
+            keys.append(_morph_key(morph, f_b, (a + b) / 2.0))
+            keys.append(_morph_key(morph, f_e, b))
     keys.sort(key=lambda k: k.frame)
     return keys

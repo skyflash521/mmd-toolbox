@@ -4,8 +4,7 @@
 遷移長が口形差と区間長で決まること、両唇閉鎖を挟む境界では協調調音を作らないことを既知値で検証する。
 口形差・遷移長は純粋ヘルパとして精密に、境界のキー配置は遷移長が偶数(T=2)になる
 coartic_overlap_max=4 の明快なフィクスチャで検証する(既定 overlap_max=2 では T=1 が量子化で潰れ
-衝突解決が §4.5/L-9 管轄になるため)。協調調音の新挙動・未実装ヘルパは xfail で印を付け、両唇閉鎖を
-挟む非協調の回帰ガードは現行実装でも成立するため印を付けない。
+衝突解決が §4.5/L-9 管轄になるため)。
 """
 
 import math
@@ -15,8 +14,6 @@ import pytest
 import lipsync
 from lipsync import GenerationParams, MouthEvent, MouthShape
 from lipsync import generate
-
-_L4 = pytest.mark.xfail(reason="impl pending: L-4 協調調音")
 
 # T=2 を得るための overlap_max=4(直交対 diff=1 で T=round(4*(1-0.5))=2、境界 b±1 の整数窓)。
 _WIDE = GenerationParams(coartic_overlap_max=4)
@@ -39,18 +36,15 @@ def _approx_envelope(actual, expected):
 
 # --- 口形差 _shape_diff(純粋ヘルパ。端点と算出可能な部分値) ---
 
-@_L4
 def test_shape_diff_identical_is_zero():
     assert generate._shape_diff(MouthShape.A, MouthShape.A, GenerationParams()) == pytest.approx(0.0)
 
 
-@_L4
 def test_shape_diff_disjoint_is_one():
     # あ={あ}・う={う,お} はモーフ集合が重ならず直交 → 正規化距離/√2 = 1.0。
     assert generate._shape_diff(MouthShape.A, MouthShape.U, GenerationParams()) == pytest.approx(1.0)
 
 
-@_L4
 def test_shape_diff_partial_known_value():
     # う={う:1.0,お:0.2}・お={う:0.2,お:1.0}。L2正規化後の距離/√2。
     dot = (1.0 * 0.2 + 0.2 * 1.0) / 1.04
@@ -60,7 +54,6 @@ def test_shape_diff_partial_known_value():
 
 # --- 遷移長 _transition_frames(純粋ヘルパ。合成 diff で精密検証) ---
 
-@_L4
 @pytest.mark.parametrize(
     "diff,shorter_len,overlap_max,expected",
     [
@@ -79,7 +72,6 @@ def test_transition_frames_formula(diff, shorter_len, overlap_max, expected):
 
 # --- 境界のキー配置(統合。overlap_max=4 で T=2) ---
 
-@_L4
 def test_no_close_at_coartic_boundary():
     # あ[0,10]・う[10,20] は直接隣接の異母音 → 境界10で閉口せず中間口形へ。
     # diff=1 で T=2、窓[9,11]、境界10は中間口形 あ:0.25・う:0.25・お:0.05(いずれも非ゼロ)。
@@ -91,7 +83,6 @@ def test_no_close_at_coartic_boundary():
     assert at10 == pytest.approx({"あ": 0.25, "う": 0.25, "お": 0.05})
 
 
-@_L4
 def test_coartic_full_envelopes():
     # あ→う、overlap_max=4 で T=2、窓[9,11]。前母音は先頭アタックのみ、次母音は末尾リリースのみ。
     env = _envelope(
