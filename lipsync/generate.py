@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from mmd_toolbox.vmd import MorphKey
 
@@ -132,14 +133,103 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
     return groups
 
 
-def _adjacent(prev: list[MouthEvent], nxt: list[MouthEvent]) -> bool:
-    """2グループが両唇閉鎖・無音を挟まず直接隣接するか(前グループ終端=次グループ始端)。"""
-    return prev[-1].end == nxt[0].start
+@dataclass
+class _Group:
+    """正規化対象の母音グループ(implementation-plan.md §4.4)。
+
+    `start`/`end` は吸収で延長されうる実効区間、`attack`/`release` は競合短縮後の実効値(浮動小数)。
+    """
+
+    events: list[MouthEvent]
+    start: float
+    end: float
+    shape: MouthShape
+    short: bool = False
+    attack: float = 0.0
+    release: float = 0.0
 
 
-def _span_length(group: list[MouthEvent]) -> float:
-    """グループ(連結後の母音区間)の総フレーム長。"""
-    return group[-1].end - group[0].start
+def _opening(event: MouthEvent, params: GenerationParams) -> float:
+    """境界イベントの開き量(吸収先タイブレーク用。implementation-plan.md §4.4)。"""
+    scale = params.vowel_scale[_VOWEL_INDEX[event.shape]]
+    return min(max(event.open_amount * scale, 0.0), params.open_cap)
+
+
+def _effective_attack_release(
+    length: float, params: GenerationParams
+) -> tuple[float, float]:
+    """競合短縮後の実効アタック/リリース(implementation-plan.md §4.4)。
+
+    保持を最優先で確保した残り `available = max(0, length − min_hold_frames)` に収まるよう、アタック+
+    リリース全量が入らない区間で比例縮小する(各最小1フレーム)。`available ≥ a+r` なら縮小しない。
+    """
+    a, r = float(params.attack_frames), float(params.release_frames)
+    available = max(0.0, length - params.min_hold_frames)
+    if available >= a + r:
+        return a, r
+    scale = available / (a + r)
+    a_eff = max(1.0, a * scale)
+    r_eff = available - a_eff
+    if r_eff < 1.0:
+        r_eff, a_eff = 1.0, available - 1.0
+    return a_eff, r_eff
+
+
+def _absorb_winner(
+    prev: _Group | None, nxt: _Group | None, params: GenerationParams
+) -> _Group | None:
+    """短区間の吸収先を選ぶ(開き量大 → 長い側 → 前側。implementation-plan.md §4.4)。"""
+    if prev is None or nxt is None:
+        return prev or nxt
+    po, no = _opening(prev.events[-1], params), _opening(nxt.events[0], params)
+    if po != no:
+        return prev if po > no else nxt
+    return nxt if (nxt.end - nxt.start) > (prev.end - prev.start) else prev
+
+
+def _normalize_groups(
+    events: Sequence[MouthEvent], params: GenerationParams
+) -> list[_Group]:
+    """§4.2 の母音グループを §4.4 で正規化する: 短区間の吸収/除去・吸収後の同母音連結・競合短縮。
+
+    出力は実効スパンと実効アタック/リリースを持つ生き残りグループ列(フレーム浮動小数。量子化は §4.5)。
+    """
+    groups = [_Group(g, g[0].start, g[-1].end, g[0].shape) for g in _vowel_groups(events)]
+    for g in groups:
+        g.short = max(0.0, (g.end - g.start) - params.min_hold_frames) < 2
+    # 短区間 run を隣接母音アンカーへ吸収/除去する。
+    survivors: list[_Group] = []
+    i, n = 0, len(groups)
+    while i < n:
+        if not groups[i].short:
+            survivors.append(groups[i])
+            i += 1
+            continue
+        j = i
+        while j < n and groups[j].short and (j == i or groups[j - 1].end == groups[j].start):
+            j += 1
+        run_start, run_end = groups[i].start, groups[j - 1].end
+        prev_anchor = survivors[-1] if survivors and survivors[-1].end == run_start else None
+        nxt_anchor = (
+            groups[j] if j < n and not groups[j].short and groups[j].start == run_end else None
+        )
+        winner = _absorb_winner(prev_anchor, nxt_anchor, params)
+        if winner is prev_anchor and prev_anchor is not None:
+            prev_anchor.end = run_end
+        elif winner is nxt_anchor and nxt_anchor is not None:
+            nxt_anchor.start = run_start
+        i = j
+    # 吸収後に直接隣接した同一母音グループを §4.2 の連結へ統合する。
+    merged: list[_Group] = []
+    for g in survivors:
+        if merged and merged[-1].shape == g.shape and merged[-1].end == g.start:
+            merged[-1].events = merged[-1].events + g.events
+            merged[-1].end = g.end
+        else:
+            merged.append(g)
+    for g in merged:
+        g.attack, g.release = _effective_attack_release(g.end - g.start, params)
+    return merged
 
 
 def _preceding_event(events: Sequence[MouthEvent], start: float) -> MouthEvent | None:
@@ -166,48 +256,50 @@ def generate_morph_keys(
 ) -> list[MorphKey]:
     """口形イベント列からモーフキー列を生成する(implementation-plan.md §4.7/§4.9/§4.2/§4.3)。
 
-    連続する同一母音イベントを1グループへ連結し(§4.2)、グループごとに §4.9 のエンベロープを置く:
+    連続する同一母音イベントを1グループへ連結し(§4.2)、§4.4 で最小保持未満の短区間を隣接母音へ吸収/
+    除去し競合短縮で実効アタック/リリースを求めたうえで、グループごとに §4.9 のエンベロープを置く:
     先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量
     の強弱節点を置いて節点間を線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、§4.3 の
     協調調音(境界 b を中心とした幅 T の窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、
-    境界に中間口形を置く)へ置き換える。きびきび遷移・量子化などは後続ステップで加える。両唇閉鎖・無音の
-    閉口キーは後続ステップ(L-8)で置く。返すキーは時間順(§4.7)。
+    境界に中間口形を置く)へ置き換える。無音直後の母音は §4.10 の先行準備でアタックを前倒す。量子化は
+    後続ステップ(§4.5/L-9)で行う。両唇閉鎖・無音の閉口キーは後続ステップ(L-8)で置く。返すキーは時間順
+    (§4.7)。
     """
-    groups = _vowel_groups(events)
-    weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g] for g in groups]
+    groups = _normalize_groups(events, params)
+    weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g.events] for g in groups]
     keys: list[MorphKey] = []
-    # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。
-    for i, group in enumerate(groups):
+    # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
+    for i, g in enumerate(groups):
         gw = weights[i]
-        coart_in = i > 0 and _adjacent(groups[i - 1], group)
-        coart_out = i < len(groups) - 1 and _adjacent(group, groups[i + 1])
+        coart_in = i > 0 and groups[i - 1].end == g.start
+        coart_out = i < len(groups) - 1 and groups[i + 1].start == g.end
         if not coart_in:
-            # §4.10 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(アタック長は不変)。
-            antic = _anticipation_frames(_preceding_event(events, group[0].start), params)
-            f_start = round(group[0].start - antic)
-            f_attack = round(group[0].start - antic + params.attack_frames)
+            # §4.10 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(実効アタック長は不変)。
+            antic = _anticipation_frames(_preceding_event(events, g.start), params)
+            f_start = round(g.start - antic)
+            f_attack = round(g.start - antic + g.attack)
             for morph, weight in gw[0].items():
                 keys.append(_morph_key(morph, f_start, 0.0))
                 keys.append(_morph_key(morph, f_attack, weight))
         if not coart_out:
-            f_hold_end = round(group[-1].end - params.release_frames)
-            f_end = round(group[-1].end)
+            f_hold_end = round(g.end - g.release)
+            f_end = round(g.end)
             for morph, weight in gw[-1].items():
                 keys.append(_morph_key(morph, f_hold_end, weight))
                 keys.append(_morph_key(morph, f_end, 0.0))
-        if len(group) >= 2:
-            for ev, w in zip(group, gw):
+        if len(g.events) >= 2:
+            for ev, w in zip(g.events, gw):
                 f_mid = round((ev.start + ev.end) / 2)
                 for morph, weight in w.items():
                     keys.append(_morph_key(morph, f_mid, weight))
     # 隣接する異母音グループ境界の協調調音(§4.3)。閉口を挟まず中間口形へ線形遷移する。
     for i in range(len(groups) - 1):
-        if not _adjacent(groups[i], groups[i + 1]):
+        if groups[i].end != groups[i + 1].start:
             continue
         wa, wb = weights[i][-1], weights[i + 1][0]
-        boundary = groups[i][-1].end
-        diff = _shape_diff(groups[i][-1].shape, groups[i + 1][0].shape, params)
-        shorter = min(_span_length(groups[i]), _span_length(groups[i + 1]))
+        boundary = groups[i].end
+        diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
+        shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
         half = _transition_frames(diff, shorter, params) / 2.0
         f_s, f_b, f_e = round(boundary - half), round(boundary), round(boundary + half)
         for morph in _VOWEL_ORDER:
