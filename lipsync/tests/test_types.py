@@ -8,12 +8,6 @@ I/O をラウンドトリップすることを検証する。
 import pytest
 
 import lipsync
-
-if not hasattr(lipsync, "MouthShape"):
-    # lipsync は namespace package として空 import される。型未実装の間はモジュール
-    # 全体を skip して赤を出さない(impl pending: L-0 雛形・データ型)。
-    pytest.skip("impl pending: L-0 雛形・データ型", allow_module_level=True)
-
 from mmd_toolbox.vmd import MorphKey, VmdDocument, read, write
 
 
