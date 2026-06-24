@@ -33,7 +33,7 @@ def _build_parser():
     p.add_argument("--foot-ik-stabilize", dest="foot_ik_stabilize", action="store_true", default=True)
     p.add_argument("--no-foot-ik-stabilize", dest="foot_ik_stabilize", action="store_false")
     p.add_argument(
-        "--reduce-preset", dest="reduce_preset", choices=presets.REDUCTION_PRESET_NAMES, default="balanced"
+        "--reduce-preset", dest="reduce_preset", choices=presets.REDUCTION_PRESET_NAMES, default="medium"
     )
     p.add_argument("--reduce-error-bone-pos", dest="reduce_error_bone_pos", type=float, default=None)
     p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=float, default=None)

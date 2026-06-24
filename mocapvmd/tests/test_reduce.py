@@ -47,8 +47,8 @@ def _track(out, name):
 
 def test_single_track_matches_building_blocks():
     keys = _curved("右足ＩＫ")
-    out = mreduce.reduce_bones(keys, "balanced")
-    expected = _manual(keys, "balanced", "foot_ik")
+    out = mreduce.reduce_bones(keys, "medium")
+    expected = _manual(keys, "medium", "foot_ik")
     assert _track(out, "右足ＩＫ") == list(expected)
 
 
@@ -56,11 +56,11 @@ def test_per_category_tolerance_resolution():
     # 種別ごとに解決した許容誤差(center 0.7 / fingers 1.5 スケール)で各トラックが疎化される。
     center = _curved("センター")
     fingers = _curved("右人指1")
-    out = mreduce.reduce_bones(center + fingers, "balanced")
-    assert _track(out, "センター") == list(_manual(center, "balanced", "center"))
-    assert _track(out, "右人指1") == list(_manual(fingers, "balanced", "fingers"))
+    out = mreduce.reduce_bones(center + fingers, "medium")
+    assert _track(out, "センター") == list(_manual(center, "medium", "center"))
+    assert _track(out, "右人指1") == list(_manual(fingers, "medium", "fingers"))
     # 余分なキー・重複トラックを出さない: 全出力が各トラックの疎化結果の結合と一致する。
-    expected_all = list(_manual(center, "balanced", "center")) + list(_manual(fingers, "balanced", "fingers"))
+    expected_all = list(_manual(center, "medium", "center")) + list(_manual(fingers, "medium", "fingers"))
     assert sorted(out, key=lambda k: (k.name, k.frame)) == sorted(expected_all, key=lambda k: (k.name, k.frame))
 
 
@@ -76,12 +76,12 @@ def test_per_track_range_tolerance_and_fixed_args(monkeypatch):
     monkeypatch.setattr(mreduce, "reduce_bone_track", _spy)
     center = _curved("センター")  # frames 0-10
     fingers = [bone("右人指1", f, pos=(round(0.01 * f * f, 6), 0.0, 0.0)) for f in range(5, 13)]  # 5-12
-    mreduce.reduce_bones(center + fingers, "balanced")
+    mreduce.reduce_bones(center + fingers, "medium")
 
     assert calls["センター"][0] == [(0, 10)]       # 各トラック固有の実在区間
     assert calls["右人指1"][0] == [(5, 12)]
-    assert calls["センター"][1] == _expected_tols("balanced", "center")  # 種別別トレランス
-    assert calls["右人指1"][1] == _expected_tols("balanced", "fingers")
+    assert calls["センター"][1] == _expected_tols("medium", "center")  # 種別別トレランス
+    assert calls["右人指1"][1] == _expected_tols("medium", "fingers")
     for name in ("センター", "右人指1"):
         kw = calls[name][2]
         for key, val in {
@@ -101,8 +101,8 @@ def test_override_and_curve_mode_flow_into_call(monkeypatch):
         return list(source_keys)
 
     monkeypatch.setattr(mreduce, "reduce_bone_track", _spy)
-    mreduce.reduce_bones(_curved("センター"), "balanced", override_pos=0.005, override_rot=0.05, curve_mode="linear")
-    assert captured["tols"] == _expected_tols("balanced", "center", override_pos=0.005, override_rot=0.05)
+    mreduce.reduce_bones(_curved("センター"), "medium", override_pos=0.005, override_rot=0.05, curve_mode="linear")
+    assert captured["tols"] == _expected_tols("medium", "center", override_pos=0.005, override_rot=0.05)
     assert captured["curve_mode"] == "linear"
 
 
@@ -111,14 +111,14 @@ def test_single_key_track_kept_verbatim_alongside_multikey():
     # 入力全体が1キーのときだけ逐語返す誤実装を弾く。
     single = [bone("右足ＩＫ", 0, pos=(1.0, 2.0, 3.0), interp=BONE_NONLINEAR)]
     multi = _curved("センター")
-    out = mreduce.reduce_bones(single + multi, "balanced")
+    out = mreduce.reduce_bones(single + multi, "medium")
     assert _track(out, "右足ＩＫ") == single
-    assert _track(out, "センター") == list(_manual(multi, "balanced", "center"))
+    assert _track(out, "センター") == list(_manual(multi, "medium", "center"))
 
 
 def test_deterministic():
     keys = _curved("右足ＩＫ")
-    assert mreduce.reduce_bones(keys, "balanced") == mreduce.reduce_bones(keys, "balanced")
+    assert mreduce.reduce_bones(keys, "medium") == mreduce.reduce_bones(keys, "medium")
 
 
 # --- 疎化診断(diagnostics_out。レポート §4.4 の削減率・適用許容・カット数・最大再生誤差の素データ) ---
@@ -138,12 +138,12 @@ def test_diagnostics_out_filled_per_track():
     center = _curved("センター")     # frames 0-10
     fingers = _curved("右人指1")
     diag = {}
-    out = mreduce.reduce_bones(center + fingers, "balanced", diagnostics_out=diag)
+    out = mreduce.reduce_bones(center + fingers, "medium", diagnostics_out=diag)
     assert set(diag) == {"センター", "右人指1"}
     for name, cat in (("センター", "center"), ("右人指1", "fingers")):
         src = _track(center + fingers, name)
         reduced = _track(out, name)
-        tol = presets.resolve_reduction_tolerances("balanced", cat)
+        tol = presets.resolve_reduction_tolerances("medium", cat)
         d = diag[name]
         assert d["input_keys"] == len(src)
         assert d["output_keys"] == len(reduced)
@@ -157,8 +157,8 @@ def test_diagnostics_out_override_tolerance():
     # override は適用許容(tol_pos/tol_rot)へ反映される(基準値上書き×種別スケール)。
     keys = _curved("センター")
     diag = {}
-    mreduce.reduce_bones(keys, "balanced", override_pos=0.005, override_rot=0.05, diagnostics_out=diag)
-    tol = presets.resolve_reduction_tolerances("balanced", "center", override_pos=0.005, override_rot=0.05)
+    mreduce.reduce_bones(keys, "medium", override_pos=0.005, override_rot=0.05, diagnostics_out=diag)
+    tol = presets.resolve_reduction_tolerances("medium", "center", override_pos=0.005, override_rot=0.05)
     assert diag["センター"]["tol_pos"] == tol["bone_pos"]
     assert diag["センター"]["tol_rot"] == tol["bone_rot"]
 
@@ -169,11 +169,11 @@ def test_diagnostics_out_single_key_track_alongside_multikey():
     single = [bone("右足ＩＫ", 0, pos=(1.0, 2.0, 3.0), interp=BONE_NONLINEAR)]
     multi = _curved("センター")
     diag = {}
-    out = mreduce.reduce_bones(single + multi, "balanced", diagnostics_out=diag)
+    out = mreduce.reduce_bones(single + multi, "medium", diagnostics_out=diag)
     assert set(diag) == {"右足ＩＫ", "センター"}
     assert _track(out, "右足ＩＫ") == single
     d = diag["右足ＩＫ"]
-    tol = presets.resolve_reduction_tolerances("balanced", "foot_ik")
+    tol = presets.resolve_reduction_tolerances("medium", "foot_ik")
     assert d["input_keys"] == 1
     assert d["output_keys"] == 1
     assert d["tol_pos"] == tol["bone_pos"]
@@ -186,7 +186,7 @@ def test_diagnostics_out_does_not_change_output():
     # 診断収集は疎化結果を変えない。diagnostics_out 省略時(既定 None)と同一の出力を返す。
     keys = _curved("右足ＩＫ")
     diag = {}
-    assert mreduce.reduce_bones(keys, "balanced", diagnostics_out=diag) == mreduce.reduce_bones(keys, "balanced")
+    assert mreduce.reduce_bones(keys, "medium", diagnostics_out=diag) == mreduce.reduce_bones(keys, "medium")
 
 
 # --- ボーン並列疎化(出力はシリアルと完全一致) ---
@@ -236,8 +236,8 @@ class _SpyPool:
 def test_parallel_output_matches_serial_exact():
     # 実プロセス並列(workers=2)の出力キー列がシリアル(workers=1)と完全一致する。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)  # 閾値超で並列経路を確実に通す
-    parallel = mreduce.reduce_bones(keys, "balanced", workers=2)
-    serial = mreduce.reduce_bones(keys, "balanced", workers=1)
+    parallel = mreduce.reduce_bones(keys, "medium", workers=2)
+    serial = mreduce.reduce_bones(keys, "medium", workers=1)
     assert parallel == serial
 
 
@@ -245,15 +245,15 @@ def test_parallel_diagnostics_match_serial_exact():
     # 診断データ(カット数・誤差・入出力キー数・適用許容)が並列とシリアルで、値も first-seen 順も一致する。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
     d_par, d_ser = {}, {}
-    mreduce.reduce_bones(keys, "balanced", workers=2, diagnostics_out=d_par)
-    mreduce.reduce_bones(keys, "balanced", workers=1, diagnostics_out=d_ser)
+    mreduce.reduce_bones(keys, "medium", workers=2, diagnostics_out=d_par)
+    mreduce.reduce_bones(keys, "medium", workers=1, diagnostics_out=d_ser)
     assert list(d_par.items()) == list(d_ser.items())
 
 
 def test_workers_one_equals_default_serial():
     # workers=1 は workers 既定(省略)と同一出力(後方互換: 既存呼び出しを変えない)。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
-    assert mreduce.reduce_bones(keys, "balanced", workers=1) == mreduce.reduce_bones(keys, "balanced")
+    assert mreduce.reduce_bones(keys, "medium", workers=1) == mreduce.reduce_bones(keys, "medium")
 
 
 def test_parallel_fires_at_threshold_with_worker_count(monkeypatch):
@@ -270,10 +270,10 @@ def test_parallel_fires_at_threshold_with_worker_count(monkeypatch):
     n = mreduce._MIN_PARALLEL_TRACKS  # 閾値ちょうど(>= で並列)
     keys = _many_tracks(n)
     d_par, d_ser = {}, {}
-    out = mreduce.reduce_bones(keys, "balanced", workers=3, diagnostics_out=d_par)
+    out = mreduce.reduce_bones(keys, "medium", workers=3, diagnostics_out=d_par)
     assert rec["workers"] == 3
     assert rec["dispatched"] == n  # 全多キートラックがワーカへ配分される
-    serial = mreduce.reduce_bones(keys, "balanced", workers=1, diagnostics_out=d_ser)
+    serial = mreduce.reduce_bones(keys, "medium", workers=1, diagnostics_out=d_ser)
     assert out == serial  # 逆順返却でも出力キーは first-seen 順に一致
     assert list(d_par.items()) == list(d_ser.items())  # 診断も first-seen 順へ復元される
 
@@ -288,9 +288,9 @@ def test_below_threshold_runs_serial(monkeypatch):
 
     monkeypatch.setattr(mreduce, "_make_pool", fake_make_pool)
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS - 1)  # 閾値未満
-    out = mreduce.reduce_bones(keys, "balanced", workers=4)
+    out = mreduce.reduce_bones(keys, "medium", workers=4)
     assert made["pool"] is False
-    assert out == mreduce.reduce_bones(keys, "balanced", workers=1)
+    assert out == mreduce.reduce_bones(keys, "medium", workers=1)
 
 
 def test_threshold_counts_reducible_tracks_only(monkeypatch):
@@ -307,9 +307,9 @@ def test_threshold_counts_reducible_tracks_only(monkeypatch):
     multi = _many_tracks(mreduce._MIN_PARALLEL_TRACKS - 1)  # 多キーは閾値未満
     singles = [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(mreduce._MIN_PARALLEL_TRACKS)]
     keys = multi + singles  # 総トラック数は閾値以上だが、多キーは閾値未満
-    out = mreduce.reduce_bones(keys, "balanced", workers=4)
+    out = mreduce.reduce_bones(keys, "medium", workers=4)
     assert made["pool"] is False
-    assert out == mreduce.reduce_bones(keys, "balanced", workers=1)
+    assert out == mreduce.reduce_bones(keys, "medium", workers=1)
 
 
 def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch):
@@ -324,8 +324,8 @@ def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch)
         keys.extend(_curved(name, k=0.01 + 0.001 * i))
         keys.append(bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)))  # 各多キーの直後に単一キーを挟む
     d_par, d_ser = {}, {}
-    out = mreduce.reduce_bones(keys, "balanced", workers=3, diagnostics_out=d_par)
-    serial = mreduce.reduce_bones(keys, "balanced", workers=1, diagnostics_out=d_ser)
+    out = mreduce.reduce_bones(keys, "medium", workers=3, diagnostics_out=d_par)
+    serial = mreduce.reduce_bones(keys, "medium", workers=1, diagnostics_out=d_ser)
     assert out == serial
     assert list(d_par.items()) == list(d_ser.items())
 
@@ -364,9 +364,9 @@ def test_progress_param_does_not_change_output():
     for workers in (1, 2):
         d_cb, d_no = {}, {}
         with_cb = mreduce.reduce_bones(
-            keys, "balanced", workers=workers, progress=lambda d, t: None, diagnostics_out=d_cb
+            keys, "medium", workers=workers, progress=lambda d, t: None, diagnostics_out=d_cb
         )
-        without = mreduce.reduce_bones(keys, "balanced", workers=workers, diagnostics_out=d_no)
+        without = mreduce.reduce_bones(keys, "medium", workers=workers, diagnostics_out=d_no)
         assert with_cb == without
         assert list(d_cb.items()) == list(d_no.items())  # 診断も値・first-seen 順とも不変
 
@@ -380,7 +380,7 @@ def test_progress_contract_serial():
     keys += [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(3)]  # 単一キーは progress 対象外
     for workers in (1, 4):
         calls = []
-        mreduce.reduce_bones(keys, "balanced", workers=workers, progress=lambda d, t: calls.append((d, t)))
+        mreduce.reduce_bones(keys, "medium", workers=workers, progress=lambda d, t: calls.append((d, t)))
         assert calls == [(d, multi) for d in range(multi + 1)]  # (0,M),(1,M),…,(M,M)
 
 
@@ -389,7 +389,7 @@ def test_progress_reports_zero_total_when_no_multikey():
     # 「多キーがあるときだけ初回通知する」実装だと total 未確定のままになるのを弾く。
     keys = [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(5)]  # 全て単一キー
     calls = []
-    mreduce.reduce_bones(keys, "balanced", workers=4, progress=lambda d, t: calls.append((d, t)))
+    mreduce.reduce_bones(keys, "medium", workers=4, progress=lambda d, t: calls.append((d, t)))
     assert calls == [(0, 0)]
 
 
@@ -409,7 +409,7 @@ def test_progress_contract_parallel(monkeypatch):
         events.append(("progress", d, t))
         done_calls.append((d, t))
 
-    mreduce.reduce_bones(keys, "balanced", workers=3, progress=_prog)
+    mreduce.reduce_bones(keys, "medium", workers=3, progress=_prog)
     assert done_calls == [(d, multi) for d in range(multi + 1)]  # total 固定・done 0→total
     # 確定時に progress(0,M)、以後 yield ごとに progress(done,M)。yield と progress が交互に並ぶ。
     expected = [("progress", 0, multi)]

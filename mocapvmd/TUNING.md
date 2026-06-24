@@ -8,8 +8,8 @@ mocapvmd のコードに**暫定で置かれている既定値**を、実際の�
 - 足IK接地ロック `presets._FOOT_XZ_CENTER`(foot_ik の X/Z 接地中央をプリセット別)と固定係数
   (foot_ik の Y、toe_ik の各チャンネル、接地端フェード `_FOOT_LOCK_FADE_WIDTH`)。§5.4。
 - 最大補正量・スパイク閾値(§5.5。接地中 0.5 MMD単位、1フレーム 位置 0.3 / 回転 5度)。
-- 疎化の許容誤差プリセット `presets._REDUCTION_BASE`(`precise`/`balanced`/`aggressive` の位置・回転基準値)と
-  種別スケール `presets._REDUCTION_SCALE`。§5.3。
+- 疎化の許容誤差プリセット `presets._REDUCTION_BASE`(速度観点の `slower`/`slow`/`medium`/`fast`/`faster` の位置・回転基準値。
+  既定は中央 `medium`)と種別スケール `presets._REDUCTION_SCALE`。§5.3。
 
 固定で調整対象外(仕様で確定): 整数フレーム上で処理する基準、分類規則(4.1)、補間チャンネルの扱い、疎化の中核機構
 (区間分割・継ぎ目処理・誤差検証・ベジェ採否は `mmd_toolbox.vmd.reduce` の共通実装)。
@@ -144,14 +144,15 @@ mocapvmd の**既定出力は疎なキー＋ベジェ補間**で、密な線形�
 
 ## 5. 疎化レベル(`--reduce-preset` / `--reduce-error-*`)
 
-- 対象: `_REDUCTION_BASE`(`precise` (0.01, 0.10) / `balanced` (0.02, 0.20) / `aggressive` (0.05, 0.40)。位置 MMD単位・
-  回転 度の基準値)。`--reduce-error-bone-pos` / `--reduce-error-bone-rot` は基準値を上書きする(種別スケールは
+- 対象: `_REDUCTION_BASE`(速度観点で `slower` (0.05, 0.40) / `slow` (0.10, 0.75) / `medium` (0.20, 1.50) /
+  `fast` (0.80, 6.0) / `faster` (1.60, 12.0)。位置 MMD単位・回転 度の基準値。既定は中央 `medium`)。
+  `--reduce-error-bone-pos` / `--reduce-error-bone-rot` は基準値を上書きする(種別スケールは
   引き続き掛かる)。**クリーニング・足IK安定化を確定してから**調整する(疎化は滑らかになった信号ほどキーが減る)。
 - 素材: 全体(クリーニング後)。**接地区間**と**大きな動作**の両方を含む区間で見る。
-- 候補例(直交ペア): `--reduce-preset` 3種の比較、または `--reduce-error-bone-pos` 0.010 / 0.020 / 0.050 ×
-  `--reduce-error-bone-rot` 0.10 / 0.20 / 0.40 を 2 次元グリッドで 1 本選ぶ。`--curve-mode bezier`(既定)で見る。
+- 候補例(直交ペア): `--reduce-preset` 5段の比較、または `--reduce-error-bone-pos` 0.05 / 0.20 / 0.80 ×
+  `--reduce-error-bone-rot` 0.40 / 1.50 / 6.0 を 2 次元グリッドで 1 本選ぶ。`--curve-mode bezier`(既定)で見る。
 - 着眼点: キーが減って編集しやすく、かつ再生誤差が許容内で**接地感・演技の追従**が保たれる許容値。許容を上げるほど
-  キーが減るが細部が丸まる。`precise` は忠実度優先、`aggressive` は削減率優先。
+  キーが減って処理も速いが細部が丸まる。`slower` は忠実度優先(キー多・処理遅)、`faster` は削減・速度優先。
 - 診断の当たり: `--report-json` の**キー削減率**・**最大再生誤差**・**カット数**・適用許容値を当たりに使う。削減率は
   許容誤差・意図的な複雑動作・カット・トラック長にも左右されるので断定はできないが、削減率が低いままなら**原因の一つ**
   としてクリーニング不足(信号がまだノイジー)を疑う。最大再生誤差(レポートは軸別最大、疎化の検証はユークリッド距離で

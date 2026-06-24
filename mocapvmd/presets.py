@@ -99,11 +99,15 @@ def resolve_cleaning(preset, category):
 
 # §5.3 疎化トレランス。プリセット基準値(位置 MMD単位 / 回転 度)と種別スケール(位置, 回転)。
 # mocapvmd 独自値で sparsevmd と共有しない。
-REDUCTION_PRESET_NAMES = ("precise", "balanced", "aggressive")
+# 速度の観点で命名(遅い=高忠実・キー多・処理遅、速い=高圧縮・キー少・処理速)。既定は中央の
+# medium(0.20 / 1.50)。許容を緩めるほどキーが減り疎化処理も速い(fast / faster)。位置と回転は連動して粗くする。
+REDUCTION_PRESET_NAMES = ("slower", "slow", "medium", "fast", "faster")
 _REDUCTION_BASE = {
-    "precise": (0.01, 0.10),
-    "balanced": (0.02, 0.20),
-    "aggressive": (0.05, 0.40),
+    "slower": (0.05, 0.40),
+    "slow": (0.10, 0.75),
+    "medium": (0.20, 1.50),
+    "fast": (0.80, 6.0),
+    "faster": (1.60, 12.0),
 }
 _REDUCTION_SCALE = {
     "root": (1.0, 1.0),

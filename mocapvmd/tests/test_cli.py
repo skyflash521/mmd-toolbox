@@ -576,7 +576,7 @@ def test_reduce_preset_validation(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _ramp_doc(src)
-    assert cli.main([str(src), "-o", str(out), "--reduce-preset", "precise"]) == 0
+    assert cli.main([str(src), "-o", str(out), "--reduce-preset", "slower"]) == 0
     assert cli.main([str(src), "--reduce-preset", "turbo"]) == 2  # 未知プリセットは引数エラー
 
 
@@ -663,7 +663,7 @@ def test_report_reduction_matches_reduce_bones(tmp_path):
     data = json.loads(rep.read_text(encoding="utf-8"))
     in_doc, _ = io.read(str(src))
     diag = {}
-    mreduce.reduce_bones(in_doc.bone, "balanced", diagnostics_out=diag)
+    mreduce.reduce_bones(in_doc.bone, "medium", diagnostics_out=diag)
     d = diag["センター"]
     r = next(e for e in data["bones"] if e["name"] == "センター")["reduction"]
     assert r["output_keys"] == d["output_keys"]
@@ -690,12 +690,12 @@ def test_dry_run_reduction_matches_full_pipeline(tmp_path):
     in_doc, _ = io.read(str(src))
     cleaned = _clean_bones(in_doc.bone, "balanced")
     full = {}
-    mreduce.reduce_bones(_stabilize_bones(cleaned, "balanced"), "balanced", diagnostics_out=full)
+    mreduce.reduce_bones(_stabilize_bones(cleaned, "balanced"), "medium", diagnostics_out=full)
     d = full["右足ＩＫ"]
     # 負例: 全前処理省略・clean 省略・stabilize 省略は、いずれも errors が全段と異なる(各段が結果に効く入力)。
     for skipped in (in_doc.bone, _stabilize_bones(in_doc.bone, "balanced"), cleaned):
         diag = {}
-        mreduce.reduce_bones(skipped, "balanced", diagnostics_out=diag)
+        mreduce.reduce_bones(skipped, "medium", diagnostics_out=diag)
         assert diag["右足ＩＫ"]["errors"] != d["errors"]
     data = json.loads(rep.read_text(encoding="utf-8"))
     r = next(e for e in data["bones"] if e["name"] == "右足ＩＫ")["reduction"]
