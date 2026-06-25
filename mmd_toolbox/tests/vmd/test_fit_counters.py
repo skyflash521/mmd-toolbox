@@ -7,6 +7,8 @@ diagnostics を渡されたとき1トラック分の集計を diagnostics["fit_c
 (diagnostics 未指定)では出力を変えない。
 """
 
+import pytest
+
 from mmd_toolbox.vmd import fit, interp
 from mmd_toolbox.vmd.reduce import (
     BONE_LINEAR_INTERP,
@@ -17,6 +19,9 @@ from mmd_toolbox.vmd.reduce import (
     reduce_camera_track,
 )
 from mmd_toolbox.vmd.types import BoneKey, CameraKey
+
+# チャンネル種別別カウント(fit_counts_by_channel / read_fit_counters_by_category)は未実装。
+PENDING = pytest.mark.xfail(reason="impl pending: per-channel fit counts", strict=True)
 
 EASE = (96, 0, 96, 30)  # 強いイージング(線形ファストパスで収まらない曲線)
 
@@ -194,6 +199,106 @@ def test_diagnostics_linear_track_prefers_fastpath():
     # 線形トラックは全軸がファストパス採用で least_squares を回さない。
     assert fc["fastpath_linear"] >= 1
     assert fc["lsq_calls"] == 0
+
+
+# --- チャンネル種別別カウント(どのチャンネルのフィットが重いかの帰属) --------
+
+
+@PENDING
+def test_by_category_fit_level_buckets():
+    # category を渡すとそのチャンネル種別のバケットに計上し、渡さなければバケットを作らない。
+    fit.reset_fit_counters()
+    xs = [(i + 1) / 12 for i in range(11)]
+    ys = [interp._solve_factor(*EASE, x) for x in xs]
+    fit.fit_bezier_curve(xs, ys, early_exit_err=0.01, category="position")
+    by = fit.read_fit_counters_by_category()
+    assert by["position"]["fit_calls"] == 1
+    assert by["position"]["lsq_calls"] >= 1
+
+    # 係数曲線(回転系の計測入口)も category を受けて種別バケットへ計上する。
+    fit.reset_fit_counters()
+
+    def resid_at(coeff):
+        return [coeff(x) - interp._solve_factor(*EASE, x) for x in xs]
+
+    fit._fit_coeff_curve(xs, resid_at, early_exit_err=0.01, category="rotation")
+    by = fit.read_fit_counters_by_category()
+    assert by["rotation"]["fit_calls"] == 1
+    assert by["rotation"]["lsq_calls"] >= 1
+
+    fit.reset_fit_counters()
+    fit.fit_bezier_curve(xs, ys, early_exit_err=0.01)
+    assert fit.read_fit_counters_by_category() == {}
+
+
+@PENDING
+def test_by_channel_attributes_position_vs_rotation():
+    # 位置が曲がり回転は定数のトラックでは、フィット費用は position に帰属する。
+    src = _eased_track()
+    diag = {}
+    reduce_bone_track(
+        src,
+        [(0, 20)],
+        _tols(),
+        cut_thresholds=(5.0, 20.0),
+        keep_frames=[],
+        no_cut_detect=True,
+        min_seg=1,
+        max_seg=180,
+        strict=False,
+        curve_mode="bezier",
+        diagnostics=diag,
+    )
+    by = diag["fit_counts_by_channel"]
+    assert by["position"]["lsq_calls"] >= 1
+    assert by["rotation"]["lsq_calls"] == 0
+
+
+@PENDING
+def test_by_channel_reconciles_with_total():
+    # 全フィットがチャンネルへ帰属するので、チャンネル別の総和は合算カウントに一致する。
+    src = _eased_track()
+    diag = {}
+    reduce_bone_track(
+        src,
+        [(0, 20)],
+        _tols(),
+        cut_thresholds=(5.0, 20.0),
+        keep_frames=[],
+        no_cut_detect=True,
+        min_seg=1,
+        max_seg=180,
+        strict=False,
+        curve_mode="bezier",
+        diagnostics=diag,
+    )
+    total = diag["fit_counts"]
+    by = diag["fit_counts_by_channel"]
+    assert sum(c["fit_calls"] for c in by.values()) == total["fit_calls"]
+    assert sum(c["lsq_calls"] for c in by.values()) == total["lsq_calls"]
+    assert sum(c["fastpath_linear"] for c in by.values()) == total["fastpath_linear"]
+
+
+@PENDING
+def test_by_channel_camera_has_position():
+    src = _eased_camera_track()
+    diag = {}
+    reduce_camera_track(
+        src,
+        [(0, 20)],
+        _cam_tols(),
+        cut_thresholds=(5.0, 20.0, 5.0),
+        keep_frames=[],
+        no_cut_detect=True,
+        min_seg=1,
+        max_seg=180,
+        strict=False,
+        curve_mode="bezier",
+        diagnostics=diag,
+    )
+    by = diag["fit_counts_by_channel"]
+    assert by["position"]["lsq_calls"] >= 1
+    assert all(isinstance(v, int) for c in by.values() for v in c.values())
 
 
 def test_diagnostics_omitted_does_not_error_and_has_no_fit_counts():
