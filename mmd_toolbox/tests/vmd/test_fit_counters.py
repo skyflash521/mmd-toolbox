@@ -2,7 +2,7 @@
 
 ベジェフィットは疎化時間の支配項なので、`least_squares` 呼び出し回数と線形ファストパス採用数を
 計測できると、フィット高速化の効果を測れる。fit.py はモジュールレベルのカウンタ
-(fit_calls / lsq_calls / fastpath_linear)を持ち、reduce_bone_track / reduce_camera_track は
+(fit_calls / lsq_calls / fastpath_linear / cheap_accept)を持ち、reduce_bone_track / reduce_camera_track は
 diagnostics を渡されたとき1トラック分の集計を diagnostics["fit_counts"] に出す。通常実行
 (diagnostics 未指定)では出力を変えない。
 """
@@ -62,7 +62,7 @@ def _cam_tols():
 def test_reset_zeroes_counters():
     fit.reset_fit_counters()
     c = fit.read_fit_counters()
-    assert c == {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0}
+    assert c == {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0, "cheap_accept": 0}
 
 
 def test_nonlinear_increments_lsq_calls():
@@ -119,6 +119,20 @@ def test_coeff_curve_nonlinear_increments_lsq_calls():
     assert c["fastpath_linear"] == 0
 
 
+def test_cheap_accept_fires_for_eased_curve():
+    # 線形では収まらないが固定 ease 形に合う区間は、least_squares を呼ばず cheap accept で即採用する。
+    fit.reset_fit_counters()
+    xs = [(i + 1) / 12 for i in range(11)]
+    ease_in = fit._CHEAP_EASE_CPS[0]
+    ys = [interp._solve_factor(*ease_in, x) for x in xs]
+    cp, _err = fit.fit_bezier_curve(xs, ys, early_exit_err=0.02)
+    c = fit.read_fit_counters()
+    assert c["cheap_accept"] == 1
+    assert c["lsq_calls"] == 0
+    assert c["fastpath_linear"] == 0  # 線形では収まらず ease で採用
+    assert cp == ease_in
+
+
 # --- reduce_*_track の diagnostics 連携 --------------------------------------
 
 
@@ -143,7 +157,7 @@ def test_diagnostics_records_fit_counts_for_curved_track():
         diagnostics=diag,
     )
     fc = diag["fit_counts"]
-    assert set(fc) == {"fit_calls", "lsq_calls", "fastpath_linear"}
+    assert set(fc) == {"fit_calls", "lsq_calls", "fastpath_linear", "cheap_accept"}
     assert all(isinstance(v, int) for v in fc.values())
     assert fc["fit_calls"] >= 1
     # 曲がった位置軸があるので least_squares を少なくとも1回は回す。
@@ -167,7 +181,7 @@ def test_diagnostics_records_fit_counts_for_camera_track():
         diagnostics=diag,
     )
     fc = diag["fit_counts"]
-    assert set(fc) == {"fit_calls", "lsq_calls", "fastpath_linear"}
+    assert set(fc) == {"fit_calls", "lsq_calls", "fastpath_linear", "cheap_accept"}
     assert all(isinstance(v, int) for v in fc.values())
     assert fc["fit_calls"] >= 1
     # 曲がったカメラ中心軸があるので least_squares を少なくとも1回は回す。
@@ -266,9 +280,9 @@ def test_by_channel_reconciles_with_total():
     )
     total = diag["fit_counts"]
     by = diag["fit_counts_by_channel"]
-    assert sum(c["fit_calls"] for c in by.values()) == total["fit_calls"]
-    assert sum(c["lsq_calls"] for c in by.values()) == total["lsq_calls"]
-    assert sum(c["fastpath_linear"] for c in by.values()) == total["fastpath_linear"]
+    # 全カウンタ(fit_calls/lsq_calls/fastpath_linear/cheap_accept)で種別別総和が合算に一致する。
+    for key in total:
+        assert sum(c[key] for c in by.values()) == total[key]
 
 
 def test_by_channel_camera_has_position():

@@ -686,11 +686,17 @@ _BEZIER_INITS = (
 _BEZIER_INITS_LARGE = (_BEZIER_INITS[0], _BEZIER_INITS[3])
 _BEZIER_LINEAR_CP = (20, 20, 107, 107)
 
+# cheap accept(§3.4.1): least_squares の前に試す固定 ease 制御点(_BEZIER_INITS の ease 3種=
+# ease-in/ease-out/ease-in-out を 0..127 量子化したもの)。線形は線形ファストパスが担うので含めない。
+# 候補を量子化後誤差で評価し許容内に収まれば least_squares を呼ばず即採用する。
+_CHEAP_EASE_CPS = ((53, 0, 127, 127), (0, 0, 74, 127), (53, 0, 74, 127))
+
 # フィット計測カウンタ(任意の高速化効果測定用)。fit_calls はベジェフィット試行回数、
 # lsq_calls は least_squares 呼び出し回数、fastpath_linear は線形制御点で許容内に収まり
-# least_squares を回さず即採用した回数。通常実行では誰も読まないので副作用は無い。診断を
+# least_squares を回さず即採用した回数、cheap_accept は固定 ease 候補(_CHEAP_EASE_CPS)で許容内に
+# 収まり least_squares を回さず即採用した回数。通常実行では誰も読まないので副作用は無い。診断を
 # 要求する呼び出し側が reset_fit_counters() → 処理 → read_fit_counters() で差分を取る。
-_FIT_COUNTERS = {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0}
+_FIT_COUNTERS = {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0, "cheap_accept": 0}
 # チャンネル種別(position / rotation / distance / fov)別の内訳。フィットに category が
 # 渡されたときだけ該当バケットへ計上する。どのチャンネルのフィットが重いか(位置 vs 回転)を
 # 帰属するために合算 _FIT_COUNTERS と並行して持つ。全フィットが category 付きなら種別別の
@@ -704,7 +710,7 @@ def _bump(field, category):
     if category is not None:
         bucket = _FIT_COUNTERS_BY_CAT.get(category)
         if bucket is None:
-            bucket = {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0}
+            bucket = {k: 0 for k in _FIT_COUNTERS}
             _FIT_COUNTERS_BY_CAT[category] = bucket
         bucket[field] += 1
 
@@ -852,6 +858,11 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None):
         if lin_err <= early_exit_err:
             _bump("fastpath_linear", category)
             return (_BEZIER_LINEAR_CP, lin_err)
+        for cand in _CHEAP_EASE_CPS:
+            cand_err = quantized_err(cand)
+            if cand_err <= early_exit_err:
+                _bump("cheap_accept", category)
+                return (cand, cand_err)
 
     lsq_kw = _lsq_kwargs(len(xs))
     best_cost = math.inf
@@ -909,9 +920,14 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None):
 
     # 線形ファストパス(§6.3): 線形制御点で許容内に収まれば least_squares を呼ばず即採用する。
     # 閾値(early_exit_err)が無い全探索では行わない。
-    if early_exit_err is not None and quantized_err(_BEZIER_LINEAR_CP) <= early_exit_err:
-        _bump("fastpath_linear", category)
-        return _BEZIER_LINEAR_CP
+    if early_exit_err is not None:
+        if quantized_err(_BEZIER_LINEAR_CP) <= early_exit_err:
+            _bump("fastpath_linear", category)
+            return _BEZIER_LINEAR_CP
+        for cand in _CHEAP_EASE_CPS:
+            if quantized_err(cand) <= early_exit_err:
+                _bump("cheap_accept", category)
+                return cand
 
     lsq_kw = _lsq_kwargs(len(xs))
     best_cost = math.inf
