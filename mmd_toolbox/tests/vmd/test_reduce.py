@@ -1,8 +1,9 @@
 """区間削減器(linear mode)のテスト(sparsevmd.md §5.1, §5.5, §2.5)。
 
 reduce_track は必須境界の間を区間化し、各区間を全チャンネルが許容誤差以内で
-線形表現できるか検査する。超過時は最大正規化誤差フレームで再帰分割する。
-max-segment-frames で事前分割し、min-segment-frames を下回る tol 探索分割はしない。
+線形表現できるか検査する。超過時は最大正規化誤差フレームで再帰分割する(error-split)。
+max-segment-frames は出力キー間隔の sliding 上限で、許容内でも非定数区間が上限を超える場合だけ
+上限位置で分割する(maxspan-cap)。min-segment-frames を下回る tol 探索分割はしない。
 非strictでは min-segment まで分割しても満たせない区間を1フレームまで密に保持し、
 strictでは終了コード4につながる StrictError を送出する。
 """
@@ -23,10 +24,6 @@ from mmd_toolbox.vmd.types import BoneKey
 
 def lin(frame_start, values, tol):
     return LinearScalarChannel(frame_start, [float(v) for v in values], tol)
-
-
-# 未実装の sliding max_seg / maxspan-cap に依存するテストの印(実装フェーズで外す)。
-PENDING = pytest.mark.xfail(reason="impl pending: sliding max_seg", strict=True)
 
 
 def test_linear_segment_no_split():
@@ -65,9 +62,9 @@ def test_unsorted_duplicate_boundaries_normalized():
     assert keys == [0, 30, 60]
 
 
-def test_max_segment_pre_split():
-    # 線形だが max_seg=40 で事前分割。tol探索では分割されない(線形)ので、
-    # 中間キーは事前分割由来。区間数は ceil(100/40)=3、全区間 <=40、端点保持。
+def test_max_segment_sliding_cap():
+    # 線形だが max_seg=40 で sliding 上限超過。tol探索では分割されない(線形)ので、
+    # 中間キーは maxspan-cap 由来。区間数は ceil(100/40)=3、全区間 <=40、端点保持。
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
     assert keys[0] == 0 and keys[-1] == 100
@@ -128,26 +125,25 @@ def test_adjacent_segment_accepted():
     assert keys == [0, 1]
 
 
-def test_constant_span_not_presplit():
-    # 全フレーム同値(定数)の span は max_seg を超えても等分されず両端2キーになる
-    # (定数区間には編集すべき曲がりが無いため max_seg 事前分割の対象外。§4.3)。
+def test_constant_span_not_capped():
+    # 全フレーム同値(定数)の span は max_seg を超えても分割されず両端2キーになる
+    # (定数区間には編集すべき曲がりが無いため maxspan-cap の対象外。§5.1 step3)。
     ch = lin(0, [5.0] * 101, tol=0.01)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
     assert keys == [0, 100]
 
 
-def test_loose_non_constant_span_still_presplit():
-    # 緩い線形(定数でない)長い span は従来通り max_seg 等分される(編集容易性の回帰防止)。
+def test_loose_non_constant_span_capped():
+    # 緩い線形(定数でない)長い span は maxspan-cap で上限以下に保たれる(編集容易性の回帰防止)。
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
     gaps = [b - a for a, b in zip(keys, keys[1:])]
     assert all(g <= 40 for g in gaps)
-    assert len(gaps) == 3  # 定数判定が誤発火せず従来の事前分割が残る
+    assert len(gaps) == 3  # 定数判定が誤発火せず非定数として maxspan-cap が効く
 
 
-@PENDING
 def test_mixed_constant_and_varying_span_no_grid_in_flat():
-    # 前半定数＋後半上昇が1 span に混在。sliding 化では定数前半に機械的な等分 grid キーを撒かず、
+    # 前半定数＋後半上昇が1 span に混在。sliding 上限では定数前半に機械的な等分 grid キーを撒かず、
     # 曲がり(定数→上昇の境界)付近で誤差駆動分割する。定数前半は maxspan-cap 対象外なので
     # 上限を超える1区間のまま残る。
     vals = [5.0] * 61 + [5.0 + float(i + 1) for i in range(40)]  # 0..60 定数, 61..100 上昇
@@ -158,8 +154,8 @@ def test_mixed_constant_and_varying_span_no_grid_in_flat():
     assert any(55 <= k <= 65 for k in keys)   # 曲がり付近にキー
 
 
-def test_presplit_requires_all_channels_constant():
-    # 片方のチャンネルが変化していれば span 全体は定数でない → 従来通り等分(全チャンネル定数が条件)。
+def test_maxspan_cap_requires_all_channels_constant():
+    # 片方のチャンネルが変化していれば span 全体は定数でない → maxspan-cap が効く(全チャンネル定数が条件)。
     const_ch = lin(0, [5.0] * 101, tol=0.01)
     vary_ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [const_ch, vary_ch], min_seg=1, max_seg=40, strict=False)
@@ -168,8 +164,8 @@ def test_presplit_requires_all_channels_constant():
     assert len(gaps) == 3
 
 
-def test_fallback_presplit_when_channel_lacks_is_constant():
-    # is_constant を持たないチャンネル(StubChannel 等)では従来の _presplit 動作にフォールバックする。
+def test_non_constant_fallback_when_channel_lacks_is_constant():
+    # is_constant を持たないチャンネル(StubChannel 等)は非定数扱いになり maxspan-cap の対象になる。
     class StubChannel:
         def normalized(self, a, b):
             return (0.0, None)  # 常に許容内(tol 分割しない)
@@ -177,10 +173,10 @@ def test_fallback_presplit_when_channel_lacks_is_constant():
     keys = reduce_track([0, 100], [StubChannel()], min_seg=1, max_seg=40, strict=False)
     gaps = [b - a for a, b in zip(keys, keys[1:])]
     assert all(g <= 40 for g in gaps)
-    assert len(gaps) == 3  # is_constant 不在 → 従来どおり等分
+    assert len(gaps) == 3  # is_constant 不在 → 非定数扱いで maxspan-cap
 
 
-def test_constant_span_presplit_deterministic():
+def test_constant_span_reduce_deterministic():
     # 同入力・同引数で同出力(決定論)。
     def run():
         ch = lin(0, [5.0] * 101, tol=0.01)
@@ -208,7 +204,6 @@ def test_reduce_uses_only_normalized_contract():
 # --- sliding max_seg / maxspan-cap (§5.1 step3/step6, §5.5) -------------------
 
 
-@PENDING
 def test_fitting_long_span_capped_and_recorded():
     # 許容内に収まる非定数の長い span(>max_seg)は maxspan-cap で上限以下に保ち、診断 caps に
     # 別理由として記録する(誤差駆動の splits とは別)。
@@ -220,7 +215,6 @@ def test_fitting_long_span_capped_and_recorded():
     assert caps and all(0 < c["frame"] < 100 for c in caps)
 
 
-@PENDING
 def test_constant_long_span_not_capped():
     # 定数の長い span は maxspan-cap 対象外。caps 空・両端のみ・上限超過を許す。
     ch = lin(0, [5.0] * 101, tol=0.01)
@@ -230,7 +224,6 @@ def test_constant_long_span_not_capped():
     assert caps == []
 
 
-@PENDING
 def test_error_split_separate_from_cap():
     # 誤差超過の分割は splits(error-split)に入り、cap が不要(max_seg 大)なら caps は空。
     ch = lin(0, [0, 10, 2, 4, 20], tol=9.0)
@@ -240,7 +233,6 @@ def test_error_split_separate_from_cap():
     assert caps == []
 
 
-@PENDING
 def test_no_mechanical_grid_when_span_within_max_seg():
     # span が max_seg 以下なら、フィット可の滑らかな区間に機械的な内部キーを撒かない。
     ch = lin(0, [float(i) for i in range(31)], tol=1.0)  # 線形・span 30
@@ -250,7 +242,6 @@ def test_no_mechanical_grid_when_span_within_max_seg():
     assert caps == []
 
 
-@PENDING
 def test_reduce_bone_track_diagnostics_has_maxspan_caps():
     # diagnostics に maxspan_caps フィールドが入り、長い線形位置で cap が発火する。
     name = b"bone".ljust(15, b"\x00")

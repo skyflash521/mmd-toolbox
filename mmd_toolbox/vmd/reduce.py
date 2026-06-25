@@ -2,9 +2,11 @@
 
 必須境界(範囲端・不連続・keep-frame。cuts.py 由来)の間を区間化し、各区間を全
 チャンネルが許容誤差以内で表現できるか検査する。超過時は最大正規化誤差フレームで
-再帰分割する。max-segment-frames で事前分割し、min-segment-frames を下回る tol 探索
-分割はしない。非strictでは min-segment まで分割しても満たせない区間を1フレームまで
-密に保持し(§1.2 の破綻回避)、strictでは StrictError(終了コード4)を送出する。
+再帰分割する(error-split)。max-segment-frames は出力キー間隔の sliding 上限で、許容内でも
+非定数区間が上限を超える場合だけ上限位置で分割する(maxspan-cap)。機械的な等分点は出力キーに
+seed しない。min-segment-frames を下回る tol 探索分割はしない。非strictでは min-segment まで
+分割しても満たせない区間を1フレームまで密に保持し(§1.2 の破綻回避)、strictでは StrictError
+(終了コード4)を送出する。
 
 チャンネルは normalized(a, b) -> (正規化誤差, 最大誤差フレーム|None) を持つダックタイプ。
 """
@@ -374,20 +376,25 @@ def _bone_seam_interp(source_keys, a, b, tols):
     return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
 
-def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, progress=None):
+def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, caps=None, progress=None):
     """必須境界とチャンネル群から、出力キーのフレーム列(昇順)を返す(§5.1)。
 
-    splits にリストを渡すと、許容超過で分割したフレームと駆動チャンネル(§2.7 の分割理由)を
-    {"frame", "channel", "norm_error"} で追記する。
+    初期キーは必須境界(範囲端・不連続・keep-frame)だけにし、機械的な等分点は出力キーに seed
+    しない(§5.1 step3)。各必須境界間の区間を _process_segment で再帰処理し、許容超過は最大正規化
+    誤差フレームで分割(error-split)、許容内でも非定数区間が max_seg を超える場合は sliding 上限
+    位置で分割(maxspan-cap)する。全チャンネル定数の区間は maxspan-cap の対象外で、上限を超える
+    間隔のまま残す(§5.1 step3)。
+
+    splits にリストを渡すと error-split したフレームと駆動チャンネル(§2.7 の分割理由)を
+    {"frame", "channel", "norm_error"} で追記する。caps にリストを渡すと maxspan-cap したフレームを
+    {"frame"} で追記する(§5.5 の診断理由 maxspan-cap)。
     progress を渡すと、再帰分割で部分区間が確定するごとに progress(処理済みフレーム数,
-    全フレーム数) を呼ぶ(§2.7 の処理経過表示)。1区間の重いベジェフィット(最大
-    max_seg フレーム)の途中でも確定した部分区間の分だけ進捗が進むため、表示が長く停滞しない。
+    全フレーム数) を呼ぶ(§2.7 の処理経過表示)。1区間の重いベジェフィット(長い必須境界間ほど重い)の
+    途中でも確定した部分区間の分だけ進捗が進むため、表示が長く停滞しない。
     """
     bounds = sorted(set(boundaries))
-    presplit = _presplit(bounds, max_seg, channels)
-
-    keys = set(presplit)
-    span0, span1 = presplit[0], presplit[-1]
+    keys = set(bounds)
+    span0, span1 = bounds[0], bounds[-1]
     on_resolve = None
     if progress is not None:
         total = span1 - span0
@@ -398,40 +405,16 @@ def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, pr
             resolved += span
             progress(resolved, total)
 
-    for a, b in zip(presplit, presplit[1:]):
-        _process_segment(a, b, channels, min_seg, strict, keys, splits, on_resolve)
+    for a, b in zip(bounds, bounds[1:]):
+        _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits, caps, on_resolve)
     return sorted(keys)
 
 
-def _presplit(bounds, max_seg, channels):
-    """必須境界間を max_seg 以下に事前分割する(§5.1 step3)。
-
-    span が max_seg を超えても、その span が全チャンネル定数なら等分しない(§4.2)。定数区間には
-    編集すべき曲がりが無く、max_seg 等分は純粋な無駄(キー過多＋フィット評価増)になるため。
-    曲がった区間は従来通り max_seg で短く保つ。定数判定 _span_is_constant はダックタイプ契約を
-    壊さないフォールバックを持つ(下記)。
-    """
-    out = [bounds[0]]
-    for a, b in zip(bounds, bounds[1:]):
-        span = b - a
-        if span > max_seg and not _span_is_constant(a, b, channels):
-            pieces = math.ceil(span / max_seg)
-            for i in range(1, pieces):
-                out.append(a + round(i * span / pieces))
-        out.append(b)
-    # 丸めの衝突を除去(昇順は構成上保たれる)。
-    dedup = []
-    for x in out:
-        if not dedup or dedup[-1] != x:
-            dedup.append(x)
-    return dedup
-
-
 def _span_is_constant(a, b, channels):
-    """span [a,b] の全チャンネルが定数(無変化)か(§4.2)。
+    """span [a,b] の全チャンネルが定数(無変化)か(§5.1 step3)。
 
     全チャンネルが is_constant(a, b) を実装し、かつ全て True のときだけ True を返す。is_constant を
-    持たないチャンネルが1つでもあれば False を返し、従来の max_seg 等分へフォールバックする
+    持たないチャンネルが1つでもあれば False を返し、非定数扱い(maxspan-cap の対象)にする
     (reduce_track のチャンネルは normalized のみのダックタイプ契約なので、属性に直結させない)。
     """
     for ch in channels:
@@ -464,40 +447,60 @@ def _worst_channel(a, b, channels):
     return max_norm, split_frame, split_label
 
 
-def _process_segment(a, b, channels, min_seg, strict, keys, splits=None, on_resolve=None):
-    """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える。
+def _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits=None, caps=None, on_resolve=None):
+    """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える(§5.1 step4-8)。
 
-    on_resolve を渡すと、確定した(これ以上分割しない)部分区間ごとにその区間長
-    on_resolve(b - a) を呼ぶ。葉区間の長さの総和は元区間長 [a,b] に一致するため、
-    呼び出し側で処理経過のフレーム数として積算できる(§2.7)。
+    許容超過(max_norm>1.0)は最大正規化誤差フレームで error-split する。許容内でも非定数区間が
+    max_seg を超える場合は sliding 上限位置(原則 a+max_seg)で maxspan-cap する。全チャンネル定数の
+    区間は maxspan-cap の対象外で上限超過を許す(§5.1 step3)。on_resolve を渡すと、確定した(これ以上
+    分割しない)部分区間ごとにその区間長 on_resolve(b - a) を呼ぶ。葉区間の長さの総和は元区間長
+    [a,b] に一致するため、呼び出し側で処理経過のフレーム数として積算できる(§2.7)。
     """
     stack = [(a, b)]
     while stack:
         a, b = stack.pop()
-        if b - a <= 1:
+        span = b - a
+        if span <= 1:
             if on_resolve is not None:
-                on_resolve(b - a)  # 隣接区間は内部点が無く受理(両端は既にキー)
+                on_resolve(span)  # 隣接区間は内部点が無く受理(両端は既にキー)
             continue
 
         max_norm, split_frame, split_label = _worst_channel(a, b, channels)
-        if max_norm <= 1.0:
+        fits = max_norm <= 1.0
+
+        # 許容内かつ、上限以下または全チャンネル定数なら受理(定数区間は上限の対象外。§5.1 step3)。
+        if fits and (span <= max_seg or _span_is_constant(a, b, channels)):
             if on_resolve is not None:
-                on_resolve(b - a)  # 全チャンネル許容内
+                on_resolve(span)
             continue
 
-        # min_seg を下回る、または両側を min_seg で割れない区間はこれ以上 tol 分割不可。
-        # 分割フレームが得られない場合も同様に atomic 扱い。
-        if b - a < 2 * min_seg or split_frame is None:
-            _atomic_fail(a, b, strict, keys)
+        # 両側を min_seg で割れない区間はこれ以上分割不可。許容内なら(上限超過でも)許容は満たすので
+        # そのまま受理し、許容超過なら atomic 扱いにする(§2.5)。
+        if span < 2 * min_seg:
+            if not fits:
+                _atomic_fail(a, b, strict, keys)
             if on_resolve is not None:
-                on_resolve(b - a)
+                on_resolve(span)
             continue
 
         # 分割候補フレームを [a+min_seg, b-min_seg] に収める(min_seg を下回る区間を作らない)。
-        w = min(max(split_frame, a + min_seg), b - min_seg)
-        keys.add(w)
-        if splits is not None:
-            splits.append({"frame": w, "channel": split_label, "norm_error": max_norm})
+        if fits:
+            # maxspan-cap: 許容内だが非定数で上限超過。sliding 上限位置で分割する。
+            w = min(max(a + max_seg, a + min_seg), b - min_seg)
+            keys.add(w)
+            if caps is not None:
+                caps.append({"frame": w})
+        else:
+            # error-split: 許容超過。最大正規化誤差フレームで分割する。
+            if split_frame is None:
+                _atomic_fail(a, b, strict, keys)
+                if on_resolve is not None:
+                    on_resolve(span)
+                continue
+            w = min(max(split_frame, a + min_seg), b - min_seg)
+            keys.add(w)
+            if splits is not None:
+                splits.append({"frame": w, "channel": split_label, "norm_error": max_norm})
         stack.append((a, w))
         stack.append((w, b))
 
@@ -568,8 +571,9 @@ def reduce_camera_track(
     再フィットし、手前の範囲外キーから範囲開始までの動きを忠実に保つ(_camera_seam_interp)。
     範囲外キーは変更不可のため、上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。
 
-    diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(分割フレームと
-    駆動チャンネルと正規化誤差)・seam_rewrites(下側継ぎ目で曲線を書き換えた範囲開始フレーム)を埋める。
+    diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(error-split したフレームと
+    駆動チャンネルと正規化誤差)・maxspan_caps(maxspan-cap したフレーム, §5.5)・seam_rewrites(下側継ぎ目で
+    曲線を書き換えた範囲開始フレーム)を埋める。
 
     progress を渡すと処理経過として progress(処理済みフレーム数, 全範囲のフレーム総数, フェーズ名)
     を呼ぶ(§2.7)。区間の再帰分割中も部分区間ごとに進み、重い出力後検証区間では note="出力後検証"
@@ -578,6 +582,7 @@ def reduce_camera_track(
     reduced = []
     diag_cuts = set()
     diag_splits = [] if diagnostics is not None else None
+    diag_caps = [] if diagnostics is not None else None
     diag_seams = set()
     diag_verify = [] if diagnostics is not None else None
     if diagnostics is not None:
@@ -619,7 +624,10 @@ def reduce_camera_track(
             def range_progress(done, _span, note="", base=progress_base):
                 progress(base + done, total_frames, note)
         range_frames = set(
-            reduce_track(bounds, channels, min_seg, max_seg, strict, diag_splits, range_progress)
+            reduce_track(
+                bounds, channels, min_seg, max_seg, strict,
+                splits=diag_splits, caps=diag_caps, progress=range_progress,
+            )
         )
         progress_base += f1 - f0
 
@@ -680,6 +688,7 @@ def reduce_camera_track(
     if diagnostics is not None:
         diagnostics["cuts"] = sorted(diag_cuts)
         diagnostics["splits"] = diag_splits
+        diagnostics["maxspan_caps"] = diag_caps
         diagnostics["seam_rewrites"] = sorted(diag_seams)
         diagnostics["verify"] = diag_verify
         diagnostics["fit_counts"] = read_fit_counters()
@@ -706,11 +715,12 @@ def reduce_bone_track(
     cut_thresholds は (POS, ROT)。範囲外の元キーは逐語保持する。curve_mode="bezier" では
     位置(軸別)と回転(slerp 係数)を1本のベジェ曲線で採否判定し、制御点を出力キーへ格納する。
     範囲端の下側継ぎ目は範囲開始キー(範囲内)の曲線のみ再フィット(範囲外キーは変更不可)。
-    diagnostics に dict を渡すと cuts・splits・seam_rewrites を埋める(§2.7/§6.3)。
+    diagnostics に dict を渡すと cuts・splits(error-split)・maxspan_caps(§5.5)・seam_rewrites を埋める(§2.7/§6.3)。
     """
     reduced = []
     diag_cuts = set()
     diag_splits = [] if diagnostics is not None else None
+    diag_caps = [] if diagnostics is not None else None
     diag_seams = set()
     diag_verify = [] if diagnostics is not None else None
     if diagnostics is not None:
@@ -735,7 +745,7 @@ def reduce_bone_track(
         pos_ch.label, rot_ch.label = "position", "rotation"
         channels = [pos_ch, rot_ch]
         range_frames = set(
-            reduce_track(bounds, channels, min_seg, max_seg, strict, diag_splits)
+            reduce_track(bounds, channels, min_seg, max_seg, strict, splits=diag_splits, caps=diag_caps)
         )
 
         segment_interp = None
@@ -785,6 +795,7 @@ def reduce_bone_track(
     if diagnostics is not None:
         diagnostics["cuts"] = sorted(diag_cuts)
         diagnostics["splits"] = diag_splits
+        diagnostics["maxspan_caps"] = diag_caps
         diagnostics["seam_rewrites"] = sorted(diag_seams)
         diagnostics["verify"] = diag_verify
         diagnostics["fit_counts"] = read_fit_counters()
