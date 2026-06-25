@@ -28,6 +28,7 @@ from mmd_toolbox.vmd.fit import (
     _quat_angle_deg,
     _round_half_up,
     read_fit_counters,
+    read_fit_counters_by_category,
     reset_fit_counters,
 )
 from mmd_toolbox.vmd.sample import perspective_series
@@ -343,6 +344,10 @@ def _camera_seam_interp(source_keys, a, b, tols):
     dist_ch = LinearScalarChannel(a, distances, tols.camera_distance, mode="bezier")
     fov_ch = FovChannel(a, fovs, tols.camera_fov, mode="bezier")
     rot_ch = CameraRotationChannel(a, eulers, tols.camera_rot, mode="bezier")
+    # 継ぎ目再フィットもチャンネル種別へ帰属させ、種別別カウントを exhaustive に保つ(§2.7 診断)。
+    pos_ch.label, dist_ch.label, fov_ch.label, rot_ch.label = (
+        "position", "distance", "fov", "rotation",
+    )
     cp_x, cp_y, cp_z = pos_ch.curve(a, b)
     return camera_interp_bytes(
         cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
@@ -363,6 +368,8 @@ def _bone_seam_interp(source_keys, a, b, tols):
     quats = [interp.sample(source_keys, "rot", f) for f in rng]
     pos_ch = EuclideanVectorChannel(a, positions, tols.bone_pos, mode="bezier")
     rot_ch = BoneRotationChannel(a, quats, tols.bone_rot, mode="bezier")
+    # 継ぎ目再フィットもチャンネル種別へ帰属させ、種別別カウントを exhaustive に保つ(§2.7 診断)。
+    pos_ch.label, rot_ch.label = "position", "rotation"
     cp_x, cp_y, cp_z = pos_ch.curve(a, b)
     return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
@@ -676,6 +683,7 @@ def reduce_camera_track(
         diagnostics["seam_rewrites"] = sorted(diag_seams)
         diagnostics["verify"] = diag_verify
         diagnostics["fit_counts"] = read_fit_counters()
+        diagnostics["fit_counts_by_channel"] = read_fit_counters_by_category()
     return sorted(reduced + outside, key=lambda k: k.frame)
 
 
@@ -780,4 +788,5 @@ def reduce_bone_track(
         diagnostics["seam_rewrites"] = sorted(diag_seams)
         diagnostics["verify"] = diag_verify
         diagnostics["fit_counts"] = read_fit_counters()
+        diagnostics["fit_counts_by_channel"] = read_fit_counters_by_category()
     return sorted(reduced + outside, key=lambda k: k.frame)

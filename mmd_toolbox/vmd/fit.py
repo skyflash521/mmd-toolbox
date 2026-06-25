@@ -63,7 +63,7 @@ def _select_worst(errs, is_reversal):
     return max(candidates, key=lambda f: (errs[f], -f))
 
 
-def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None):
+def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None, category=None):
     """1軸の量子化ベジェ制御点 (x1,y1,x2,y2) を返す(§5.4)。
 
     端点同値(正規化不能)や内部点なしは線形制御点。sample_fn(frame) は当該軸のサンプル値。
@@ -77,7 +77,7 @@ def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None):
         return _BEZIER_LINEAR_CP
     xs = [(f - a) / span for f in internal]
     ys = [(sample_fn(f) - a0) / denom for f in internal]
-    cp, _ = fit_bezier_curve(xs, ys, early_exit_err=early_exit_err)
+    cp, _ = fit_bezier_curve(xs, ys, early_exit_err=early_exit_err, category=category)
     return cp
 
 
@@ -127,7 +127,7 @@ class LinearScalarChannel:
             a0, a1 = self._value(a), self._value(b)
             denom = abs(a1 - a0)
             ee = self.tol / denom if denom > 1e-9 else None
-            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee)
+            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee, category=getattr(self, "label", None))
             self._cp_cache[(a, b)] = cp
         return cp
 
@@ -212,7 +212,10 @@ class EuclideanVectorChannel:
             va, vb = self._vec(a), self._vec(b)
             denom = abs(vb[i] - va[i])
             ee = self.tol / (math.sqrt(3.0) * denom) if denom > 1e-9 else None
-            cp = _axis_curve(va[i], vb[i], a, b, lambda f: self._vec(f)[i], early_exit_err=ee)
+            cp = _axis_curve(
+                va[i], vb[i], a, b, lambda f: self._vec(f)[i], early_exit_err=ee,
+                category=getattr(self, "label", None),
+            )
             self._cp_cache[(a, b, i)] = cp
         return cp
 
@@ -312,7 +315,7 @@ class FovChannel:
             a0, a1 = self._value(a), self._value(b)
             denom = abs(a1 - a0)
             ee = self.tol / denom if denom > 1e-9 else None
-            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee)
+            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee, category=getattr(self, "label", None))
             self._cp_cache[(a, b)] = cp
         return cp
 
@@ -522,7 +525,10 @@ class CameraRotationChannel:
             return out
 
         # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す。
-        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol)
+        cp = _fit_coeff_curve(
+            [(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol,
+            category=getattr(self, "label", None),
+        )
         self._cp_cache[(a, b)] = cp
         return cp
 
@@ -644,7 +650,10 @@ class BoneRotationChannel:
             ]
 
         # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す。
-        cp = _fit_coeff_curve([(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol)
+        cp = _fit_coeff_curve(
+            [(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol,
+            category=getattr(self, "label", None),
+        )
         self._cp_cache[(a, b)] = cp
         return cp
 
@@ -682,17 +691,39 @@ _BEZIER_LINEAR_CP = (20, 20, 107, 107)
 # least_squares を回さず即採用した回数。通常実行では誰も読まないので副作用は無い。診断を
 # 要求する呼び出し側が reset_fit_counters() → 処理 → read_fit_counters() で差分を取る。
 _FIT_COUNTERS = {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0}
+# チャンネル種別(position / rotation / distance / fov)別の内訳。フィットに category が
+# 渡されたときだけ該当バケットへ計上する。どのチャンネルのフィットが重いか(位置 vs 回転)を
+# 帰属するために合算 _FIT_COUNTERS と並行して持つ。全フィットが category 付きなら種別別の
+# 総和は合算に一致する。
+_FIT_COUNTERS_BY_CAT = {}
+
+
+def _bump(field, category):
+    """合算カウンタを増やし、category 指定時はその種別バケットも増やす。"""
+    _FIT_COUNTERS[field] += 1
+    if category is not None:
+        bucket = _FIT_COUNTERS_BY_CAT.get(category)
+        if bucket is None:
+            bucket = {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0}
+            _FIT_COUNTERS_BY_CAT[category] = bucket
+        bucket[field] += 1
 
 
 def reset_fit_counters():
-    """フィット計測カウンタを 0 に戻す。"""
+    """フィット計測カウンタ(合算・種別別)を 0 に戻す。"""
     for k in _FIT_COUNTERS:
         _FIT_COUNTERS[k] = 0
+    _FIT_COUNTERS_BY_CAT.clear()
 
 
 def read_fit_counters():
-    """現在のフィット計測カウンタのコピーを返す。"""
+    """現在の合算フィット計測カウンタのコピーを返す。"""
     return dict(_FIT_COUNTERS)
+
+
+def read_fit_counters_by_category():
+    """チャンネル種別別のフィット計測カウンタのコピーを返す。"""
+    return {cat: dict(counts) for cat, counts in _FIT_COUNTERS_BY_CAT.items()}
 
 
 # least_squares の収束許容(§6.3)。采否は量子化後誤差で判定するので scipy 既定精度(~1e-8)まで
@@ -785,7 +816,7 @@ def _quantize_solution(sol_x):
     return (x1q, y1q, x2q, y2q)
 
 
-def fit_bezier_curve(xs, ys, early_exit_err=None):
+def fit_bezier_curve(xs, ys, early_exit_err=None, category=None):
     """正規化サンプル (xs, ys) に VMD補間曲線をフィットする(§5.2, §5.4)。
 
     制御点 (x1,y1,x2,y2) を 0..127 整数に量子化して返し、最大絶対誤差は量子化後の曲線を
@@ -803,7 +834,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     ys = list(ys)
     if not xs:
         return (_BEZIER_LINEAR_CP, 0.0)
-    _FIT_COUNTERS["fit_calls"] += 1
+    _bump("fit_calls", category)
 
     def residual(v):
         x1, t, y1, y2 = v
@@ -819,7 +850,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     if early_exit_err is not None:
         lin_err = quantized_err(_BEZIER_LINEAR_CP)
         if lin_err <= early_exit_err:
-            _FIT_COUNTERS["fastpath_linear"] += 1
+            _bump("fastpath_linear", category)
             return (_BEZIER_LINEAR_CP, lin_err)
 
     lsq_kw = _lsq_kwargs(len(xs))
@@ -830,7 +861,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
-            _FIT_COUNTERS["lsq_calls"] += 1
+            _bump("lsq_calls", category)
             sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4), **lsq_kw)
         except Exception:
             continue
@@ -849,7 +880,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     return (best_cp, best_err)
 
 
-def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
+def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None):
     """共通の係数曲線 y(x)∈[0,1] をフィットし量子化制御点を返す(§5.3)。
 
     回転チャンネル用。fit_bezier_curve がスカラー (xs,ys) を直接合わせるのに対し、
@@ -865,7 +896,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     """
     if not xs:
         return _BEZIER_LINEAR_CP
-    _FIT_COUNTERS["fit_calls"] += 1
+    _bump("fit_calls", category)
 
     def residual(v):
         x1, t, y1, y2 = v
@@ -879,7 +910,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     # 線形ファストパス(§6.3): 線形制御点で許容内に収まれば least_squares を呼ばず即採用する。
     # 閾値(early_exit_err)が無い全探索では行わない。
     if early_exit_err is not None and quantized_err(_BEZIER_LINEAR_CP) <= early_exit_err:
-        _FIT_COUNTERS["fastpath_linear"] += 1
+        _bump("fastpath_linear", category)
         return _BEZIER_LINEAR_CP
 
     lsq_kw = _lsq_kwargs(len(xs))
@@ -889,7 +920,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
-            _FIT_COUNTERS["lsq_calls"] += 1
+            _bump("lsq_calls", category)
             sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4), **lsq_kw)
         except Exception:
             continue

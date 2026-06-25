@@ -253,8 +253,8 @@ def test_early_exit_fires_during_reduce(monkeypatch):
     counter["n"] = 0
     orig_fbc = fit.fit_bezier_curve
     orig_fcc = fit._fit_coeff_curve
-    monkeypatch.setattr(fit, "fit_bezier_curve", lambda xs, ys, early_exit_err=None: orig_fbc(xs, ys, early_exit_err=None))
-    monkeypatch.setattr(fit, "_fit_coeff_curve", lambda xs, r, early_exit_err=None: orig_fcc(xs, r, early_exit_err=None))
+    monkeypatch.setattr(fit, "fit_bezier_curve", lambda xs, ys, early_exit_err=None, category=None: orig_fbc(xs, ys, early_exit_err=None, category=category))
+    monkeypatch.setattr(fit, "_fit_coeff_curve", lambda xs, r, early_exit_err=None, category=None: orig_fcc(xs, r, early_exit_err=None, category=category))
 
     _camera_track(source, tols, n)
     full_calls = counter["n"]

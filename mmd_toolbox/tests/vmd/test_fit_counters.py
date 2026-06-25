@@ -7,8 +7,6 @@ diagnostics を渡されたとき1トラック分の集計を diagnostics["fit_c
 (diagnostics 未指定)では出力を変えない。
 """
 
-import pytest
-
 from mmd_toolbox.vmd import fit, interp
 from mmd_toolbox.vmd.reduce import (
     BONE_LINEAR_INTERP,
@@ -19,9 +17,6 @@ from mmd_toolbox.vmd.reduce import (
     reduce_camera_track,
 )
 from mmd_toolbox.vmd.types import BoneKey, CameraKey
-
-# チャンネル種別別カウント(fit_counts_by_channel / read_fit_counters_by_category)は未実装。
-PENDING = pytest.mark.xfail(reason="impl pending: per-channel fit counts", strict=True)
 
 EASE = (96, 0, 96, 30)  # 強いイージング(線形ファストパスで収まらない曲線)
 
@@ -204,7 +199,6 @@ def test_diagnostics_linear_track_prefers_fastpath():
 # --- チャンネル種別別カウント(どのチャンネルのフィットが重いかの帰属) --------
 
 
-@PENDING
 def test_by_category_fit_level_buckets():
     # category を渡すとそのチャンネル種別のバケットに計上し、渡さなければバケットを作らない。
     fit.reset_fit_counters()
@@ -231,7 +225,6 @@ def test_by_category_fit_level_buckets():
     assert fit.read_fit_counters_by_category() == {}
 
 
-@PENDING
 def test_by_channel_attributes_position_vs_rotation():
     # 位置が曲がり回転は定数のトラックでは、フィット費用は position に帰属する。
     src = _eased_track()
@@ -254,7 +247,6 @@ def test_by_channel_attributes_position_vs_rotation():
     assert by["rotation"]["lsq_calls"] == 0
 
 
-@PENDING
 def test_by_channel_reconciles_with_total():
     # 全フィットがチャンネルへ帰属するので、チャンネル別の総和は合算カウントに一致する。
     src = _eased_track()
@@ -279,7 +271,6 @@ def test_by_channel_reconciles_with_total():
     assert sum(c["fastpath_linear"] for c in by.values()) == total["fastpath_linear"]
 
 
-@PENDING
 def test_by_channel_camera_has_position():
     src = _eased_camera_track()
     diag = {}
