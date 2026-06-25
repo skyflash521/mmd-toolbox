@@ -11,11 +11,22 @@ import pytest
 
 from mmd_toolbox.vmd import reduce as reducer  # noqa: F401
 from mmd_toolbox.vmd.fit import LinearScalarChannel
-from mmd_toolbox.vmd.reduce import StrictError, reduce_track
+from mmd_toolbox.vmd.reduce import (
+    BONE_LINEAR_INTERP,
+    StrictError,
+    build_bone_tolerances,
+    reduce_bone_track,
+    reduce_track,
+)
+from mmd_toolbox.vmd.types import BoneKey
 
 
 def lin(frame_start, values, tol):
     return LinearScalarChannel(frame_start, [float(v) for v in values], tol)
+
+
+# 未実装の sliding max_seg / maxspan-cap に依存するテストの印(実装フェーズで外す)。
+PENDING = pytest.mark.xfail(reason="impl pending: sliding max_seg", strict=True)
 
 
 def test_linear_segment_no_split():
@@ -134,18 +145,17 @@ def test_loose_non_constant_span_still_presplit():
     assert len(gaps) == 3  # 定数判定が誤発火せず従来の事前分割が残る
 
 
-def test_mixed_constant_and_varying_span_presplit():
-    # 前半定数＋後半変化が1 span に混在。span 全体が定数でないため従来通り max_seg 等分される
-    # (初期実装は span 全体が定数のときだけ非分割。部分定数は最適化対象外=§7 の既知の限界)。
+@PENDING
+def test_mixed_constant_and_varying_span_no_grid_in_flat():
+    # 前半定数＋後半上昇が1 span に混在。sliding 化では定数前半に機械的な等分 grid キーを撒かず、
+    # 曲がり(定数→上昇の境界)付近で誤差駆動分割する。定数前半は maxspan-cap 対象外なので
+    # 上限を超える1区間のまま残る。
     vals = [5.0] * 61 + [5.0 + float(i + 1) for i in range(40)]  # 0..60 定数, 61..100 上昇
     ch = lin(0, vals, tol=1.0)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
-    assert all(g <= 40 for g in gaps)
-    # 定数前半 (0,60) は tol 分割を生まないため、そこに内部キーがあれば事前分割が
-    # 前半まで及んだ証拠(混在 span は畳まず従来等分される)。max_seg=40・span=100 で
-    # 事前分割点は 33 に置かれ、定数前半に入る。
-    assert any(0 < k < 60 for k in keys)
+    assert keys[0] == 0 and keys[-1] == 100
+    assert not any(0 < k < 55 for k in keys)  # 定数前半に等分 grid キーが出ない
+    assert any(55 <= k <= 65 for k in keys)   # 曲がり付近にキー
 
 
 def test_presplit_requires_all_channels_constant():
@@ -193,3 +203,74 @@ def test_reduce_uses_only_normalized_contract():
     stub = StubChannel({(0, 10): (3.0, 5), (0, 5): (0.0, None), (5, 10): (0.0, None)})
     keys = reduce_track([0, 10], [stub], min_seg=1, max_seg=180, strict=False)
     assert keys == [0, 5, 10]
+
+
+# --- sliding max_seg / maxspan-cap (§5.1 step3/step6, §5.5) -------------------
+
+
+@PENDING
+def test_fitting_long_span_capped_and_recorded():
+    # 許容内に収まる非定数の長い span(>max_seg)は maxspan-cap で上限以下に保ち、診断 caps に
+    # 別理由として記録する(誤差駆動の splits とは別)。
+    ch = lin(0, [float(i) for i in range(101)], tol=1.0)  # 線形=1本で表現可
+    caps = []
+    keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False, caps=caps)
+    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    assert all(g <= 40 for g in gaps)
+    assert caps and all(0 < c["frame"] < 100 for c in caps)
+
+
+@PENDING
+def test_constant_long_span_not_capped():
+    # 定数の長い span は maxspan-cap 対象外。caps 空・両端のみ・上限超過を許す。
+    ch = lin(0, [5.0] * 101, tol=0.01)
+    caps = []
+    keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False, caps=caps)
+    assert keys == [0, 100]
+    assert caps == []
+
+
+@PENDING
+def test_error_split_separate_from_cap():
+    # 誤差超過の分割は splits(error-split)に入り、cap が不要(max_seg 大)なら caps は空。
+    ch = lin(0, [0, 10, 2, 4, 20], tol=9.0)
+    splits, caps = [], []
+    reduce_track([0, 4], [ch], min_seg=1, max_seg=180, strict=False, splits=splits, caps=caps)
+    assert splits  # 誤差駆動の分割が記録される
+    assert caps == []
+
+
+@PENDING
+def test_no_mechanical_grid_when_span_within_max_seg():
+    # span が max_seg 以下なら、フィット可の滑らかな区間に機械的な内部キーを撒かない。
+    ch = lin(0, [float(i) for i in range(31)], tol=1.0)  # 線形・span 30
+    caps = []
+    keys = reduce_track([0, 30], [ch], min_seg=1, max_seg=180, strict=False, caps=caps)
+    assert keys == [0, 30]  # 等分 grid キーが出ない
+    assert caps == []
+
+
+@PENDING
+def test_reduce_bone_track_diagnostics_has_maxspan_caps():
+    # diagnostics に maxspan_caps フィールドが入り、長い線形位置で cap が発火する。
+    name = b"bone".ljust(15, b"\x00")
+    src = [
+        BoneKey(name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
+        for f in range(101)
+    ]
+    diag = {}
+    reduce_bone_track(
+        src,
+        [(0, 100)],
+        build_bone_tolerances(bone_pos=0.5, bone_rot=5.0),
+        cut_thresholds=(5.0, 20.0),
+        keep_frames=[],
+        no_cut_detect=True,
+        min_seg=1,
+        max_seg=40,
+        strict=False,
+        curve_mode="bezier",
+        diagnostics=diag,
+    )
+    assert "maxspan_caps" in diag
+    assert diag["maxspan_caps"]
