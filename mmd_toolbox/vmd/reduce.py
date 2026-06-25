@@ -27,6 +27,8 @@ from mmd_toolbox.vmd.fit import (
     LinearScalarChannel,
     _quat_angle_deg,
     _round_half_up,
+    read_fit_counters,
+    reset_fit_counters,
 )
 from mmd_toolbox.vmd.sample import perspective_series
 from mmd_toolbox.vmd.types import BoneKey, CameraKey
@@ -571,6 +573,8 @@ def reduce_camera_track(
     diag_splits = [] if diagnostics is not None else None
     diag_seams = set()
     diag_verify = [] if diagnostics is not None else None
+    if diagnostics is not None:
+        reset_fit_counters()
     # 全範囲のフレーム総数に対する処理経過(§2.7)。範囲ごとに base を進める。
     total_frames = sum(f1 - f0 for f0, f1 in ranges)
     progress_base = 0
@@ -671,6 +675,7 @@ def reduce_camera_track(
         diagnostics["splits"] = diag_splits
         diagnostics["seam_rewrites"] = sorted(diag_seams)
         diagnostics["verify"] = diag_verify
+        diagnostics["fit_counts"] = read_fit_counters()
     return sorted(reduced + outside, key=lambda k: k.frame)
 
 
@@ -700,6 +705,8 @@ def reduce_bone_track(
     diag_splits = [] if diagnostics is not None else None
     diag_seams = set()
     diag_verify = [] if diagnostics is not None else None
+    if diagnostics is not None:
+        reset_fit_counters()
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         quats = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
@@ -772,4 +779,5 @@ def reduce_bone_track(
         diagnostics["splits"] = diag_splits
         diagnostics["seam_rewrites"] = sorted(diag_seams)
         diagnostics["verify"] = diag_verify
+        diagnostics["fit_counts"] = read_fit_counters()
     return sorted(reduced + outside, key=lambda k: k.frame)

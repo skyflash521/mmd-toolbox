@@ -677,6 +677,24 @@ _BEZIER_INITS = (
 _BEZIER_INITS_LARGE = (_BEZIER_INITS[0], _BEZIER_INITS[3])
 _BEZIER_LINEAR_CP = (20, 20, 107, 107)
 
+# フィット計測カウンタ(任意の高速化効果測定用)。fit_calls はベジェフィット試行回数、
+# lsq_calls は least_squares 呼び出し回数、fastpath_linear は線形制御点で許容内に収まり
+# least_squares を回さず即採用した回数。通常実行では誰も読まないので副作用は無い。診断を
+# 要求する呼び出し側が reset_fit_counters() → 処理 → read_fit_counters() で差分を取る。
+_FIT_COUNTERS = {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0}
+
+
+def reset_fit_counters():
+    """フィット計測カウンタを 0 に戻す。"""
+    for k in _FIT_COUNTERS:
+        _FIT_COUNTERS[k] = 0
+
+
+def read_fit_counters():
+    """現在のフィット計測カウンタのコピーを返す。"""
+    return dict(_FIT_COUNTERS)
+
+
 # least_squares の収束許容(§6.3)。采否は量子化後誤差で判定するので scipy 既定精度(~1e-8)まで
 # 詰める必要はない。緩めると反復が減って速くなるが、緩めすぎるとフィット精度が必要精度に届かず
 # 分割が増えて圧縮率が落ちる。緩和の速度効果は「区間のサンプル数 × 反復」に比例するので、サンプル数が
@@ -785,6 +803,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     ys = list(ys)
     if not xs:
         return (_BEZIER_LINEAR_CP, 0.0)
+    _FIT_COUNTERS["fit_calls"] += 1
 
     def residual(v):
         x1, t, y1, y2 = v
@@ -800,6 +819,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
     if early_exit_err is not None:
         lin_err = quantized_err(_BEZIER_LINEAR_CP)
         if lin_err <= early_exit_err:
+            _FIT_COUNTERS["fastpath_linear"] += 1
             return (_BEZIER_LINEAR_CP, lin_err)
 
     lsq_kw = _lsq_kwargs(len(xs))
@@ -810,6 +830,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None):
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
+            _FIT_COUNTERS["lsq_calls"] += 1
             sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4), **lsq_kw)
         except Exception:
             continue
@@ -844,6 +865,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     """
     if not xs:
         return _BEZIER_LINEAR_CP
+    _FIT_COUNTERS["fit_calls"] += 1
 
     def residual(v):
         x1, t, y1, y2 = v
@@ -857,6 +879,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
     # 線形ファストパス(§6.3): 線形制御点で許容内に収まれば least_squares を呼ばず即採用する。
     # 閾値(early_exit_err)が無い全探索では行わない。
     if early_exit_err is not None and quantized_err(_BEZIER_LINEAR_CP) <= early_exit_err:
+        _FIT_COUNTERS["fastpath_linear"] += 1
         return _BEZIER_LINEAR_CP
 
     lsq_kw = _lsq_kwargs(len(xs))
@@ -866,6 +889,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None):
         t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
         x0 = [_clip01(ix1), _clip01(t0), _clip01(iy1), _clip01(iy2)]
         try:
+            _FIT_COUNTERS["lsq_calls"] += 1
             sol = least_squares(residual, x0, bounds=([0.0] * 4, [1.0] * 4), **lsq_kw)
         except Exception:
             continue

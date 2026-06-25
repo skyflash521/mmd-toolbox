@@ -7,8 +7,6 @@ diagnostics を渡されたとき1トラック分の集計を diagnostics["fit_c
 (diagnostics 未指定)では出力を変えない。
 """
 
-import pytest
-
 from mmd_toolbox.vmd import fit, interp
 from mmd_toolbox.vmd.reduce import (
     BONE_LINEAR_INTERP,
@@ -19,8 +17,6 @@ from mmd_toolbox.vmd.reduce import (
     reduce_camera_track,
 )
 from mmd_toolbox.vmd.types import BoneKey, CameraKey
-
-PENDING = pytest.mark.xfail(reason="impl pending: fit counters", strict=True)
 
 EASE = (96, 0, 96, 30)  # 強いイージング(線形ファストパスで収まらない曲線)
 
@@ -63,14 +59,12 @@ def _cam_tols():
 # --- fit レベルのカウンタ ----------------------------------------------------
 
 
-@PENDING
 def test_reset_zeroes_counters():
     fit.reset_fit_counters()
     c = fit.read_fit_counters()
     assert c == {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0}
 
 
-@PENDING
 def test_nonlinear_increments_lsq_calls():
     # 強いイージングは線形制御点で許容内に収まらないので least_squares を回す。
     fit.reset_fit_counters()
@@ -83,7 +77,6 @@ def test_nonlinear_increments_lsq_calls():
     assert c["fastpath_linear"] == 0
 
 
-@PENDING
 def test_linear_increments_fastpath_not_lsq():
     # 線形サンプルは線形ファストパスで即採用し least_squares を呼ばない。
     fit.reset_fit_counters()
@@ -96,7 +89,6 @@ def test_linear_increments_fastpath_not_lsq():
     assert c["fastpath_linear"] == 1
 
 
-@PENDING
 def test_coeff_curve_linear_increments_fastpath():
     # 回転の係数曲線も線形なら least_squares を呼ばずファストパス採用。
     fit.reset_fit_counters()
@@ -112,7 +104,6 @@ def test_coeff_curve_linear_increments_fastpath():
     assert c["fastpath_linear"] == 1
 
 
-@PENDING
 def test_coeff_curve_nonlinear_increments_lsq_calls():
     # 係数が強いイージングなら線形制御点では許容外で、係数曲線側も least_squares を回す。
     fit.reset_fit_counters()
@@ -135,7 +126,6 @@ def _tols():
     return build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
 
 
-@PENDING
 def test_diagnostics_records_fit_counts_for_curved_track():
     src = _eased_track()
     diag = {}
@@ -160,7 +150,6 @@ def test_diagnostics_records_fit_counts_for_curved_track():
     assert fc["lsq_calls"] >= 1
 
 
-@PENDING
 def test_diagnostics_records_fit_counts_for_camera_track():
     src = _eased_camera_track()
     diag = {}
@@ -185,7 +174,6 @@ def test_diagnostics_records_fit_counts_for_camera_track():
     assert fc["lsq_calls"] >= 1
 
 
-@PENDING
 def test_diagnostics_linear_track_prefers_fastpath():
     src = _linear_track()
     diag = {}
