@@ -24,7 +24,8 @@ mocapvmd はボーン選択を行わず全ボーンを処理するため、ボ�
 
 - `source_keys`: **クリーニング済みの密キー(線形補間)**で構成した1本のトラックを渡す。全ボーン・全キーをクリーニング対象とする(処理範囲の限定はしない)。
 - `tols`: ボーン種別ごとに解決する(要求仕様 5.3)。プリセット基準値(`--reduce-preset` / `--reduce-error-bone-*`)に種別スケールを掛けた `bone_pos` / `bone_rot` を、その種別のトラックに渡す。`reduce_bone_track` はトラック単位に呼ぶため、トラックの種別に応じた `tols` を都度与える。共通の `Tolerances` はカメラ4フィールド(`camera_pos` / `camera_rot` / `camera_distance` / `camera_fov`)も既定値なしで必須なので、mocapvmd 側でカメラ値を指定せずに済むよう、`mmd_toolbox.vmd.reduce` にボーン専用のトレランス構築ヘルパ(`bone_pos` / `bone_rot` だけ受け取り、未使用のカメラフィールドはヘルパ内部で埋めて `Tolerances` を返す)を追加し、mocapvmd はそれ経由で `tols` を作る。
-- `cut_thresholds / keep_frames / no_cut_detect / min_seg / max_seg / strict`: 固定値(`cut_thresholds=(1.0, 30.0)`(POS, ROT)、`no_cut_detect=False`、`keep_frames` 空、`min_seg=1`、`max_seg=15`、`strict=False`)を `mocapvmd.reduce` 内で与える。CLI公開はしない。`max_seg` は出力キー間隔の sliding 上限として効き、1区間を短く抑えて手編集しやすくし、区間長探索を減らして疎化を速くするため小さくする。
+- `cut_thresholds / keep_frames / no_cut_detect / min_seg / strict`: 固定値(`cut_thresholds=(1.0, 30.0)`(POS, ROT)、`no_cut_detect=False`、`keep_frames` 空、`min_seg=1`、`strict=False`)を `mocapvmd.reduce` 内で与える。CLI公開はしない。
+- `max_seg`: 出力キー間隔の sliding 上限。**ボーンごとにその実在区間長を与えて機械的 cap を無効化する(=無制限)**。区間は許容誤差の error-split とカットだけで分割し、滑らかな長区間を長いまま残して機械的 grid キーを最小化する。max_seg は処理時間にほぼ非感応で(代表入力 dense_dance + `--reduce-preset medium` で max_seg=15〜無制限まで約12分)、無制限でも実用的な処理時間(約15分以内)に収まることを計測で確認している。CLI公開はしない。
 - `ranges`: 各トラックに渡す範囲は**そのトラックの実在キー区間** `[(first, last)]` とする(処理範囲の限定はしない)。`reduce_bone_track` は与えた範囲全体をサンプリングし、トラック外の範囲には端値を延長した人工キーを作るため、トラック区間外を渡さない。
 - キーが1個以下のトラックは疎化できないため、`reduce_bone_track` に渡さず逐語保持する(`sparsevmd` 同様)。
 - `curve_mode`: `--curve-mode`(既定 `bezier`)。
