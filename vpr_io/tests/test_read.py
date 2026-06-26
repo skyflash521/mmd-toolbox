@@ -232,7 +232,7 @@ def test_read_accepts_bytes_str_and_path(tmp_path):
     assert from_bytes.resolution == from_path.resolution == from_str.resolution == 480
 
 
-# --- V-2a: 構造異常(VprFormatError)と許容入力(vpr_io.md §3.1) ---
+# --- 構造異常(VprFormatError)と許容入力(vpr_io.md §3.1) ---
 
 
 def _zip_with(entries: dict) -> bytes:
@@ -435,7 +435,7 @@ def test_read_tolerates_unknown_top_level_keys():
     assert project.resolution == 480
 
 
-# --- V-2b: 発音区間の重なり警告(VprWarning。vpr_io.md §3.2) ---
+# --- 発音区間の重なり警告(VprWarning。vpr_io.md §3.2) ---
 
 
 def test_read_warns_on_overlapping_notes_in_part():
@@ -521,7 +521,7 @@ def test_read_no_warning_for_adjacent_notes():
 def test_read_no_overlap_warning_across_parts():
     from vpr_io import read
 
-    # クロスパートの重なりは V-2 の初期スコープ外(検出は同一パート内のみ。vpr_io.md §3.2)。
+    # クロスパートの重なりは初期スコープ外(検出は同一パート内のみ。vpr_io.md §3.2)。
     track = {
         "type": 2,
         "name": "vocal",

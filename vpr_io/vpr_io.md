@@ -104,9 +104,9 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
     (書き、`song2vpr` 着手時)。`write_file` は原子置換(同ディレクトリ一時ファイルへ書いて fsync し
     `os.replace`)で、書き込み途中の中断・ディスクフルでも既存の出力先を破損させない
     (`mmd_toolbox.vmd.io.write_file` に倣う)。
-- 未解釈データ(ロスレス保持)は V-2 では `VprProject.raw_sequence` に `sequence.json` 全体を保持する範囲とする
+- 未解釈データ(ロスレス保持)は `VprProject.raw_sequence` に `sequence.json` 全体を保持する範囲とする
   (保持範囲と往復保証の限界は §3・§5)。オブジェクト単位の未マップキー保持(`extras` 等)は必要が確認された
-  時点で `song2vpr`(write、V-3)で検討する。
+  時点で `song2vpr`(write)で検討する。
 
 ---
 
@@ -155,17 +155,17 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 
 - **発音区間の重なり**(`code = "overlapping_notes"`): 歌唱トラックは単音想定で、同一パート内の音符の発音区間
   `[start_tick, start_tick + duration_tick)` が重なる音符ペアごとに1件 `VprWarning` を返す。`track_index`/`part_index`/
-  `note_index`/`related_note_index`/`tick`(重なり開始位置)で位置を指す。V-2 のスコープは**同一パート内の重なり**で、
+  `note_index`/`related_note_index`/`tick`(重なり開始位置)で位置を指す。検出のスコープは**同一パート内の重なり**で、
   異なるパート間にまたがる重なりの検出・ロケータ表現は初期スコープ外とし、必要が確認された時点で仕様化する。
 
 ### 3.3 未解釈データのロスレス保持
 
-- V-2 の未解釈データ保持は、`Project/sequence.json` を JSON として読み込んだ結果を `VprProject.raw_sequence` に
+- 未解釈データ保持は、`Project/sequence.json` を JSON として読み込んだ結果を `VprProject.raw_sequence` に
   そのまま保持する範囲とする。公開モデルに写像しないトップレベルキー・歌唱トラック以外のトラック・対象外フィールドを含む。
-- **保証しない範囲(V-2)**: `Project/sequence.json` 以外の ZIP エントリ(`Project/Audio/*.wav` 等)・ZIP エントリ属性・
+- **保証しない範囲**: `Project/sequence.json` 以外の ZIP エントリ(`Project/Audio/*.wav` 等)・ZIP エントリ属性・
   JSON の空白/キー順/数値表記などの字句差・公開モデルの並び替えで失われる元順序・公開モデル各オブジェクトと
   `raw_sequence` 内 JSON オブジェクトとの対応関係は、公開 API として保証しない。
-- 実際の往復(読み→書き→読み)検証と保持範囲の拡張(オブジェクト単位の `extras` 等)は `write`(V-3)で行う(§4・§5)。
+- 実際の往復(読み→書き→読み)検証と保持範囲の拡張(オブジェクト単位の `extras` 等)は `write` 実装時に行う(§4・§5)。
 
 ---
 
@@ -183,8 +183,8 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
   本書では重複定義しない。本書は `vpr_io` の責務とデータモデル(2章)を定める。
 - 形式仕様は [docs/specs/vpr/VPR_file_format.md](../docs/specs/vpr/VPR_file_format.md) を正本とする(MMD の VMD
   レイアウトを `docs/specs/vmd/VMD_file_format.md` が正本とし、`mmd_toolbox` がそれを実装するのと同じ扱い)。
-  ロスレスの保持範囲(未解釈データの保持表現)は §3.3 に定める(V-2: `VprProject.raw_sequence` に `sequence.json`
-  全体を保持。往復検証と範囲拡張は V-3)。
+  ロスレスの保持範囲(未解釈データの保持表現)は §3.3 に定める(`VprProject.raw_sequence` に `sequence.json`
+  全体を保持。往復検証と範囲拡張は `write` 実装時)。
 
 ---
 
