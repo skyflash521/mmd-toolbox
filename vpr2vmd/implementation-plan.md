@@ -121,7 +121,7 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
 
 **対象トラック・解析範囲・重複音符**(全時間軸の確定): `lipsync` の口形列は単一の口に対応するため、`vpr2vmd` は
 単一の歌唱トラックを対象とする。`vpr_io` が「解析範囲(曲の総尺)は呼び出し側が定める」とする部分
-([vpr_io 実装計画](../vpr_io/implementation-plan.md) §4.1)を、`vpr2vmd` は次で確定する。
+([vpr_io.md](../vpr_io/vpr_io.md) §2)を、`vpr2vmd` は次で確定する。
 
 - **対象トラック**: `VprProject.tracks` が複数ある場合、既定で先頭トラック(`tracks[0]`)を用い、`--track NAME|INDEX`
   で選択できる。複数トラックを混ぜない(同時発音は口形が重なるため)。**`--track` の解釈**: 引数が整数として
@@ -136,7 +136,7 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
   埋まるため、被覆漏れを残さない)。末尾に追加の無音区間は設けず、出力末尾の閉口は最後の母音のリリース(`lipsync`)で
   作る。これにより `lipsync` の全時間軸被覆契約を満たす「全時間軸」を `vpr2vmd` 側で一意に定める。
 - **重複音符**: 選択トラックは単音(monophonic)前提で、`vpr_io` が発音区間の重なりを `VprWarning` で報告する
-  ([vpr_io 実装計画](../vpr_io/implementation-plan.md) §4.1)。`vpr2vmd` は上記の安定整列順に並べたうえで、次の2段階で
+  ([vpr_io.md](../vpr_io/vpr_io.md) §3.2)。`vpr2vmd` は上記の安定整列順に並べたうえで、次の2段階で
   非重複化する(`lipsync` の非重複契約を満たす)。`vpr_io` の警告を継承し、除外・切り詰めはいずれも診断に記録する。
   1. **同一 `start_tick` の重複除外**: 開始が等しい音符は整列順の先頭(=最長、次いでパート出現順)だけを残し、
      残りを重複として除外する。これで残った音符は `start_tick` が相異なる。
@@ -154,7 +154,7 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
 ### 5.2 時刻⇔フレーム変換(tick→秒→フレーム)(確定)
 
 `vpr_io` は時刻を tick(整数、`resolution`=tick/四分音符)で渡し、テンポは `tempos`(`list[TempoEvent{tick, bpm}]`)で
-渡す。秒・フレームへの変換は持たない([vpr_io 実装計画](../vpr_io/implementation-plan.md) §4.1、vpr_io.md §6)。
+渡す。秒・フレームへの変換は持たない([vpr_io.md](../vpr_io/vpr_io.md) §2.1・§6)。
 
 - **tick→秒**: テンポマップの区分積分。各テンポ区間 `[tick_i, tick_{i+1})` は `bpm_i` 一定とし、1 tick の秒数 =
   `60 / (bpm_i × resolution)`。tick `t` の絶対秒 = (各先行区間の tick 幅 × その区間の 1tick秒数)の総和 +
@@ -200,7 +200,7 @@ CLAUDE.md の設計境界に従い、抽象契約は [vpr2vmd.md](vpr2vmd.md)、
 - **プリセット具体値の調整**: §5.3 の開き量レンジ・タイミング・誇張・`γ`、および §5.1 の両唇閉鎖の公称長
   (3フレーム)・取り分上限(0.5)は出発点で、実データ(MMD/MMM 視覚確認)で調整する。`lipsync` の既定プロファイル・
   アルゴリズムは [lipsync 仕様](../lipsync/lipsync.md) §4 を用いる。
-- **vpr 形式の確定**: `vpr_io` の read 実装(vpr レイアウト確定。[vpr_io 実装計画](../vpr_io/implementation-plan.md) §4.2)が
+- **vpr 形式の確定**: `vpr_io` の read 実装(vpr レイアウト確定。[VPR_file_format.md](../docs/specs/vpr/VPR_file_format.md))が
   `vpr2vmd` の前提になる。§5.1 が用いる音素記号の具体集合・各記号のカテゴリ割当(母音/両唇音/他子音)はこの
   インベントリ確定で定まる(写像規則自体は §5.1 で確定済みで、記号集合に依存しない)。
 

@@ -13,7 +13,7 @@
   [vpr_io](../vpr_io/vpr_io.md)(vpr 書き出し)。`song2vpr` はこれらを束ね、ピッチ系の固有処理を担う。
 - **F0/ピッチ推定の依存**は `song2vpr` 側に閉じる(手法・ライブラリは実装で確定。4章)。音声前段の重い依存
   (分離・認識)は `vocal_analysis` 側。`mmd_toolbox` 本体の必須依存は `numpy/scipy` のまま保つ。
-- `vpr_io` の書き出し(write)は `song2vpr` 着手時に拡張する(vpr_io 実装計画 V-3)。
+- `vpr_io` の書き出し(write)は `song2vpr` 着手時に拡張する(vpr_io.md §4)。
 
 ---
 
@@ -34,7 +34,7 @@
 | T-5 | 統合・E2E(小サンプルで音声→vpr)・レポート/診断。**公開時に README のツール表へ `song2vpr` を追記**(README 本体は指示があるまで触らない) | 1コマンドで音声→vpr を生成。統計を出力 |
 
 依存関係: T-2/T-3 は T-1(vocal_analysis 出力)に依存。T-4 は T-3 の音符列と、拡張した `vpr_io` の write に依存
-([vpr_io 実装計画](../vpr_io/implementation-plan.md) V-3)。
+([vpr_io.md](../vpr_io/vpr_io.md) §4)。
 
 ---
 
@@ -62,7 +62,7 @@
 
 下流の確定型: `vpr_io` の `Note`(`start_tick`・`duration_tick`・`pitch:int`(MIDI)・`lyric:str`・
 `phonemes:list[str]`・`velocity:int` 0–127)、`VprProject`(`resolution:int`=tick/四分音符・`tempos`)
-([vpr_io 実装計画](../vpr_io/implementation-plan.md) §4.1)。`vocal_analysis` の `Segment`(`type`∈vowel/consonant/gap・
+([vpr_io.md](../vpr_io/vpr_io.md) §2.1)。`vocal_analysis` の `Segment`(`type`∈vowel/consonant/gap・
 `start_sec`・`end_sec`・`phoneme:str|None`(IPA)・`confidence`)、`RmsEnvelope`(相対正規化RMS)、`AnalysisResult`
 ([vocal_analysis 実装計画](../vocal_analysis/implementation-plan.md) §4.4)。
 
@@ -123,7 +123,7 @@ F0 と音素セグメントから音符を切る**初期規則**を確定する(
 - **半音丸め**: 有声フレームの F0(Hz)を MIDI ノート番号へ丸める。`note = round(69 + 12·log2(F0/440))`
   (A4=440Hz=MIDI 69)。
 - **無声/gap→休符・gap クリップ**: 有声区間のみ音符化する。無声(F0 無し)・gap セグメントは音符を作らない(休符は
-  `vpr_io` が発音区間の補集合として導出。[vpr_io 実装計画](../vpr_io/implementation-plan.md) §4.1)。**有声区間が gap
+  `vpr_io` が発音区間の補集合として導出。[vpr_io.md](../vpr_io/vpr_io.md) §2.1)。**有声区間が gap
   セグメントと部分的に重なる場合は gap 部分を除外して有声区間を gap 境界でクリップ・分割する**(gap は無音なので音符に
   含めない)。クリップで生じた各有声断片を音符化候補とする。
 - **同一音高連結**: 隣接する有声区間が**同一の丸めノート番号**で、間に休符(無声/gap)も母音の切り替わり(別 vowel
@@ -153,7 +153,7 @@ F0 と音素セグメントから音符を切る**初期規則**を確定する(
 - **自動テンポ推定(将来)**: `--tempo` 未指定時の BPM 自動推定・拍子推定は将来対応。評価観点は BPM 誤差・拍位置ずれ。
   v1 は §4.2 の固定既定(120 BPM・4/4)で仮置きする。
 - **vpr 形式の確定**: `vpr_io` の write 拡張(vpr レイアウト確定)が T-4 の前提になる
-  ([vpr_io 実装計画](../vpr_io/implementation-plan.md) V-3)。§4.1 の IPA→VOCALOID 音素アルファベットの具体対応表は
+  ([vpr_io.md](../vpr_io/vpr_io.md) §4)。§4.1 の IPA→VOCALOID 音素アルファベットの具体対応表は
   この音素表現確定で定まる(対応付け規則自体は §4.1 で確定済み)。
 - 上記の初期値・採用基準は代表サンプルで調整し、実音声での F0 精度・音符化精度の確認は重テストとして分離する(§3)。
 
