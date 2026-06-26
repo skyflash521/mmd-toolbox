@@ -163,6 +163,35 @@ def _tracks(raw_tracks) -> list[Track]:
     return tracks
 
 
+def _overlap_warnings(tracks) -> list[VprWarning]:
+    """同一パート内で発音区間が重なる音符ペアを警告する(単音想定違反。vpr_io.md §3.2)。
+
+    notes は start_tick 昇順。各音符について、まだ終端に達していない先行音符(active)を残し、その
+    全てと重なるとみなして音符ペアごとに1件報告する。半開区間 [start, start+duration) なので終端 ==
+    開始は重ならない。重なりが無い通常入力では active は短く保たれる。
+    """
+    warnings: list[VprWarning] = []
+    for track_index, track in enumerate(tracks):
+        for part_index, part in enumerate(track.parts):
+            active: list[tuple[int, int]] = []  # (発音終端, note 添字)
+            for note_index, note in enumerate(part.notes):
+                active = [(end, idx) for end, idx in active if end > note.start_tick]
+                for _end, idx in active:
+                    warnings.append(
+                        VprWarning(
+                            code="overlapping_notes",
+                            message="同一パート内で発音区間が重なっています",
+                            track_index=track_index,
+                            part_index=part_index,
+                            note_index=idx,
+                            related_note_index=note_index,
+                            tick=note.start_tick,
+                        )
+                    )
+                active.append((note.start_tick + note.duration_tick, note_index))
+    return warnings
+
+
 def read(src) -> tuple[VprProject, list[VprWarning]]:
     """vpr を読み、データモデル(vpr_io.md §2)と警告を返す。"""
     sequence = _load_sequence(src)
@@ -175,5 +204,4 @@ def read(src) -> tuple[VprProject, list[VprWarning]]:
         time_signatures=_time_signatures(master),
         tracks=_tracks(raw_tracks),
     )
-    warnings: list[VprWarning] = []
-    return project, warnings
+    return project, _overlap_warnings(project.tracks)

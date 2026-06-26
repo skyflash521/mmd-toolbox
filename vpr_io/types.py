@@ -26,10 +26,18 @@ class VprFormatError(Exception):
 
 @dataclass
 class VprWarning:
-    """続行可能な事象の構造化報告(vpr_io.md §3)。"""
+    """続行可能な事象の構造化報告(vpr_io.md §3.2)。
+
+    ロケータ(添字・tick)は公開データモデルの階層に対応する。VMD 固有の section/frame は持たない。
+    """
 
     code: str
     message: str
+    track_index: int | None = None  # VprProject.tracks の添字
+    part_index: int | None = None  # Track.parts の添字
+    note_index: int | None = None  # Part.notes の添字
+    related_note_index: int | None = None  # 2音符の関係(重なり等)で相手側 Part.notes の添字
+    tick: int | None = None  # 対象位置のプロジェクト絶対 tick
 
 
 @dataclass

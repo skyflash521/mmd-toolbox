@@ -438,7 +438,6 @@ def test_read_tolerates_unknown_top_level_keys():
 # --- V-2b: 発音区間の重なり警告(VprWarning。vpr_io.md §3.2) ---
 
 
-@pytest.mark.xfail(reason="impl pending: V-2b", strict=True)
 def test_read_warns_on_overlapping_notes_in_part():
     from vpr_io import read
 
@@ -451,7 +450,6 @@ def test_read_warns_on_overlapping_notes_in_part():
     assert [w.code for w in warnings] == ["overlapping_notes"]
 
 
-@pytest.mark.xfail(reason="impl pending: V-2b", strict=True)
 def test_read_overlap_warning_carries_locator():
     from vpr_io import read
 
@@ -468,7 +466,6 @@ def test_read_overlap_warning_carries_locator():
     assert w.tick == 240  # 重なり開始位置(後続音符の開始)
 
 
-@pytest.mark.xfail(reason="impl pending: V-2b", strict=True)
 def test_read_warns_once_per_overlapping_pair():
     from vpr_io import read
 
@@ -481,6 +478,21 @@ def test_read_warns_once_per_overlapping_pair():
     ]
     _, warnings = read(_make_vpr(_sequence([_singing_track(notes)])))
     assert [w.code for w in warnings] == ["overlapping_notes", "overlapping_notes"]
+
+
+def test_read_warns_for_all_overlapping_pairs():
+    from vpr_io import read
+
+    # 3音符が相互に重なる([0,1000)・[240,480)・[300,600))→ ペア (0,1)(0,2)(1,2) の3件。
+    # 最大終端の先行音符だけを見ると (1,2) を取りこぼすため、全ペアを報告することを検証する。
+    notes = [
+        _note(pos=0, duration=1000, number=60, lyric="あ", phoneme="a", velocity=64),
+        _note(pos=240, duration=240, number=62, lyric="い", phoneme="i", velocity=64),
+        _note(pos=300, duration=300, number=64, lyric="う", phoneme="u", velocity=64),
+    ]
+    _, warnings = read(_make_vpr(_sequence([_singing_track(notes)])))
+    pairs = [(w.note_index, w.related_note_index) for w in warnings if w.code == "overlapping_notes"]
+    assert pairs == [(0, 1), (0, 2), (1, 2)]
 
 
 def test_read_no_warning_for_non_overlapping_notes():
