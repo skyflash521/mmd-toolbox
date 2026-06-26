@@ -10,7 +10,18 @@ from dataclasses import dataclass, field
 
 
 class VprFormatError(Exception):
-    """vpr の構造異常(vpr_io.md §3)。"""
+    """vpr の構造異常(vpr_io.md §3.1)。
+
+    原因特定のため path(ZIP エントリ名または JSON パス)・key(欠落/型不一致の対象キー)・
+    value(問題になった実値)を持つ。
+    """
+
+    def __init__(self, message: str, *, path=None, key=None, value=None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.path = path
+        self.key = key
+        self.value = value
 
 
 @dataclass
