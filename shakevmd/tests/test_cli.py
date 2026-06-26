@@ -114,7 +114,7 @@ class TestCli:
         # フォールバックする(§2.1)。明示 argv だけ動いて sys.argv 経路が壊れる実装を排除。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        monkeypatch.setattr(sys, "argv", ["shakevmd", inp, "-o", str(out)])
+        monkeypatch.setattr(sys, "argv", ["shakevmd", inp, "-o", str(out), "--no-smooth"])
         assert cli.main() == 0
         assert out.exists()
 
@@ -132,7 +132,7 @@ class TestCli:
     def test_default_output_always_vmd_extension(self, tmp_path):
         # §2.2: 既定出力は拡張子に依らず `<入力名>_shake.vmd`。非 .vmd 入力でも .vmd で出す。
         inp = write_input(tmp_path / "take.dat")     # 中身は有効な VMD、拡張子のみ .dat
-        rc = cli.main([inp])
+        rc = cli.main([inp, "--no-smooth"])
         assert rc == 0
         assert (tmp_path / "take_shake.vmd").exists()
         assert not (tmp_path / "take_shake.dat").exists()
@@ -141,7 +141,7 @@ class TestCli:
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "sub" / "out.vmd"
         out.parent.mkdir()
-        rc = cli.main([inp, "-o", str(out)])
+        rc = cli.main([inp, "-o", str(out), "--no-smooth"])
         assert rc == 0 and out.exists()
 
     # --- 入力不正(§9 コード1) -------------------------------------------
@@ -212,7 +212,7 @@ class TestCli:
         # -o の長形式 --output(§2.2)
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        assert cli.main([inp, "--output", str(out)]) == 0 and out.exists()
+        assert cli.main([inp, "--output", str(out), "--no-smooth"]) == 0 and out.exists()
 
     def test_bad_range_format_exit2(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
@@ -250,7 +250,7 @@ class TestCli:
         # 出力先の親がファイル(ディレクトリでない)→ 書き込み不可
         clash = tmp_path / "afile"
         clash.write_bytes(b"x")
-        rc = cli.main([inp, "-o", str(clash / "out.vmd")])
+        rc = cli.main([inp, "-o", str(clash / "out.vmd"), "--no-smooth"])
         assert rc == 3
 
     # --- 範囲・パラメーター ------------------------------------------------
@@ -298,9 +298,9 @@ class TestCli:
     def test_seed_reproducible_and_seed_dependent(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
         o1, o2, o3 = tmp_path / "o1.vmd", tmp_path / "o2.vmd", tmp_path / "o3.vmd"
-        assert cli.main([inp, "-o", str(o1), "--seed", "7", "--amp-rot", "5"]) == 0
-        assert cli.main([inp, "-o", str(o2), "--seed", "7", "--amp-rot", "5"]) == 0
-        assert cli.main([inp, "-o", str(o3), "--seed", "8", "--amp-rot", "5"]) == 0
+        assert cli.main([inp, "-o", str(o1), "--seed", "7", "--amp-rot", "5", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(o2), "--seed", "7", "--amp-rot", "5", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(o3), "--seed", "8", "--amp-rot", "5", "--no-smooth"]) == 0
         assert o1.read_bytes() == o2.read_bytes()   # 同一シード→バイナリ一致(§7.5)
         assert o1.read_bytes() != o3.read_bytes()   # 異なるシード→変わる(seed が効いている)
 
@@ -308,7 +308,7 @@ class TestCli:
         # 正規化警告(同一フレーム重複の後勝ち破棄など)はユーザーに表示する(§3.1)。
         dup = [cam(0), cam(30), cam(30, center=(9.0, 9.0, 9.0)), cam(60)]   # frame30 重複
         inp = write_input(tmp_path / "dup.vmd", dup)
-        rc = cli.main([inp, "-o", str(tmp_path / "out.vmd")])
+        rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--no-smooth"])
         assert rc == 0
         text = capsys.readouterr()
         # 警告は安定マーカー "warning:" 付きで表示される(文言非依存)
@@ -320,10 +320,10 @@ class TestCli:
         # 既定 freq=1.2(1.2/2.4/4.8≤8)はクランプなし=警告なし、--freq 3.0(→12Hz)は警告あり、
         # と判別することで「クランプ警告がユーザーに伝播される」ことを検証する(KEYS は重複なし)。
         inp = write_input(tmp_path / "in.vmd")
-        assert cli.main([inp, "-o", str(tmp_path / "d.vmd")]) == 0           # 既定 freq
+        assert cli.main([inp, "-o", str(tmp_path / "d.vmd"), "--no-smooth"]) == 0           # 既定 freq
         base = capsys.readouterr()
         assert "warning:" not in (base.out + base.err).lower()
-        assert cli.main([inp, "-o", str(tmp_path / "f.vmd"), "--freq", "3.0"]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "f.vmd"), "--freq", "3.0", "--no-smooth"]) == 0
         clamped = capsys.readouterr()
         assert "warning:" in (clamped.out + clamped.err).lower()
 
@@ -345,7 +345,7 @@ class TestCli:
 
         def out_bytes(args, name):
             p = tmp_path / name
-            assert cli.main([inp, "-o", str(p), *args]) == 0
+            assert cli.main([inp, "-o", str(p), *args, "--no-smooth"]) == 0
             return p.read_bytes()
 
         base = out_bytes([], "base.vmd")
@@ -355,7 +355,7 @@ class TestCli:
         assert out_bytes(["--motion-damp", "2.0"], "ms.vmd") != base
         # --cut-threshold は KEYS にカット(隣接フレーム)がないため出力は変わらないが、
         # パースされ exit0 になることは確認(効果は test_cuts.py / bake のカットテストで担保)
-        assert cli.main([inp, "-o", str(tmp_path / "ct.vmd"), "--cut-threshold", "4,15"]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "ct.vmd"), "--cut-threshold", "4,15", "--no-smooth"]) == 0
 
     def test_impulse_option_applies_and_multiple(self, tmp_path):
         # --impulse F:S:D が効く。複数指定可(§2.4)。base ノイズは切って衝撃だけ見る。
@@ -363,10 +363,10 @@ class TestCli:
         base, one, two = tmp_path / "b.vmd", tmp_path / "1.vmd", tmp_path / "2.vmd"
         last = tmp_path / "last.vmd"
         common = ["--amp-rot", "0", "--amp-pos", "0", "--settle", "0"]
-        assert cli.main([inp, "-o", str(base), *common]) == 0
-        assert cli.main([inp, "-o", str(one), *common, "--impulse", "20:10:0.5"]) == 0
-        assert cli.main([inp, "-o", str(two), *common, "--impulse", "20:10:0.5", "--impulse", "45:10:0.5"]) == 0
-        assert cli.main([inp, "-o", str(last), *common, "--impulse", "45:10:0.5"]) == 0
+        assert cli.main([inp, "-o", str(base), *common, "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(one), *common, "--impulse", "20:10:0.5", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(two), *common, "--impulse", "20:10:0.5", "--impulse", "45:10:0.5", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(last), *common, "--impulse", "45:10:0.5", "--no-smooth"]) == 0
         assert base.read_bytes() != one.read_bytes()    # 1つ目が効く
         assert one.read_bytes() != two.read_bytes()      # 2つ目(複数指定)も効く
         # 加算合成(§6.3): 2指定は「45単独」とも異なる。これにより「最後の1つだけ保持」
@@ -377,16 +377,16 @@ class TestCli:
         # --amp-rot 非ゼロ値が効く(回転シェイク振幅が出力に影響)
         inp = write_input(tmp_path / "in.vmd")
         a, b = tmp_path / "a.vmd", tmp_path / "b.vmd"
-        assert cli.main([inp, "-o", str(a), "--amp-rot", "1", "--amp-pos", "0", "--settle", "0"]) == 0
-        assert cli.main([inp, "-o", str(b), "--amp-rot", "9", "--amp-pos", "0", "--settle", "0"]) == 0
+        assert cli.main([inp, "-o", str(a), "--amp-rot", "1", "--amp-pos", "0", "--settle", "0", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(b), "--amp-rot", "9", "--amp-pos", "0", "--settle", "0", "--no-smooth"]) == 0
         assert a.read_bytes() != b.read_bytes()
 
     def test_amp_pos_affects_output(self, tmp_path):
         # --amp-pos が効く(位置シェイクが出力に影響)
         inp = write_input(tmp_path / "in.vmd")
         a, b = tmp_path / "a.vmd", tmp_path / "b.vmd"
-        assert cli.main([inp, "-o", str(a), "--amp-pos", "0"]) == 0
-        assert cli.main([inp, "-o", str(b), "--amp-pos", "0.5"]) == 0
+        assert cli.main([inp, "-o", str(a), "--amp-pos", "0", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(b), "--amp-pos", "0.5", "--no-smooth"]) == 0
         assert a.read_bytes() != b.read_bytes()
 
     def test_defaults_match_spec(self, tmp_path):
@@ -404,16 +404,16 @@ class TestCli:
                            ("cut", CUT_KEYS), ("anglecut", ANGLE_CUT_KEYS)):
             inp = write_input(tmp_path / f"{name}.vmd", keys)
             d, e = tmp_path / f"{name}_d.vmd", tmp_path / f"{name}_e.vmd"
-            assert cli.main([inp, "-o", str(d)]) == 0                    # 既定
-            assert cli.main([inp, "-o", str(e), *spec_defaults]) == 0    # spec 既定値を明示
+            assert cli.main([inp, "-o", str(d), "--no-smooth"]) == 0                    # 既定
+            assert cli.main([inp, "-o", str(e), *spec_defaults, "--no-smooth"]) == 0    # spec 既定値を明示
             assert d.read_bytes() == e.read_bytes(), f"default != spec-explicit for {name}"
 
     def test_default_seed_is_one(self, tmp_path):
         # 既定 seed は 1(§2.3)。既定実行と --seed 1 が一致する
         inp = write_input(tmp_path / "in.vmd")
         d, s1 = tmp_path / "d.vmd", tmp_path / "s1.vmd"
-        assert cli.main([inp, "-o", str(d), "--amp-rot", "5"]) == 0
-        assert cli.main([inp, "-o", str(s1), "--amp-rot", "5", "--seed", "1"]) == 0
+        assert cli.main([inp, "-o", str(d), "--amp-rot", "5", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(s1), "--amp-rot", "5", "--seed", "1", "--no-smooth"]) == 0
         assert d.read_bytes() == s1.read_bytes()
 
     def test_settle_affects_output(self, tmp_path):
@@ -436,16 +436,16 @@ class TestCli:
         # --cut-threshold がカット検出へ転送される(閾値で分割が変わり出力が変わる)
         inp = write_input(tmp_path / "cut.vmd", CUT_KEYS)
         lo, hi = tmp_path / "lo.vmd", tmp_path / "hi.vmd"
-        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20"]) == 0    # frame30 をカット検出
-        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200"]) == 0  # カット検出なし
+        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0    # frame30 をカット検出
+        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200", "--no-smooth"]) == 0  # カット検出なし
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cut_threshold_angle_jump(self, tmp_path):
         # 角度ジャンプでもカット検出(§2.6 位置,角度のいずれか)。中心不動・角度のみ跳ぶ入力。
         inp = write_input(tmp_path / "acut.vmd", ANGLE_CUT_KEYS)
         lo, hi = tmp_path / "lo.vmd", tmp_path / "hi.vmd"
-        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20"]) == 0   # 角度34°>20 → カット
-        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "5,200"]) == 0  # 角度閾値200° → カットなし
+        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0   # 角度34°>20 → カット
+        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "5,200", "--no-smooth"]) == 0  # 角度閾値200° → カットなし
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cut_threshold_world_position_zoom(self, tmp_path):
@@ -453,8 +453,8 @@ class TestCli:
         # (§2.6 「カメラ中心またはカメラワールド位置」)。位置側閾値で分割が変わる。
         inp = write_input(tmp_path / "zcut.vmd", ZOOM_CUT_KEYS)
         lo, hi = tmp_path / "lo.vmd", tmp_path / "hi.vmd"
-        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20"]) == 0   # world_jump≈25>5 → カット
-        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200"]) == 0  # 位置閾値100 → カットなし
+        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0   # world_jump≈25>5 → カット
+        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200", "--no-smooth"]) == 0  # 位置閾値100 → カットなし
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cli_flags_wire_to_correct_bake_params(self, tmp_path):
@@ -605,7 +605,7 @@ class TestCli:
         for args in (["--amp-rot", "0"], ["--amp-pos", "0"], ["--motion-damp", "0"],
                      ["--settle", "0"], ["--fade", "0"], ["--cut-threshold", "0,0"],
                      ["--impulse", "20:0:0.5"]):
-            assert cli.main([inp, "-o", o, *args]) == 0, args
+            assert cli.main([inp, "-o", o, *args, "--no-smooth"]) == 0, args
 
     def test_negative_impulse_frame_exit2(self, tmp_path):
         # --impulse の F はフレーム=非負(§2.4)。負フレームは引数エラー(exit 2)。
@@ -627,7 +627,7 @@ class TestCli:
             return doc, warns
 
         monkeypatch.setattr(cli.io, "read", fake_read)
-        assert cli.main([str(inp), "-o", str(tmp_path / "out.vmd")]) == 0
+        assert cli.main([str(inp), "-o", str(tmp_path / "out.vmd"), "--no-smooth"]) == 0
         cap = capsys.readouterr()
         text = (cap.out + cap.err).lower()
         assert "warning:" in text and "decode-error" in text
@@ -654,7 +654,7 @@ class TestCli:
         # OverflowError になる。これは引数起因なので「出力書き込み失敗(3)」ではなく
         # 引数エラー(2)に分類する(§9)。
         inp = write_input(tmp_path / "in.vmd")
-        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--amp-rot", "1e308"]) == 2
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--amp-rot", "1e308", "--no-smooth"]) == 2
 
     def test_abbreviated_flag_rejected_exit2(self, tmp_path):
         # 仕様外の前置き省略形(--over 等)は受理しない(allow_abbrev=False)→ exit 2。
@@ -764,7 +764,7 @@ class TestCliOps:
         assert set(presets.INTERNAL_PARAM_NAMES) <= set(p)
         monkeypatch.setitem(presets._PRESETS, "handheld", p)
         inp = write_input(tmp_path / "in.vmd")
-        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--preset", "handheld"]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--preset", "handheld", "--no-smooth"]) == 0
 
     def test_all_internal_params_forwarded_and_effective(self, tmp_path, monkeypatch):
         # 内蔵パラメータが「すべて実際に転送され出力に効く」ことを behavioral に検証する(no-collision の
@@ -818,7 +818,7 @@ class TestCliOps:
         # 4プリセット名すべてが CLI で受理され正常終了する(earthquake だけでなく全名)。
         inp = write_input(tmp_path / "in.vmd")
         for name in ("handheld", "telephoto", "walking", "earthquake"):
-            assert cli.main([inp, "-o", str(tmp_path / f"{name}.vmd"), "--preset", name]) == 0, name
+            assert cli.main([inp, "-o", str(tmp_path / f"{name}.vmd"), "--preset", name, "--no-smooth"]) == 0, name
 
     def test_unknown_preset_exit2(self, tmp_path):
         # 未知のプリセット名は引数エラー(exit 2)。
@@ -829,8 +829,8 @@ class TestCliOps:
         # --preset はベイクに効く(既定実行と異なる出力になる)。earthquake は既定と明確に異なる。
         inp = write_input(tmp_path / "in.vmd")
         base, eq = tmp_path / "base.vmd", tmp_path / "eq.vmd"
-        assert cli.main([inp, "-o", str(base)]) == 0
-        assert cli.main([inp, "-o", str(eq), "--preset", "earthquake"]) == 0
+        assert cli.main([inp, "-o", str(base), "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(eq), "--preset", "earthquake", "--no-smooth"]) == 0
         assert base.read_bytes() != eq.read_bytes()
 
     def test_individual_arg_overrides_preset(self, tmp_path):
@@ -838,10 +838,10 @@ class TestCliOps:
         # ことを判別する(§2.7)。1引数だけ上書きし、全適用とも既定とも異なることを確認。
         inp = write_input(tmp_path / "in.vmd")
         base, full, part = tmp_path / "base.vmd", tmp_path / "full.vmd", tmp_path / "part.vmd"
-        assert cli.main([inp, "-o", str(base)]) == 0                              # 既定
-        assert cli.main([inp, "-o", str(full), "--preset", "earthquake"]) == 0     # earthquake 全適用
+        assert cli.main([inp, "-o", str(base), "--no-smooth"]) == 0                              # 既定
+        assert cli.main([inp, "-o", str(full), "--preset", "earthquake", "--no-smooth"]) == 0     # earthquake 全適用
         assert cli.main([inp, "-o", str(part), "--preset", "earthquake",
-                         "--amp-rot", "0.8"]) == 0                                  # amp-rot だけ上書き
+                         "--amp-rot", "0.8", "--no-smooth"]) == 0                                  # amp-rot だけ上書き
         assert part.read_bytes() != full.read_bytes()   # amp-rot 上書きが効く(全適用と異なる)
         assert part.read_bytes() != base.read_bytes()   # 残りの earthquake 引数は有効(既定とも異なる)
 
@@ -854,8 +854,8 @@ class TestCliOps:
             "--freq", "1.2", "--motion-damp", "1.0", "--settle", "0",
             "--cut-threshold", "5,20",
         ]
-        assert cli.main([inp, "-o", str(d)]) == 0
-        assert cli.main([inp, "-o", str(e), "--preset", "earthquake", *spec_defaults]) == 0
+        assert cli.main([inp, "-o", str(d), "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(e), "--preset", "earthquake", *spec_defaults, "--no-smooth"]) == 0
         assert d.read_bytes() == e.read_bytes()
 
     def test_preset_matches_explicit_params(self, tmp_path):
@@ -874,8 +874,8 @@ class TestCliOps:
                 "--cut-threshold", "{},{}".format(*p["cut_threshold"]),
             ]
             a, b = tmp_path / f"{name}_a.vmd", tmp_path / f"{name}_b.vmd"
-            assert cli.main([inp, "-o", str(a), "--preset", name]) == 0, name
-            assert cli.main([inp, "-o", str(b), *explicit]) == 0, name
+            assert cli.main([inp, "-o", str(a), "--preset", name, "--no-smooth"]) == 0, name
+            assert cli.main([inp, "-o", str(b), *explicit, "--no-smooth"]) == 0, name
             # 「効く」内蔵パラメーターを持つか(キーの有無でなく実効値で判定。非 walking が
             # gait_freq=0 を明示しても無効=公開引数のみと一致、を誤判定しない)。
             active_gait = p.get("gait_freq", 0.0) > 0.0 and p.get("gait_amp", 0.0) != 0.0
@@ -889,8 +889,8 @@ class TestCliOps:
         # (後続 preset が先行の個別引数を潰す実装を排除)。
         inp = write_input(tmp_path / "in.vmd")
         before, after = tmp_path / "before.vmd", tmp_path / "after.vmd"
-        assert cli.main([inp, "-o", str(before), "--amp-rot", "0.8", "--preset", "earthquake"]) == 0
-        assert cli.main([inp, "-o", str(after), "--preset", "earthquake", "--amp-rot", "0.8"]) == 0
+        assert cli.main([inp, "-o", str(before), "--amp-rot", "0.8", "--preset", "earthquake", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(after), "--preset", "earthquake", "--amp-rot", "0.8", "--no-smooth"]) == 0
         assert before.read_bytes() == after.read_bytes()
 
     # --- --dry-run ---------------------------------------------------------
@@ -975,7 +975,7 @@ class TestCliOps:
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
         csv_path = tmp_path / "preview.csv"
-        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path)]) == 0
+        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path), "--no-smooth"]) == 0
         assert csv_path.exists()
         header, data = self._read_csv(csv_path)
         # frame 列 + 回転3 + 位置3 の計7列以上、データ行はベイクフレーム数(61)。
@@ -993,8 +993,8 @@ class TestCliOps:
         inp = write_input(tmp_path / "in.vmd")
         zero_csv, shake_csv = tmp_path / "zero.csv", tmp_path / "shake.csv"
         assert cli.main([inp, "-o", str(tmp_path / "z.vmd"), "--preview-csv", str(zero_csv),
-                         "--amp-rot", "0", "--amp-pos", "0", "--settle", "0"]) == 0
-        assert cli.main([inp, "-o", str(tmp_path / "s.vmd"), "--preview-csv", str(shake_csv)]) == 0
+                         "--amp-rot", "0", "--amp-pos", "0", "--settle", "0", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "s.vmd"), "--preview-csv", str(shake_csv), "--no-smooth"]) == 0
 
         def channel_vals(path):
             _, data = self._read_csv(path)
@@ -1028,7 +1028,7 @@ class TestCliOps:
         # --preview-csv は通常出力(VMD)も書く(--dry-run とは異なり出力を抑止しない)。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--preview-csv", str(tmp_path / "p.csv")]) == 0
+        assert cli.main([inp, "-o", str(out), "--preview-csv", str(tmp_path / "p.csv"), "--no-smooth"]) == 0
         assert out.exists()
 
     def test_preview_csv_does_not_change_vmd(self, tmp_path):
@@ -1036,8 +1036,8 @@ class TestCliOps:
         # 非 preview 実行とバイナリ一致する。
         inp = write_input(tmp_path / "in.vmd")
         without, with_csv = tmp_path / "wo.vmd", tmp_path / "w.vmd"
-        assert cli.main([inp, "-o", str(without)]) == 0
-        assert cli.main([inp, "-o", str(with_csv), "--preview-csv", str(tmp_path / "p.csv")]) == 0
+        assert cli.main([inp, "-o", str(without), "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(with_csv), "--preview-csv", str(tmp_path / "p.csv"), "--no-smooth"]) == 0
         assert with_csv.read_bytes() == without.read_bytes()
 
     def test_preview_csv_path_collision_exit2(self, tmp_path):
@@ -1054,7 +1054,7 @@ class TestCliOps:
         inp = write_input(tmp_path / "in.vmd")
         clash = tmp_path / "afile"
         clash.write_bytes(b"x")
-        rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--preview-csv", str(clash / "p.csv")])
+        rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--preview-csv", str(clash / "p.csv"), "--no-smooth"])
         assert rc == 3
 
     def test_dry_run_suppresses_preview_csv(self, tmp_path):
@@ -1070,11 +1070,11 @@ class TestCliOps:
         # --verbose は詳細ログ(適用範囲・カット位置等)を出す(§2.7, §5.2, §5.3)。
         # かつ非 verbose 実行ではこれら詳細を出さない(範囲/カット報告は dry-run/verbose 限定)。
         inp = write_input(tmp_path / "cut.vmd", CUT_KEYS)
-        assert cli.main([inp, "-o", str(tmp_path / "a.vmd")]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--no-smooth"]) == 0
         q = capsys.readouterr()
         quiet_text = (q.out + q.err).lower()
         assert "range" not in quiet_text and "cut" not in quiet_text   # 非verboseは詳細を出さない
-        assert cli.main([inp, "-o", str(tmp_path / "b.vmd"), "--verbose"]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "b.vmd"), "--verbose", "--no-smooth"]) == 0
         cap = capsys.readouterr()
         verbose_text = (cap.out + cap.err).lower()
         assert len(cap.out + cap.err) > len(q.out + q.err)            # 出力が増える
@@ -1084,7 +1084,7 @@ class TestCliOps:
         # --verbose もスナップ後の実適用範囲を報告する(§5.2)。KEYS で 26:60 → 30:60。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
-                         "--range", "26:60", "--verbose"]) == 0
+                         "--range", "26:60", "--verbose", "--no-smooth"]) == 0
         cap = capsys.readouterr()
         text = cap.out + cap.err
         assert "30" in text and "60" in text
@@ -1092,7 +1092,7 @@ class TestCliOps:
     def test_verbose_reports_all_cuts(self, tmp_path, capsys):
         # verbose も検出カット全件を報告する(§5.3)。frame21・frame41 の2カット入力。
         inp = write_input(tmp_path / "mcut.vmd", MULTI_CUT_KEYS)
-        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--verbose"]) == 0
+        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--verbose", "--no-smooth"]) == 0
         cap = capsys.readouterr()
         text = cap.out + cap.err
         assert "21" in text and "41" in text
@@ -1102,7 +1102,7 @@ class TestCliOps:
         keys = [cam(0), cam(15), cam(30, persp=1), cam(45), cam(60)]
         inp = write_input(tmp_path / "mr.vmd", keys)
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
-                         "--range", "0:14", "--range", "44:60", "--verbose"]) == 0
+                         "--range", "0:14", "--range", "44:60", "--verbose", "--no-smooth"]) == 0
         cap = capsys.readouterr()
         text = cap.out + cap.err
         assert "15" in text and "45" in text
@@ -1119,8 +1119,8 @@ class TestCliOps:
         # --verbose はログのみで、ベイクされる VMD を変えない(§2.7)。非 verbose と一致する。
         inp = write_input(tmp_path / "in.vmd")
         q, v = tmp_path / "q.vmd", tmp_path / "v.vmd"
-        assert cli.main([inp, "-o", str(q)]) == 0
-        assert cli.main([inp, "-o", str(v), "--verbose"]) == 0
+        assert cli.main([inp, "-o", str(q), "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(v), "--verbose", "--no-smooth"]) == 0
         assert v.read_bytes() == q.read_bytes()
 
     def test_verbose_short_alias_equals_long(self, tmp_path, capsys):
@@ -1128,10 +1128,10 @@ class TestCliOps:
         # 両者の詳細ログが一致することを確認する。
         inp = write_input(tmp_path / "in.vmd")
         out = str(tmp_path / "out.vmd")            # 同一パス(入力とは別なので上書きガード対象外)
-        assert cli.main([inp, "-o", out, "-v"]) == 0
+        assert cli.main([inp, "-o", out, "-v", "--no-smooth"]) == 0
         short = capsys.readouterr()
         short_text = short.out + short.err
-        assert cli.main([inp, "-o", out, "--verbose"]) == 0
+        assert cli.main([inp, "-o", out, "--verbose", "--no-smooth"]) == 0
         long = capsys.readouterr()
         assert short_text == (long.out + long.err)
 
