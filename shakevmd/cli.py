@@ -383,7 +383,13 @@ def main(argv=None) -> int:
     # 誤判定する余地も無くす。
     camera_out = result.camera_keys
     if args.smooth:
-        keep = sorted({f for c in detected_cuts for f in (c - 1, c) if f >= 0})
+        # 機械的 grid: 各範囲を max_seg 間隔のキーで区切る。sliding max_seg は「線形でも許容内に収まる」
+        # 長区間を作り、手ぶれを疎キー＋線形補間=キー境界のコーナーで返すため 30fps 超でカクつき、
+        # サブフレームでは揺れを取りこぼす。grid を keep に与えて区間長を max_seg 以下に抑えると、各区間は
+        # 手ぶれが線形許容に収まらずベジェ曲線でフィットされ、曲線で滑らかに(judder低減)かつサブフレーム
+        # でも揺れを許容内に保つ。区間が短く bounded なので least_squares 回数も抑えられ高速。
+        grid = {f for f0, f1 in result.resolved for f in range(int(f0), int(f1) + 1, _SMOOTH_MAX_SEG)}
+        keep = sorted({f for c in detected_cuts for f in (c - 1, c) if f >= 0} | grid)
         camera_out = reduce_camera_track(
             result.camera_keys,
             result.resolved,

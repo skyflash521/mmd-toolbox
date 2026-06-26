@@ -1295,14 +1295,15 @@ class TestSmooth:
         assert calls == [str(out)]    # 最終出力先へ1回だけ(中間VMDを書かない)
         assert out.exists()
 
-    def test_smooth_matches_sparsevmd_pipeline(self, tmp_path):
-        # --smooth の直接出力が、検証で用いた密VMD経由の sparsevmd CLI パイプライン(同設定)と
-        # 整合することを担保する。ツール間依存を作らない(計画 §2)ため sparsevmd は import せず、
-        # 密VMDを f32 で読み戻し、CLI が用いるのと同一設定で共有エンジン reduce_camera_track を
-        # 直接呼んでパイプラインを再現する(sparsevmd CLI の --curve-mode bezier --preset aggressive
-        # --max-segment-frames 5 --no-cut-detect 経路がこの関数をこの設定で呼ぶ)。基準は §6(a):
-        # 直接(プロセス内 f64 ソース)とパイプライン(密VMDの f32 ソース)で reduction 入力の精度が
-        # 違うためバイト一致は前提にせず、両者がサブフレームで aggressive 許容内に一致すること。
+    def test_smooth_matches_shared_engine_pipeline(self, tmp_path):
+        # --smooth の直接出力が、検証で用いた密VMD経由で共有エンジン reduce_camera_track を
+        # **--smooth の実設定**(curve_mode=bezier・aggressive 許容・max_seg=5・no_cut_detect・
+        # 区間長を抑える max_seg grid の keep_frames)で直接呼んだ結果と整合することを担保する。
+        # 別ツール(sparsevmd 等)を import せず密VMDを f32 で読み戻して同設定で再現することで、
+        # ツール間のコード依存を作らずに整合を確かめる。--smooth は手ぶれを線形へ平準化せず曲線で滑らかに
+        # するため grid を keep に渡すので、grid 無しの素の疎化とは一致しない。直接(プロセス内 f64 ソース)と
+        # パイプライン(密VMDの f32 ソース)で reduction 入力の精度が違うためバイト一致は前提にせず、両者が
+        # サブフレームで aggressive 許容内に一致することを基準とする。
         dense = tmp_path / "dense.vmd"
         smooth = tmp_path / "smooth.vmd"
         assert self._bake(dense, "--no-smooth") == 0
@@ -1314,10 +1315,14 @@ class TestSmooth:
             camera_distance=SMOOTH_DIST_TOL, camera_fov=SMOOTH_FOV_TOL,
         )
         first, last = dk[0].frame, dk[-1].frame
+        # --smooth は区間長を max_seg 以下に抑える機械的 grid を keep_frames で渡す(手ぶれを線形へ
+        # 平準化せず曲線で滑らかにするため)。パイプライン再現も同じ grid を渡して実設定に合わせる。
+        # この素材はカット無しなので keep は grid のみ(bake の keep_frames も空)。
+        keep = tuple(range(first, last + 1, 5))
         pk = reduce_camera_track(
             dk, [(first, last)], tols,
             cut_thresholds=(5.0, 20.0, 5.0),
-            keep_frames=(),                 # この素材はカット無し(bake の keep_frames も空)
+            keep_frames=keep,
             no_cut_detect=True,
             min_seg=1, max_seg=5, strict=False, curve_mode="bezier",
         )
