@@ -532,3 +532,48 @@ def test_read_no_overlap_warning_across_parts():
     }
     _, warnings = read(_make_vpr(_sequence([track])))
     assert warnings == []
+
+
+# --- 未解釈データのロスレス保持(raw_sequence。vpr_io.md §3.3) ---
+
+
+@pytest.mark.xfail(reason="impl pending: raw_sequence retention", strict=True)
+def test_read_retains_raw_sequence():
+    from vpr_io import read
+
+    # read は Project/sequence.json 全体を raw_sequence に保持する。
+    seq = _sequence([_singing_track([])])
+    project, _ = read(_make_vpr(seq))
+    assert project.raw_sequence == seq
+
+
+@pytest.mark.xfail(reason="impl pending: raw_sequence retention", strict=True)
+def test_raw_sequence_retains_uninterpreted_data():
+    from vpr_io import read
+
+    # 公開データモデルに写像しないトップレベルキーも raw_sequence に保持される。
+    seq = _sequence([_singing_track([])])
+    seq["customField"] = {"keep": [1, 2, 3]}
+    project, _ = read(_make_vpr(seq))
+    assert project.raw_sequence["customField"] == {"keep": [1, 2, 3]}
+
+
+@pytest.mark.xfail(reason="impl pending: raw_sequence retention", strict=True)
+def test_raw_sequence_retains_audio_track_excluded_from_model():
+    from vpr_io import read
+
+    # オーディオトラックは公開モデル(tracks)に現れないが raw_sequence には保持される。
+    audio = {"type": 1, "name": "audio", "parts": [{"name": "a", "pos": 0, "wav": {}, "region": {}}]}
+    seq = _sequence([_singing_track([], name="vocal"), audio])
+    project, _ = read(_make_vpr(seq))
+    assert [t.name for t in project.tracks] == ["vocal"]
+    assert project.raw_sequence["tracks"][1]["name"] == "audio"
+
+
+@pytest.mark.xfail(reason="impl pending: raw_sequence retention", strict=True)
+def test_vprproject_raw_sequence_defaults_to_none():
+    from vpr_io import VprProject
+
+    # 手組みの VprProject(read を介さない)は raw_sequence を持たない(既定 None)。
+    project = VprProject(resolution=480)
+    assert project.raw_sequence is None
