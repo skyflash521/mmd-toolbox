@@ -230,3 +230,173 @@ def test_read_accepts_bytes_str_and_path(tmp_path):
     from_path, _ = read(path)
     from_str, _ = read(str(path))
     assert from_bytes.resolution == from_path.resolution == from_str.resolution == 480
+
+
+# --- V-2a: 構造異常(VprFormatError)と許容入力(vpr_io.md §3.1) ---
+
+
+def _zip_with(entries: dict) -> bytes:
+    """{エントリ名: 文字列} を持つ最小の zip を組み立てる(壊れた sequence.json 等の合成用)。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, content in entries.items():
+            z.writestr(name, content)
+    return buf.getvalue()
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_non_zip():
+    from vpr_io import VprFormatError, read
+
+    with pytest.raises(VprFormatError):
+        read(b"this is not a zip archive")
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_missing_sequence_json():
+    from vpr_io import VprFormatError, read
+
+    with pytest.raises(VprFormatError):
+        read(_zip_with({"Project/other.txt": "x"}))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_invalid_json():
+    from vpr_io import VprFormatError, read
+
+    with pytest.raises(VprFormatError):
+        read(_zip_with({"Project/sequence.json": "{ not valid json "}))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_invalid_utf8_sequence_json():
+    from vpr_io import VprFormatError, read
+
+    # sequence.json が UTF-8 として復号できない(vpr_io.md §3.1)。
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("Project/sequence.json", b"\x80\x81\x82\xff")
+    with pytest.raises(VprFormatError):
+        read(buf.getvalue())
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_missing_master_track():
+    from vpr_io import VprFormatError, read
+
+    seq = _sequence([_singing_track([])])
+    del seq["masterTrack"]
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(seq))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_missing_tracks():
+    from vpr_io import VprFormatError, read
+
+    seq = _sequence([_singing_track([])])
+    del seq["tracks"]
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(seq))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_malformed_tempo_event():
+    from vpr_io import VprFormatError, read
+
+    # TempoEvent を構築するための必須キー(value)が無い(vpr_io.md §3.1)。
+    seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0}])
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(seq))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_tempo_event_type_error():
+    from vpr_io import VprFormatError, read
+
+    # value が数値でない(bpm 構築で型不正。vpr_io.md §3.1)。
+    seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0, "value": "fast"}])
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(seq))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_malformed_timesig_event():
+    from vpr_io import VprFormatError, read
+
+    # TimeSignature を構築するための必須キー(numer)が無い(vpr_io.md §3.1)。
+    seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "denom": 4}])
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(seq))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_timesig_event_type_error():
+    from vpr_io import VprFormatError, read
+
+    # denom が数値でない(小節長 tick 構築で型不正。vpr_io.md §3.1)。
+    seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "numer": 4, "denom": "x"}])
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(seq))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_missing_required_note_field():
+    from vpr_io import VprFormatError, read
+
+    note = _note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64)
+    del note["number"]
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(_sequence([_singing_track([note])])))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_format_error_carries_locator():
+    from vpr_io import VprFormatError, read
+
+    note = _note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64)
+    del note["number"]
+    with pytest.raises(VprFormatError) as exc:
+        read(_make_vpr(_sequence([_singing_track([note])])))
+    # 原因特定のためのロケータ(JSON パスと欠落キー)を持つ(vpr_io.md §3.1)。
+    assert exc.value.path is not None
+    assert exc.value.key == "number"
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_missing_track_name():
+    from vpr_io import VprFormatError, read
+
+    # 歌唱トラックの公開モデル対象フィールド(name)が欠落(vpr_io.md §3.1)。
+    track = {"type": 2, "parts": [{"name": "p", "pos": 0, "duration": 1920, "notes": []}]}
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(_sequence([track])))
+
+
+@pytest.mark.xfail(reason="impl pending: V-2a", strict=True)
+def test_read_raises_format_error_on_missing_part_pos():
+    from vpr_io import VprFormatError, read
+
+    # パートの公開モデル対象フィールド(pos)が欠落(vpr_io.md §3.1)。
+    track = {"type": 2, "name": "vocal", "parts": [{"name": "p", "duration": 1920, "notes": []}]}
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(_sequence([track])))
+
+
+def test_read_tolerates_missing_notes_as_empty_part():
+    from vpr_io import read
+
+    # 歌唱パートに notes が無い場合は空の音符列として扱う(エラーにしない)。
+    track = {"type": 2, "name": "vocal", "parts": [{"name": "p", "pos": 0, "duration": 1920}]}
+    project, _ = read(_make_vpr(_sequence([track])))
+    assert project.tracks[0].parts[0].notes == []
+
+
+def test_read_tolerates_unknown_top_level_keys():
+    from vpr_io import read
+
+    # 公開データモデル対象外の未知キーが存在しても read は失敗しない。
+    seq = _sequence([_singing_track([])])
+    seq["someUnknownKey"] = {"x": 1}
+    project, _ = read(_make_vpr(seq))
+    assert project.resolution == 480
