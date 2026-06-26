@@ -4,15 +4,6 @@
 [0, end_tick) の範囲で導出する。重なり・隣接で偽の休符を作らない。
 """
 
-import pytest
-
-# rest_intervals が未実装の間は import が ImportError になる(これだけを xfail で許す)。
-pytestmark = pytest.mark.xfail(
-    reason="impl pending: vpr_io rest_intervals",
-    raises=ImportError,
-)
-
-
 def _note(start, duration):
     from vpr_io import Note
 

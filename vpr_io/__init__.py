@@ -1,4 +1,5 @@
 from .io import read
+from .rests import rest_intervals
 from .types import (
     Note,
     Part,
@@ -20,4 +21,5 @@ __all__ = [
     "VprProject",
     "VprWarning",
     "read",
+    "rest_intervals",
 ]
