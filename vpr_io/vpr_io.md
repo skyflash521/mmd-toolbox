@@ -31,8 +31,7 @@ CLAUDE.md の設計境界に従う。**MMDでない形式(VOCALOID vpr)の入出
 | S-1認識ゲートのラベル生成 | 音符の時刻・音素(→母音/子音/休符の自動ラベル)を読む | 読み |
 | `song2vpr` | 音符(時刻・ピッチ・歌詞/音素・強弱)・テンポを vpr へ書き出す | 書き |
 
-読みは `vpr2vmd`・S-1ゲートで先に必要になり、書きは `song2vpr` 着手時に必要になる(実装は読み先行。
-[implementation-plan.md](implementation-plan.md))。
+読みは `vpr2vmd`・S-1ゲートで先に必要になり、書きは `song2vpr` 着手時に必要になる(実装は読みを先行する)。
 
 ---
 
@@ -51,7 +50,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 は音符全体とテンポを書き出す。データモデルは利用先の和集合を表現できれば足り、利用しないフィールドの
 読み出しは各利用先が選ぶ。
 
-**確定事項**(机上で確定する。具体型・公開関数シグネチャは [implementation-plan.md](implementation-plan.md) §4.1。
+**確定事項**(机上で確定する。具体的な型・公開関数シグネチャは §2.1。
 形式レイアウト確定でモデルが変わる場合は本書を先に更新する。§5・§6):
 
 - **時刻の単位・座標系**: vpr ネイティブの **tick(整数)** で保持し、音符の時刻は**プロジェクト絶対 tick**で
@@ -68,6 +67,34 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 - **公開関数**: 読み(§3)とデータモデル、書き(§4)の2方向。読みはデータモデルを返し、書きはデータモデルを
   vpr へ直列化する。
 
+### 2.1 公開する具体型と関数
+
+型は Python の dataclass、公開関数はモジュール関数とし、`mmd_toolbox.vmd`(`types.py` / `io.py`)の作法に倣う。
+時刻は vpr ネイティブの **tick(整数)** で保持し、秒/フレーム/拍への変換は持たない(§6)。
+
+- `VprProject`: `resolution: int`(tick/四分音符)、`tempos: list[TempoEvent]`、
+  `time_signatures: list[TimeSignature]`、`tracks: list[Track]`。
+- `TempoEvent`: `tick: int`、`bpm: float`。
+- `TimeSignature`: `tick: int`、`numerator: int`、`denominator: int`。
+- `Track`: `name: str`、`parts: list[Part]`。
+- `Part`: `name: str`、`start_tick: int`(プロジェクト絶対 tick。パートの開始位置)、
+  `notes: list[Note]`(`start_tick` の昇順)。
+- `Note`: `start_tick: int`、`duration_tick: int`、`pitch: int`(MIDI ノート番号)、`lyric: str`(表示歌詞)、
+  `velocity: int`(0〜127)、`phonemes: list[str]`(音符内の音素列。空可、既定は空リスト)。
+  `start_tick` は**プロジェクト絶対 tick**、`duration_tick` は **tick 長**で持つ(vpr がパート相対で格納する場合、
+  read 時に `Part` 開始位置を `start_tick` へ加算して絶対化する)。
+- **休符**: 専用型を持たせない。同一 `Track` 内の発音区間 `[start_tick, start_tick+duration_tick)` の和集合の
+  補集合を休符とする(上記「確定事項」)。
+- **警告/エラー**: `VprWarning`(`code: str`、`message: str`。続行可能事象の構造化報告)、
+  `VprFormatError`(構造異常の例外)。`mmd_toolbox.vmd.types` の `VmdWarning`/`VmdFormatError` に倣う。
+- **公開関数**(`mmd_toolbox.vmd.io` に倣う):
+  - `read(src: str | Path | bytes) -> tuple[VprProject, list[VprWarning]]`(読み)。
+  - `write(project: VprProject) -> bytes` / `write_file(project: VprProject, path: str | Path) -> None`
+    (書き、`song2vpr` 着手時)。`write_file` は原子置換(同ディレクトリ一時ファイルへ書いて fsync し
+    `os.replace`)で、書き込み途中の中断・ディスクフルでも既存の出力先を破損させない
+    (`mmd_toolbox.vmd.io.write_file` に倣う)。
+- 未解釈データ(ロスレス保持)を各型へどう持たせるかは、形式レイアウト確定後に定める(§5)。
+
 ---
 
 ## 3. 読み込み(read)
@@ -83,7 +110,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 ## 4. 書き出し(write)
 
 - データモデル(2章)を vpr へ直列化する。
-- 初期実装では読みを先行させ、書き出しは `song2vpr` 着手時に拡張する(実装計画)。書き出しは、対応する
+- 初期実装では読みを先行させ、書き出しは `song2vpr` 着手時に拡張する。書き出しは、対応する
   vpr で読み戻せる妥当な vpr を生成することを要件とする。
 
 ---

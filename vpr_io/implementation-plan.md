@@ -50,35 +50,10 @@
 
 ### 4.1 公開データモデル・関数(確定)
 
-利用先(vpr_io.md §1.3)の必要から机上で確定する。型は Python の dataclass、公開関数はモジュール関数とし、
-`mmd_toolbox.vmd`(`types.py` / `io.py`)の作法に倣う。時刻は vpr ネイティブの **tick(整数)** で保持し、
-秒/フレーム/拍への変換は持たない(vpr_io.md §2・§6)。
-
-- `VprProject`: `resolution: int`(tick/四分音符)、`tempos: list[TempoEvent]`、
-  `time_signatures: list[TimeSignature]`、`tracks: list[Track]`。
-- `TempoEvent`: `tick: int`、`bpm: float`。
-- `TimeSignature`: `tick: int`、`numerator: int`、`denominator: int`。
-- `Track`: `name: str`、`parts: list[Part]`。
-- `Part`: `name: str`、`start_tick: int`(プロジェクト絶対 tick。パートの開始位置)、
-  `notes: list[Note]`(`start_tick` の昇順)。
-- `Note`: `start_tick: int`、`duration_tick: int`、`pitch: int`(MIDI ノート番号)、`lyric: str`(表示歌詞)、
-  `phonemes: list[str]`(音符内の音素列。空可)、`velocity: int`(0〜127)。
-  **時刻の座標系**: `Note.start_tick` は**プロジェクト絶対 tick**、`duration_tick` は **tick 長**で持つ(vpr が
-  パート相対で格納する場合、read 時に `Part` 開始位置を `start_tick` へ加算して絶対化する。相対化は形式マッピングの
-  責務で §4.2)。
-- **休符**: 専用型を持たせない。同一 `Track` 内の**発音区間 `[start_tick, start_tick+duration_tick)` の和集合の
-  補集合**を休符(無音区間)とする(隣接差分でなく和集合の補集合とすることで、万一区間が重なっても偽の休符を
-  作らない)。先頭音符より前は先頭無音、解析範囲末尾までは末尾無音とし、**解析範囲(曲の総尺)は呼び出し側が
-  定める**。歌唱トラックは単音想定で、発音区間が重なる入力は `read` が `VprWarning` で報告する(vpr_io.md §2)。
-- **警告/エラー**: `VprWarning`(続行可能事象の構造化報告)、`VprFormatError`(構造異常)。
-  `mmd_toolbox.vmd.types` の `VmdWarning`/`VmdFormatError` に倣う。
-- **公開関数**(`mmd_toolbox.vmd.io` に倣う):
-  - `read(src: str | Path | bytes) -> tuple[VprProject, list[VprWarning]]`(V-1)。
-  - `write(project: VprProject) -> bytes` / `write_file(project: VprProject, path: str | Path) -> None`
-    (V-3、`song2vpr` 着手時)。`write_file` は原子置換(同ディレクトリ一時ファイルへ書いて fsync し
-    `os.replace`)で、書き込み途中の中断・ディスクフルでも既存の出力先を破損させない
-    (`mmd_toolbox.vmd.io.write_file` に倣う)。
-- 未解釈データ(ロスレス保持)を `VprProject`・各要素にどう持たせるかは §4.2(レイアウト確定後)。
+公開する具体型(`VprProject`/`TempoEvent`/`TimeSignature`/`Track`/`Part`/`Note`、休符は専用型を持たず導出)・
+公開関数(`read`/`write`/`write_file`)・警告/エラー型(`VprWarning`/`VprFormatError`)の定義は
+**vpr_io.md §2.1 を正とする**。本計画は着手順序(2章)とテスト方針(3章)を担い、型定義を重複して持たない。
+未解釈データ(ロスレス保持)を各型へどう持たせるかは §4.2(レイアウト確定後)。
 
 ### 4.2 形式レイアウト・ロスレス範囲(実装着手時に実ファイルから確定)
 
