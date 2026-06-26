@@ -433,3 +433,90 @@ def test_read_tolerates_unknown_top_level_keys():
     seq["someUnknownKey"] = {"x": 1}
     project, _ = read(_make_vpr(seq))
     assert project.resolution == 480
+
+
+# --- V-2b: 発音区間の重なり警告(VprWarning。vpr_io.md §3.2) ---
+
+
+@pytest.mark.xfail(reason="impl pending: V-2b", strict=True)
+def test_read_warns_on_overlapping_notes_in_part():
+    from vpr_io import read
+
+    # 同一パート内で発音区間が重なる2音符([0,480) と [240,720))。
+    notes = [
+        _note(pos=0, duration=480, number=60, lyric="あ", phoneme="a", velocity=64),
+        _note(pos=240, duration=480, number=62, lyric="い", phoneme="i", velocity=64),
+    ]
+    _, warnings = read(_make_vpr(_sequence([_singing_track(notes)])))
+    assert [w.code for w in warnings] == ["overlapping_notes"]
+
+
+@pytest.mark.xfail(reason="impl pending: V-2b", strict=True)
+def test_read_overlap_warning_carries_locator():
+    from vpr_io import read
+
+    notes = [
+        _note(pos=0, duration=480, number=60, lyric="あ", phoneme="a", velocity=64),
+        _note(pos=240, duration=480, number=62, lyric="い", phoneme="i", velocity=64),
+    ]
+    _, warnings = read(_make_vpr(_sequence([_singing_track(notes)])))
+    w = next(w for w in warnings if w.code == "overlapping_notes")
+    assert w.track_index == 0
+    assert w.part_index == 0
+    assert w.note_index == 0
+    assert w.related_note_index == 1
+    assert w.tick == 240  # 重なり開始位置(後続音符の開始)
+
+
+@pytest.mark.xfail(reason="impl pending: V-2b", strict=True)
+def test_read_warns_once_per_overlapping_pair():
+    from vpr_io import read
+
+    # 独立した2組の重なり([0,480)&[240,500)、[1000,1480)&[1200,1500))→ ペアごとに1件。
+    notes = [
+        _note(pos=0, duration=480, number=60, lyric="あ", phoneme="a", velocity=64),
+        _note(pos=240, duration=260, number=62, lyric="い", phoneme="i", velocity=64),
+        _note(pos=1000, duration=480, number=64, lyric="う", phoneme="u", velocity=64),
+        _note(pos=1200, duration=300, number=65, lyric="え", phoneme="e", velocity=64),
+    ]
+    _, warnings = read(_make_vpr(_sequence([_singing_track(notes)])))
+    assert [w.code for w in warnings] == ["overlapping_notes", "overlapping_notes"]
+
+
+def test_read_no_warning_for_non_overlapping_notes():
+    from vpr_io import read
+
+    notes = [
+        _note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64),
+        _note(pos=480, duration=240, number=62, lyric="い", phoneme="i", velocity=64),
+    ]
+    _, warnings = read(_make_vpr(_sequence([_singing_track(notes)])))
+    assert warnings == []
+
+
+def test_read_no_warning_for_adjacent_notes():
+    from vpr_io import read
+
+    # 隣接(前音符の終端 == 次音符の開始)は半開区間 [start, start+dur) では重ならない。
+    notes = [
+        _note(pos=0, duration=480, number=60, lyric="あ", phoneme="a", velocity=64),
+        _note(pos=480, duration=480, number=62, lyric="い", phoneme="i", velocity=64),
+    ]
+    _, warnings = read(_make_vpr(_sequence([_singing_track(notes)])))
+    assert warnings == []
+
+
+def test_read_no_overlap_warning_across_parts():
+    from vpr_io import read
+
+    # クロスパートの重なりは V-2 の初期スコープ外(検出は同一パート内のみ。vpr_io.md §3.2)。
+    track = {
+        "type": 2,
+        "name": "vocal",
+        "parts": [
+            {"name": "p1", "pos": 0, "duration": 1920, "notes": [_note(0, 960, 60, "あ", "a", 64)]},
+            {"name": "p2", "pos": 480, "duration": 1920, "notes": [_note(0, 960, 62, "い", "i", 64)]},
+        ],
+    }
+    _, warnings = read(_make_vpr(_sequence([track])))
+    assert warnings == []
