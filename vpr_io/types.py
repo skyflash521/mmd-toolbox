@@ -86,3 +86,5 @@ class VprProject:
     tempos: list[TempoEvent] = field(default_factory=list)
     time_signatures: list[TimeSignature] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
+    # 未解釈データのロスレス保持。read は sequence.json 全体を保持し、手組み時は None(vpr_io.md §3.3)。
+    raw_sequence: dict | None = None

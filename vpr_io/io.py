@@ -203,5 +203,6 @@ def read(src) -> tuple[VprProject, list[VprWarning]]:
         tempos=_tempos(master),
         time_signatures=_time_signatures(master),
         tracks=_tracks(raw_tracks),
+        raw_sequence=sequence,
     )
     return project, _overlap_warnings(project.tracks)
