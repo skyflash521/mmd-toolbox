@@ -119,8 +119,9 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 
 - vpr の具体的な直列化レイアウト(コンテナ構造・フィールド配置・バージョン差)は**形式仕様を正本**とし、
   本書では重複定義しない。本書は `vpr_io` の責務とデータモデル(2章)を定める。
-- 形式仕様は実装着手時に確定し、必要に応じてフォーマット仕様として別途置く(MMD の VMD レイアウトを
-  `docs/specs/vmd/VMD_file_format.md` が正本とし、`mmd_toolbox` がそれを実装するのと同じ扱い)。
+- 形式仕様は [docs/specs/vpr/VPR_file_format.md](../docs/specs/vpr/VPR_file_format.md) を正本とする(MMD の VMD
+  レイアウトを `docs/specs/vmd/VMD_file_format.md` が正本とし、`mmd_toolbox` がそれを実装するのと同じ扱い)。
+  ロスレスの保持範囲(未解釈データの保持表現)は形式仕様の確定後に同書および本書で定める。
 
 ---
 
