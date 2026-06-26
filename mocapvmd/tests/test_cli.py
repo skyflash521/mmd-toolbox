@@ -489,7 +489,7 @@ def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
         pos_strength=params["pos_strength"], rot_strength=params["rot_strength"],
     )
     expected = footik.stabilize_foot_ik(
-        {"右足ＩＫ": ("foot_ik", [k.frame for k in foot], cpos)}, "balanced"
+        {"右足ＩＫ": ("foot_ik", [k.frame for k in foot], cpos)}, 1.0
     )["右足ＩＫ"].locked_positions
     out_foot = sorted((k for k in out_doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
     assert [k.frame for k in out_foot] == [k.frame for k in foot]  # 件数・フレーム列の一致
@@ -520,6 +520,39 @@ def test_no_foot_ik_stabilize_keeps_foot_and_toe_verbatim(tmp_path):
         in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
         out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
         assert out_keys == in_keys
+
+
+def test_foot_slide_suppression_out_of_range_is_arg_error(tmp_path):
+    # 横滑り抑制は 0〜1 のみ。範囲外・非有限は引数エラー(終了コード2)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(0.05 * f, 0.0, 0.0)) for f in range(6)])
+    for bad in ("1.5", "-0.1", "nan"):
+        assert cli.main([str(src), "-o", str(out), "--foot-slide-suppression", bad]) == 2
+
+
+def test_foot_slide_suppression_zero_preserves_slide_one_removes(tmp_path):
+    # S=0 は接地中の横滑りを保持(出力=入力)、S=1(既定)はアンカーへ寄せて横方向の振れ幅を縮める。
+    src = tmp_path / "in.vmd"
+    out0 = tmp_path / "out0.vmd"
+    out1 = tmp_path / "out1.vmd"
+    xs = [round(0.05 * i, 6) for i in range(11)]  # 接地中の遅いドリフト
+    write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
+
+    assert cli.main([str(src), "-o", str(out0), "--no-denoise", "--no-reduce",
+                     "--foot-slide-suppression", "0"]) == 0
+    assert cli.main([str(src), "-o", str(out1), "--no-denoise", "--no-reduce",
+                     "--foot-slide-suppression", "1"]) == 0
+
+    def foot_x(doc):
+        ks = sorted((k for k in doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
+        return [k.position[0] for k in ks]
+
+    in_x = foot_x(io.read(str(src))[0])
+    x0 = foot_x(io.read(str(out0))[0])
+    x1 = foot_x(io.read(str(out1))[0])
+    assert x0 == pytest.approx(in_x)                                   # S=0: 横滑りそのまま保持
+    assert (max(x1) - min(x1)) < (max(in_x) - min(in_x))              # S=1: 振れ幅が縮む
 
 
 # --- インプロセス疎化統合(--reduce-preset / --curve-mode / --no-reduce) ---------
@@ -690,10 +723,10 @@ def test_dry_run_reduction_matches_full_pipeline(tmp_path):
     in_doc, _ = io.read(str(src))
     cleaned = _clean_bones(in_doc.bone, "balanced")
     full = {}
-    mreduce.reduce_bones(_stabilize_bones(cleaned, "balanced"), "medium", diagnostics_out=full)
+    mreduce.reduce_bones(_stabilize_bones(cleaned, 1.0), "medium", diagnostics_out=full)
     d = full["右足ＩＫ"]
     # 負例: 全前処理省略・clean 省略・stabilize 省略は、いずれも errors が全段と異なる(各段が結果に効く入力)。
-    for skipped in (in_doc.bone, _stabilize_bones(in_doc.bone, "balanced"), cleaned):
+    for skipped in (in_doc.bone, _stabilize_bones(in_doc.bone, 1.0), cleaned):
         diag = {}
         mreduce.reduce_bones(skipped, "medium", diagnostics_out=diag)
         assert diag["右足ＩＫ"]["errors"] != d["errors"]

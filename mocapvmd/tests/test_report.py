@@ -80,7 +80,7 @@ def test_report_grounding_reflects_denoise_then_stabilize():
         pos_strength=params["pos_strength"], rot_strength=params["rot_strength"],
     )
     ts = footik.stabilize_foot_ik(
-        {"右足ＩＫ": ("foot_ik", [k.frame for k in foot], cpos)}, "balanced"
+        {"右足ＩＫ": ("foot_ik", [k.frame for k in foot], cpos)}, 1.0
     )["右足ＩＫ"]
     assert e["grounding_segments"] == [[s.start, s.end] for s in ts.grounding.segments]
     assert e["max_change"] == pytest.approx(ts.max_change)
@@ -106,8 +106,8 @@ def test_report_foot_ik_stabilize_flag_and_off_skips_grounding():
 
 
 def test_report_counts_clamp_warnings():
-    # 最大補正量を超える低速ランプ(24フレーム)はクランプされ、警告数が1以上になる。
-    xs = [round(0.07 * i, 6) for i in range(24)]
+    # 最大補正量(S=1 で 2.0)を超えるランプ(24フレーム)はクランプされ、警告数が1以上になる。
+    xs = [round(0.3 * i, 6) for i in range(24)]
     keys = [bone("右足ＩＫ", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)]
     rep = report.build_report(keys, denoise=False)
     assert _entry(rep, "右足ＩＫ")["clamp_warnings"] >= 1

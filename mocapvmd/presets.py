@@ -29,28 +29,39 @@ _BASE = {
 }
 
 
-# §5.4 接地ロック強度。アンカーへのブレンド係数(0〜1)で倍率でなく直接値。
-# foot_ik の X/Z 接地中央のみプリセット別(stable-foot が最強・light が最弱)。
-_FOOT_XZ_CENTER = {"light": 0.70, "balanced": 0.90, "strong": 0.93, "stable-foot": 0.97}
-_FOOT_LOCK_FADE_WIDTH = 3  # 接地端のフェード幅(端からのフレーム数)
+# §4.3 / §5.4 / §5.5 横滑り抑制 S(0〜1)→ 接地ロック・接地検出パラメータ(初期値。実データで調整)。
+# S=0 で従来の検出のまま X/Z をアンカーへ寄せず滑りを保持、S=1(既定)で高さ主導検出(水平速度ゲートを
+# 緩める)＋強い X/Z 固定＋補正上限緩和により接地中の横滑りを除去する。各値は S で線形に写像する。
+_SLIDE_FOOT_XZ_MAX = 0.97              # S=1 の foot_ik X/Z 接地中央(S=0 は 0.0)
+_SLIDE_FOOT_XZ_EDGE_MAX = 0.25        # S=1 の foot_ik X/Z 接地端(S=0 は 0.0)。端値も S 連動させ、
+                                      # S が小さいとき端>中央でフェードが逆転するのを防ぐ(常に端≤中央)。
+_SLIDE_HORIZ_VEL_THRESH = (0.08, 1.0)  # 接地検出の水平速度許容 (S=0, S=1)
+_SLIDE_MAX_CORRECTION = (0.5, 2.0)     # 接地ロックの1フレーム最大変位上限 MMD単位 (S=0, S=1)
+_FOOT_LOCK_FADE_WIDTH = 3              # 接地端のフェード幅(端からのフレーム数)
 
 
-def resolve_foot_lock(preset, category):
-    """プリセットと種別(foot_ik / toe_ik)から接地ロック係数 dict を返す(§5.4)。
+def _lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def _validate_suppression(suppression):
+    if not math.isfinite(suppression) or not 0.0 <= suppression <= 1.0:
+        raise ValueError(f"横滑り抑制 S は 0〜1 の有限値である必要があります: {suppression!r}")
+
+
+def resolve_foot_lock(suppression, category):
+    """横滑り抑制 S(0〜1)と種別(foot_ik / toe_ik)から接地ロック係数 dict を返す(§5.4)。
 
     返す dict: xz_center / xz_edge / y_center / y_edge / fade_width。係数は接地アンカーへの
-    ブレンド係数(0〜1。1に近いほど強く固定)で、倍率でなく直接値。foot_ik の X/Z 接地中央のみ
-    プリセット別、foot_ik の Y と toe_ik の各チャンネルはプリセット非依存。接地ロックは
-    foot_ik / toe_ik のみ対象で、他種別・未知プリセットは ValueError。
+    ブレンド係数(0〜1。1に近いほど強く固定)で倍率でなく直接値。foot_ik の X/Z 接地中央のみ S で
+    決まり(S=0→0.0 / S=1→0.97 を線形写像)、foot_ik の Y と toe_ik の各チャンネルは S 非依存の
+    固定値。接地ロックは foot_ik / toe_ik のみ対象で、他種別は ValueError。S が範囲外は ValueError。
     """
-    if preset not in PRESET_NAMES:
-        raise ValueError(
-            f"未知のプリセット: {preset!r}(有効: {', '.join(PRESET_NAMES)})"
-        )
+    _validate_suppression(suppression)
     if category == "foot_ik":
         return {
-            "xz_center": _FOOT_XZ_CENTER[preset],
-            "xz_edge": 0.25,
+            "xz_center": _SLIDE_FOOT_XZ_MAX * suppression,
+            "xz_edge": _SLIDE_FOOT_XZ_EDGE_MAX * suppression,
             "y_center": 0.50,
             "y_edge": 0.10,
             "fade_width": _FOOT_LOCK_FADE_WIDTH,
@@ -64,6 +75,21 @@ def resolve_foot_lock(preset, category):
             "fade_width": _FOOT_LOCK_FADE_WIDTH,
         }
     raise ValueError(f"接地ロックの対象外の種別: {category!r}(foot_ik / toe_ik のみ)")
+
+
+def resolve_foot_detection(suppression):
+    """横滑り抑制 S(0〜1)から接地検出・補正の S 連動パラメータ dict を返す(§4.3 / §5.5)。
+
+    返す dict: horiz_vel_thresh(接地候補の水平速度許容。S が大きいほど高くし、接地高さで水平に
+    滑る足も接地として拾う。S=0 は従来の 0.08)/ max_displacement(接地区間内の1フレーム最大変位
+    上限。S が大きいほど緩め、大きな滑りもアンカーへ引き戻す。S=0 は 0.5)。いずれも S で線形に
+    写像する(初期値。実データで調整)。S が範囲外は ValueError。
+    """
+    _validate_suppression(suppression)
+    return {
+        "horiz_vel_thresh": _lerp(_SLIDE_HORIZ_VEL_THRESH[0], _SLIDE_HORIZ_VEL_THRESH[1], suppression),
+        "max_displacement": _lerp(_SLIDE_MAX_CORRECTION[0], _SLIDE_MAX_CORRECTION[1], suppression),
+    }
 
 
 def _strength_multiplier(preset, category):

@@ -159,62 +159,85 @@ def test_reduction_tolerance_invalid_override_raises(bad):
         presets.resolve_reduction_tolerances("medium", "center", override_rot=bad)
 
 
-# --- 接地ロック強度(§5.4)---------------------------------------------------
-# 接地ロックは接地中に足IK・つま先IKを接地アンカーへ寄せるブレンド係数(0〜1)。倍率でなく直接値。
-# foot_ik の X/Z 接地中央はプリセット別、他(foot_ik の Y、toe_ik の全チャンネル)はプリセット非依存。
-
-# §5.4 foot_ik X/Z 接地中央のプリセット別確定値。stable-foot が最強、light が最弱。
-_FOOT_XZ_CENTER = {"light": 0.70, "balanced": 0.90, "strong": 0.93, "stable-foot": 0.97}
+# --- 接地ロック強度・接地検出(§4.3 / §5.4 / §5.5)----------------------------
+# 接地ロック・検出は横滑り抑制 S(0〜1)で連動する。foot_ik の X/Z 接地中央は S=0→0.0 / S=1→0.97 の
+# 線形写像、他チャンネル(foot_ik の Y、toe_ik の全チャンネル)は S 非依存の固定値。接地検出の水平
+# 速度許容(S=0→0.08 / S=1→1.0)と最大補正量上限(S=0→0.5 / S=1→2.0)も S で線形に動く。
 
 
-@pytest.mark.parametrize("preset,xz_center", list(_FOOT_XZ_CENTER.items()))
-def test_foot_lock_foot_ik_xz_center_by_preset(preset, xz_center):
-    # foot_ik の X/Z 接地中央はプリセット別、接地端は 0.25 固定(§5.4)。
-    p = presets.resolve_foot_lock(preset, "foot_ik")
-    assert p["xz_center"] == pytest.approx(xz_center)
-    assert p["xz_edge"] == pytest.approx(0.25)
+@pytest.mark.parametrize("s,xz", [(0.0, 0.0), (0.5, 0.485), (1.0, 0.97)])
+def test_foot_lock_foot_ik_xz_center_by_suppression(s, xz):
+    # foot_ik の X/Z 接地中央は 0.97×S、接地端は 0.25×S(端≤中央を保ち S=0 で完全にロックを外す。§5.4)。
+    p = presets.resolve_foot_lock(s, "foot_ik")
+    assert p["xz_center"] == pytest.approx(xz)
+    assert p["xz_edge"] == pytest.approx(0.25 * s)
+    assert p["xz_edge"] <= p["xz_center"] + 1e-9
 
 
-@pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
-def test_foot_lock_foot_ik_y_is_preset_independent(preset):
-    # foot_ik の Y は中央0.50・端0.10 でプリセット非依存(§5.4)。
-    p = presets.resolve_foot_lock(preset, "foot_ik")
+def test_foot_lock_default_suppression_removes_slide():
+    # 既定 S=1.0 は X/Z 接地中央が最強(0.97)=規定「横滑りなし」(§5.4)。
+    assert presets.resolve_foot_lock(1.0, "foot_ik")["xz_center"] == pytest.approx(0.97)
+
+
+@pytest.mark.parametrize("s", [0.0, 0.5, 1.0])
+def test_foot_lock_foot_ik_y_is_suppression_independent(s):
+    # foot_ik の Y は中央0.50・端0.10 で S 非依存(§5.4)。
+    p = presets.resolve_foot_lock(s, "foot_ik")
     assert p["y_center"] == pytest.approx(0.50)
     assert p["y_edge"] == pytest.approx(0.10)
 
 
-@pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
-def test_foot_lock_toe_ik_is_preset_independent(preset):
-    # toe_ik は X/Z・Y とも中央0.30・端0.10 でプリセット非依存(つま先の動き・回転を保つ。§5.4)。
-    p = presets.resolve_foot_lock(preset, "toe_ik")
+@pytest.mark.parametrize("s", [0.0, 0.5, 1.0])
+def test_foot_lock_toe_ik_is_suppression_independent(s):
+    # toe_ik は X/Z・Y とも中央0.30・端0.10 で S 非依存(つま先の動き・回転を保つ。§5.4)。
+    p = presets.resolve_foot_lock(s, "toe_ik")
     assert p["xz_center"] == pytest.approx(0.30)
     assert p["xz_edge"] == pytest.approx(0.10)
     assert p["y_center"] == pytest.approx(0.30)
     assert p["y_edge"] == pytest.approx(0.10)
 
 
-def test_foot_lock_foot_ik_xz_center_ordering():
-    # 接地固定の強さは stable-foot > strong > balanced > light(§5.4)。
-    centers = [presets.resolve_foot_lock(p, "foot_ik")["xz_center"]
-               for p in ("light", "balanced", "strong", "stable-foot")]
+def test_foot_lock_foot_ik_xz_center_monotonic_in_suppression():
+    # 接地固定の強さは S が大きいほど強い(単調増加。§5.4)。
+    centers = [presets.resolve_foot_lock(s, "foot_ik")["xz_center"]
+               for s in (0.0, 0.25, 0.5, 0.75, 1.0)]
     assert centers == sorted(centers)
-    assert len(set(centers)) == 4
+    assert len(set(centers)) == 5
 
 
 @pytest.mark.parametrize("category", ["foot_ik", "toe_ik"])
-@pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
-def test_foot_lock_fade_width_default_3(preset, category):
+@pytest.mark.parametrize("s", [0.0, 0.5, 1.0])
+def test_foot_lock_fade_width_default_3(s, category):
     # フェード幅は端から既定3フレーム(§5.4)。
-    assert presets.resolve_foot_lock(preset, category)["fade_width"] == 3
-
-
-def test_foot_lock_invalid_preset_raises():
-    with pytest.raises(ValueError):
-        presets.resolve_foot_lock("turbo", "foot_ik")
+    assert presets.resolve_foot_lock(s, category)["fade_width"] == 3
 
 
 @pytest.mark.parametrize("category", ["center", "legs", "toe", "unknown"])
 def test_foot_lock_non_footik_category_raises(category):
     # 接地ロックは foot_ik / toe_ik のみ対象。他種別は対象外で ValueError。
     with pytest.raises(ValueError):
-        presets.resolve_foot_lock("balanced", category)
+        presets.resolve_foot_lock(1.0, category)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -0.01, 1.01])
+def test_foot_lock_invalid_suppression_raises(bad):
+    # 横滑り抑制 S は 0〜1 の有限値のみ。範囲外・非有限は ValueError(CLI で終了コード2)。
+    with pytest.raises(ValueError):
+        presets.resolve_foot_lock(bad, "foot_ik")
+
+
+# --- 接地検出の S 連動パラメータ(§4.3 / §5.5)-------------------------------
+
+
+@pytest.mark.parametrize("s,horiz,maxd", [(0.0, 0.08, 0.5), (0.5, 0.54, 1.25), (1.0, 1.0, 2.0)])
+def test_foot_detection_by_suppression(s, horiz, maxd):
+    # 水平速度許容・最大補正量上限はともに S で線形に写像する。
+    d = presets.resolve_foot_detection(s)
+    assert d["horiz_vel_thresh"] == pytest.approx(horiz)
+    assert d["max_displacement"] == pytest.approx(maxd)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -0.01, 1.01])
+def test_foot_detection_invalid_suppression_raises(bad):
+    with pytest.raises(ValueError):
+        presets.resolve_foot_detection(bad)

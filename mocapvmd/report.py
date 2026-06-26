@@ -60,12 +60,12 @@ def _spike_protected_counts(keys, preset, category):
     return len(spike_frames), len(protected)
 
 
-def _stabilization(bone_keys, preset, denoise_on):
+def _stabilization(bone_keys, preset, denoise_on, suppression):
     """foot_ik/toe_ik トラックを接地安定化し、name -> TrackStabilization を返す(§4.4)。
 
     パイプライン(一般ノイズ軽減→足IK安定化)と同じ順序で診断を出すため、denoise_on のときは
-    クリーニング(apply_denoise)後の位置で安定化する。値が検証を通らない・キー1個以下のトラックは
-    対象外とする。
+    クリーニング(apply_denoise)後の位置で安定化する。preset はクリーニングに、横滑り抑制 S は
+    接地検出・ロックに使う。値が検証を通らない・キー1個以下のトラックは対象外とする。
     """
     order = []
     groups = {}
@@ -97,7 +97,7 @@ def _stabilization(bone_keys, preset, denoise_on):
         tracks[name] = (category, [k.frame for k in ks], positions)
     if not tracks:
         return {}
-    return footik.stabilize_foot_ik(tracks, preset)
+    return footik.stabilize_foot_ik(tracks, suppression)
 
 
 def _reduction_rate(input_count, output_count):
@@ -107,7 +107,8 @@ def _reduction_rate(input_count, output_count):
     return 1.0 - output_count / input_count
 
 
-def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=True, reduction=None):
+def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=True, reduction=None,
+                 suppression=1.0):
     """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
 
     名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。
@@ -127,7 +128,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
             order.append(k.name)
         groups[k.name].append(k)
 
-    stab = _stabilization(bone_keys, preset, denoise) if foot_ik_stabilize else {}
+    stab = _stabilization(bone_keys, preset, denoise, suppression) if foot_ik_stabilize else {}
 
     bones = []
     foot_ik = []
@@ -182,6 +183,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
         "preset": preset,
         "denoise": denoise,
         "foot_ik_stabilize": foot_ik_stabilize,
+        "foot_slide_suppression": suppression,
         "reduce": reduction is not None,
         "range": [min(all_frames), max(all_frames)] if all_frames else [],
         "bones": bones,
@@ -203,6 +205,7 @@ def format_dry_run(report):
         f"preset: {report['preset']}",
         f"denoise: {'on' if report['denoise'] else 'off'}",
         f"foot_ik_stabilize: {'on' if report.get('foot_ik_stabilize') else 'off'}",
+        f"foot_slide_suppression: {report.get('foot_slide_suppression')}",
         f"reduce: {'on' if report.get('reduce') else 'off'}",
         f"range: {report['range']}",
     ]

@@ -32,6 +32,7 @@ def _build_parser():
     p.add_argument("--no-denoise", dest="denoise", action="store_false")
     p.add_argument("--foot-ik-stabilize", dest="foot_ik_stabilize", action="store_true", default=True)
     p.add_argument("--no-foot-ik-stabilize", dest="foot_ik_stabilize", action="store_false")
+    p.add_argument("--foot-slide-suppression", dest="foot_slide_suppression", type=float, default=1.0)
     p.add_argument(
         "--reduce-preset", dest="reduce_preset", choices=presets.REDUCTION_PRESET_NAMES, default="medium"
     )
@@ -133,11 +134,12 @@ def _clean_bones(bone_keys, preset):
     return out
 
 
-def _stabilize_bones(bone_keys, preset):
+def _stabilize_bones(bone_keys, suppression):
     """分類 foot_ik / toe_ik の密トラックに接地安定化を適用し、密キー(線形補間)で返す(§4.3)。
 
-    左右ペアリング・接地検出・接地ロックは footik.stabilize_foot_ik に委譲する。foot_ik / toe_ik 以外の
-    ボーンと、キー1個以下のトラックは逐語透過する。回転は接地ロック対象外なので元の値を保つ。
+    左右ペアリング・接地検出・接地ロックは footik.stabilize_foot_ik に委譲する。横滑り抑制 S(0〜1)は
+    検出・ロック強度・最大補正量を連動制御する。foot_ik / toe_ik 以外のボーンと、キー1個以下のトラックは
+    逐語透過する。回転は接地ロック対象外なので元の値を保つ。
     """
     order = []
     groups = {}
@@ -156,7 +158,7 @@ def _stabilize_bones(bone_keys, preset):
     if not tracks:
         return bone_keys
 
-    stabilized = footik.stabilize_foot_ik(tracks, preset)
+    stabilized = footik.stabilize_foot_ik(tracks, suppression)
 
     out = []
     for name in order:
@@ -208,6 +210,11 @@ def main(argv=None):
         if v is not None and (not math.isfinite(v) or v < 0.0):
             return 2
 
+    # 横滑り抑制は 0〜1 の有限値のみ許容(範囲外・非有限は引数エラー=終了コード2。§4.3 / §5.4)。
+    s = args.foot_slide_suppression
+    if not math.isfinite(s) or not 0.0 <= s <= 1.0:
+        return 2
+
     # 入力読み込み(VMDでない等 → 入力不正)。
     try:
         doc, read_warnings = io.read(args.input)
@@ -243,7 +250,7 @@ def main(argv=None):
             new_bone = doc.bone
         if args.foot_ik_stabilize:
             reporter.stage("足IK最適化")
-            new_bone = _stabilize_bones(new_bone, args.preset)
+            new_bone = _stabilize_bones(new_bone, args.foot_slide_suppression)
         if args.reduce:
             reporter.stage("キーフレーム圧縮")
             new_bone = reduce.reduce_bones(
@@ -266,6 +273,7 @@ def main(argv=None):
             denoise=args.denoise,
             foot_ik_stabilize=args.foot_ik_stabilize,
             reduction=reduction_diag,
+            suppression=args.foot_slide_suppression,
         )
         if args.dry_run:
             print(report.format_dry_run(rep))

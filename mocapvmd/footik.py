@@ -361,15 +361,16 @@ def apply_foot_lock(positions, segments, strength, *, max_displacement=MAX_CORRE
 # --- 統合(ペアリング→検出→ロック→診断)----------------------------------
 
 
-def stabilize_foot_ik(tracks, preset):
+def stabilize_foot_ik(tracks, suppression):
     """足IK・つま先IKトラック群に接地安定化を適用し、トラックごとの結果と診断を返す(§4.3 / §4.4)。
 
     tracks は dict name -> (category, frames, positions)。category は "foot_ik"/"toe_ik"、frames は
     昇順の絶対フレーム列、positions は frames に整列した (x,y,z) 列(foot_ik/toe_ik 以外は呼び出し側で
     除外する)。各トラックは左右ペアリング(pair_ik_tracks)で相方を決め、相方があればその位置を絶対
-    フレームで整列(欠けるフレームは None)して接地検出の相対位置参照に使い、種別別の接地ロック強度
-    (resolve_foot_lock)で接地ロックを適用する。曖昧・相方欠如のトラックは相対参照なしで処理する。
-    返り値は dict name -> TrackStabilization。
+    フレームで整列(欠けるフレームは None)して接地検出の相対位置参照に使う。曖昧・相方欠如のトラックは
+    相対参照なしで処理する。横滑り抑制 S(0〜1)は接地検出の水平速度許容・接地ロックの X/Z 強度・
+    最大補正量上限を連動制御する(resolve_foot_detection / resolve_foot_lock)。返り値は
+    dict name -> TrackStabilization。
     """
     pairing = pair_ik_tracks([(name, cat) for name, (cat, _, _) in tracks.items()])
     partner = {}
@@ -378,6 +379,7 @@ def stabilize_foot_ik(tracks, preset):
         partner[pair.toe] = pair.foot
 
     frame_pos = {name: dict(zip(frames, positions)) for name, (_, frames, positions) in tracks.items()}
+    det = presets.resolve_foot_detection(suppression)
 
     result = {}
     for name, (category, frames, positions) in tracks.items():
@@ -387,9 +389,12 @@ def stabilize_foot_ik(tracks, preset):
             paired_positions = [mate_map.get(f) for f in frames]
         else:
             paired_positions = None
-        grounding = detect_grounding_segments(positions, paired_positions=paired_positions)
+        grounding = detect_grounding_segments(
+            positions, paired_positions=paired_positions, horiz_vel_thresh=det["horiz_vel_thresh"]
+        )
         locked, locks = apply_foot_lock(
-            positions, grounding.segments, presets.resolve_foot_lock(preset, category)
+            positions, grounding.segments, presets.resolve_foot_lock(suppression, category),
+            max_displacement=det["max_displacement"],
         )
 
         changes = [math.dist(o, l) for o, l in zip(positions, locked)]
