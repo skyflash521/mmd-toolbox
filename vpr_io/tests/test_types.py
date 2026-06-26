@@ -1,18 +1,9 @@
 """vpr_io データモデル型のテスト(vpr_io.md §2)。
 
-型定義のみを検証する。read/write の振る舞いは別ステップで検証する。
-未実装のため import が解決しない間は xfail とし、実装後に XPASS で印の外し忘れを検出する。
+型定義(フィールド・既定値)のみを検証する。read/write の振る舞いはこのファイルでは扱わない。
 """
 
 import pytest
-
-# 型が未定義の間は vpr_io からのシンボル import が ImportError になる(これだけを xfail で許す)。
-# 型実装後は構築・既定値の検証が通り XPASS として表面化する(印の外し忘れ検出)。
-# raises を ImportError に絞ることで、実装はあるがフィールドを誤った場合は別の例外で赤になり即露見する。
-pytestmark = pytest.mark.xfail(
-    reason="impl pending: vpr_io data model types",
-    raises=ImportError,
-)
 
 
 def test_note_holds_documented_fields():

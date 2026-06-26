@@ -23,7 +23,7 @@ shakevmd = "shakevmd.cli:main"
 sparsevmd = "sparsevmd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*", "lipsync*", "mocapvmd*", "shakevmd*", "sparsevmd*"]
+include = ["mmd_toolbox*", "lipsync*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr_io*"]
 
 [tool.pytest.ini_options]
 testpaths = ["mmd_toolbox", "lipsync", "mocapvmd", "shakevmd", "sparsevmd", "vpr_io"]
