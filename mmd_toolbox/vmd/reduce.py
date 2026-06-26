@@ -13,6 +13,7 @@ seed しない。min-segment-frames を下回る tol 探索分割はしない。
 
 import dataclasses
 import math
+import os
 
 from mmd_toolbox.vmd import interp
 from mmd_toolbox.vmd.cuts import (
@@ -354,6 +355,64 @@ def _camera_seam_interp(source_keys, a, b, tols):
     return camera_interp_bytes(
         cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
     )
+
+
+# §3.5 位置C1平滑化の有効化。spawn ワーカーも import 時に同じ環境変数を読むよう env で切り替える
+# (計測・視聴比較で C1 あり/なしを一貫させるため)。既定は有効。
+_C1_SMOOTHING = os.environ.get("MOCAP_C1_SMOOTHING", "1") != "0"
+
+
+def _bone_channel_cp(interp_bytes, c):
+    """ボーン補間64バイトの先頭16バイトからチャンネル c の制御点 (x1,y1,x2,y2) を取り出す。
+
+    bone_interp_bytes のレイアウト: 先頭16バイト = [x1(4ch), y1(4ch), x2(4ch), y2(4ch)]。
+    チャンネル順は (pos_x, pos_y, pos_z, rotation)。
+    """
+    b = interp_bytes
+    return [b[c], b[4 + c], b[8 + c], b[12 + c]]
+
+
+def _apply_c1_bone(keys, source_keys):
+    """位置の補間制御点 Y 端点を各内部キーでのソース実速度(中心差分)へ近づける(§3.5 位置端点速度平滑化)。
+
+    キー k の補間(到達側=区間 [k-1,k])の y2 を左区間の端速度、キー k+1 の補間(区間 [k,k+1])の y1 を
+    右区間の始速度として、両者をソース中心差分速度 τ_k に近づける。ベジェ端点の値速度は
+    (Δ値/Δ時間)·(端点の Y傾き/X傾き) で、s=0 で y1/x1、s=1 で (1-y2)/(1-x2)。回転は触らない(段階導入)。
+    両隣の端速度を τ_k に揃えるとキーで速度連続(C1)になるが、制御点を [0,127] にクランプして単調性を
+    保つため、必要な τ_k が大きい/区間の正味変位と逆符号の箇所では到達できず実現可能範囲への射影に
+    とどまる(厳密な C1 保証ではなく C1 近似)。curve_mode="bezier" の出力キー列に適用する。
+    """
+    if len(keys) < 3:
+        return keys
+    axes = ("pos_x", "pos_y", "pos_z")
+    out = list(keys)
+    cps = [[_bone_channel_cp(k.interpolation, c) for c in range(4)] for k in out]
+    for k in range(1, len(out) - 1):
+        fk = out[k].frame
+        for a in range(3):
+            tau = (
+                interp.sample(source_keys, axes[a], fk + 1)
+                - interp.sample(source_keys, axes[a], fk - 1)
+            ) / 2.0
+            dv_l = out[k].position[a] - out[k - 1].position[a]
+            dt_l = out[k].frame - out[k - 1].frame
+            if abs(dv_l) > 1e-9 and dt_l > 0:
+                x2 = cps[k][a][2] / 127.0
+                y2 = 1.0 - (tau * dt_l / dv_l) * (1.0 - x2)  # 左区間 [k-1,k] の s=1 端速度
+                cps[k][a][3] = min(127, max(0, _round_half_up(y2 * 127.0)))
+            dv_r = out[k + 1].position[a] - out[k].position[a]
+            dt_r = out[k + 1].frame - out[k].frame
+            if abs(dv_r) > 1e-9 and dt_r > 0:
+                x1 = cps[k + 1][a][0] / 127.0
+                y1 = (tau * dt_r / dv_r) * x1  # 右区間 [k,k+1] の s=0 始速度
+                cps[k + 1][a][1] = min(127, max(0, _round_half_up(y1 * 127.0)))
+    for k in range(1, len(out)):
+        c = cps[k]
+        out[k] = dataclasses.replace(
+            out[k],
+            interpolation=bone_interp_bytes(tuple(c[0]), tuple(c[1]), tuple(c[2]), tuple(c[3])),
+        )
+    return out
 
 
 def _bone_seam_interp(source_keys, a, b, tols):
@@ -762,6 +821,12 @@ def reduce_bone_track(
         added_counts = [] if record else None
         while True:
             keys = build_bone_keys(source_keys, sorted(range_frames), segment_interp)
+            if curve_mode == "bezier" and _C1_SMOOTHING:
+                c1_keys = _apply_c1_bone(keys, source_keys)  # §3.5 位置端点速度平滑化ポストパス
+                # strict は C1 が許容を破ったら適用せず元フィットを残す(C1 で許容契約を破らない)。
+                # 非strict は後段の密化が C1 の誤差を吸収するため無条件に適用する。
+                if not strict or not verify_bone_track(source_keys, c1_keys, [(f0, f1)], tols):
+                    keys = c1_keys
             bad = verify_bone_track(source_keys, keys, [(f0, f1)], tols)
             if record:
                 bad_counts.append(len(bad))
