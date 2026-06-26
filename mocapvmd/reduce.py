@@ -21,9 +21,8 @@ from . import classify, presets
 # reduce_bone_track へ渡す固定引数(全範囲・カット検出あり)。
 _CUT_THRESHOLDS = (1.0, 30.0)  # (位置 MMD単位 / 回転 度)
 _MIN_SEG = 1
-# 1区間あたりの最大フレーム数を短く抑える。長大区間を1本のベジェに畳まず細かいキーを残すことで
-# 後段の手編集をしやすくし、併せて区間長探索(per-fit の scipy 呼び出し)を減らして疎化を高速化する。
-_MAX_SEG = 15
+# max_seg(出力キー間隔の sliding 上限)はボーンごとの実在区間長にして機械的 cap を無効化する(=無制限)。
+# 区間は許容誤差の error-split とカットだけで分割し、滑らかな長区間を長いまま残して機械的 grid キーを最小化する。
 
 # 多キートラックがこの本数以上のときだけプロセス並列化する。未満はプール起動・データ転送のコストが
 # 並列の利得を上回るのでシリアルにフォールバックする。判定は疎化対象(多キー)トラック数で行う
@@ -50,7 +49,7 @@ def _reduce_track(ks, tol_pos, tol_rot, curve_mode, want_diag):
             keep_frames=[],
             no_cut_detect=False,
             min_seg=_MIN_SEG,
-            max_seg=_MAX_SEG,
+            max_seg=ks[-1].frame - ks[0].frame,  # ボーン区間長=機械的 cap 無効化(無制限)
             strict=False,
             curve_mode=curve_mode,
             diagnostics=diag,

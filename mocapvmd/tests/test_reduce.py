@@ -16,9 +16,11 @@ from mocapvmd import reduce as mreduce
 from .helpers import BONE_NONLINEAR, bone
 
 # reduce_bone_track へ渡す固定引数(設計確定値)。全範囲・カット検出あり。
+# max_seg は固定値でなくトラックごとの実在区間長(=機械的 cap 無効化、無制限)なので _FIXED に含めず、
+# 各ヘルパが span(f1 - f0)を都度渡す。
 _FIXED = dict(
     cut_thresholds=(1.0, 30.0), keep_frames=[], no_cut_detect=False,
-    min_seg=1, max_seg=15, strict=False,
+    min_seg=1, strict=False,
 )
 
 
@@ -38,7 +40,7 @@ def _manual(track_keys, preset, category, curve_mode="bezier", override_pos=None
     )
     tols = build_bone_tolerances(t["bone_pos"], t["bone_rot"])
     f0, f1 = track_keys[0].frame, track_keys[-1].frame
-    return reduce_bone_track(track_keys, [(f0, f1)], tols, curve_mode=curve_mode, **_FIXED)
+    return reduce_bone_track(track_keys, [(f0, f1)], tols, curve_mode=curve_mode, max_seg=f1 - f0, **_FIXED)
 
 
 def _track(out, name):
@@ -86,9 +88,14 @@ def test_per_track_range_tolerance_and_fixed_args(monkeypatch):
         kw = calls[name][2]
         for key, val in {
             "cut_thresholds": (1.0, 30.0), "keep_frames": [], "no_cut_detect": False,
-            "min_seg": 1, "max_seg": 15, "strict": False, "curve_mode": "bezier",
+            "min_seg": 1, "strict": False, "curve_mode": "bezier",
         }.items():
             assert kw[key] == val
+        # max_seg はボーンの実在区間長(=機械的 cap 無効化、無制限)。trackごとに span が異なる。
+        (a, b) = calls[name][0][0]
+        assert kw["max_seg"] == b - a
+    assert calls["センター"][2]["max_seg"] == 10  # 範囲 (0,10)
+    assert calls["右人指1"][2]["max_seg"] == 7    # 範囲 (5,12)
 
 
 def test_override_and_curve_mode_flow_into_call(monkeypatch):
@@ -126,9 +133,11 @@ def test_deterministic():
 
 def _expected_cuts(track_keys, tol):
     diag = {}
+    f0, f1 = track_keys[0].frame, track_keys[-1].frame
     reduce_bone_track(
-        track_keys, [(track_keys[0].frame, track_keys[-1].frame)],
-        build_bone_tolerances(tol["bone_pos"], tol["bone_rot"]), diagnostics=diag, **_FIXED,
+        track_keys, [(f0, f1)],
+        build_bone_tolerances(tol["bone_pos"], tol["bone_rot"]),
+        diagnostics=diag, max_seg=f1 - f0, **_FIXED,
     )
     return len(diag["cuts"])
 
