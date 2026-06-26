@@ -116,7 +116,8 @@ def _build_parser():
     for arg in _TOL_ARGS:
         p.add_argument("--" + arg.replace("_", "-"), dest=arg, type=float)
     # フィット制御。
-    p.add_argument("--max-segment-frames", dest="max_segment_frames", type=int, default=180)
+    # 未指定(None)は上限なし=無制限。機械的 cap を無効化し、滑らかな長区間を長いまま残す。
+    p.add_argument("--max-segment-frames", dest="max_segment_frames", type=int, default=None)
     p.add_argument("--min-segment-frames", dest="min_segment_frames", type=int, default=1)
     p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier")
     p.add_argument("--strict", action="store_true")
@@ -271,10 +272,12 @@ def main(argv=None):
     if args.bone_file is not None and not os.path.isfile(args.bone_file):
         return 2
 
-    # フィット制御の検証(§2.5)。
-    if args.max_segment_frames < 1 or args.min_segment_frames < 1:
+    # フィット制御の検証(§2.5)。max_segment_frames=None は無制限で上限検証の対象外。
+    if args.min_segment_frames < 1:
         return 2
-    if args.min_segment_frames > args.max_segment_frames:
+    if args.max_segment_frames is not None and args.max_segment_frames < 1:
+        return 2
+    if args.max_segment_frames is not None and args.min_segment_frames > args.max_segment_frames:
         return 2
 
     # 許容誤差解決(明示 > プリセット。§2.3/§2.4)。

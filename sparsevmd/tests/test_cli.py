@@ -46,6 +46,11 @@ def linear_camera_doc():
     return [cam(f, center=(float(f), 0.0, 0.0)) for f in range(31)]
 
 
+def long_linear_camera_doc(n):
+    # n+1 フレームの定速線形移動(密)。単一線形区間で誤差ゼロにフィットできる。
+    return [cam(f, center=(float(f), 0.0, 0.0)) for f in range(n + 1)]
+
+
 # --- 基本動作 ---------------------------------------------------------------
 
 
@@ -59,6 +64,41 @@ def test_camera_reduce_writes_output(tmp_path):
     doc, _ = io.read(str(out))
     # 連続フレームの線形移動 → 端点の2キーへ削減。
     assert [k.frame for k in doc.camera] == [0, 30]
+
+
+def test_max_segment_frames_default_is_unlimited(tmp_path):
+    # 既定(--max-segment-frames 未指定)は上限なし=無制限。長い定速線形区間を
+    # maxspan-cap で機械的に分割せず端点2キーへ削減する。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=long_linear_camera_doc(360))
+    out = tmp_path / "out.vmd"
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
+    assert code == 0
+    doc, _ = io.read(str(out))
+    assert [k.frame for k in doc.camera] == [0, 360]
+
+
+def test_max_segment_frames_explicit_caps_span(tmp_path):
+    # 明示した有限上限は維持する。同じ定速線形でも上限を超える非定数区間は maxspan-cap で分割する。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=long_linear_camera_doc(360))
+    out = tmp_path / "out.vmd"
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
+                     "--max-segment-frames", "180"])
+    assert code == 0
+    doc, _ = io.read(str(out))
+    frames = [k.frame for k in doc.camera]
+    assert frames[0] == 0 and frames[-1] == 360
+    assert len(frames) > 2
+
+
+def test_max_segment_frames_zero_is_arg_error(tmp_path):
+    # 明示指定は1以上の整数。0 は引数エラー(終了コード2)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    out = tmp_path / "out.vmd"
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--max-segment-frames", "0"])
+    assert code == 2
 
 
 EASE = (96, 0, 96, 30)
