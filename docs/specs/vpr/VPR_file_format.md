@@ -1,9 +1,9 @@
 # vpr ファイルフォーマット仕様
 
 > **注意:** vpr(VOCALOID プロジェクトファイル)に公式の公開仕様書は無い。本ドキュメントは実ファイルの
-> 解析(リバースエンジニアリング)による結果をまとめたもので、誤りを含む可能性がある。`vpr_io` の責務と
-> 公開データモデルは [vpr_io.md](../../../vpr_io/vpr_io.md) を正とし、本書は直列化レイアウト(形式の事実)を
-> 正とする。
+> 解析(リバースエンジニアリング)による結果をまとめたもので、誤りを含む可能性がある。本書は vpr の
+> 直列化レイアウト(形式の事実)を正とする。読み手モジュールの責務・公開データモデル・写像は本書の範囲外で、
+> 読み手側(各モジュール仕様)が本書を参照して定める。
 
 ## 主要参照元
 
@@ -33,8 +33,8 @@ Project/sequence.json              ← プロジェクト本体(JSON)
 Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個以上)
 ```
 
-- プロジェクト本体は `Project/sequence.json` の 1 ファイル。`vpr_io` が読むのはこれ。
-- `Project/Audio/*.wav` はオーディオトラックの波形。データモデル(音符)には現れない。
+- プロジェクト本体は `Project/sequence.json` の 1 ファイル。読み手が解析するのはこれ。
+- `Project/Audio/*.wav` はオーディオトラックの波形データ。
 
 ## sequence.json 構造
 
@@ -55,7 +55,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `samplingRate` | int | サンプリングレート(Hz) |
 | `tempo.events[]` | list | テンポイベント。各要素 `{pos: int(tick), value: int}`。**`value` は BPM×100**(例 `13600` = 136.00 BPM)。`pos` の昇順 |
 | `timeSig.events[]` | list | 拍子イベント。各要素 `{bar: int, numer: int, denom: int}`。**位置は tick でなく小節番号 `bar`(0 始まり)** |
-| `volume.events[]` | list | マスターボリューム。データモデル対象外 |
+| `volume.events[]` | list | マスターボリューム |
 
 ### tracks[]
 
@@ -64,7 +64,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `type` | int | **2 = 歌唱トラック**(`notes` を持つ)、**1 = オーディオトラック**(`wav`/`region` を持ち音符なし) |
 | `name` | str | トラック名 |
 | `parts[]` | list | パート(歌唱区間/オーディオ区間) |
-| その他 | — | `color`/`busNo`/`volume`/`panpot`/`isMuted` 等。データモデル対象外 |
+| その他 | — | `color`/`busNo`/`volume`/`panpot`/`isMuted` 等 |
 
 ### parts[](歌唱トラック)
 
@@ -74,7 +74,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `pos` | int | パート開始位置(プロジェクト絶対 tick) |
 | `duration` | int | パート長(tick) |
 | `notes[]` | list | 音符 |
-| その他 | — | `styleName`/`aiVoice`/`controllers` 等。データモデル対象外 |
+| その他 | — | `styleName`/`aiVoice`/`controllers` 等 |
 
 オーディオトラックのパートは `{name, pos, wav, region}` を持ち `notes` を持たない。
 
@@ -88,24 +88,11 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `lyric` | str | 表示歌詞 |
 | `phoneme` | str | 音素列。**空白区切り**(例 `"k o"`、`"t th e l"`)。`phoneme.split()` で音素の並びになる |
 | `velocity` | int | ベロシティ(0〜127) |
-| `exp` / `aiExp` / `vibrato` / `singingSkill` | dict(**省略可**) | 表現パラメータ。公開データモデル対象外(ダイナミクス曲線等はロスレス保持の検討対象)。音符・サブフィールドにより有無が異なる |
-| `phonemePositions[]` | list(**省略可**) | 音符内の音素別タイミング。**初期スコープ外**(vpr_io.md §2)。音符により存在しない(実サンプルでは一部の音符のみ)。未設定値は `-2147483648`(INT_MIN) |
+| `exp` / `aiExp` / `vibrato` / `singingSkill` | dict(**省略可**) | 表現パラメータ(ダイナミクス曲線等)。音符・サブフィールドにより有無が異なる |
+| `phonemePositions[]` | list(**省略可**) | 音符内の音素別タイミング。音符により存在しない(実サンプルでは一部の音符のみ)。未設定値は `-2147483648`(INT_MIN) |
 
-`read` が使う必須フィールドは `pos`・`duration`・`number`・`lyric`・`phoneme`・`velocity` の6つ(実サンプルの全音符に存在)。
-上記「省略可」の対象外フィールドは音符により有無が異なるため、`read` はこれらに依存せず、無くても失敗しない。
-
-## データモデルへの写像(vpr_io.md §2.1)
-
-`read` は `sequence.json` を以下のとおり [vpr_io.md §2.1](../../../vpr_io/vpr_io.md) のデータモデルへ写像する。
-
-- `VprProject.resolution` = 480(固定。上記「基本仕様」)。
-- `VprProject.tempos` ← `masterTrack.tempo.events`。`TempoEvent(tick=pos, bpm=value/100)`。
-- `VprProject.time_signatures` ← `masterTrack.timeSig.events`。`bar` を tick へ変換して `TimeSignature(tick, numerator=numer, denominator=denom)` とする(変換は分解能と先行する拍子から各小節の tick 長を積算)。
-- `VprProject.tracks` ← `tracks` のうち**歌唱トラック(`type` = 2)**。`Track(name, parts)`。
-  - オーディオトラック(`type` = 1)は音符を持たず、公開データモデル(音符)には現れない。その保持はロスレス範囲(vpr_io.md §5)で扱う。
-- `Part(name, start_tick=part.pos, notes)`。`notes` は `start_tick` 昇順。
-- `Note(start_tick=part.pos + note.pos, duration_tick=duration, pitch=number, lyric, velocity, phonemes=phoneme.split())`。
-- 休符は専用型を持たず、同一トラック内の発音区間の和集合の補集合として導出する(vpr_io.md §2.1)。
+実サンプルの全音符に存在するフィールドは `pos`・`duration`・`number`・`lyric`・`phoneme`・`velocity` の6つ。
+`exp`/`aiExp`/`vibrato`/`singingSkill`/`phonemePositions` は音符により有無が異なる(省略可)。
 
 ## 確証の状況
 
@@ -116,5 +103,6 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
   が `note.pos + part.pos` で絶対化しており、これに従いパート相対とみなす。解析に用いた実ファイルはいずれも
   `part.pos` = 0 のため、相対/絶対をローカルの実測だけでは区別できない(非ゼロ `part.pos` の実ファイルが
   得られれば最終確認できる)。`read` は `part.pos` を加算して絶対化する。
-- **ロスレス保持範囲(未確定):** 未解釈データ(`exp`/`aiExp`/`vibrato`/`controllers`/オーディオトラック等)の
-  保持表現はロスレス対応(vpr_io.md §5)で定める。
+- **未解析の領域:** `exp`/`aiExp`/`vibrato`/`controllers` 等の表現パラメータの内部構造、オーディオトラックの
+  詳細、`Project/sequence.json` 以外の ZIP エントリ(`Project/Audio/*.wav` 等)は、本書で詳細レイアウトを
+  解析していない(確証が低い領域)。実ファイルで確定でき次第、本書を更新する。
