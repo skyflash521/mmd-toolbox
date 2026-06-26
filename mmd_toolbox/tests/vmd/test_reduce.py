@@ -48,6 +48,15 @@ def test_valley_splits_at_extremum():
     assert keys == [0, 5, 10]
 
 
+def test_max_seg_none_disables_cap():
+    # max_seg=None は上限なし(無制限)。許容内なら非定数の長区間でも maxspan-cap せず分割しない。
+    ch = lin(0, range(101), tol=0.01)   # 完全線形 0..100(非定数)
+    assert reduce_track([0, 100], [ch], min_seg=1, max_seg=None, strict=False) == [0, 100]
+    # 対比: 有限上限なら同じ長区間を上限位置で maxspan-cap して中間キーを足す。
+    capped = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
+    assert capped != [0, 100] and len(capped) > 2
+
+
 def test_mandatory_boundaries_kept():
     # 線形でも与えた必須境界(30)は保持される。
     ch = lin(0, [float(i) for i in range(61)], tol=0.01)

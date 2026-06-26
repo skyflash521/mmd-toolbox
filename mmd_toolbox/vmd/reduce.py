@@ -510,7 +510,8 @@ def _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits=None
     """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える(§5.1 step4-8)。
 
     許容超過(max_norm>1.0)は最大正規化誤差フレームで error-split する。許容内でも非定数区間が
-    max_seg を超える場合は sliding 上限位置(原則 a+max_seg)で maxspan-cap する。全チャンネル定数の
+    max_seg を超える場合は sliding 上限位置(原則 a+max_seg)で maxspan-cap する。max_seg=None なら
+    上限なし(無制限)で maxspan-cap せず、許容内の区間は長さに依らず受理する。全チャンネル定数の
     区間は maxspan-cap の対象外で上限超過を許す(§5.1 step3)。on_resolve を渡すと、確定した(これ以上
     分割しない)部分区間ごとにその区間長 on_resolve(b - a) を呼ぶ。葉区間の長さの総和は元区間長
     [a,b] に一致するため、呼び出し側で処理経過のフレーム数として積算できる(§2.7)。
@@ -527,8 +528,9 @@ def _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits=None
         max_norm, split_frame, split_label = _worst_channel(a, b, channels)
         fits = max_norm <= 1.0
 
-        # 許容内かつ、上限以下または全チャンネル定数なら受理(定数区間は上限の対象外。§5.1 step3)。
-        if fits and (span <= max_seg or _span_is_constant(a, b, channels)):
+        # 許容内かつ、上限なし(max_seg=None=無制限)・上限以下・全チャンネル定数のいずれかなら受理
+        # (定数区間は上限の対象外。§5.1 step3)。
+        if fits and (max_seg is None or span <= max_seg or _span_is_constant(a, b, channels)):
             if on_resolve is not None:
                 on_resolve(span)
             continue
