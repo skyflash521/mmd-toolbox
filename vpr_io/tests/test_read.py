@@ -9,13 +9,6 @@ import zipfile
 
 import pytest
 
-# raises を ImportError に絞る: 想定する失敗(未公開シンボルの import 解決失敗)だけを xfail とし、
-# 実装後にフィールド等を誤れば別の例外で赤として露見させる。
-pytestmark = pytest.mark.xfail(
-    reason="impl pending: vpr_io read",
-    raises=ImportError,
-)
-
 
 def _make_vpr(sequence: dict) -> bytes:
     """sequence.json を Project/sequence.json として持つ最小の vpr(zip)を組み立てる。"""
@@ -112,6 +105,15 @@ def test_read_timesig_nonzero_bar_maps_to_tick():
     project, _ = read(_make_vpr(_sequence([_singing_track([])], timesig_events=events)))
     mapped = [(t.tick, t.numerator, t.denominator) for t in project.time_signatures]
     assert mapped == [(0, 4, 4), (1920, 3, 4)]
+
+
+def test_read_timesig_first_event_after_bar_zero_uses_default_4_4():
+    from vpr_io import read
+
+    # 最初の拍子イベントが bar>0 のとき、その前の小節は既定 4/4(1小節=1920 tick)で積算する。
+    events = [{"bar": 2, "numer": 4, "denom": 4}]
+    project, _ = read(_make_vpr(_sequence([_singing_track([])], timesig_events=events)))
+    assert [(t.tick, t.numerator, t.denominator) for t in project.time_signatures] == [(3840, 4, 4)]
 
 
 def test_read_timesig_accumulates_nonuniform_bar_lengths():

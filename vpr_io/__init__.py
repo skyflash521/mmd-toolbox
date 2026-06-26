@@ -1,3 +1,4 @@
+from .io import read
 from .types import (
     Note,
     Part,
@@ -18,4 +19,5 @@ __all__ = [
     "VprFormatError",
     "VprProject",
     "VprWarning",
+    "read",
 ]
