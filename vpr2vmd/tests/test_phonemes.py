@@ -6,11 +6,9 @@ VOCALOID 日本語の音素(X-SAMPA)を、口形イベント確定で使うカ�
 標準で確定したもの。
 """
 
-import pytest
+from lipsync import MouthShape
 
-phonemes = pytest.importorskip("vpr2vmd.phonemes", reason="impl pending: P-2 音素カテゴリ")
-
-from lipsync import MouthShape  # noqa: E402
+from vpr2vmd import phonemes
 
 Cat = phonemes.PhonemeCategory
 

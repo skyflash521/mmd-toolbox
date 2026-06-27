@@ -1,0 +1,66 @@
+"""音素→カテゴリ写像(vpr2vmd.md §3、口形イベント確定の音素分類)。
+
+VOCALOID 日本語の音素(X-SAMPA 表記)を、口形イベント確定で使うカテゴリへ分類する。写像規則
+(母音→母音イベント、語頭の両唇音→両唇閉鎖、両唇閉鎖以外の子音→協調調音へ委ねる)は vpr2vmd.md §3
+が定める。各記号がどのカテゴリに属するか(およびどの母音か)は、日本語初音ミクの実 vpr と X-SAMPA・
+日本語音韻の標準で確定したインベントリに従い、実装者が独自判断しない。
+"""
+
+from enum import Enum
+
+from lipsync import MouthShape
+
+
+class PhonemeCategory(Enum):
+    """音素のカテゴリ(口形イベント確定で使う分類)。"""
+
+    VOWEL = "vowel"  # 母音。対応する MouthShape は vowel_shape() で得る
+    BILABIAL = "bilabial"  # 両唇閉鎖(ま・ば・ぱ行の語頭)。MouthShape.BILABIAL へ
+    MORAIC_NASAL = "moraic_nasal"  # 撥音「ん」。MouthShape.N へ
+    CONTINUATION = "continuation"  # 継続/メリスマ(直前音の伸ばし)
+    OTHER = "other"  # その他子音・未知。自前イベントを作らず協調調音へ委ねる
+
+
+# 母音記号 → MouthShape。X-SAMPA の M は close back unrounded vowel で、日本語「う」の標準表記。
+# 長音記号 ":" 付き(例 i:)は母音同一のまま扱う(長さはカテゴリでなく区間長の属性)。
+_VOWEL_SHAPES = {
+    "a": MouthShape.A,
+    "i": MouthShape.I,
+    "i:": MouthShape.I,
+    "M": MouthShape.U,
+    "e": MouthShape.E,
+    "o": MouthShape.O,
+}
+
+# 両唇閉鎖を作る記号(語頭で唇が完全に閉じる ま・ば・ぱ行の子音と口蓋化形)。
+# X-SAMPA: m=両唇鼻音、b=有声両唇破裂音、p=無声両唇破裂音。"'" は口蓋化を表す修飾で両唇性は保つ。
+# p\(=φ、ふ の無声両唇摩擦音)は完全閉鎖でないため含めず、その他子音として後続母音「う」の口で見せる。
+_BILABIALS = {"m", "m'", "b", "b'", "p", "p'"}
+
+# 撥音「ん」(後続母音を持たない単独の鼻音)。X-SAMPA では N\(uvular nasal)。
+_MORAIC_NASALS = {"N\\"}
+
+# 継続/メリスマ(直前音を伸ばす音符の記号)。
+_CONTINUATIONS = {"-"}
+
+
+def vowel_shape(symbol: str) -> MouthShape | None:
+    """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。"""
+    return _VOWEL_SHAPES.get(symbol)
+
+
+def categorize(symbol: str) -> PhonemeCategory:
+    """音素記号をカテゴリへ分類する(vpr2vmd.md §3)。
+
+    母音・両唇音・撥音・継続のいずれにも該当しない記号(既知のその他子音・未知記号)は、両唇閉鎖
+    以外の子音と同じく自前イベントを作らず協調調音へ委ねるため、まとめて OTHER とする。
+    """
+    if symbol in _VOWEL_SHAPES:
+        return PhonemeCategory.VOWEL
+    if symbol in _BILABIALS:
+        return PhonemeCategory.BILABIAL
+    if symbol in _MORAIC_NASALS:
+        return PhonemeCategory.MORAIC_NASAL
+    if symbol in _CONTINUATIONS:
+        return PhonemeCategory.CONTINUATION
+    return PhonemeCategory.OTHER
