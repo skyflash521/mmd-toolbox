@@ -64,6 +64,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--track")
     p.add_argument("--model-name", dest="model_name", type=_model_name, default="")
     p.add_argument("--style", choices=STYLE_NAMES, default="pop")
+    # 既定は「ん」モーフを使う。指定時は撥音「ん」を無音(閉口)へ倒す(vpr2vmd.md §4.2)。
+    p.add_argument("--no-n-morph", dest="no_n_morph", action="store_true")
     # 既定はプリセット値。未指定センチネル(None)を後続ステップでプリセットから解決する。
     p.add_argument("--open-max", dest="open_max", type=_open_amount)
     p.add_argument("--default-open", dest="default_open", type=_open_amount)
@@ -94,6 +96,8 @@ def _print_plan(args, output: str) -> None:
     print(f"output: {output}")
     print(f"track: {args.track if args.track is not None else '(先頭トラック)'}")
     print(f"style: {args.style}")
+    # 既定は撥音「ん」に「ん」モーフを使う(on)。--no-n-morph 指定時は無音へ倒す(off)。
+    print(f"n-morph: {'off (撥音→無音)' if args.no_n_morph else 'on (撥音→ん)'}")
     print(f"model-name: {args.model_name!r}")
     print(f"open-max: {args.open_max if args.open_max is not None else '(プリセット値)'}")
     print(
