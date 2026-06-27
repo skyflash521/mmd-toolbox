@@ -6,11 +6,9 @@
 長さ 0 以下は除外する。
 """
 
-import pytest
+from vpr_io import Note
 
-events = pytest.importorskip("vpr2vmd.events", reason="impl pending: P-2 重なり解決")
-
-from vpr_io import Note  # noqa: E402
+from vpr2vmd import events
 
 
 def _note(start, dur, *, lyric="x"):
