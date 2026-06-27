@@ -18,6 +18,30 @@ _VOWEL_LIKE = frozenset(
     {MouthShape.A, MouthShape.I, MouthShape.U, MouthShape.E, MouthShape.O, MouthShape.N}
 )
 
+# レガート間隙と判定する間隙長の上限(フレーム)。初期値は 8分音符相当の目安で、視覚で詰める
+# (vpr2vmd.md §3)。実テンポへの適応は別途プリセット/テンポ補正が担う。
+_LEGATO_MAX_FRAMES = 8.0
+
+
+def _classify_gap(
+    left_shape: MouthShape | None,
+    right_shape: MouthShape,
+    gap_len: float,
+    legato_max_frames: float,
+) -> MouthShape:
+    """母音間の短い間隙をレガート間隙(LEGATO_GAP)/休符(SILENCE)へ分類する(vpr2vmd.md §3)。
+
+    前後の実効口形がともに母音的(母音・撥音「ん」)で、間隙が `legato_max_frames` 以下のときだけ
+    `LEGATO_GAP`(谷で繋ぐ)。非母音的な隣接(両唇閉鎖・促音閉口・直前が閉口の継続など)・長い間隙・
+    曲頭(直前口形なし `left_shape is None`)は `SILENCE`(完全閉口)。判定は確定済みの口形だけに依り、
+    `lipsync` 側はこの分類結果を入力として受ける([lipsync 仕様](../lipsync/lipsync.md) §6・§4.12)。
+    """
+    if left_shape not in _VOWEL_LIKE or right_shape not in _VOWEL_LIKE:
+        return MouthShape.SILENCE
+    if gap_len > legato_max_frames:
+        return MouthShape.SILENCE
+    return MouthShape.LEGATO_GAP
+
 
 def resolve_overlaps(notes: list[Note]) -> list[Note]:
     """重なり音符を単音前提の採用音符列へ非重複化する(vpr2vmd.md §3)。
@@ -53,14 +77,17 @@ def build_mouth_events(
     resolution: int,
     use_n_morph: bool = True,
     open_by_note: list[float] | None = None,
+    legato_max_frames: float = _LEGATO_MAX_FRAMES,
 ) -> list[MouthEvent]:
     """採用音符列から lipsync の口形イベント列を組み立てる(vpr2vmd.md §3)。
 
     各採用音符を tick→フレーム変換し、note_mouth_events で文脈なしに定まる口形を得る。母音を持たず
     撥音/促音でもない音符(note_mouth_events が None)は、直前の確定口形を継続する(直前が無ければ無音)。
-    音符間の隙間(休符=採用音符列の発音区間の補集合)は無音(SILENCE)で埋め、先頭〜最初の音符も無音に
-    する。結果は時間順・隙間なく連続・非重複で、フレーム 0〜採用音符列の最後の終端までを被覆する
-    (lipsync の入力契約)。採用音符列が空なら空列。
+    音符間の隙間(採用音符列の発音区間の補集合)は、前後の実効口形と間隙長から `_classify_gap` で
+    レガート間隙(LEGATO_GAP、谷で繋ぐ)か休符(SILENCE、完全閉口)へ分類して埋める。先頭〜最初の音符は
+    直前口形が無いので無音にする。結果は時間順・隙間なく連続・非重複で、フレーム 0〜採用音符列の最後の
+    終端までを被覆する(lipsync の入力契約)。採用音符列が空なら空列。
+    `legato_max_frames` はレガート間隙と判定する間隙長の上限(視覚で詰める)。
 
     `open_by_note`(採用音符に整列した開き量列。`adopted_notes` と同長)を渡すと、その音符が生む
     母音的口形イベント(母音・撥音「ん」)へ該当音符の開き量を刻印する。両唇閉鎖・無音(休符・促音・
@@ -74,10 +101,19 @@ def build_mouth_events(
         note_open = open_by_note[i] if open_by_note is not None else 0.0
         start = tick_to_frame(note.start_tick, tempos, resolution)
         end = tick_to_frame(note.start_tick + note.duration_tick, tempos, resolution)
-        if start > cursor:
-            result.append(MouthEvent(MouthShape.SILENCE, cursor, start))  # 休符=無音(開き量 0)
-            prev_held = MouthShape.SILENCE  # 休符(閉口)が直前の確定口形になる
         note_events = note_mouth_events(note.phonemes, start, end, use_n_morph)
+        if start > cursor:
+            # 間隙を分類する。次音符の実効STARTING口形は、継続(None)なら直前の確定口形へ解決した口形。
+            right_shape = (
+                note_events[0].shape
+                if note_events is not None
+                else (prev_held if prev_held is not None else MouthShape.SILENCE)
+            )
+            gap_shape = _classify_gap(prev_held, right_shape, start - cursor, legato_max_frames)
+            result.append(MouthEvent(gap_shape, cursor, start))  # 非発音区間(開き量 0)
+            if gap_shape is MouthShape.SILENCE:
+                prev_held = MouthShape.SILENCE  # 休符(閉口)が直前の確定口形になる
+            # LEGATO_GAP は谷で繋ぐ非発音区間。直前の母音的口形を保ち、継続解決へ引き継ぐ。
         if note_events is None:
             # 母音なし非撥音非促音 → 直前口形を継続(直前が無ければ閉口)。
             shape = prev_held if prev_held is not None else MouthShape.SILENCE

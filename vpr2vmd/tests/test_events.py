@@ -104,7 +104,6 @@ def test_build_leading_rest_is_silence():
     ]
 
 
-@pytest.mark.xfail(reason="impl pending: C-vpr2vmd gap classification", strict=True)
 def test_build_short_vowel_gap_is_legato():
     # 前後とも母音的で短い間隙はレガート間隙(LEGATO_GAP)。[a][0,240) と [i][480,720) の間
     # [7.5,15)(8分音符相当=7.5f ≤ legato_max 8.0)は LEGATO_GAP(完全閉口でなく谷で繋ぐ)。
@@ -116,7 +115,6 @@ def test_build_short_vowel_gap_is_legato():
     ]
 
 
-@pytest.mark.xfail(reason="impl pending: C-vpr2vmd gap classification", strict=True)
 def test_build_short_gap_into_continuation_is_legato():
     # 次音符が継続「-」(note_mouth_events=None)でも、直前の確定口形(母音的)へ解決してから分類する。
     # [a][0,240) frame[0,7.5)、[-][480,720) frame[15,22.5) は あ を継続。間 [7.5,15)=7.5f は前後とも
@@ -159,7 +157,6 @@ def test_build_gap_after_closure_is_silence():
     assert result[1] == (MouthShape.SILENCE, 7.5, 15.0)
 
 
-@pytest.mark.xfail(reason="impl pending: C-vpr2vmd gap classification", strict=True)
 def test_build_legato_max_frames_override():
     # legato_max_frames を下げると同じ母音-母音短間隙でも SILENCE になる(視覚チューニング点)。
     # 間隙 7.5f に対し legato_max=4.0 → 7.5 > 4.0 → SILENCE。
