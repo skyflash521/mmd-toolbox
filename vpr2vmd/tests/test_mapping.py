@@ -7,11 +7,9 @@
 「ん」にする。
 """
 
-import pytest
+from lipsync import MouthShape
 
-mapping = pytest.importorskip("vpr2vmd.mapping", reason="impl pending: P-2 時間配分")
-
-from lipsync import MouthShape  # noqa: E402
+from vpr2vmd import mapping
 
 
 def _shapes_spans(eventlist):
@@ -99,6 +97,14 @@ def test_moraic_nasal_fills_note_with_n():
     # 撥音(後続母音を持たない単独の鼻音 N\)は音符全体を「ん」にする。
     assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0)) == [
         (MouthShape.N, 0.0, 30.0),
+    ]
+
+
+def test_moraic_nasal_mixed_with_consonant_is_not_standalone():
+    # 撥音は「単独の鼻音」のときのみ N。子音を伴う(非単独)場合は撥音扱いせず、母音なし
+    # フォールバック(既定母音あ)へ倒す。[t, N\] は t がその他子音で語頭両唇も無いため A 全区間。
+    assert _shapes_spans(mapping.note_mouth_events(["t", "N\\"], 0.0, 30.0)) == [
+        (MouthShape.A, 0.0, 30.0),
     ]
 
 
