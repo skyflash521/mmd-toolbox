@@ -13,8 +13,9 @@ from enum import Enum
 class MouthShape(Enum):
     """口形種別。
 
-    BILABIAL と SILENCE は出力上どちらも閉口(全母音 0.0)だが、両唇閉鎖は
-    閉口完成のタイミングを持つため生成上の扱いを区別する。
+    A〜O と N(撥音「ん」)は合成プロファイルを持つ母音的口形。N は閉口ではなく「ん」モーフを
+    正に立てる有声的口形。BILABIAL と SILENCE は出力上どちらも閉口(全標準口モーフ 0.0)だが、
+    両唇閉鎖は閉口完成のタイミングを持つため生成上の扱いを区別する。
     """
 
     A = "a"
@@ -22,6 +23,7 @@ class MouthShape(Enum):
     U = "u"
     E = "e"
     O = "o"
+    N = "n"  # 撥音「ん」(後続母音を持たない単独の鼻音)
     BILABIAL = "bilabial"  # 両唇閉鎖(ま・ば・ぱ行)
     SILENCE = "silence"  # 無音・休符
 
@@ -37,7 +39,7 @@ class MouthEvent:
     shape: MouthShape
     start: float  # 開始フレーム
     end: float  # 終了フレーム
-    open_amount: float = 0.0  # 開き量 0〜1。母音区間のみ有意
+    open_amount: float = 0.0  # 開き量 0〜1。母音的口形(母音・撥音「ん」)区間のみ有意
 
 
 @dataclass
@@ -48,7 +50,15 @@ class GenerationParams:
     """
 
     open_cap: float = 0.8  # 開き量の上限
-    vowel_scale: tuple[float, float, float, float, float] = (1.0, 1.0, 1.0, 1.0, 1.0)
+    # 母音的口形別(a, i, u, e, o, n)の開き量倍率。
+    vowel_scale: tuple[float, float, float, float, float, float] = (
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+    )
     attack_frames: int = 2
     release_frames: int = 2
     min_hold_frames: int = 3

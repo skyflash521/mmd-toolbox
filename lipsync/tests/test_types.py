@@ -11,7 +11,6 @@ import lipsync
 from mmd_toolbox.vmd import MorphKey, VmdDocument, read, write
 
 
-@pytest.mark.xfail(reason="impl pending: MouthShape.N", strict=True)
 def test_mouth_shape_members():
     """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音を持つ(lipsync.md §2.1/§4.7)。
 
@@ -31,7 +30,6 @@ def test_mouth_event_defaults():
     assert ev.open_amount == 0.0
 
 
-@pytest.mark.xfail(reason="impl pending: vowel_scale 6-tuple", strict=True)
 def test_generation_params_defaults():
     """GenerationParams の既定値が初期目安と一致する(lipsync.md §4.8)。
 
