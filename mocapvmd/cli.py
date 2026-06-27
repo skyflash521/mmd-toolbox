@@ -15,11 +15,14 @@ import math
 import os
 import sys
 
+from mmd_toolbox.pmx.types import PmxFormatError
 from mmd_toolbox.vmd import io
 from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 from mmd_toolbox.vmd.types import BoneKey
 
 from . import classify, denoise, footik, presets, progress, reduce, report
+from .model_profile import MocapModelProfileError
+from .pose_denoise import apply_pose_denoise
 
 
 def _build_parser():
@@ -30,6 +33,8 @@ def _build_parser():
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="balanced")
     p.add_argument("--denoise", dest="denoise", action="store_true", default=True)
     p.add_argument("--no-denoise", dest="denoise", action="store_false")
+    p.add_argument("--denoise-mode", dest="denoise_mode", choices=("bone", "pose"), default="bone")
+    p.add_argument("--pmx", dest="pmx", default=None)
     p.add_argument("--foot-ik-stabilize", dest="foot_ik_stabilize", action="store_true", default=True)
     p.add_argument("--no-foot-ik-stabilize", dest="foot_ik_stabilize", action="store_false")
     p.add_argument("--foot-slide-suppression", dest="foot_slide_suppression", type=float, default=1.0)
@@ -215,6 +220,11 @@ def main(argv=None):
     if not math.isfinite(s) or not 0.0 <= s <= 1.0:
         return 2
 
+    # pose モードで --pmx 指定時は、パスの存在・通常ファイルを引数エラー(終了コード2)で検証する。
+    if args.denoise and args.denoise_mode == "pose" and args.pmx is not None:
+        if not os.path.isfile(args.pmx):
+            return 2
+
     # 入力読み込み(VMDでない等 → 入力不正)。
     try:
         doc, read_warnings = io.read(args.input)
@@ -245,7 +255,14 @@ def main(argv=None):
     try:
         if args.denoise:
             reporter.stage("平滑化")
-            new_bone = _clean_bones(doc.bone, args.preset)
+            if args.denoise_mode == "pose":
+                # 表現空間ノイズ除去。プロファイル不正・PMX形式不正は入力不正(終了コード1)。
+                try:
+                    new_bone = apply_pose_denoise(doc.bone, pmx_path=args.pmx)
+                except (MocapModelProfileError, PmxFormatError):
+                    return 1
+            else:
+                new_bone = _clean_bones(doc.bone, args.preset)
         else:
             new_bone = doc.bone
         if args.foot_ik_stabilize:

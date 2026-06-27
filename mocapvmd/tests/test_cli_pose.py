@@ -5,27 +5,11 @@
 --pmx のパス不在・非通常ファイルは引数エラー(終了コード2)になる。
 """
 
-import pytest
-
 from mmd_toolbox.vmd import io
 from mocapvmd import cli
 from mocapvmd.model_profile import STANDARD_BONE_NAMES
 
 from .helpers import bone, build_standard_pmx, write_vmd
-
-
-def _has_pose_mode():
-    try:
-        cli._build_parser().parse_args(["x", "--denoise-mode", "pose"])
-        return True
-    except SystemExit:
-        return False
-
-
-# impl pending: pose-denoise Step7b CLI
-_needs_pose_cli = pytest.mark.skipif(
-    not _has_pose_mode(), reason="impl pending: pose-denoise Step7b CLI"
-)
 
 
 def _write_input(path):
@@ -49,7 +33,6 @@ def test_bone_mode_is_default(tmp_path):
     assert out.is_file()
 
 
-@_needs_pose_cli
 def test_pose_mode_default_profile(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -64,7 +47,6 @@ def test_pose_mode_default_profile(tmp_path):
     assert center_frames == list(range(0, 11))
 
 
-@_needs_pose_cli
 def test_pose_mode_with_pmx(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -81,7 +63,6 @@ def test_pose_mode_with_pmx(tmp_path):
     assert center_frames == list(range(0, 11))
 
 
-@_needs_pose_cli
 def test_pose_pmx_missing_path_is_arg_error(tmp_path):
     src = tmp_path / "in.vmd"
     _write_input(src)
@@ -99,7 +80,6 @@ def test_pose_pmx_missing_path_is_arg_error(tmp_path):
     assert code == 2
 
 
-@_needs_pose_cli
 def test_pose_pmx_directory_is_arg_error(tmp_path):
     # --pmx が非通常ファイル(ディレクトリ)でも引数エラー。
     src = tmp_path / "in.vmd"
@@ -112,7 +92,6 @@ def test_pose_pmx_directory_is_arg_error(tmp_path):
     assert code == 2
 
 
-@_needs_pose_cli
 def test_pose_pmx_unsupported_encoding_is_input_error(tmp_path):
     # 未対応文字コードのPMXは PmxFormatError → 入力不正(終了コード1)。
     src = tmp_path / "in.vmd"
@@ -127,7 +106,6 @@ def test_pose_pmx_unsupported_encoding_is_input_error(tmp_path):
     assert code == 1
 
 
-@_needs_pose_cli
 def test_pose_pmx_missing_required_role_is_input_error(tmp_path):
     src = tmp_path / "in.vmd"
     pmx = tmp_path / "model.pmx"
@@ -141,7 +119,6 @@ def test_pose_pmx_missing_required_role_is_input_error(tmp_path):
     assert code == 1
 
 
-@_needs_pose_cli
 def test_pose_pmx_format_error_is_input_error(tmp_path):
     src = tmp_path / "in.vmd"
     pmx = tmp_path / "bad.pmx"
@@ -153,7 +130,6 @@ def test_pose_pmx_format_error_is_input_error(tmp_path):
     assert code == 1
 
 
-@_needs_pose_cli
 def test_no_denoise_pose_mode_needs_no_pmx(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
