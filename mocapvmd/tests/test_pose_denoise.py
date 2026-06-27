@@ -5,15 +5,40 @@
 ボーン(指など)は原キーのまま通す。
 """
 
+import math
+
 import pytest
 
+from mmd_toolbox.pmx.pose import evaluate_fk, sample_local_poses
 from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 from mmd_toolbox.vmd.types import BoneKey
 
 from .helpers import BONE_NONLINEAR, bone, build_standard_pmx
-from mocapvmd.model_profile import STANDARD_BONE_NAMES
+from mocapvmd.markers import extract_markers
+from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
 
 from mocapvmd.pose_denoise import apply_pose_denoise
+
+
+def _quat_y(deg):
+    h = math.radians(deg) / 2.0
+    return (0.0, math.sin(h), 0.0, math.cos(h))
+
+
+def _marker_trajectory(profile, bone_keys, marker):
+    """ボーンキー列から指定マーカーのワールド軌跡を、パイプラインと同じFKで再計算する。"""
+    tracks = {}
+    for k in bone_keys:
+        tracks.setdefault(k.name, []).append(k)
+    for v in tracks.values():
+        v.sort(key=lambda k: k.frame)
+    f0 = min(k.frame for k in bone_keys)
+    f1 = max(k.frame for k in bone_keys)
+    traj = []
+    for f in range(f0, f1 + 1):
+        world = evaluate_fk(profile.model, sample_local_poses(profile.model, tracks, f))
+        traj.append(extract_markers(profile, [world]).markers[marker][0])
+    return traj
 
 
 def test_empty_input_returns_empty():
@@ -66,6 +91,20 @@ def test_static_motion_is_preserved():
         if k.name == "センター":
             assert k.position == pytest.approx((0.0, 0.0, 0.0), abs=1e-6)
             assert k.rotation == pytest.approx((0.0, 0.0, 0.0, 1.0), abs=1e-6)
+
+
+def test_clean_moving_motion_passes_through_unchanged():
+    # ノイズの無い滑らかな動き(静止でない)は壊さない(非破壊=オプトイン設計の要)。
+    # センターを0→0.5へ直線的に動かすと全マーカーが並進する。平滑化が除くべき高周波が
+    # 無いので、表現空間ノイズ除去を通しても頭マーカー軌跡は変わらないことを確認する。
+    profile = load_mocap_profile(None)
+    keys = [bone("センター", f, pos=(0.5 * f / 20.0, 0.0, 0.0)) for f in range(21)]
+    before = _marker_trajectory(profile, keys, "head")
+    after = _marker_trajectory(profile, apply_pose_denoise(keys, pmx_path=None), "head")
+    # 明確に動いている(静止テストと別物であることを担保)。
+    assert math.dist(before[0], before[-1]) > 0.1
+    for a, b in zip(before, after):
+        assert a == pytest.approx(b, abs=1e-6)
 
 
 def test_output_keys_are_valid_bonekeys():
