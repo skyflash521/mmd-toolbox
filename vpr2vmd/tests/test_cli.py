@@ -8,6 +8,8 @@ vpr 読み込み・口形イベント確定・VMD 生成は後続の実装ステ
 3 出力書き込み失敗。
 """
 
+import pytest
+
 from vpr2vmd import cli
 
 
@@ -144,6 +146,29 @@ def test_model_name_over_20_bytes_is_arg_error(tmp_path):
     """--model-name が cp932 で 20 バイト超なら引数エラー(vpr2vmd.md §4.2)。"""
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--model-name", "x" * 21, "--dry-run"]) == 2
+
+
+@pytest.mark.xfail(reason="impl pending: P-4a --no-n-morph フラグ", strict=True)
+def test_no_n_morph_accepted_in_dry_run(tmp_path):
+    """--no-n-morph を受理し --dry-run で 0(vpr2vmd.md §4.2)。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--no-n-morph", "--dry-run"]) == 0
+
+
+@pytest.mark.xfail(reason="impl pending: P-4a --no-n-morph フラグ", strict=True)
+def test_dry_run_plan_reflects_n_morph_on_by_default(tmp_path, capsys):
+    """既定では「ん」モーフを使う。--dry-run の計画表示に n-morph on を出す。"""
+    src = _touch(tmp_path / "in.vpr")
+    cli.main([src, "--dry-run"])
+    assert "n-morph: on" in capsys.readouterr().out
+
+
+@pytest.mark.xfail(reason="impl pending: P-4a --no-n-morph フラグ", strict=True)
+def test_dry_run_plan_reflects_no_n_morph(tmp_path, capsys):
+    """--no-n-morph 指定時は撥音を無音へ倒す旨(n-morph off)を計画表示に出す。"""
+    src = _touch(tmp_path / "in.vpr")
+    cli.main([src, "--no-n-morph", "--dry-run"])
+    assert "n-morph: off" in capsys.readouterr().out
 
 
 def test_model_name_multibyte_over_20_bytes_is_arg_error(tmp_path):
