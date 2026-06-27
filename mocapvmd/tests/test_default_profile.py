@@ -5,28 +5,14 @@ PMX未指定時に使う既定モデルプロファイルが、FK評価とマー
 共通 PmxModel 相当として提供できることを検証する。
 """
 
-import pytest
-
 from mmd_toolbox.pmx.pose import evaluate_fk, sample_local_poses
 from mmd_toolbox.pmx.types import PmxModel
 
-try:
-    from mocapvmd.default_profile import (
-        FEATURE_BINDINGS,
-        MARKER_BINDINGS,
-        ROLE_TO_INDEX,
-        build_default_model,
-    )
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: pose-denoise Step1 既定モデルプロファイル
-pytestmark = (
-    []
-    if _IMPORT_OK
-    else pytest.mark.skip(reason="impl pending: pose-denoise Step1 既定モデルプロファイル")
+from mocapvmd.default_profile import (
+    FEATURE_BINDINGS,
+    MARKER_BINDINGS,
+    ROLE_TO_INDEX,
+    build_default_model,
 )
 
 # markers.py が必要とする必須標準ロール(初期マーカー表)。
