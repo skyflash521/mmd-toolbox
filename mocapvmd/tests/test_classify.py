@@ -1,4 +1,4 @@
-"""ボーン分類のテスト(mocapvmd.md §4.1 / implementation-plan §5.1)。
+"""ボーン分類のテスト(mocapvmd.md §4.1)。
 
 ボーン名から種別(root / center / torso / arms / fingers / legs / foot_ik / toe_ik /
 unknown)を推定する。具体度の高い種別を優先し、足IK・つま先IKが legs より先に判定される。

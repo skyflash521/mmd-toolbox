@@ -1,4 +1,4 @@
-"""一般ノイズ軽減の検出層(mocapvmd.md §4.2 / 実装計画 §4.1)。
+"""一般ノイズ軽減の検出層(mocapvmd.md §4.2)。
 
 各ボーンの密サンプル(0始まり相対インデックス)から、スパイク候補・スパイク(補正対象)・
 アクセント(保護)・カット/範囲端の境界を検出する。スパイクは窓基準(位置=窓中央値・回転=窓内
@@ -271,7 +271,7 @@ def _collect_runs(signs, seg_start, axis, frames):
 
 
 def detect_noise_events(positions, rotations, *, pos_window, rot_window):
-    """密サンプルからスパイク・アクセント・境界を検出して NoiseDetection を返す(§4.1)。"""
+    """密サンプルからスパイク・アクセント・境界を検出して NoiseDetection を返す(§4.2)。"""
     _validate(positions, rotations, pos_window, rot_window)
     n = len(positions)
     if n == 0:
@@ -370,7 +370,7 @@ def _pos_smoothed(pos, segs, window):
 
 
 def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength, rot_strength):
-    """密サンプルに一般ノイズ軽減を適用し、平滑化済みの (位置列, 回転列) を返す(§4.1, §5.5)。
+    """密サンプルに一般ノイズ軽減を適用し、平滑化済みの (位置列, 回転列) を返す(§4.2, §5.5)。
 
     位置は中央値フィルタ後 Savitzky-Golay を位置強度でブレンド、回転は窓内正規化平均を回転強度で
     ブレンドする。アクセント run・カット境界・範囲端は保護(変更しない)。スパイクは窓基準により

@@ -1,4 +1,4 @@
-"""足IK接地区間検出と左右ペアリング(mocapvmd.md §4.3 / 実装計画 §4.2)。
+"""足IK接地区間検出と左右ペアリング(mocapvmd.md §4.3)。
 
 足IK・つま先IKの密サンプル(0始まり相対インデックス、各要素 (x,y,z))から接地区間を推定する。
 検出は denoise と同様に密入力(隣接フレーム差をそのまま速度とみなし、ギャップ正規化は行わない)を
@@ -15,7 +15,7 @@
 接地区間は接地候補フレームの連続 run のうち、長さが最小接地長以上のもの。接地候補と接地区間は
 別々に返す(レポート §4.4 が「接地候補」と「接地区間」を別項目に挙げるため)。
 
-左右ペアリングは、足IK・つま先IKの名前から側を推定し、同側で各1本のときだけペアにする(§3.4)。
+左右ペアリングは、足IK・つま先IKの名前から側を推定し、同側で各1本のときだけペアにする(§4.3)。
 """
 
 import dataclasses
@@ -141,7 +141,7 @@ def detect_grounding_segments(
     ground_y_tol=GROUND_Y_TOL,
     relative_delta_thresh=RELATIVE_DELTA_THRESH,
 ):
-    """密サンプルから接地候補フレームと接地区間を検出する(§4.2)。
+    """密サンプルから接地候補フレームと接地区間を検出する(§4.3)。
 
     paired_positions(相方トラックを positions と同じ相対インデックスで整列した位置列。キーを欠く
     フレームは None)を与えると、相方との相対位置が急変するフレームを接地候補から除外する。
@@ -185,7 +185,7 @@ def detect_grounding_segments(
 
 
 def relative_rejected_frames(positions, paired_positions, *, threshold=RELATIVE_DELTA_THRESH):
-    """相方トラックとの差分ベクトルが1フレームで急変するフレーム集合を返す(§4.2)。
+    """相方トラックとの差分ベクトルが1フレームで急変するフレーム集合を返す(§4.3)。
 
     差分ベクトル r[f] = paired[f] - positions[f] の1フレーム変化 |r[f]-r[f-1]| が threshold を超える
     フレーム f を返す。差分の絶対距離でなく変化量のみを使う。相方キーを欠くフレーム(None)は判定を
@@ -209,7 +209,7 @@ def relative_rejected_frames(positions, paired_positions, *, threshold=RELATIVE_
 
 
 def detect_side(name):
-    """ボーン名から側("left"/"right")を推定する。判定できなければ None(§3.4)。
+    """ボーン名から側("left"/"right")を推定する。判定できなければ None(§4.3)。
 
     優先順は 名前中の 左/右(最優先)→ 独立語 left/right → 区切りに囲まれた L/R。部分文字列
     (leftover の left、leg の l 等)は側マーカーにしない。左右が競合する名は None とする。
@@ -238,7 +238,7 @@ def detect_side(name):
 
 
 def pair_ik_tracks(tracks):
-    """(name, category) の列から足IK・つま先IKを左右で対応付ける(§3.4)。
+    """(name, category) の列から足IK・つま先IKを左右で対応付ける(§4.3)。
 
     同側で foot_ik と toe_ik が各1本のときだけペアにする。同側同種が複数・側不明はペアにできず
     ambiguous、側が判る単独で相方を欠くものは unpaired とする。foot_ik / toe_ik 以外は対象外。
@@ -283,7 +283,7 @@ def pair_ik_tracks(tracks):
 
 
 def compute_ground_anchor(positions, segment):
-    """接地区間の各IK位置の X/Y/Z 各軸独立の中央値を接地アンカーとして返す(§4.2)。
+    """接地区間の各IK位置の X/Y/Z 各軸独立の中央値を接地アンカーとして返す(§4.3)。
 
     中央値は外れ値に強く、片足を置いた瞬間の1フレーム跳ねに引っ張られにくい。
     """

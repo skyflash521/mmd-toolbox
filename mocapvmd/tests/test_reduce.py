@@ -1,4 +1,4 @@
-"""mocapvmd インプロセス疎化のオーケストレーションのテスト(mocapvmd.md §3.3 / §5.3、実装計画 §3.5)。
+"""mocapvmd インプロセス疎化のオーケストレーションのテスト(mocapvmd.md §3.3 / §5.3)。
 
 reduce_bones はクリーニング後の全密ボーントラックを、種別ごとに解決した許容誤差で
 mmd_toolbox.vmd.reduce.reduce_bone_track により疎化する(全範囲・全ボーン・カット検出あり)。本テストは
