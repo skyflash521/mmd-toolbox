@@ -105,10 +105,11 @@ def test_fit_reduces_marker_error():
     profile = load_mocap_profile(None)
     dense = _dense(profile, {}, range(0, 1))
     target = _fk_markers(profile, dense)
-    # center マーカーを到達可能な小量だけ動かす(center は位置補正で追える)。
     target = {n: list(s) for n, s in target.items()}
-    cx = target["center"][0]
-    target["center"][0] = (cx[0] + 0.1, cx[1], cx[2])
+    # head は縮約骨格の葉なので、親(首)の回転で head マーカーだけを動かせる
+    # (他マーカーを巻き込まず到達可能)。
+    hx = target["head"][0]
+    target["head"][0] = (hx[0] + 0.05, hx[1], hx[2])
     before = _marker_error(profile, dense, target)
     res = fit(profile, dense, target)
     after = _marker_error(profile, res.poses, target)
@@ -163,17 +164,27 @@ def test_proportional_correction_limit():
     # この d で比例上限が絶対上限より小さい(=比例上限が効く)ことを前提として固定する。
     assert DEFAULT_FIT_PARAMS.k_pos * d < DEFAULT_FIT_PARAMS.max_pos
     assert DEFAULT_FIT_PARAMS.k_rot * d < math.radians(DEFAULT_FIT_PARAMS.max_rot_deg)
-    cx = target["center"][0]
-    target["center"][0] = (cx[0] + d, cx[1], cx[2])
+    # 葉マーカー head を動かし、首の回転補正に比例上限を効かせる。
+    hx = target["head"][0]
+    target["head"][0] = (hx[0] + d, hx[1], hx[2])
+    before = _marker_error(profile, dense, target)
     res = fit(profile, dense, target)
+    after = _marker_error(profile, res.poses, target)
+    # フィットが実際に補正している(ゼロ補正で素通りしていない)。
+    assert after < before
     pos_limit = DEFAULT_FIT_PARAMS.k_pos * d
     rot_limit = DEFAULT_FIT_PARAMS.k_rot * d
+    max_rot = 0.0
     for fitted_frame, orig_frame in zip(res.poses, dense):
         for fb, ob in zip(fitted_frame, orig_frame):
             dp = sum((a - b) ** 2 for a, b in zip(fb.position, ob.position)) ** 0.5
             assert dp <= pos_limit + 1e-6
             dot = min(1.0, abs(sum(a * b for a, b in zip(fb.rotation, ob.rotation))))
-            assert 2.0 * math.acos(dot) <= rot_limit + 1e-6
+            angle = 2.0 * math.acos(dot)
+            assert angle <= rot_limit + 1e-6
+            max_rot = max(max_rot, angle)
+    # 比例上限がクランプとして実際に効いている(回転補正が入っている)。
+    assert max_rot > 0.0
 
 
 def test_default_fit_params_are_reasonable():
