@@ -5,10 +5,9 @@ vpr の tick(整数、resolution=tick/四分音符)とテンポマップから 3
 """
 
 import pytest
+from vpr_io import TempoEvent
 
-timing = pytest.importorskip("vpr2vmd.timing", reason="impl pending: P-2 時刻⇔フレーム変換")
-
-from vpr_io import TempoEvent  # noqa: E402
+from vpr2vmd import timing
 
 
 def test_tick_zero_is_frame_zero():
