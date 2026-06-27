@@ -109,11 +109,12 @@ class LinearScalarChannel:
     分割候補フレームは§5.5(速度符号反転優先)。
     """
 
-    def __init__(self, frame_start, values, tol, mode="linear"):
+    def __init__(self, frame_start, values, tol, mode="linear", force_bezier=False):
         self.frame_start = frame_start
         self.values = list(values)
         self.tol = float(tol)
         self.mode = mode
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(§6.3)
         self._cp_cache = {}  # (a, b) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _value(self, frame):
@@ -130,7 +131,10 @@ class LinearScalarChannel:
             a0, a1 = self._value(a), self._value(b)
             denom = abs(a1 - a0)
             ee = self.tol / denom if denom > 1e-9 else None
-            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee, category=getattr(self, "label", None))
+            cp = _axis_curve(
+                a0, a1, a, b, self._value, early_exit_err=ee,
+                category=getattr(self, "label", None), skip_fastpath=self._force_bezier,
+            )
             self._cp_cache[(a, b)] = cp
         return cp
 
@@ -194,11 +198,12 @@ class EuclideanVectorChannel:
     分割候補は最大ユークリッド誤差フレーム(§5.1 の基本)。
     """
 
-    def __init__(self, frame_start, vectors, tol, mode="linear"):
+    def __init__(self, frame_start, vectors, tol, mode="linear", force_bezier=False):
         self.frame_start = frame_start
         self.vectors = [tuple(float(c) for c in v) for v in vectors]
         self.tol = float(tol)
         self.mode = mode
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(§6.3)
         self._cp_cache = {}  # (a, b, axis) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _vec(self, frame):
@@ -217,7 +222,7 @@ class EuclideanVectorChannel:
             ee = self.tol / (math.sqrt(3.0) * denom) if denom > 1e-9 else None
             cp = _axis_curve(
                 va[i], vb[i], a, b, lambda f: self._vec(f)[i], early_exit_err=ee,
-                category=getattr(self, "label", None),
+                category=getattr(self, "label", None), skip_fastpath=self._force_bezier,
             )
             self._cp_cache[(a, b, i)] = cp
         return cp
@@ -296,11 +301,12 @@ class FovChannel:
     分割候補は速度符号反転(局所極値)を優先し、無ければ最大誤差フレーム(§5.5)。
     """
 
-    def __init__(self, frame_start, values, tol, mode="linear"):
+    def __init__(self, frame_start, values, tol, mode="linear", force_bezier=False):
         self.frame_start = frame_start
         self.values = [float(v) for v in values]
         self.tol = float(tol)
         self.mode = mode
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(§6.3)
         self._cp_cache = {}  # (a, b) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _value(self, frame):
@@ -318,7 +324,10 @@ class FovChannel:
             a0, a1 = self._value(a), self._value(b)
             denom = abs(a1 - a0)
             ee = self.tol / denom if denom > 1e-9 else None
-            cp = _axis_curve(a0, a1, a, b, self._value, early_exit_err=ee, category=getattr(self, "label", None))
+            cp = _axis_curve(
+                a0, a1, a, b, self._value, early_exit_err=ee,
+                category=getattr(self, "label", None), skip_fastpath=self._force_bezier,
+            )
             self._cp_cache[(a, b)] = cp
         return cp
 
@@ -436,12 +445,13 @@ class CameraRotationChannel:
     ラップは __init__ の軸別 unwrap で除去する。分割候補は軸別速度反転を優先(§5.5)。
     """
 
-    def __init__(self, frame_start, eulers, tol, mode="linear"):
+    def __init__(self, frame_start, eulers, tol, mode="linear", force_bezier=False):
         self.frame_start = frame_start
         arr = np.asarray(eulers, dtype=float)
         self.eulers = np.column_stack([np.unwrap(arr[:, i]) for i in range(3)])
         self.tol = float(tol)
         self.mode = mode
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(§6.3)
         self._cp_cache = {}  # (a, b) -> 共通係数曲線の量子化制御点(区間フィットのメモ化)
 
     def _euler(self, frame):
@@ -530,7 +540,7 @@ class CameraRotationChannel:
         # 早期終了閾値は回転許容(度)。係数曲線の残差は度単位なので直接渡す。
         cp = _fit_coeff_curve(
             [(f - a) / span for f in internal], _resid_at, early_exit_err=self.tol,
-            category=getattr(self, "label", None),
+            category=getattr(self, "label", None), skip_fastpath=self._force_bezier,
         )
         self._cp_cache[(a, b)] = cp
         return cp

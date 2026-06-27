@@ -5,14 +5,11 @@
 reduce_camera_track へ force_bezier フラグを設け、True でファストパスを切り least_squares
 由来の実ベジェ曲線を強制する。既定 False は従来挙動(ファストパス有効)。
 
-「線形でも許容内だが実際は曲がっている」= eased データ + 大きい許容、で対比する。
-未実装の force_bezier 経路を呼ぶ直前に pytest.xfail() を置く(実装後に外す)。既存挙動の
-前提確認は通常実行され目的外の回帰が隠れない。
+「線形でも許容内だが実際は曲がっている」= eased データ + 大きい許容、で対比する。各テストは
+まず既定挙動(ファストパスで線形)を確認したのち、force_bezier=True で非線形化することを見る。
 """
 
 import math
-
-import pytest
 
 from mmd_toolbox.vmd import interp
 from mmd_toolbox.vmd.types import CameraKey
@@ -30,8 +27,6 @@ from mmd_toolbox.vmd.reduce import (
     camera_interp_bytes,
     reduce_camera_track,
 )
-
-_PENDING = "impl pending: channel reduce force_bezier"
 
 EASE = (96, 0, 96, 30)
 LIN = (20, 20, 107, 107)
@@ -82,7 +77,6 @@ def _assert_real_fit(counts):
 def test_scalar_channel_force_bezier_opts_out_fastpath():
     vals = _eased(0.0, 100.0)
     assert LinearScalarChannel(0, vals, tol=_BIG, mode="bezier").curve(0, 10) == LIN
-    pytest.xfail(_PENDING)
     reset_fit_counters()
     ch = LinearScalarChannel(0, vals, tol=_BIG, mode="bezier", force_bezier=True)
     assert ch.curve(0, 10) != LIN
@@ -92,7 +86,6 @@ def test_scalar_channel_force_bezier_opts_out_fastpath():
 def test_fov_channel_force_bezier_opts_out_fastpath():
     vals = _eased(30.0, 80.0)
     assert FovChannel(0, vals, tol=_BIG, mode="bezier").curve(0, 10) == LIN
-    pytest.xfail(_PENDING)
     reset_fit_counters()
     ch = FovChannel(0, vals, tol=_BIG, mode="bezier", force_bezier=True)
     assert ch.curve(0, 10) != LIN
@@ -103,7 +96,6 @@ def test_euclidean_channel_force_bezier_opts_out_fastpath():
     ys = _eased(0.0, 100.0)
     vecs = [(0.0, y, 0.0) for y in ys]  # Y 軸だけ eased
     assert EuclideanVectorChannel(0, vecs, tol=_BIG, mode="bezier").curve(0, 10)[1] == LIN
-    pytest.xfail(_PENDING)
     reset_fit_counters()
     ch = EuclideanVectorChannel(0, vecs, tol=_BIG, mode="bezier", force_bezier=True)
     assert ch.curve(0, 10)[1] != LIN
@@ -116,7 +108,6 @@ def test_camera_rotation_channel_force_bezier_opts_out_fastpath():
     e1 = (math.radians(30), math.radians(20), math.radians(-10))
     eulers = [(e1[0] * c[f], e1[1] * c[f], e1[2] * c[f]) for f in range(11)]
     assert CameraRotationChannel(0, eulers, tol=_BIG, mode="bezier").curve(0, 10) == LIN
-    pytest.xfail(_PENDING)
     reset_fit_counters()
     ch = CameraRotationChannel(0, eulers, tol=_BIG, mode="bezier", force_bezier=True)
     assert ch.curve(0, 10) != LIN
@@ -137,7 +128,6 @@ def test_reduce_camera_force_bezier_non_constant_not_linear_interp():
     ]
     base = camera_track(source, [(0, 10)])
     assert all(k.interpolation == CAMERA_LINEAR_INTERP for k in base)  # 既定=ファストパス退化
-    pytest.xfail(_PENDING)
     reset_fit_counters()
     fb = camera_track(source, [(0, 10)], force_bezier=True)
     assert fb[-1].interpolation != CAMERA_LINEAR_INTERP
@@ -152,7 +142,6 @@ def test_reduce_camera_force_bezier_false_keeps_fastpath_degradation():
     source = [cam(f, dist=dist[f]) for f in range(11)]
     out = camera_track(source, [(0, 10)])  # 既定(force_bezier 未指定)
     assert all(k.interpolation == CAMERA_LINEAR_INTERP for k in out)
-    pytest.xfail(_PENDING)
     out_false = camera_track(source, [(0, 10)], force_bezier=False)
     assert [k.interpolation for k in out_false] == [k.interpolation for k in out]
 
@@ -177,7 +166,6 @@ def test_seam_refit_force_bezier_opts_out_fastpath():
     base = camera_track(src, [(10, 20)])  # 大許容 → 継ぎ目はファストパスで線形に退化
     k10 = next(k for k in base if k.frame == 10)
     assert k10.interpolation[0:4] == bytes([20, 107, 20, 107])  # pos_x 継ぎ目が線形(退化)
-    pytest.xfail(_PENDING)
     reset_fit_counters()
     fb = camera_track(src, [(10, 20)], force_bezier=True)
     k10fb = next(k for k in fb if k.frame == 10)

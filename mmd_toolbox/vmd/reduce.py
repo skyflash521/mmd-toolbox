@@ -325,11 +325,12 @@ def _nearest_source_before(source_keys, frame):
     return max(cands) if cands else None
 
 
-def _camera_seam_interp(source_keys, a, b, tols):
+def _camera_seam_interp(source_keys, a, b, tols, force_bezier=False):
     """区間 [a,b] を元サンプルからベジェ再フィットしカメラ補間24バイトを返す(§6.3)。
 
     範囲端の到達側曲線が範囲外区間 [a,b] を支配する継ぎ目で、元の動きを忠実に保つよう
     各チャンネルを元サンプルから再フィットする。単一区間のため整数量子化が誤差下限になる。
+    force_bezier=True は各チャンネルへ伝播し、共有の線形ファストパスを切って実ベジェを強制する。
     """
     rng = range(a, b + 1)
     positions = [
@@ -343,10 +344,10 @@ def _camera_seam_interp(source_keys, a, b, tols):
     distances = [interp.sample(source_keys, "distance", f) for f in rng]
     fovs = [interp.sample(source_keys, "fov", f) for f in rng]
     eulers = [interp.sample(source_keys, "rot", f) for f in rng]
-    pos_ch = EuclideanVectorChannel(a, positions, tols.camera_pos, mode="bezier")
-    dist_ch = LinearScalarChannel(a, distances, tols.camera_distance, mode="bezier")
-    fov_ch = FovChannel(a, fovs, tols.camera_fov, mode="bezier")
-    rot_ch = CameraRotationChannel(a, eulers, tols.camera_rot, mode="bezier")
+    pos_ch = EuclideanVectorChannel(a, positions, tols.camera_pos, mode="bezier", force_bezier=force_bezier)
+    dist_ch = LinearScalarChannel(a, distances, tols.camera_distance, mode="bezier", force_bezier=force_bezier)
+    fov_ch = FovChannel(a, fovs, tols.camera_fov, mode="bezier", force_bezier=force_bezier)
+    rot_ch = CameraRotationChannel(a, eulers, tols.camera_rot, mode="bezier", force_bezier=force_bezier)
     # 継ぎ目再フィットもチャンネル種別へ帰属させ、種別別カウントを exhaustive に保つ(§2.7 診断)。
     pos_ch.label, dist_ch.label, fov_ch.label, rot_ch.label = (
         "position", "distance", "fov", "rotation",
@@ -613,6 +614,7 @@ def reduce_camera_track(
     max_seg,
     strict,
     curve_mode="linear",
+    force_bezier=False,
     diagnostics=None,
     progress=None,
 ):
@@ -631,6 +633,10 @@ def reduce_camera_track(
     範囲端の下側継ぎ目(§6.3)は bezier で、範囲開始キー(範囲内)の到達側曲線を元サンプルから
     再フィットし、手前の範囲外キーから範囲開始までの動きを忠実に保つ(_camera_seam_interp)。
     範囲外キーは変更不可のため、上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。
+
+    force_bezier=True は4カメラチャンネルと継ぎ目再フィットへ伝播し、共有の線形ファストパス/
+    cheap accept を切って実ベジェ曲線を強制する(曲線形状の忠実度が要る滑らかさ目的。mmd_toolbox.md
+    §6.3)。既定 False は従来挙動(ファストパス有効・採否/キー数/性能不変)。
 
     diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(error-split したフレームと
     駆動チャンネルと正規化誤差)・maxspan_caps(maxspan-cap したフレーム, §5.5)・seam_rewrites(下側継ぎ目で
@@ -672,10 +678,10 @@ def reduce_camera_track(
             keep_frames=keep_frames,
             no_cut_detect=no_cut_detect,
         )
-        pos_ch = EuclideanVectorChannel(f0, positions, tols.camera_pos, mode=curve_mode)
-        dist_ch = LinearScalarChannel(f0, distances, tols.camera_distance, mode=curve_mode)
-        fov_ch = FovChannel(f0, fovs, tols.camera_fov, mode=curve_mode)
-        rot_ch = CameraRotationChannel(f0, eulers, tols.camera_rot, mode=curve_mode)
+        pos_ch = EuclideanVectorChannel(f0, positions, tols.camera_pos, mode=curve_mode, force_bezier=force_bezier)
+        dist_ch = LinearScalarChannel(f0, distances, tols.camera_distance, mode=curve_mode, force_bezier=force_bezier)
+        fov_ch = FovChannel(f0, fovs, tols.camera_fov, mode=curve_mode, force_bezier=force_bezier)
+        rot_ch = CameraRotationChannel(f0, eulers, tols.camera_rot, mode=curve_mode, force_bezier=force_bezier)
         pos_ch.label, dist_ch.label, fov_ch.label, rot_ch.label = (
             "position", "distance", "fov", "rotation",
         )
@@ -740,7 +746,10 @@ def reduce_camera_track(
             prev_src = _nearest_source_before(source_keys, f0)
             if prev_src is not None and _interval_clear_of_ranges(ranges, prev_src, f0):
                 keys[0] = dataclasses.replace(
-                    keys[0], interpolation=_camera_seam_interp(source_keys, prev_src, f0, tols)
+                    keys[0],
+                    interpolation=_camera_seam_interp(
+                        source_keys, prev_src, f0, tols, force_bezier=force_bezier
+                    ),
                 )
                 diag_seams.add(keys[0].frame)
         reduced.extend(keys)
