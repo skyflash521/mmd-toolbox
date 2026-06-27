@@ -30,10 +30,11 @@ _TEMPOS = [TempoEvent(0, 120.0)]
 _RES = 480
 
 
-def _build_se(adopted, *, use_n_morph=True):
+def _build_se(adopted, *, use_n_morph=True, legato_max_frames=None):
+    kw = {} if legato_max_frames is None else {"legato_max_frames": legato_max_frames}
     return [
         (e.shape, e.start, e.end)
-        for e in events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=use_n_morph)
+        for e in events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=use_n_morph, **kw)
     ]
 
 
@@ -103,10 +104,67 @@ def test_build_leading_rest_is_silence():
     ]
 
 
-def test_build_gap_between_notes_is_silence():
-    # 採用音符列の発音区間の補集合が休符。[a][0,240) と [i][480,720) の間 [7.5,15) は SILENCE。
+@pytest.mark.xfail(reason="impl pending: C-vpr2vmd gap classification", strict=True)
+def test_build_short_vowel_gap_is_legato():
+    # 前後とも母音的で短い間隙はレガート間隙(LEGATO_GAP)。[a][0,240) と [i][480,720) の間
+    # [7.5,15)(8分音符相当=7.5f ≤ legato_max 8.0)は LEGATO_GAP(完全閉口でなく谷で繋ぐ)。
     adopted = [_note(0, 240, phonemes=["a"]), _note(480, 240, phonemes=["i"])]
     assert _build_se(adopted) == [
+        (MouthShape.A, 0.0, 7.5),
+        (MouthShape.LEGATO_GAP, 7.5, 15.0),
+        (MouthShape.I, 15.0, 22.5),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: C-vpr2vmd gap classification", strict=True)
+def test_build_short_gap_into_continuation_is_legato():
+    # 次音符が継続「-」(note_mouth_events=None)でも、直前の確定口形(母音的)へ解決してから分類する。
+    # [a][0,240) frame[0,7.5)、[-][480,720) frame[15,22.5) は あ を継続。間 [7.5,15)=7.5f は前後とも
+    # 母音的(左 A・右は A へ解決)で短いため LEGATO_GAP。継続イベントは あ を保つ(間隙が谷で繋ぐため)。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(480, 240, phonemes=["-"])]
+    assert _build_se(adopted) == [
+        (MouthShape.A, 0.0, 7.5),
+        (MouthShape.LEGATO_GAP, 7.5, 15.0),
+        (MouthShape.A, 15.0, 22.5),
+    ]
+
+
+def test_build_long_vowel_gap_is_silence():
+    # 前後とも母音的でも、間隙が legato_max を超えれば休符(SILENCE、完全閉口)。
+    # [a][0,240) frame[0,7.5)、[i][720,960) frame[22.5,30) の間 [7.5,22.5)=15f > 8.0 → SILENCE。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(720, 240, phonemes=["i"])]
+    assert _build_se(adopted) == [
+        (MouthShape.A, 0.0, 7.5),
+        (MouthShape.SILENCE, 7.5, 22.5),
+        (MouthShape.I, 22.5, 30.0),
+    ]
+
+
+def test_build_gap_before_bilabial_onset_is_silence():
+    # 次音符の実効口形(語頭)が母音的でない(両唇閉鎖)間隙は、短くても SILENCE(閉口を優先)。
+    # [a][0,240) frame[0,7.5)、[m,i][480,720) は語頭閉鎖。間 [7.5,15)=7.5f でも次が BILABIAL → SILENCE。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(480, 240, phonemes=["m", "i"])]
+    result = _build_se(adopted)
+    assert result[0] == (MouthShape.A, 0.0, 7.5)
+    assert result[1] == (MouthShape.SILENCE, 7.5, 15.0)
+
+
+def test_build_gap_after_closure_is_silence():
+    # 前音符の実効口形が母音的でない(促音=閉口)間隙は、短くても SILENCE。
+    # [w,Q][0,240)→SILENCE frame[0,7.5)、[i][480,720) frame[15,22.5) の間 [7.5,15)=7.5f、
+    # 左が閉口 → SILENCE。
+    adopted = [_note(0, 240, phonemes=["w", "Q"]), _note(480, 240, phonemes=["i"])]
+    result = _build_se(adopted)
+    assert result[0] == (MouthShape.SILENCE, 0.0, 7.5)
+    assert result[1] == (MouthShape.SILENCE, 7.5, 15.0)
+
+
+@pytest.mark.xfail(reason="impl pending: C-vpr2vmd gap classification", strict=True)
+def test_build_legato_max_frames_override():
+    # legato_max_frames を下げると同じ母音-母音短間隙でも SILENCE になる(視覚チューニング点)。
+    # 間隙 7.5f に対し legato_max=4.0 → 7.5 > 4.0 → SILENCE。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(480, 240, phonemes=["i"])]
+    assert _build_se(adopted, legato_max_frames=4.0) == [
         (MouthShape.A, 0.0, 7.5),
         (MouthShape.SILENCE, 7.5, 15.0),
         (MouthShape.I, 15.0, 22.5),
