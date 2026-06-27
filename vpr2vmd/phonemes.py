@@ -16,9 +16,10 @@ class PhonemeCategory(Enum):
 
     VOWEL = "vowel"  # 母音。対応する MouthShape は vowel_shape() で得る
     BILABIAL = "bilabial"  # 両唇閉鎖(ま・ば・ぱ行の語頭)。MouthShape.BILABIAL へ
-    MORAIC_NASAL = "moraic_nasal"  # 撥音「ん」。MouthShape.N へ
+    MORAIC_NASAL = "moraic_nasal"  # 撥音「ん」。MouthShape.N(--no-n-morph 時は無音)へ
+    GEMINATE_STOP = "geminate_stop"  # 促音「っ」(Q)。無音(閉口)へ
     CONTINUATION = "continuation"  # 継続/メリスマ(直前音の伸ばし)
-    OTHER = "other"  # その他子音・未知。自前イベントを作らず協調調音へ委ねる
+    OTHER = "other"  # その他子音・未知。自前イベントを作らず協調調音/直前口形継続へ委ねる
 
 
 # 母音記号 → MouthShape。X-SAMPA の M は close back unrounded vowel で、日本語「う」の標準表記。
@@ -40,6 +41,9 @@ _BILABIALS = {"m", "m'", "b", "b'", "p", "p'"}
 # 撥音「ん」(後続母音を持たない単独の鼻音)。X-SAMPA では N\(uvular nasal)。
 _MORAIC_NASALS = {"N\\"}
 
+# 促音「っ」。X-SAMPA では Q(日本語の特殊モーラ。閉鎖・詰まり)。
+_GEMINATE_STOPS = {"Q"}
+
 # 継続/メリスマ(直前音を伸ばす音符の記号)。
 _CONTINUATIONS = {"-"}
 
@@ -52,8 +56,9 @@ def vowel_shape(symbol: str) -> MouthShape | None:
 def categorize(symbol: str) -> PhonemeCategory:
     """音素記号をカテゴリへ分類する(vpr2vmd.md §3)。
 
-    母音・両唇音・撥音・継続のいずれにも該当しない記号(既知のその他子音・未知記号)は、両唇閉鎖
-    以外の子音と同じく自前イベントを作らず協調調音へ委ねるため、まとめて OTHER とする。
+    母音・両唇音・撥音・促音・継続のいずれにも該当しない記号(既知のその他子音・未知記号)は、両唇閉鎖
+    以外の子音と同じく自前イベントを作らず協調調音/直前口形継続へ委ねるため、まとめて OTHER とする。
+    未知音素の診断記録(その他子音との区別)は写像でなく診断側で扱う。
     """
     if symbol in _VOWEL_SHAPES:
         return PhonemeCategory.VOWEL
@@ -61,6 +66,8 @@ def categorize(symbol: str) -> PhonemeCategory:
         return PhonemeCategory.BILABIAL
     if symbol in _MORAIC_NASALS:
         return PhonemeCategory.MORAIC_NASAL
+    if symbol in _GEMINATE_STOPS:
+        return PhonemeCategory.GEMINATE_STOP
     if symbol in _CONTINUATIONS:
         return PhonemeCategory.CONTINUATION
     return PhonemeCategory.OTHER

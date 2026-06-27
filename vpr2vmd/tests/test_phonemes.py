@@ -1,7 +1,7 @@
 """音素→カテゴリ写像のテスト(vpr2vmd.md §3、口形イベント確定の音素分類)。
 
 VOCALOID 日本語の音素(X-SAMPA)を、口形イベント確定で使うカテゴリ
-(母音 / 両唇閉鎖 / 撥音「ん」/ 継続 / その他子音)へ分類する。母音はさらに対応する
+(母音 / 両唇閉鎖 / 撥音「ん」/ 促音「っ」/ 継続 / その他子音)へ分類する。母音はさらに対応する
 口形 MouthShape(A/I/U/E/O)を返す。インベントリは実 vpr(日本語初音ミク)と X-SAMPA の
 標準で確定したもの。
 """
@@ -60,12 +60,13 @@ def test_other_consonants_categorized_as_other():
         assert phonemes.categorize(sym) is Cat.OTHER
 
 
-def test_unknown_symbols_fall_back_to_other():
-    # vpr_io インベントリで母音にも両唇音にも該当しない記号は、その他子音と同じく協調調音へ委ねる。
+def test_unknown_symbols_categorized_as_other():
+    # 未知記号(標準 X-SAMPA 外)は写像上はその他子音と同じく OTHER に併合する(自前イベントを
+    # 作らない)。未知音素の診断記録は別途(is_known)で行う。
     for sym in ["th", "gh", "zzz", ""]:
         assert phonemes.categorize(sym) is Cat.OTHER
 
 
-def test_geminate_is_other():
-    # 促音「っ」(Q)は無音/閉鎖の準備区間で、口形は後続子音との協調調音に委ねる=その他子音。
-    assert phonemes.categorize("Q") is Cat.OTHER
+def test_geminate_categorized_as_geminate_stop():
+    # 促音「っ」(Q)は閉鎖・詰まりで、口形イベントは無音(閉口)にするため専用カテゴリにする。
+    assert phonemes.categorize("Q") is Cat.GEMINATE_STOP

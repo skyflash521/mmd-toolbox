@@ -1,10 +1,10 @@
 """音符内の音素→口形イベント写像のテスト(vpr2vmd.md §3、音符内の時間配分)。
 
-1つの採用音符(フレーム区間 [s, e))の音素列を、口形イベント(両唇閉鎖・母音・撥音「ん」)へ
-写像する。継続「-」は直前母音に依存するため本段では扱わず、組み立て段で処理する。時間配分:
-語頭両唇閉鎖は音符先頭に取り分 d_b = min(公称長, (e-s)×取り分上限)、残り区間の母音 k 個を等分。
-母音が得られない音符は既定母音「あ」を1つ置く(語頭両唇音があれば閉鎖は保持)。撥音は音符全体を
-「ん」にする。
+1つの採用音符(フレーム区間 [s, e))の音素列を、文脈なしで定まる口形イベントへ写像する。
+時間配分: 語頭両唇閉鎖は音符先頭に取り分 d_b = min(公称長, (e-s)×取り分上限)、残り区間の母音 k 個を等分。
+撥音「ん」(単独の鼻音)は ON で「ん」(N)、OFF(use_n_morph=False)で無音(閉口)。促音「っ」(Q)は無音(閉口)。
+母音を持たず撥音/促音でもない音符(継続「-」・その他子音のみ等)は直前口形に依存するため None を返し、
+組み立て段で直前口形を継続する(既定母音「あ」フォールバックは行わない)。
 """
 
 from lipsync import MouthShape
@@ -78,33 +78,41 @@ def test_non_leading_bilabial_makes_no_event():
     ]
 
 
-def test_no_vowel_falls_back_to_default_a():
-    # 母音が得られない音符(子音のみ)は既定母音「あ」を1つ置く。
-    assert _shapes_spans(mapping.note_mouth_events(["t"], 0.0, 30.0)) == [
-        (MouthShape.A, 0.0, 30.0),
-    ]
+def test_no_vowel_returns_none_for_hold():
+    # 母音を持たず撥音/促音でもない音符(その他子音のみ・継続・語頭両唇のみ・空)は None を返し、
+    # 直前口形の継続を組み立て段へ委ねる(既定母音「あ」へ倒さない)。
+    assert mapping.note_mouth_events(["t"], 0.0, 30.0) is None
+    assert mapping.note_mouth_events(["-"], 0.0, 30.0) is None
+    assert mapping.note_mouth_events(["m"], 0.0, 100.0) is None  # 語頭両唇のみ(母音なし)
+    assert mapping.note_mouth_events([], 0.0, 30.0) is None
 
 
-def test_no_vowel_keeps_leading_bilabial_then_default_a():
-    # 語頭両唇音のみ([m])は閉鎖を保持し、残りへ既定母音「あ」。
-    assert _shapes_spans(mapping.note_mouth_events(["m"], 0.0, 100.0)) == [
-        (MouthShape.BILABIAL, 0.0, 3.0),
-        (MouthShape.A, 3.0, 100.0),
-    ]
-
-
-def test_moraic_nasal_fills_note_with_n():
-    # 撥音(後続母音を持たない単独の鼻音 N\)は音符全体を「ん」にする。
+def test_moraic_nasal_fills_note_with_n_when_on():
+    # 撥音(単独の鼻音 N\)は既定(ん ON)で音符全体を「ん」(N)にする。
     assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0)) == [
         (MouthShape.N, 0.0, 30.0),
     ]
 
 
+def test_moraic_nasal_is_silence_when_off():
+    # ん OFF(use_n_morph=False)では撥音を無音(閉口)にする。口を開けた母音「あ」へ倒さない。
+    assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0, use_n_morph=False)) == [
+        (MouthShape.SILENCE, 0.0, 30.0),
+    ]
+
+
 def test_moraic_nasal_mixed_with_consonant_is_not_standalone():
-    # 撥音は「単独の鼻音」のときのみ N。子音を伴う(非単独)場合は撥音扱いせず、母音なし
-    # フォールバック(既定母音あ)へ倒す。[t, N\] は t がその他子音で語頭両唇も無いため A 全区間。
-    assert _shapes_spans(mapping.note_mouth_events(["t", "N\\"], 0.0, 30.0)) == [
-        (MouthShape.A, 0.0, 30.0),
+    # 撥音は「単独の鼻音」のときのみ。子音を伴う(非単独)は撥音扱いせず None(直前口形継続)。
+    assert mapping.note_mouth_events(["t", "N\\"], 0.0, 30.0) is None
+
+
+def test_geminate_stop_fills_note_with_silence():
+    # 促音「っ」(Q)は無音(閉口)。子音と共起([w,Q] 等)しても口を開けず閉口にする。
+    assert _shapes_spans(mapping.note_mouth_events(["Q"], 0.0, 30.0)) == [
+        (MouthShape.SILENCE, 0.0, 30.0),
+    ]
+    assert _shapes_spans(mapping.note_mouth_events(["w", "Q"], 0.0, 30.0)) == [
+        (MouthShape.SILENCE, 0.0, 30.0),
     ]
 
 
@@ -124,9 +132,9 @@ def test_bilabial_fricative_is_not_bilabial_event():
 
 
 def test_open_amount_placeholder_zero_for_all_event_kinds():
-    # 開き量(ベロシティ写像)は後続ステップ。本段では母音・両唇閉鎖・撥音・フォールバックの
+    # 開き量(ベロシティ写像)は後続ステップ。本段では母音・両唇閉鎖・撥音・促音(無音)の
     # 全イベントで既定 0.0。
-    for phonemes in (["a"], ["m", "a"], ["N\\"], ["t"]):
+    for phonemes in (["a"], ["m", "a"], ["N\\"], ["Q"]):
         events = mapping.note_mouth_events(phonemes, 0.0, 30.0)
         assert events
         assert all(e.open_amount == 0.0 for e in events)
