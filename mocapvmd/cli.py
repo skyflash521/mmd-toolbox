@@ -20,13 +20,14 @@ from mmd_toolbox.vmd import io
 from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 from mmd_toolbox.vmd.types import BoneKey
 
-from . import classify, denoise, footik, presets, progress, reduce, report
+from . import __version__, classify, denoise, footik, presets, progress, reduce, report
 from .model_profile import MocapModelProfileError
 from .pose_denoise import apply_pose_denoise
 
 
 def _build_parser():
     p = argparse.ArgumentParser(prog="mocapvmd", allow_abbrev=False)
+    p.add_argument("--version", action="version", version=f"mocapvmd {__version__}")
     p.add_argument("input")
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
