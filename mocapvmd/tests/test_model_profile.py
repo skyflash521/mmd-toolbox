@@ -14,24 +14,12 @@ from mmd_toolbox.pmx.types import PmxFormatError, PmxModel
 from mocapvmd.default_profile import ROLE_TO_INDEX as _DEFAULT_ROLE_TO_INDEX
 from mocapvmd.default_profile import build_default_model
 
-try:
-    from mocapvmd.model_profile import (
-        MocapModelProfile,
-        MocapModelProfileError,
-        STANDARD_BONE_NAMES,
-        load_mocap_profile,
-        validate_required_roles,
-    )
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: pose-denoise Step2 model_profile
-pytestmark = (
-    []
-    if _IMPORT_OK
-    else pytest.mark.skip(reason="impl pending: pose-denoise Step2 model_profile")
+from mocapvmd.model_profile import (
+    MocapModelProfile,
+    MocapModelProfileError,
+    STANDARD_BONE_NAMES,
+    load_mocap_profile,
+    validate_required_roles,
 )
 
 _EXPECTED_MARKERS = {
