@@ -48,7 +48,7 @@ def test_hold_clamped_to_open_cap():
 
 def test_vowel_scale_applied_then_clamped():
     # あ: open_amount=0.5, vowel_scale[a]=2 → hold=clamp(1.0, 0, 0.8)=0.8。
-    p = GenerationParams(vowel_scale=(2.0, 1.0, 1.0, 1.0, 1.0))
+    p = GenerationParams(vowel_scale=(2.0, 1.0, 1.0, 1.0, 1.0, 1.0))
     assert _peak_weights(_vowel(MouthShape.A, 0.5), p) == pytest.approx({"あ": 0.8})
 
 
@@ -117,7 +117,7 @@ def test_vowel_scale_indexed_per_vowel(shape, index, expected):
     # 母音別倍率 vowel_scale=(a,i,u,e,o) が母音ごとに正しい添字で、かつ hold 全体(主・補助とも)に
     # 効くか。当該母音の倍率だけ 1.5、open_amount=0.3 で hold=clamp(0.45, 0, 0.8)=0.45(cap未満で
     # 縮小なし)。各モーフ重み = 相対重み × hold で、補助も含め固定する。
-    scale = [1.0, 1.0, 1.0, 1.0, 1.0]
+    scale = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     scale[index] = 1.5
     p = GenerationParams(vowel_scale=tuple(scale))
     assert _peak_weights(_vowel(shape, 0.3), p) == pytest.approx(expected)
