@@ -11,10 +11,15 @@ import lipsync
 from mmd_toolbox.vmd import MorphKey, VmdDocument, read, write
 
 
+@pytest.mark.xfail(reason="impl pending: MouthShape.N", strict=True)
 def test_mouth_shape_members():
-    """MouthShape は母音5種＋両唇閉鎖＋無音を持つ。"""
+    """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音を持つ(lipsync.md §2.1/§4.7)。
+
+    「ん」は閉口でなく母音と同じ機構を通る母音的口形。
+    """
     names = {m.name for m in lipsync.MouthShape}
-    assert names == {"A", "I", "U", "E", "O", "BILABIAL", "SILENCE"}
+    assert names == {"A", "I", "U", "E", "O", "N", "BILABIAL", "SILENCE"}
+    assert lipsync.MouthShape.N.value == "n"
 
 
 def test_mouth_event_defaults():
@@ -26,11 +31,15 @@ def test_mouth_event_defaults():
     assert ev.open_amount == 0.0
 
 
+@pytest.mark.xfail(reason="impl pending: vowel_scale 6-tuple", strict=True)
 def test_generation_params_defaults():
-    """GenerationParams の既定値が初期目安と一致する。"""
+    """GenerationParams の既定値が初期目安と一致する(lipsync.md §4.8)。
+
+    vowel_scale は母音的口形別(a,i,u,e,o,n)の6要素で既定は全口形 1 倍。
+    """
     p = lipsync.GenerationParams()
     assert p.open_cap == 0.8
-    assert p.vowel_scale == (1.0, 1.0, 1.0, 1.0, 1.0)
+    assert p.vowel_scale == (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     assert p.attack_frames == 2
     assert p.release_frames == 2
     assert p.min_hold_frames == 3
