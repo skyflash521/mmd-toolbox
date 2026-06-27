@@ -12,19 +12,7 @@ from mmd_toolbox.vmd.types import BoneKey
 
 from .helpers import BONE_NONLINEAR, bone
 
-try:
-    from mocapvmd.pose_denoise import apply_pose_denoise
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: pose-denoise Step7 pose_denoise
-pytestmark = (
-    []
-    if _IMPORT_OK
-    else pytest.mark.skip(reason="impl pending: pose-denoise Step7 pose_denoise")
-)
+from mocapvmd.pose_denoise import apply_pose_denoise
 
 
 def test_empty_input_returns_empty():
