@@ -149,7 +149,6 @@ def test_no_denoise_pose_mode_needs_no_pmx(tmp_path):
 # --- pose モードの診断レポート(report-json / dry-run。§12) -------------------
 
 
-@pytest.mark.xfail(reason="impl pending: pose-denoise診断CLI接続", strict=False)
 def test_pose_report_json_has_pose_denoise_block(tmp_path):
     # pose モードの report-json にトップレベル pose_denoise セクションが出る(§12)。
     src = tmp_path / "in.vmd"
@@ -167,7 +166,6 @@ def test_pose_report_json_has_pose_denoise_block(tmp_path):
     assert "marker_displacement" in pd
 
 
-@pytest.mark.xfail(reason="impl pending: pose-denoise診断CLI接続", strict=False)
 def test_pose_dry_run_shows_pose_summary(tmp_path, capsys):
     # pose モードの dry-run 表示に pose_denoise 要約が出る(§12)。
     src = tmp_path / "in.vmd"

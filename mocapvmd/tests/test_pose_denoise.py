@@ -84,7 +84,6 @@ def test_output_keys_are_valid_bonekeys():
 # --- 診断レポート素データ(§12: diagnostics_out) -----------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
 def test_diagnostics_out_populated():
     # diagnostics_out を渡すと §12 構造(マーカー数・必須ボーン検証・変位・fit診断)を埋める。
     keys = [
@@ -115,7 +114,6 @@ def test_diagnostics_out_populated():
     assert fit["max_center_delta"] >= 0.0
 
 
-@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
 def test_diagnostics_records_pmx_path(tmp_path):
     # --pmx 指定時は診断の pmx フィールドにそのパスを記録する。
     pmx = tmp_path / "model.pmx"

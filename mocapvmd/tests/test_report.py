@@ -518,7 +518,6 @@ def _pose_denoise_diag():
     }
 
 
-@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
 def test_build_report_includes_pose_denoise_block():
     # pose_denoise 素データを渡すとトップレベルに pose_denoise セクションがそのまま載る(§12)。
     keys = [bone("センター", 0), bone("センター", 10)]
@@ -534,7 +533,6 @@ def test_build_report_omits_pose_denoise_when_absent():
     assert "pose_denoise" not in rep
 
 
-@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
 def test_format_dry_run_shows_pose_summary():
     # dry-run 表示に有効マーカー数・必須ボーン検証・最大マーカー変位・fit改善・フォールバック数が出る(§12)。
     rep = report.build_report(
@@ -550,7 +548,6 @@ def test_format_dry_run_shows_pose_summary():
     assert "fallback=2" in text               # フォールバック数
 
 
-@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
 def test_report_json_roundtrip_with_pose_denoise(tmp_path):
     rep = report.build_report(
         [bone("センター", 0), bone("センター", 10)], pose_denoise=_pose_denoise_diag()

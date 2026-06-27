@@ -108,7 +108,7 @@ def _reduction_rate(input_count, output_count):
 
 
 def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=True, reduction=None,
-                 suppression=1.0):
+                 suppression=1.0, pose_denoise=None):
     """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
 
     名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。
@@ -119,6 +119,9 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
     tol_pos, tol_rot, cuts, errors})を渡すと、トップレベルに reduce フラグ(疎化したか= reduction を
     渡したか)を、該当ボーンに reduction セクション(出力キー数・削減率(入出力から派生)・適用許容・
     検出カット数・最大再生誤差)を付ける(§4.4)。疎化の実行は呼び出し側(CLI)が行い、本関数は表示のみ。
+
+    pose_denoise(pose_denoise.apply_pose_denoise の diagnostics_out)を渡すと、トップレベルに
+    pose_denoise セクションをそのまま載せる(§12)。表現空間ノイズ除去の実行は呼び出し側(CLI)が行う。
     """
     order = []
     groups = {}
@@ -179,7 +182,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
         elif category == "toe_ik":
             toe_ik.append(name)
 
-    return {
+    result = {
         "preset": preset,
         "denoise": denoise,
         "foot_ik_stabilize": foot_ik_stabilize,
@@ -190,6 +193,9 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
         "foot_ik_candidates": foot_ik,
         "toe_ik_candidates": toe_ik,
     }
+    if pose_denoise:
+        result["pose_denoise"] = pose_denoise
+    return result
 
 
 def write_json(report, path):
@@ -238,6 +244,22 @@ def format_dry_run(report):
         lines.append(line)
     lines.append(f"足IK候補: {report['foot_ik_candidates']}")
     lines.append(f"つま先IK候補: {report['toe_ik_candidates']}")
+    if "pose_denoise" in report:
+        pd = report["pose_denoise"]
+        mk = pd["markers"]
+        md = pd["marker_displacement"]
+        ft = pd["fit"]
+        src = f"pmx={pd['pmx']}" if pd.get("pmx") else "既定モデルプロファイル"
+        lines.append(f"pose_denoise: {src} frames={pd['frames']}")
+        lines.append(
+            f"  markers: available={mk['available']} required_bones_ok={mk['required_bones_ok']}"
+        )
+        lines.append(f"  marker_disp: max={md['max']:.4g} mean={md['mean']:.4g}")
+        lines.append(
+            f"  fit: error {ft['mean_error_before']:.4g} -> {ft['mean_error_after']:.4g}"
+            f" fallback={ft['fallback_frames']}"
+            f" max_rot={ft['max_bone_delta_deg']:.4g}deg max_center={ft['max_center_delta']:.4g}"
+        )
     return "\n".join(lines)
 
 

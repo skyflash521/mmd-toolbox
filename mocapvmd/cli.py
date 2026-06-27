@@ -252,13 +252,17 @@ def main(argv=None):
     # 疎化レポートを出すときだけ診断 diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
     want_report = args.dry_run or args.report_json or args.preview_csv
     reduction_diag = {} if (args.reduce and want_report) else None
+    # pose モードでレポートを出すときだけ表現空間ノイズ除去の診断素データを集める(§12)。
+    pose_diag = {} if (args.denoise and args.denoise_mode == "pose" and want_report) else None
     try:
         if args.denoise:
             reporter.stage("平滑化")
             if args.denoise_mode == "pose":
                 # 表現空間ノイズ除去。プロファイル不正・PMX形式不正は入力不正(終了コード1)。
                 try:
-                    new_bone = apply_pose_denoise(doc.bone, pmx_path=args.pmx)
+                    new_bone = apply_pose_denoise(
+                        doc.bone, pmx_path=args.pmx, diagnostics_out=pose_diag
+                    )
                 except (MocapModelProfileError, PmxFormatError):
                     return 1
             else:
@@ -291,6 +295,7 @@ def main(argv=None):
             foot_ik_stabilize=args.foot_ik_stabilize,
             reduction=reduction_diag,
             suppression=args.foot_slide_suppression,
+            pose_denoise=pose_diag,
         )
         if args.dry_run:
             print(report.format_dry_run(rep))
