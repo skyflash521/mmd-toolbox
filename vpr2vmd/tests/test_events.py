@@ -6,6 +6,8 @@
 長さ 0 以下は除外する。
 """
 
+import pytest
+
 from lipsync import MouthShape
 from vpr_io import Note, TempoEvent
 
@@ -176,3 +178,111 @@ def test_build_is_contiguous_and_covers_full_axis():
     for a, b in zip(result, result[1:]):
         assert a.end == b.start
     assert result[-1].end == 30.0  # 960/32
+
+
+# --- 開き量の付与: 母音的口形イベントへ音符別開き量を刻印、無音は 0 ---
+
+def _build_so(adopted, *, use_n_morph=True, open_by_note=None):
+    return [
+        (e.shape, e.open_amount)
+        for e in events.build_mouth_events(
+            adopted, _TEMPOS, _RES, use_n_morph=use_n_morph, open_by_note=open_by_note
+        )
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_defaults_zero_without_open_by_note():
+    # open_by_note を渡さなければ全イベントの開き量は 0(既定・後方互換)。
+    assert _build_so([_note(0, 240, phonemes=["a"])]) == [(MouthShape.A, 0.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_stamps_note_open_on_vowel():
+    # 母音イベントへ該当音符の開き量を刻印する。
+    assert _build_so([_note(0, 240, phonemes=["a"])], open_by_note=[0.6]) == [(MouthShape.A, 0.6)]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_shared_across_moras_of_one_note():
+    # 1音符の複数母音(モーラ)は同じ音符の開き量を共有する。
+    assert _build_so([_note(0, 480, phonemes=["a", "i"])], open_by_note=[0.5]) == [
+        (MouthShape.A, 0.5),
+        (MouthShape.I, 0.5),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_on_moraic_nasal_when_on():
+    # 撥音「ん」は母音的口形なので開き量を刻印する(ん ON)。
+    assert _build_so([_note(0, 240, phonemes=["N\\"])], use_n_morph=True, open_by_note=[0.3]) == [
+        (MouthShape.N, 0.3),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_zero_on_moraic_nasal_when_off():
+    # ん OFF では撥音は無音(SILENCE)なので母音的口形でなく開き量 0(音符の開き量を無視)。
+    assert _build_so([_note(0, 240, phonemes=["N\\"])], use_n_morph=False, open_by_note=[0.3]) == [
+        (MouthShape.SILENCE, 0.0),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_zero_on_geminate_silence():
+    # 促音(無音)は母音的口形でないので音符の開き量を無視し 0。
+    assert _build_so([_note(0, 480, phonemes=["w", "Q"])], open_by_note=[0.9]) == [
+        (MouthShape.SILENCE, 0.0),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_zero_on_leading_bilabial():
+    # 語頭両唇閉鎖(BILABIAL)も母音的口形でないので開き量 0。後続母音は音符の開き量。
+    # [m,a] [0,480) frame[0,15) → 語頭閉鎖 d_b=min(3.0,15*0.5)=3、BILABIAL[0,3)・A[3,15)。
+    assert _build_so([_note(0, 480, phonemes=["m", "a"])], open_by_note=[0.6]) == [
+        (MouthShape.BILABIAL, 0.0),
+        (MouthShape.A, 0.6),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_zero_on_rest_silence():
+    # 先頭休符は音符に紐づかないので開き量 0。続く母音は自音符の開き量。
+    assert _build_so([_note(240, 240, phonemes=["a"])], open_by_note=[0.7]) == [
+        (MouthShape.SILENCE, 0.0),
+        (MouthShape.A, 0.7),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_on_continuation_uses_continuation_note_open():
+    # 継続(母音なし→直前口形を継続)の保持イベントは、継続音符自身の開き量を持つ
+    # (直前音符の開き量ではない)。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(240, 240, phonemes=["-"])]
+    assert _build_so(adopted, open_by_note=[0.4, 0.8]) == [
+        (MouthShape.A, 0.4),
+        (MouthShape.A, 0.8),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_on_continuation_holding_moraic_nasal():
+    # 継続が直前の撥音「ん」(N)を保持する場合、N は母音的口形なので継続音符自身の開き量を刻印する。
+    adopted = [_note(0, 240, phonemes=["N\\"]), _note(240, 240, phonemes=["-"])]
+    assert _build_so(adopted, use_n_morph=True, open_by_note=[0.3, 0.8]) == [
+        (MouthShape.N, 0.3),
+        (MouthShape.N, 0.8),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: P-4b 開き量のイベント付与", strict=True)
+def test_build_open_zero_on_continuation_holding_closed():
+    # 継続が直前の閉口(SILENCE)を保持する場合は母音的口形でないので、継続音符の開き量を
+    # 無視して 0 にする(休符後の継続。[a][0,240)→休符[7.5,22.5)→[-][720,960) は閉口継続)。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(720, 240, phonemes=["-"])]
+    assert _build_so(adopted, open_by_note=[0.4, 0.8]) == [
+        (MouthShape.A, 0.4),
+        (MouthShape.SILENCE, 0.0),
+        (MouthShape.SILENCE, 0.0),
+    ]
