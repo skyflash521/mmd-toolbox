@@ -10,11 +10,7 @@ import json
 import zipfile
 
 import pytest
-
-# 抽出層 vpr2vmd.io は後続実装で入るため、それまでスキップする。
-vio = pytest.importorskip("vpr2vmd.io", reason="impl pending: P-1 vpr読み込み")
-
-from vpr_io import (  # noqa: E402
+from vpr_io import (
     Note,
     Part,
     TempoEvent,
@@ -22,7 +18,9 @@ from vpr_io import (  # noqa: E402
     VprProject,
     rest_intervals,
 )
-from vpr_io import read as vpr_read  # noqa: E402
+from vpr_io import read as vpr_read
+
+from vpr2vmd import io as vio
 
 
 def _make_vpr(sequence: dict) -> bytes:
