@@ -492,6 +492,75 @@ def test_report_json_roundtrip_with_reduction(tmp_path):
     assert loaded == rep  # reduction セクションが JSON ネイティブ型で往復する
 
 
+# --- 表現空間ノイズ除去レポート(§12: マーカー数・必須ボーン検証・変位・fit改善・フォールバック) ---
+
+
+def _pose_denoise_diag():
+    # pose_denoise.apply_pose_denoise の diagnostics_out と同じ素データ schema(レポート層へ渡す入力)。
+    return {
+        "enabled": True,
+        "pmx": None,
+        "frames": 11,
+        "markers": {"available": 16, "required_bones_ok": True},
+        "marker_displacement": {
+            "max": 0.23,
+            "mean": 0.05,
+            "by_marker": {"head": {"max": 0.23, "mean": 0.06}},
+        },
+        "fit": {
+            "frames": 11,
+            "fallback_frames": 2,
+            "mean_error_before": 0.08,
+            "mean_error_after": 0.03,
+            "max_bone_delta_deg": 2.4,
+            "max_center_delta": 0.12,
+        },
+    }
+
+
+@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
+def test_build_report_includes_pose_denoise_block():
+    # pose_denoise 素データを渡すとトップレベルに pose_denoise セクションがそのまま載る(§12)。
+    keys = [bone("センター", 0), bone("センター", 10)]
+    diag = _pose_denoise_diag()
+    rep = report.build_report(keys, pose_denoise=diag)
+    # 素データを改変せずそのまま載せる契約(全フィールドを固定)。
+    assert rep["pose_denoise"] == diag
+
+
+def test_build_report_omits_pose_denoise_when_absent():
+    # pose_denoise を渡さない既定では pose_denoise セクションを付けない(bone モード相当)。
+    rep = report.build_report([bone("センター", 0), bone("センター", 10)])
+    assert "pose_denoise" not in rep
+
+
+@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
+def test_format_dry_run_shows_pose_summary():
+    # dry-run 表示に有効マーカー数・必須ボーン検証・最大マーカー変位・fit改善・フォールバック数が出る(§12)。
+    rep = report.build_report(
+        [bone("センター", 0), bone("センター", 10)], pose_denoise=_pose_denoise_diag()
+    )
+    text = report.format_dry_run(rep)
+    assert "pose" in text.lower()
+    assert "既定モデルプロファイル" in text    # PMX未使用=既定プロファイル使用の明示(pmx=None)
+    assert "available=16" in text             # 有効マーカー数
+    assert "required_bones_ok=True" in text   # 必須標準ボーン検証
+    assert "max=0.23" in text                 # 最大マーカー変位
+    assert "0.08" in text and "0.03" in text  # fit改善(before -> after)
+    assert "fallback=2" in text               # フォールバック数
+
+
+@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
+def test_report_json_roundtrip_with_pose_denoise(tmp_path):
+    rep = report.build_report(
+        [bone("センター", 0), bone("センター", 10)], pose_denoise=_pose_denoise_diag()
+    )
+    path = tmp_path / "report.json"
+    report.write_json(rep, str(path))
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    assert loaded == rep  # pose_denoise セクションが JSON ネイティブ型で往復する
+
+
 def test_report_reduction_rate_derives_from_diagnostics_keys():
     # 削減率は diagnostics の input_keys/output_keys から派生する(エントリの実キー数ではない)。
     # 実トラック11キーに対し diagnostics input_keys=10 を渡し、1-3/10 になることで派生元を固定する。

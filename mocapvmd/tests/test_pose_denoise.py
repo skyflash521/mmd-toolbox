@@ -10,7 +10,8 @@ import pytest
 from mmd_toolbox.vmd.reduce import BONE_LINEAR_INTERP
 from mmd_toolbox.vmd.types import BoneKey
 
-from .helpers import BONE_NONLINEAR, bone
+from .helpers import BONE_NONLINEAR, bone, build_standard_pmx
+from mocapvmd.model_profile import STANDARD_BONE_NAMES
 
 from mocapvmd.pose_denoise import apply_pose_denoise
 
@@ -78,3 +79,54 @@ def test_output_keys_are_valid_bonekeys():
         assert len(k.rotation) == 4
         assert isinstance(k.interpolation, bytes)
         assert len(k.interpolation) == 64
+
+
+# --- 診断レポート素データ(§12: diagnostics_out) -----------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
+def test_diagnostics_out_populated():
+    # diagnostics_out を渡すと §12 構造(マーカー数・必須ボーン検証・変位・fit診断)を埋める。
+    keys = [
+        bone("センター", 0, pos=(0.2, 0.0, 0.0)),
+        bone("センター", 5, pos=(0.5, 0.0, 0.0)),
+        bone("頭", 0),
+        bone("頭", 10, rot=(0.0, 0.0, 0.05, 0.99875)),
+    ]
+    diag = {}
+    out = apply_pose_denoise(keys, pmx_path=None, diagnostics_out=diag)
+    assert out  # 診断要求時も従来どおり密キー列を返す
+    assert diag["enabled"] is True
+    assert diag["pmx"] is None  # 既定モデルプロファイル使用時は None
+    assert diag["frames"] == 11  # 全体フレーム範囲 0..10
+    assert diag["markers"]["available"] > 0
+    assert diag["markers"]["required_bones_ok"] is True
+    md = diag["marker_displacement"]
+    assert md["max"] >= md["mean"] >= 0.0
+    assert isinstance(md["by_marker"], dict) and md["by_marker"]
+    for stats in md["by_marker"].values():
+        assert stats["max"] >= stats["mean"] >= 0.0
+    fit = diag["fit"]
+    assert fit["frames"] == 11
+    assert fit["fallback_frames"] >= 0
+    # フィットはマーカー誤差を悪化させない(フォールバック含め before 以下)。
+    assert fit["mean_error_after"] <= fit["mean_error_before"] + 1e-9
+    assert fit["max_bone_delta_deg"] >= 0.0
+    assert fit["max_center_delta"] >= 0.0
+
+
+@pytest.mark.xfail(reason="impl pending: pose-denoise診断", strict=False)
+def test_diagnostics_records_pmx_path(tmp_path):
+    # --pmx 指定時は診断の pmx フィールドにそのパスを記録する。
+    pmx = tmp_path / "model.pmx"
+    pmx.write_bytes(build_standard_pmx(list(STANDARD_BONE_NAMES.values())))
+    keys = [bone("センター", 0), bone("センター", 5, pos=(0.3, 0.0, 0.0))]
+    diag = {}
+    apply_pose_denoise(keys, pmx_path=str(pmx), diagnostics_out=diag)
+    assert diag["pmx"] == str(pmx)
+
+
+def test_no_diagnostics_arg_returns_list():
+    # diagnostics_out 省略(既定)は従来どおり密キー列だけを返す。
+    out = apply_pose_denoise([bone("頭", 0), bone("頭", 4, rot=(0.0, 0.0, 0.05, 0.9987))])
+    assert isinstance(out, list)
