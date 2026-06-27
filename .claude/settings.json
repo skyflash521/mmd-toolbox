@@ -38,6 +38,8 @@
       "Bash(git tag -l *)",
       "Bash(git tag)",
       "Bash(git worktree list)",
+      "Bash(node \"/*codex-companion.mjs*)",
+      "Bash(node \"C:/*codex-companion.mjs*)",
       "Bash(node /*codex-companion.mjs*)",
       "Bash(node C:/*codex-companion.mjs*)",
       "Bash(pytest)",
@@ -69,6 +71,11 @@
       {
         "matcher": "Bash",
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-codex.py\"",
+            "shell": "bash"
+          },
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-readonly.py\"",
