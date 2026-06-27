@@ -1,9 +1,8 @@
 """vpr2vmd CLI(vpr2vmd.md §4)。
 
 vpr を入力に、口形イベント列と開き量を作って lipsync に渡し、口パク VMD を 1 コマンドで
-出力する薄いラッパー。本ファイルは引数解析・検証・出力先解決と --dry-run の空実行を担う。
-実際の変換パイプライン(vpr 読み込み → 口形イベント確定 → 開き量 → lipsync → VMD 出力)は
-後続ステップで _convert() に実装する。
+出力する薄いラッパー。引数解析・検証・出力先解決と --dry-run の空実行を担い、変換パイプライン
+(vpr 読み込み → 口形イベント確定 → 開き量 → lipsync → VMD 出力)は _convert() が束ねる。
 
 終了コード(既存ツール shakevmd 等の規約に倣う):
 0 正常 / 1 入力不正(入力 vpr の欠落・非vpr 等) / 2 引数エラー(未知オプション・範囲不正・
@@ -15,8 +14,15 @@ import math
 import os
 import sys
 
-# 口パクスタイルプリセット名(vpr2vmd.md §4.2)。プリセットごとの開き量レンジ・タイミング等の
-# 具体値の解決は後続の実装で行う。
+from lipsync import generate_morph_keys
+from mmd_toolbox.vmd import VmdDocument, write_file
+from vpr_io import VprFormatError, read
+
+from . import openness, presets
+from .events import build_mouth_events, resolve_overlaps
+from .io import TrackSelectionError, collect_notes, select_track
+
+# 口パクスタイルプリセット名(vpr2vmd.md §4.2)。具体値の解決は presets.resolve が担う。
 STYLE_NAMES = ("pop", "ballad", "powerful", "whisper", "rap")
 
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS(vpr2vmd.md §4.2・§5)。
@@ -60,13 +66,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
     # --track は整数なら 0-based INDEX、非整数なら Track.name(vpr2vmd.md §4.2)。解釈・解決は
-    # 対象トラックを持つ後続の実装で行うため、ここでは生文字列のまま保持する(type=str)。
+    # io.select_track が行うため、ここでは生文字列のまま保持する(type=str)。
     p.add_argument("--track")
     p.add_argument("--model-name", dest="model_name", type=_model_name, default="")
     p.add_argument("--style", choices=STYLE_NAMES, default="pop")
     # 既定は「ん」モーフを使う。指定時は撥音「ん」を無音(閉口)へ倒す(vpr2vmd.md §4.2)。
     p.add_argument("--no-n-morph", dest="no_n_morph", action="store_true")
-    # 既定はプリセット値。未指定センチネル(None)を後続ステップでプリセットから解決する。
+    # 既定はプリセット値。未指定センチネル(None)は presets.resolve がプリセットから解決する。
     p.add_argument("--open-max", dest="open_max", type=_open_amount)
     p.add_argument("--default-open", dest="default_open", type=_open_amount)
     p.add_argument("--report-json", dest="report_json")
@@ -107,9 +113,51 @@ def _print_plan(args, output: str) -> None:
 
 
 def _convert(args, output: str) -> int:
-    """vpr → 口パク VMD の変換本体。後続ステップ(vpr 読み込み・口形イベント確定・開き量・
-    lipsync・VMD 出力)で実装する。"""
-    raise NotImplementedError("vpr→VMD 変換は未実装(後続ステップで実装)")
+    """vpr → 口パク VMD の変換本体(vpr2vmd.md §3〜§5)。
+
+    vpr_io 解析 → 対象トラック選択 → 重なり解決 → 口形イベント確定 → 開き量 → lipsync →
+    モーフキー VMD 出力を束ねる。終了コードは vpr2vmd.md §4.3 に従う(形式失敗・対象トラック
+    皆無=1、`--track` の不正値=2、出力書き込み失敗=3、それ以外は 0)。
+    """
+    try:
+        project, _warnings = read(args.input)
+    except VprFormatError:
+        return 1  # 読み込み・形式検証の失敗(非vpr など)=入力不正
+    if not project.tracks:
+        return 1  # 対象トラックが1件も無い=入力不正
+    try:
+        track = select_track(project, args.track)
+    except TrackSelectionError:
+        return 2  # --track の値が当該入力で有効な選択にならない=引数エラー
+
+    adopted = resolve_overlaps(collect_notes(track))
+    openness_params, gen_params = presets.resolve(args.style, args.open_max, args.default_open)
+    open_by_note = openness.open_amounts(
+        [note.velocity for note in adopted],
+        lo=openness_params.lo,
+        hi=openness_params.hi,
+        open_max=openness_params.open_max,
+        default_open=openness_params.default_open,
+        gamma=openness_params.gamma,
+    )
+    mouth_events = build_mouth_events(
+        adopted,
+        project.tempos,
+        project.resolution,
+        use_n_morph=not args.no_n_morph,
+        open_by_note=open_by_note,
+    )
+    morph_keys = generate_morph_keys(mouth_events, gen_params)
+
+    document = VmdDocument(
+        model_name_raw=args.model_name.encode("cp932").ljust(20, b"\x00"),
+        morph=morph_keys,
+    )
+    try:
+        write_file(document, output)
+    except OSError:
+        return 3  # 出力VMDの書き込み失敗
+    return 0
 
 
 def main(argv=None) -> int:
@@ -133,7 +181,7 @@ def main(argv=None) -> int:
     if not args.overwrite and (_same_path(output, args.input) or os.path.exists(output)):
         return 2
 
-    # 入力 vpr の存在確認(欠落は入力不正)。読み込み・形式検証は後続ステップ。
+    # 入力 vpr の存在確認(欠落は入力不正)。読み込み・形式検証は _convert が行う。
     if not os.path.isfile(args.input):
         return 1
 

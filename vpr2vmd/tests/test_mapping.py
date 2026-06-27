@@ -132,8 +132,8 @@ def test_bilabial_fricative_is_not_bilabial_event():
 
 
 def test_open_amount_placeholder_zero_for_all_event_kinds():
-    # 開き量(ベロシティ写像)は後続ステップ。本段では母音・両唇閉鎖・撥音・促音(無音)の
-    # 全イベントで既定 0.0。
+    # 開き量は本段(mapping)では付与せず、組み立て段の build_mouth_events が刻印する。本段では
+    # 母音・両唇閉鎖・撥音・促音(無音)の全イベントで既定 0.0。
     for phonemes in (["a"], ["m", "a"], ["N\\"], ["Q"]):
         events = mapping.note_mouth_events(phonemes, 0.0, 30.0)
         assert events
