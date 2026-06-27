@@ -1,4 +1,4 @@
-"""PMX読み取り(pmx-read-fk-plan.md §4・docs/specs/pmx/PMX仕様.txt)。
+"""PMX読み取り(pmx.md・docs/specs/pmx/PMX仕様.txt)。
 
 ボーン階層のみを保持し、それ以外のセクション(頂点・面・テクスチャ・材質・
 モーフ・表示枠・剛体・ジョイント・SoftBody)は個数を読んで本体を読み飛ばす。

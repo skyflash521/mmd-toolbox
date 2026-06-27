@@ -1,4 +1,4 @@
-"""FK評価のテスト(pmx-read-fk-plan.md §6.2)。
+"""FK評価のテスト(pmx.md §7)。
 
 PmxModel/PmxBone はデータモデルを直接組み立て、BoneKey のトラックを与えて
 ローカル姿勢サンプリングと前方運動学を検証する。
