@@ -401,6 +401,7 @@ def main(argv=None) -> int:
             max_seg=_SMOOTH_MAX_SEG,
             strict=False,
             curve_mode="bezier",
+            force_bezier=True,
         )
 
     doc.camera = camera_out

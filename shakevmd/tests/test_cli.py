@@ -1325,6 +1325,7 @@ class TestSmooth:
             keep_frames=keep,
             no_cut_detect=True,
             min_seg=1, max_seg=5, strict=False, curve_mode="bezier",
+            force_bezier=True,
         )
         for i in range(0, 241):             # 0..60 を 0.25 刻み(60fps超サンプルを含む)
             f = i * 0.25
@@ -1406,7 +1407,6 @@ class TestSmooth:
         monkeypatch.setattr(cli, "reduce_camera_track", capturing)
         assert self._bake(tmp_path / "smooth.vmd", "--smooth") == 0
         assert captured  # 前提: smooth 経路で reduce_camera_track が呼ばれた
-        pytest.xfail("impl pending: shakevmd force_bezier wiring")
         assert captured.get("force_bezier") is True
 
     def test_smooth_bezier_ratio_recovers(self, tmp_path):
@@ -1415,6 +1415,5 @@ class TestSmooth:
         out = tmp_path / "smooth.vmd"
         assert self._bake(out, "--smooth") == 0
         ks = [bytes(k.interpolation) for k in read_camera(out)[1:]]  # 先頭キーは区間評価外
-        pytest.xfail("impl pending: shakevmd force_bezier wiring")
         curved_keys = sum(1 for b in ks if any(_curved(b[j:j + 4]) for j in (0, 4, 8, 12)))
         assert curved_keys / len(ks) >= 0.85
