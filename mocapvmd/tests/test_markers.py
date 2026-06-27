@@ -14,22 +14,10 @@ from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
 
 from .helpers import bone, build_standard_pmx
 
-try:
-    from mocapvmd.markers import (
-        MarkerTrajectories,
-        evaluate_world_poses,
-        extract_markers,
-    )
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: pose-denoise Step3+4 markers
-pytestmark = (
-    []
-    if _IMPORT_OK
-    else pytest.mark.skip(reason="impl pending: pose-denoise Step3+4 markers")
+from mocapvmd.markers import (
+    MarkerTrajectories,
+    evaluate_world_poses,
+    extract_markers,
 )
 
 _EXPECTED_MARKERS = {
