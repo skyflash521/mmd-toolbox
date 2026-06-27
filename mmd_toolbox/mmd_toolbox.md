@@ -49,6 +49,7 @@ MMDファイルフォーマット層の機能を提供する。
       pmx/
         types.py    # データモデル(PmxModel/PmxBone/PmxWarning。pmx.md)
         io.py       # PMX読み取り(read_pmx。pmx.md)
+        pose.py     # FK評価(ローカル姿勢サンプリング・前方運動学。pmx.md)
 
 機能別仕様書:
 
@@ -57,7 +58,7 @@ MMDファイルフォーマット層の機能を提供する。
 | [vmd-io.md](vmd-io.md) | vmd/types, vmd/io | VMD読み書き・データモデル・正規化・ラウンドトリップ保証 |
 | [vmd-interp.md](vmd-interp.md) | vmd/interp | MMD互換の補間曲線評価・サンプリング |
 | [vmd-camera.md](vmd-camera.md) | vmd/camera | カメラモデルの座標変換・符号規約 |
-| [pmx.md](pmx.md) | pmx/types, pmx/io | PMX読み取り・ボーン階層データモデル |
+| [pmx.md](pmx.md) | pmx/types, pmx/io, pmx/pose | PMX読み取り・ボーン階層データモデル・FK評価 |
 
 キーフレーム疎化の共通機構 `vmd/reduce`(支援: `vmd/cuts`・`vmd/fit`・`vmd/sample`)は
 複数ツール(shakevmd・sparsevmd・mocapvmd)が共有する。疎化アルゴリズム(区間分割・キー削減・

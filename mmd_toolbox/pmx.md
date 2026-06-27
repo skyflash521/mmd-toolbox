@@ -1,17 +1,20 @@
-# pmx — PMX読み取り
+# pmx — PMX読み取り・FK評価
 
 PMXモデルファイルからボーン階層を読み取り、共通データモデルへ変換する。
+さらに、VMDローカル姿勢をボーン階層へ適用する前方運動学(FK)評価を提供する。
 
-対応モジュール: `pmx/types.py`(データモデル)・`pmx/io.py`(`read_pmx`)。
+対応モジュール: `pmx/types.py`(データモデル)・`pmx/io.py`(`read_pmx`)・
+`pmx/pose.py`(FK評価)。
 
 バイナリレイアウトの正は `docs/specs/pmx/PMX仕様.txt`。本書ではバイト
-レイアウトを重複記載せず、読み取り範囲・データモデル・規約・エラーを定める。
+レイアウトを重複記載せず、読み取り範囲・データモデル・規約・エラー・FK評価を定める。
 
 ---
 
 ## 1. 位置づけ
 
-PMXのうち、FK評価に必要なボーン情報だけを保持する読み取り専用パーサ。
+PMXのうちFK評価に必要なボーン情報だけを保持する読み取り専用パーサと、
+VMDローカル姿勢をPMXボーン階層に適用する近似FK評価を提供する。
 PMXの編集・書き出し、IK解決、付与親・物理演算の評価は対象外。
 
 対応バージョンは PMX 2.0 / 2.1。非対応バージョンは読み取りを中断する。
@@ -100,3 +103,54 @@ read_pmx(source: str | Path | bytes) -> PmxModel
 ```
 
 `source` はPMXファイルのパス(`str` または `pathlib.Path`)、またはPMXバイト列。
+
+---
+
+## 7. FK評価
+
+VMDボーンキーを指定フレームでサンプルしてローカル姿勢を作り、PMXボーン
+階層に沿って前方運動学でワールド姿勢を評価する。IK・付与親・物理演算は
+扱わない近似FKである。
+
+### 7.1 データモデル
+
+`LocalBonePose` / `WorldBonePose` はいずれも次のフィールドを持つ。
+
+| フィールド | 内容 |
+|---|---|
+| `position` | 位置 `(x, y, z)` |
+| `rotation` | クォータニオン `(x, y, z, w)` |
+
+`LocalBonePose` はVMD由来のローカル移動量・回転量、`WorldBonePose` は
+FK評価後のワールド位置・回転を表す。
+
+### 7.2 評価規約
+
+各ボーンのローカル変換とワールド変換は次で定める。
+
+```text
+base_offset       = bone.position - parent.position
+local_translation = base_offset + (移動可能なら VMD位置)
+local_rotation    = (回転可能なら VMD回転、でなければ単位回転)
+world             = parent_world * translate(local_translation) * rotate(local_rotation)
+```
+
+- 親を持たないボーンはモデル原点を親とする。
+- VMDにキーが無いボーンはローカル位置 `(0,0,0)`・単位クォータニオンを用いる。
+- クォータニオンは `(x, y, z, w)` で扱い、正規化して適用する。
+- 親が子より後ろのindexに置かれていても、ワールド姿勢を解決できる。
+
+### 7.3 API
+
+```text
+sample_local_poses(model: PmxModel, bone_tracks: dict[str, list[BoneKey]], frame: int)
+    -> tuple[LocalBonePose, ...]
+evaluate_fk(model: PmxModel, local_poses: tuple[LocalBonePose, ...])
+    -> tuple[WorldBonePose, ...]
+evaluate_fk_range(model: PmxModel, bone_tracks: dict[str, list[BoneKey]], frames: range)
+    -> list[tuple[WorldBonePose, ...]]
+```
+
+- `bone_tracks` はボーン名から `BoneKey` 列への対応。
+- 返り値は `model.bones` と同じ並び順。
+- `evaluate_fk_range` は `frames` の各フレームについて決定論的な結果を順に返す。
