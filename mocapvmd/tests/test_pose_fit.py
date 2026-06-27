@@ -14,23 +14,11 @@ from mmd_toolbox.vmd.types import BoneKey
 from mocapvmd.markers import evaluate_world_poses, extract_markers
 from mocapvmd.model_profile import load_mocap_profile
 
-try:
-    from mocapvmd.pose_fit import (
-        DEFAULT_FIT_PARAMS,
-        FitParams,
-        FitResult,
-        fit,
-    )
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: pose-denoise Step6 pose_fit
-pytestmark = (
-    []
-    if _IMPORT_OK
-    else pytest.mark.skip(reason="impl pending: pose-denoise Step6 pose_fit")
+from mocapvmd.pose_fit import (
+    DEFAULT_FIT_PARAMS,
+    FitParams,
+    FitResult,
+    fit,
 )
 
 
