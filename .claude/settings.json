@@ -98,6 +98,11 @@
           },
           {
             "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-pytest-pipe.py\"",
+            "shell": "bash"
+          },
+          {
+            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-sed-inplace.py\"",
             "shell": "bash"
           }
