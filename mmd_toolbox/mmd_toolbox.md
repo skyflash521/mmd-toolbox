@@ -46,7 +46,9 @@ MMDファイルフォーマット層の機能を提供する。
         cuts.py     # 不連続検出・必須境界の管理(reduce の支援)
         fit.py      # 補間曲線フィット・チャンネル別誤差評価(reduce の支援)
         sample.py   # サンプリング小ヘルパ(perspective の直近ホールド。reduce の支援)
-      pmx/          # 将来: PMX読み込み(docs/specs/pmx/ 参照)
+      pmx/
+        types.py    # データモデル(PmxModel/PmxBone/PmxWarning。pmx.md)
+        io.py       # PMX読み取り(read_pmx。pmx.md)
 
 機能別仕様書:
 
@@ -55,6 +57,7 @@ MMDファイルフォーマット層の機能を提供する。
 | [vmd-io.md](vmd-io.md) | vmd/types, vmd/io | VMD読み書き・データモデル・正規化・ラウンドトリップ保証 |
 | [vmd-interp.md](vmd-interp.md) | vmd/interp | MMD互換の補間曲線評価・サンプリング |
 | [vmd-camera.md](vmd-camera.md) | vmd/camera | カメラモデルの座標変換・符号規約 |
+| [pmx.md](pmx.md) | pmx/types, pmx/io | PMX読み取り・ボーン階層データモデル |
 
 キーフレーム疎化の共通機構 `vmd/reduce`(支援: `vmd/cuts`・`vmd/fit`・`vmd/sample`)は
 複数ツール(shakevmd・sparsevmd・mocapvmd)が共有する。疎化アルゴリズム(区間分割・キー削減・
@@ -64,7 +67,8 @@ MMDファイルフォーマット層の機能を提供する。
 カメラ枠を含む共通 `Tolerances` を扱うが、ボーンだけを扱うツール向けに、ボーンの位置・回転許容誤差だけを
 受け取り未使用のカメラ枠を内部で埋めて `Tolerances` を返すヘルパ `build_bone_tolerances` を提供する。
 
-バイナリレイアウトの正は `docs/specs/vmd/VMD_file_format.md` とし、
+バイナリレイアウトの正は VMD は `docs/specs/vmd/VMD_file_format.md`、
+PMX は `docs/specs/pmx/PMX仕様.txt` とし、
 本ライブラリの仕様書ではバイトレイアウトを重複記載しない。
 
 ---
