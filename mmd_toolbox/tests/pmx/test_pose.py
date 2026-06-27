@@ -10,22 +10,12 @@ import pytest
 
 from mmd_toolbox.vmd.types import BoneKey
 
-try:
-    from mmd_toolbox.pmx.pose import (
-        evaluate_fk,
-        evaluate_fk_range,
-        sample_local_poses,
-    )
-    from mmd_toolbox.pmx.types import PmxBone, PmxModel
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: Step2 FK評価
-pytestmark = (
-    [] if _IMPORT_OK else pytest.mark.skip(reason="impl pending: Step2 FK評価")
+from mmd_toolbox.pmx.pose import (
+    evaluate_fk,
+    evaluate_fk_range,
+    sample_local_poses,
 )
+from mmd_toolbox.pmx.types import PmxBone, PmxModel
 
 # Z軸まわり90度のクォータニオン (x,y,z,w)
 _SIN45 = math.sin(math.pi / 4)
