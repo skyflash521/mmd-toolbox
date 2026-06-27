@@ -1394,3 +1394,27 @@ class TestSmooth:
         assert dpp > 5.0               # 振幅が十分大きい(平坦入力での形骸化防止)
         # 振幅(peak-to-peak)が密とほぼ一致=平坦化していない(許容ぶんの目減りは許す)。
         assert spp >= dpp - 2 * SMOOTH_ROT_TOL_DEG
+
+    def test_smooth_passes_force_bezier_true(self, tmp_path, monkeypatch):
+        # 配線: --smooth は共有エンジン reduce_camera_track を force_bezier=True で呼び、
+        # 共有の線形ファストパスを切って実ベジェを強制する。reduce 呼び出しを捕捉して直接確かめる。
+        captured = {}
+        real = cli.reduce_camera_track
+        def capturing(*args, **kwargs):
+            captured.update(kwargs)
+            return real(*args, **kwargs)
+        monkeypatch.setattr(cli, "reduce_camera_track", capturing)
+        assert self._bake(tmp_path / "smooth.vmd", "--smooth") == 0
+        assert captured  # 前提: smooth 経路で reduce_camera_track が呼ばれた
+        pytest.xfail("impl pending: shakevmd force_bezier wiring")
+        assert captured.get("force_bezier") is True
+
+    def test_smooth_bezier_ratio_recovers(self, tmp_path):
+        # --smooth 出力のベジェ比率が回復(非定数区間が線形に退化しない)。共有ファストパスを切ると
+        # 位置・回転チャンネルがある到達キーは大半が曲線になる(線形退化時は半数程度に落ちる)。
+        out = tmp_path / "smooth.vmd"
+        assert self._bake(out, "--smooth") == 0
+        ks = [bytes(k.interpolation) for k in read_camera(out)[1:]]  # 先頭キーは区間評価外
+        pytest.xfail("impl pending: shakevmd force_bezier wiring")
+        curved_keys = sum(1 for b in ks if any(_curved(b[j:j + 4]) for j in (0, 4, 8, 12)))
+        assert curved_keys / len(ks) >= 0.85
