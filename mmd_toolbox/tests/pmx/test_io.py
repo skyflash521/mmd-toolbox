@@ -9,18 +9,8 @@ import struct
 
 import pytest
 
-try:
-    from mmd_toolbox.pmx.io import read_pmx
-    from mmd_toolbox.pmx.types import PmxFormatError
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: Step1 PMX読み取り
-pytestmark = (
-    [] if _IMPORT_OK else pytest.mark.skip(reason="impl pending: Step1 PMX読み取り")
-)
+from mmd_toolbox.pmx.io import read_pmx
+from mmd_toolbox.pmx.types import PmxFormatError
 
 
 # ---------------------------------------------------------------------------
@@ -169,20 +159,134 @@ def pmx_pre_bone_section(
     return bytes(out)
 
 
-def build_pmx(bones, **kwargs) -> bytes:
-    """ボーン配列までを含む構造的に完全な最小PMX。
+def build_morph(*, encoding: int, bone_index_size: int) -> bytes:
+    """ボーンモーフ1件(オフセット1個)。"""
+    out = bytearray()
+    out += _textbuf("morph", encoding)
+    out += _textbuf("morph_en", encoding)
+    out += struct.pack("<B", 1)  # 操作パネル
+    out += struct.pack("<B", 2)  # モーフ種類: ボーン
+    out += struct.pack("<i", 1)  # オフセット数
+    out += _idx(0, bone_index_size)  # ボーンIndex
+    out += struct.pack("<3f", 0.0, 0.0, 0.0)  # 移動量
+    out += struct.pack("<4f", 0.0, 0.0, 0.0, 1.0)  # 回転量
+    return bytes(out)
 
-    ボーンの後に続くモーフ・表示枠・剛体・Joint の各セクションは個数0で置く
-    (PMX仕様の構造概要に従い、ボーン以降のセクションも形式上存在させる)。
+
+def build_display_frame(*, encoding: int, bone_index_size: int) -> bytes:
+    """ボーン要素1個の表示枠。"""
+    out = bytearray()
+    out += _textbuf("frame", encoding)
+    out += _textbuf("frame_en", encoding)
+    out += struct.pack("<B", 0)  # 特殊枠フラグ
+    out += struct.pack("<i", 1)  # 枠内要素数
+    out += struct.pack("<B", 0)  # 要素対象: ボーン
+    out += _idx(0, bone_index_size)
+    return bytes(out)
+
+
+def build_rigidbody(*, encoding: int, bone_index_size: int) -> bytes:
+    out = bytearray()
+    out += _textbuf("rb", encoding)
+    out += _textbuf("rb_en", encoding)
+    out += _idx(0, bone_index_size)  # 関連ボーン
+    out += struct.pack("<B", 0)  # グループ
+    out += struct.pack("<H", 0)  # 非衝突グループ
+    out += struct.pack("<B", 0)  # 形状
+    out += struct.pack("<3f", 1.0, 1.0, 1.0)  # サイズ
+    out += struct.pack("<3f", 0.0, 0.0, 0.0)  # 位置
+    out += struct.pack("<3f", 0.0, 0.0, 0.0)  # 回転
+    out += struct.pack("<5f", 1.0, 0.0, 0.0, 0.0, 0.0)  # 質量・各減衰・反発・摩擦
+    out += struct.pack("<B", 0)  # 物理演算
+    return bytes(out)
+
+
+def build_joint(*, encoding: int, rigid_index_size: int) -> bytes:
+    out = bytearray()
+    out += _textbuf("jt", encoding)
+    out += _textbuf("jt_en", encoding)
+    out += struct.pack("<B", 0)  # Joint種類
+    out += _idx(-1, rigid_index_size)  # 関連剛体A
+    out += _idx(-1, rigid_index_size)  # 関連剛体B
+    for _ in range(8):  # 位置・回転・移動制限下上・回転制限下上・バネ移動・バネ回転
+        out += struct.pack("<3f", 0.0, 0.0, 0.0)
+    return bytes(out)
+
+
+def build_softbody(
+    *, encoding: int, material_index_size: int, rigid_index_size: int, vertex_index_size: int
+) -> bytes:
+    """アンカー・Pin 0個の最小SoftBody(PMX2.1)。"""
+    out = bytearray()
+    out += _textbuf("sb", encoding)
+    out += _textbuf("sb_en", encoding)
+    out += struct.pack("<B", 0)  # 形状
+    out += _idx(-1, material_index_size)  # 関連材質
+    out += struct.pack("<B", 0)  # グループ
+    out += struct.pack("<H", 0)  # 非衝突グループ
+    out += struct.pack("<B", 0)  # フラグ
+    out += struct.pack("<i", 0)  # B-Link作成距離
+    out += struct.pack("<i", 0)  # クラスタ数
+    out += struct.pack("<f", 1.0)  # 総質量
+    out += struct.pack("<f", 0.0)  # 衝突マージン
+    out += struct.pack("<i", 0)  # AeroModel
+    out += struct.pack("<25f", *([0.0] * 25))  # config12+cluster6+iteration4+material3
+    out += struct.pack("<i", 0)  # アンカー剛体数
+    out += struct.pack("<i", 0)  # Pin頂点数
+    return bytes(out)
+
+
+def build_pmx(
+    bones,
+    *,
+    morphs: int = 0,
+    display_frames: int = 0,
+    rigidbodies: int = 0,
+    joints: int = 0,
+    softbodies: int = 0,
+    **kwargs,
+) -> bytes:
+    """ボーン配列とそれ以降のセクションを含む構造的に完全なPMX。
+
+    ボーン以降(モーフ・表示枠・剛体・Joint、PMX2.1ではSoftBody)も
+    PMX仕様の構造概要どおり個数付きで置く。
     """
     encoding = kwargs.get("encoding", 0)
+    version = kwargs.get("version", 2.0)
     bone_index_size = kwargs.get("bone_index_size", 1)
+    material_index_size = kwargs.get("material_index_size", 1)
+    rigid_index_size = kwargs.get("rigid_index_size", 1)
+    vertex_index_size = kwargs.get("vertex_index_size", 1)
     out = bytearray(pmx_pre_bone_section(**kwargs))
     out += struct.pack("<i", len(bones))
     for b in bones:
         out += build_bone(b, encoding=encoding, bone_index_size=bone_index_size)
-    # モーフ・表示枠・剛体・Joint の各個数(すべて0)
-    out += struct.pack("<i", 0) * 4
+    # モーフ
+    out += struct.pack("<i", morphs)
+    for _ in range(morphs):
+        out += build_morph(encoding=encoding, bone_index_size=bone_index_size)
+    # 表示枠
+    out += struct.pack("<i", display_frames)
+    for _ in range(display_frames):
+        out += build_display_frame(encoding=encoding, bone_index_size=bone_index_size)
+    # 剛体
+    out += struct.pack("<i", rigidbodies)
+    for _ in range(rigidbodies):
+        out += build_rigidbody(encoding=encoding, bone_index_size=bone_index_size)
+    # Joint
+    out += struct.pack("<i", joints)
+    for _ in range(joints):
+        out += build_joint(encoding=encoding, rigid_index_size=rigid_index_size)
+    # SoftBody(PMX2.1のみ)
+    if version >= 2.05:
+        out += struct.pack("<i", softbodies)
+        for _ in range(softbodies):
+            out += build_softbody(
+                encoding=encoding,
+                material_index_size=material_index_size,
+                rigid_index_size=rigid_index_size,
+                vertex_index_size=vertex_index_size,
+            )
     return bytes(out)
 
 
@@ -304,10 +408,21 @@ def test_unsupported_encoding_raises():
         read_pmx(bytes(data))
 
 
-def test_bad_index_size_raises():
+# globals は offset 9 から [encoding, addUV, vertex, texture, material, bone, morph, rigid]
+@pytest.mark.parametrize(
+    "offset",
+    [11, 12, 13, 14, 15, 16],  # vertex/texture/material/bone/morph/rigid のIndexサイズ
+)
+def test_bad_index_size_raises(offset):
     data = bytearray(build_pmx([{"name": "a"}]))
-    # globals[5] ボーンIndexサイズ = offset 9 + 5 = 14
-    data[14] = 3
+    data[offset] = 3  # 1/2/4 以外
+    with pytest.raises(PmxFormatError):
+        read_pmx(bytes(data))
+
+
+def test_bad_add_uv_raises():
+    data = bytearray(build_pmx([{"name": "a"}]))
+    data[10] = 5  # 追加UV数(0..4 範囲外)
     with pytest.raises(PmxFormatError):
         read_pmx(bytes(data))
 
@@ -317,6 +432,52 @@ def test_truncated_section_raises():
     truncated = pmx_pre_bone_section() + struct.pack("<i", 1)
     with pytest.raises(PmxFormatError):
         read_pmx(truncated)
+
+
+def test_negative_bone_count_raises():
+    data = pmx_pre_bone_section() + struct.pack("<i", -1)
+    with pytest.raises(PmxFormatError):
+        read_pmx(data)
+
+
+def test_truncated_morph_section_raises():
+    """ボーン0・モーフ1を宣言するがモーフ本体が無い(ボーン以降も走査する)。"""
+    data = pmx_pre_bone_section() + struct.pack("<i", 0) + struct.pack("<i", 1)
+    with pytest.raises(PmxFormatError):
+        read_pmx(data)
+
+
+# ---------------------------------------------------------------------------
+# ボーン以降のセクションのスキップ
+# ---------------------------------------------------------------------------
+
+
+def test_reads_bones_past_full_trailing_sections():
+    """非空のモーフ・表示枠・剛体・Joint があってもボーンを正しく読む。"""
+    data = build_pmx(
+        [{"name": "センター"}, {"name": "子", "parent": 0}],
+        n_vertices=2,
+        n_materials=1,
+        morphs=2,
+        display_frames=1,
+        rigidbodies=1,
+        joints=1,
+    )
+    model = read_pmx(data)
+    assert [b.name for b in model.bones] == ["センター", "子"]
+
+
+def test_reads_bones_past_softbody_pmx21():
+    """PMX2.1 の SoftBody セクションを読み飛ばしてボーンを読む。"""
+    data = build_pmx(
+        [{"name": "センター"}],
+        version=2.1,
+        morphs=1,
+        rigidbodies=1,
+        softbodies=1,
+    )
+    model = read_pmx(data)
+    assert model.bones[0].name == "センター"
 
 
 # ---------------------------------------------------------------------------
