@@ -6,17 +6,33 @@
 長さ 0 以下は除外する。
 """
 
-from vpr_io import Note
+from lipsync import MouthShape
+from vpr_io import Note, TempoEvent
 
 from vpr2vmd import events
 
 
-def _note(start, dur, *, lyric="x"):
-    return Note(start_tick=start, duration_tick=dur, pitch=60, lyric=lyric, velocity=64, phonemes=[])
+def _note(start, dur, *, lyric="x", phonemes=None):
+    return Note(
+        start_tick=start, duration_tick=dur, pitch=60, lyric=lyric,
+        velocity=64, phonemes=phonemes if phonemes is not None else [],
+    )
 
 
 def _spans(notes):
     return [(n.start_tick, n.start_tick + n.duration_tick) for n in notes]
+
+
+# 120bpm・resolution 480 では 1 tick = 1/32 フレーム(tick 240→7.5, 480→15)。
+_TEMPOS = [TempoEvent(0, 120.0)]
+_RES = 480
+
+
+def _build_se(adopted, *, use_n_morph=True):
+    return [
+        (e.shape, e.start, e.end)
+        for e in events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=use_n_morph)
+    ]
 
 
 def test_empty():
@@ -64,3 +80,99 @@ def test_zero_duration_note_dropped():
 def test_zero_duration_note_dropped_others_kept():
     notes = [_note(0, 0), _note(100, 100)]
     assert _spans(events.resolve_overlaps(notes)) == [(100, 200)]
+
+
+# --- 組み立て: 採用音符列→フレーム変換→休符 SILENCE・直前口形継続・全時間軸被覆の MouthEvent 列 ---
+
+def test_build_empty_is_empty():
+    assert events.build_mouth_events([], _TEMPOS, _RES, use_n_morph=True) == []
+
+
+def test_build_single_vowel_note():
+    # [a] [0,480) → frame [0,15)。先頭休符なし・末尾休符なし。
+    assert _build_se([_note(0, 480, phonemes=["a"])]) == [(MouthShape.A, 0.0, 15.0)]
+
+
+def test_build_leading_rest_is_silence():
+    # 先頭〜最初の音符は SILENCE。[a] [240,480) → frame [7.5,15)、先頭 [0,7.5) は SILENCE。
+    assert _build_se([_note(240, 240, phonemes=["a"])]) == [
+        (MouthShape.SILENCE, 0.0, 7.5),
+        (MouthShape.A, 7.5, 15.0),
+    ]
+
+
+def test_build_gap_between_notes_is_silence():
+    # 採用音符列の発音区間の補集合が休符。[a][0,240) と [i][480,720) の間 [7.5,15) は SILENCE。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(480, 240, phonemes=["i"])]
+    assert _build_se(adopted) == [
+        (MouthShape.A, 0.0, 7.5),
+        (MouthShape.SILENCE, 7.5, 15.0),
+        (MouthShape.I, 15.0, 22.5),
+    ]
+
+
+def test_build_adjacent_notes_have_no_silence():
+    # 隙間なく隣接する音符の間には SILENCE を挟まない。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(240, 240, phonemes=["i"])]
+    assert _build_se(adopted) == [
+        (MouthShape.A, 0.0, 7.5),
+        (MouthShape.I, 7.5, 15.0),
+    ]
+
+
+def test_build_continuation_holds_previous_vowel():
+    # 継続「-」(母音なし音符)は直前の母音口形を保つ。[a] の後の [-] は あ を継続。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(240, 240, phonemes=["-"])]
+    assert _build_se(adopted) == [
+        (MouthShape.A, 0.0, 7.5),
+        (MouthShape.A, 7.5, 15.0),
+    ]
+
+
+def test_build_continuation_after_moraic_nasal_holds_n_when_on():
+    # ん ON では撥音の直後の継続は「ん」を保つ(直前の口形を保つ)。
+    adopted = [_note(0, 240, phonemes=["N\\"]), _note(240, 240, phonemes=["-"])]
+    assert _build_se(adopted, use_n_morph=True) == [
+        (MouthShape.N, 0.0, 7.5),
+        (MouthShape.N, 7.5, 15.0),
+    ]
+
+
+def test_build_continuation_after_moraic_nasal_stays_closed_when_off():
+    # ん OFF では撥音は閉口(SILENCE)。直後の継続も閉口を保ち口を開けない(「ん——」OFF)。
+    adopted = [_note(0, 240, phonemes=["N\\"]), _note(240, 240, phonemes=["-"])]
+    assert _build_se(adopted, use_n_morph=False) == [
+        (MouthShape.SILENCE, 0.0, 7.5),
+        (MouthShape.SILENCE, 7.5, 15.0),
+    ]
+
+
+def test_build_continuation_after_rest_holds_closed_not_pre_rest_vowel():
+    # 休符(閉口)の直後の母音なし音符は、休符前の母音を再開せず閉口を継続する。
+    # [a][0,240) frame[0,7.5)、休符[7.5,22.5)、[-][720,960) frame[22.5,30)。
+    adopted = [_note(0, 240, phonemes=["a"]), _note(720, 240, phonemes=["-"])]
+    assert _build_se(adopted) == [
+        (MouthShape.A, 0.0, 7.5),
+        (MouthShape.SILENCE, 7.5, 22.5),
+        (MouthShape.SILENCE, 22.5, 30.0),
+    ]
+
+
+def test_build_first_note_voweless_with_no_previous_is_silence():
+    # 直前口形が無い(曲頭の母音なし音符)は無音(閉口)。既定母音「あ」へ倒さない。
+    assert _build_se([_note(0, 480, phonemes=["t"])]) == [(MouthShape.SILENCE, 0.0, 15.0)]
+
+
+def test_build_geminate_is_silence():
+    # 促音(Q)は無音(閉口)。
+    assert _build_se([_note(0, 480, phonemes=["w", "Q"])]) == [(MouthShape.SILENCE, 0.0, 15.0)]
+
+
+def test_build_is_contiguous_and_covers_full_axis():
+    # 連続(終端=次の始端)・先頭 0・末尾=採用音符列の最後の終端、で全時間軸を被覆する。
+    adopted = [_note(240, 240, phonemes=["m", "a"]), _note(720, 240, phonemes=["i"])]
+    result = events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=True)
+    assert result[0].start == 0.0
+    for a, b in zip(result, result[1:]):
+        assert a.end == b.start
+    assert result[-1].end == 30.0  # 960/32
