@@ -131,6 +131,30 @@ def _transition_frames(diff: float, shorter_len: float, params: GenerationParams
     return _half_up(max(1.0, min(value, cap)))
 
 
+def _valley_depth(gap_len: float, params: GenerationParams) -> float:
+    """レガート間隙長から谷係数 d を線形で求める(間隙が長いほど小さく=深い)。
+
+    d = clamp(shallow − slope·gap_len, deep, shallow)。数値は GenerationParams の初期目安で、
+    視覚チューニングで詰める。
+    """
+    d = params.legato_valley_shallow - params.legato_valley_slope * gap_len
+    return min(max(d, params.legato_valley_deep), params.legato_valley_shallow)
+
+
+def _legato_bridge(events: Sequence[MouthEvent], gap_start: float, gap_end: float) -> bool:
+    """区間 [gap_start, gap_end) がレガート間隙(LEGATO_GAP のみで連続被覆)なら True。
+
+    無音・両唇閉鎖を1つでも挟む間隙は閉口優先で谷を作らない(False)。間隙分類は呼び出し側が
+    LEGATO_GAP/SILENCE で確定済み(lipsync.md §6)で、本判定はその確定入力を読むだけ。
+    """
+    if gap_end <= gap_start:
+        return False
+    span = [ev for ev in events if ev.start >= gap_start and ev.end <= gap_end and ev.start < ev.end]
+    if not span or span[0].start != gap_start or span[-1].end != gap_end:
+        return False
+    return all(ev.shape is MouthShape.LEGATO_GAP for ev in span)
+
+
 def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
     """連続する同一母音イベントを極大グループへ束ねる。
 
@@ -386,6 +410,12 @@ def generate_morph_keys(
         diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
         shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
         coart_half[i] = _transition_frames(diff, shorter, params) / 2.0
+    # 母音グループ i と i+1 の間がレガート間隙なら、その span [gs, ge] を谷で橋渡しする(閉口しない)。
+    legato_at: dict[int, tuple[float, float]] = {}
+    for i in range(n - 1):
+        gs, ge = groups[i].end, groups[i + 1].start
+        if _legato_bridge(events, gs, ge):
+            legato_at[i] = (gs, ge)
     # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、最後に一括量子化する。
     targets: list[tuple[str, float, float]] = []
     plateaus: list[tuple[float, float]] = []  # グループごとの保持プラトー [始端, 終端](伸び表現の対象)。
@@ -394,7 +424,14 @@ def generate_morph_keys(
         gw = weights[i]
         coart_in = i > 0 and groups[i - 1].end == g.start
         coart_out = i < n - 1 and groups[i + 1].start == g.end
-        if not coart_in:
+        legato_in = (i - 1) in legato_at  # 直前グループとの間がレガート間隙(谷が立ち上がりを担う)
+        legato_out = i in legato_at  # 次グループとの間がレガート間隙(谷が立ち下がりを担う)
+        if coart_in:
+            plateau_start = groups[i - 1].end + coart_half[i - 1]
+        elif legato_in:
+            # 谷が onset を担うため先頭アタックの 0.0/到達キーは置かない。
+            plateau_start = g.start
+        else:
             # 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(実効アタック長は不変)。
             antic = _anticipation_frames(_preceding_event(events, g.start), params)
             f_start = g.start - antic
@@ -403,17 +440,18 @@ def generate_morph_keys(
                 targets.append((morph, f_start, 0.0))
                 targets.append((morph, f_attack, weight))
             plateau_start = f_attack
+        if coart_out:
+            plateau_end = g.end - coart_half[i]
+        elif legato_out:
+            # 谷が offset を担うため末尾リリースの保持/0.0 キーは置かない。
+            plateau_end = g.end
         else:
-            plateau_start = groups[i - 1].end + coart_half[i - 1]
-        if not coart_out:
             f_hold_end = g.end - g.release
             f_end = g.end
             for morph, weight in gw[-1].items():
                 targets.append((morph, f_hold_end, weight))
                 targets.append((morph, f_end, 0.0))
             plateau_end = f_hold_end
-        else:
-            plateau_end = g.end - coart_half[i]
         if len(g.events) >= 2:
             for ev, w in zip(g.events, gw):
                 f_mid = (ev.start + ev.end) / 2.0
@@ -435,6 +473,19 @@ def generate_morph_keys(
             targets.append((morph, f_s, a))
             targets.append((morph, f_b, (a + b) / 2.0))
             targets.append((morph, f_e, b))
+    # レガート間隙の谷橋渡し: 完全閉口でなく、前母音の境界保持値 w_a から谷値 d·(w_a+w_b)/2 を経て
+    # 次母音の境界保持値 w_b へ線形に繋ぐ。前後母音の 0.0 リリース/アタックキーは上で抑制済み。
+    for i, (gs, ge) in legato_at.items():
+        wa, wb = weights[i][-1], weights[i + 1][0]
+        gm = (gs + ge) / 2.0
+        depth = _valley_depth(ge - gs, params)
+        for morph in _VOWEL_ORDER:
+            a, b = wa.get(morph, 0.0), wb.get(morph, 0.0)
+            if a == 0.0 and b == 0.0:
+                continue
+            targets.append((morph, gs, a))
+            targets.append((morph, gm, depth * (a + b) / 2.0))
+            targets.append((morph, ge, b))
     # 伸び表現: 公称エンベロープ・強弱・協調調音の後に、長い保持プラトーへ揺らぎ節点を加える(任意)。
     if params.vibrato_amp > 0.0 and params.vibrato_period > 0:
         for i, g in enumerate(groups):

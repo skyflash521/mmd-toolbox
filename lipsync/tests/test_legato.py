@@ -31,7 +31,6 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-@pytest.mark.xfail(reason="impl pending: C-lipsync LEGATO_GAP valley", strict=True)
 def test_legato_gap_bridges_with_valley():
     # あ[0,10]・LEGATO_GAP[10,14]・い[14,24]。間隙長4 → d = 0.4 − 0.025·4 = 0.3。
     # 前接は SILENCE でないため先行準備は効かず(A_eff=0)、谷が閉口を置換する。
@@ -58,7 +57,6 @@ def test_legato_gap_bridges_with_valley():
     )
 
 
-@pytest.mark.xfail(reason="impl pending: C-lipsync LEGATO_GAP valley", strict=True)
 def test_legato_valley_deepens_with_longer_gap():
     # 谷の深さ d は間隙長に対し線形で深くなる(d 小=谷深い)。同じ前後母音で間隙長だけ変える。
     # 短間隙(長さ2): d=0.4−0.025·2=0.35、mid=11、あ谷値=0.35·(0.5+0.05)/2=0.096250。
@@ -86,7 +84,6 @@ def test_legato_valley_deepens_with_longer_gap():
     assert long_mid < short_mid  # 間隙が長いほど谷は深い
 
 
-@pytest.mark.xfail(reason="impl pending: C-lipsync LEGATO_GAP valley", strict=True)
 def test_legato_gap_differs_from_silence_closure():
     # 同じ配置で SILENCE は完全閉口(境界に0.0)、LEGATO_GAP は谷(境界に非ゼロ)。両者が区別されること。
     base = [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), None, MouthEvent(MouthShape.I, 14.0, 24.0, 0.5)]

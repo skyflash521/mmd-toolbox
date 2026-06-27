@@ -26,6 +26,7 @@ class MouthShape(Enum):
     N = "n"  # 撥音「ん」(後続母音を持たない単独の鼻音)
     BILABIAL = "bilabial"  # 両唇閉鎖(ま・ば・ぱ行)
     SILENCE = "silence"  # 無音・休符
+    LEGATO_GAP = "legato_gap"  # レガート間隙(非発音だが完全閉口でなく谷で繋ぐ)
 
 
 @dataclass
@@ -64,6 +65,11 @@ class GenerationParams:
     min_hold_frames: int = 3
     coartic_overlap_max: int = 2  # 協調調音の重なり上限(=基準長)
     anticipation_frames: int = 1  # 母音口形の先行準備
+    # レガート間隙(LEGATO_GAP)の谷係数 d を間隙長から決める線形関数のパラメータ。
+    # d = clamp(shallow − slope×gap_len, deep, shallow)。間隙が長いほど d 小=谷が深い。
+    legato_valley_shallow: float = 0.4  # 谷係数 d の上限(間隙長0、浅い谷)
+    legato_valley_deep: float = 0.2  # 谷係数 d の下限(深い谷)
+    legato_valley_slope: float = 0.025  # 間隙長1フレームあたりの d 減少
     exaggeration: float = 1.0  # 母音合成プロファイルの誇張係数
     vibrato_threshold: int = 18  # 伸び表現を適用する保持プラトー長の下限
     vibrato_amp: float = 0.05

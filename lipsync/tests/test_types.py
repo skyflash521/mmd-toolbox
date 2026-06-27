@@ -12,13 +12,16 @@ from mmd_toolbox.vmd import MorphKey, VmdDocument, read, write
 
 
 def test_mouth_shape_members():
-    """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音を持つ(lipsync.md §2.1/§4.7)。
+    """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音＋レガート間隙を持つ
+    (lipsync.md §2.1/§4.7)。
 
-    「ん」は閉口でなく母音と同じ機構を通る母音的口形。
+    「ん」は閉口でなく母音と同じ機構を通る母音的口形。LEGATO_GAP は SILENCE と同じく非発音だが、
+    生成時は完全閉口でなく谷として描く。
     """
     names = {m.name for m in lipsync.MouthShape}
-    assert names == {"A", "I", "U", "E", "O", "N", "BILABIAL", "SILENCE"}
+    assert names == {"A", "I", "U", "E", "O", "N", "BILABIAL", "SILENCE", "LEGATO_GAP"}
     assert lipsync.MouthShape.N.value == "n"
+    assert lipsync.MouthShape.LEGATO_GAP.value == "legato_gap"
 
 
 def test_mouth_event_defaults():
@@ -43,6 +46,9 @@ def test_generation_params_defaults():
     assert p.min_hold_frames == 3
     assert p.coartic_overlap_max == 2
     assert p.anticipation_frames == 1
+    assert p.legato_valley_shallow == 0.4
+    assert p.legato_valley_deep == 0.2
+    assert p.legato_valley_slope == 0.025
     assert p.exaggeration == 1.0
     assert p.vibrato_threshold == 18
     assert p.vibrato_amp == 0.05
