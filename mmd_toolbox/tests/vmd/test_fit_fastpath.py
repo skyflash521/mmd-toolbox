@@ -67,11 +67,6 @@ def test_no_early_exit_err_takes_no_fastpath(monkeypatch):
 
 
 # --- skip_fastpath: ファストパスのオプトアウト(mmd_toolbox.md §6.3) -----------------
-#
-# 未実装の skip_fastpath 経路を呼ぶ直前に pytest.xfail() を置く(実装後に外す)。
-# こうすると既存挙動の前提確認(既定でファストパス発火など)は通常実行され、目的外の回帰が
-# xfail に隠れない。前提を持たない自明ケース(空区間)はデコレータ xfail でよい。
-_PENDING = "impl pending: fit skip_fastpath"
 
 # 「線形でも許容内に収まるが実際は曲がっている」サンプル(強いイージング)。
 _CURVED_XS = [(i + 1) / 12 for i in range(11)]
@@ -94,7 +89,6 @@ def test_skip_fastpath_forces_real_bezier(monkeypatch):
     thr = _linear_err(_CURVED_XS, _CURVED_YS) + 1e-6
     cp_default, _ = fit.fit_bezier_curve(_CURVED_XS, _CURVED_YS, early_exit_err=thr)
     assert cp_default == LIN  # 既定はファストパスで線形を即採用(前提=線形が許容内)
-    pytest.xfail(_PENDING)
     calls = _count_least_squares(monkeypatch)
     cp_skip, err_skip = fit.fit_bezier_curve(
         _CURVED_XS, _CURVED_YS, early_exit_err=thr, skip_fastpath=True
@@ -112,7 +106,6 @@ def test_skip_fastpath_coeff_forces_real_bezier(monkeypatch):
     thr = lin_res + 1e-6
     cp_default = fit._fit_coeff_curve(_CURVED_XS, resid_at, early_exit_err=thr)
     assert cp_default == LIN
-    pytest.xfail(_PENDING)
     calls = _count_least_squares(monkeypatch)
     cp_skip = fit._fit_coeff_curve(_CURVED_XS, resid_at, early_exit_err=thr, skip_fastpath=True)
     assert calls["n"] >= 1
@@ -132,14 +125,12 @@ def test_skip_fastpath_cheap_accept_also_skipped(monkeypatch):
     cp_default, _ = fit.fit_bezier_curve(_CURVED_XS, ys, early_exit_err=thr)
     assert calls_default["n"] == 0
     assert cp_default == cand
-    pytest.xfail(_PENDING)
     # skip_fastpath: cheap accept も切るので least_squares を回す
     calls_skip = _count_least_squares(monkeypatch)
     fit.fit_bezier_curve(_CURVED_XS, ys, early_exit_err=thr, skip_fastpath=True)
     assert calls_skip["n"] >= 1
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=False)
 def test_skip_fastpath_linear_sample_still_linear():
     # 数学的に線形なサンプルは skip_fastpath=True でも線形曲線を返す(退化ではなく正解)。
     # 実フィットは LIN と別の対角制御点を返しうるので、等値でなく曲線が恒等かで見る。
@@ -149,7 +140,6 @@ def test_skip_fastpath_linear_sample_still_linear():
     assert _is_linear_curve(cp, xs)
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=False)
 def test_skip_fastpath_empty_returns_linear():
     # 内部点なしは両モードで線形制御点。
     assert fit.fit_bezier_curve([], [], skip_fastpath=True)[0] == LIN
@@ -171,6 +161,5 @@ def test_axis_curve_passthrough_skip_fastpath():
     thr = _linear_err(xs, ys) + 1e-6
     cp_default = fit._axis_curve(a0, a1, a, b, sample_fn, early_exit_err=thr)
     assert cp_default == LIN
-    pytest.xfail(_PENDING)
     cp_skip = fit._axis_curve(a0, a1, a, b, sample_fn, early_exit_err=thr, skip_fastpath=True)
     assert cp_skip != LIN

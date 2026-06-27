@@ -63,12 +63,13 @@ def _select_worst(errs, is_reversal):
     return max(candidates, key=lambda f: (errs[f], -f))
 
 
-def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None, category=None):
+def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None, category=None, skip_fastpath=False):
     """1軸の量子化ベジェ制御点 (x1,y1,x2,y2) を返す(§5.4)。
 
     端点同値(正規化不能)や内部点なしは線形制御点。sample_fn(frame) は当該軸のサンプル値。
     採否(_bezier_axis_pred)と出力(curve)が同一の制御点を使うよう、両者はこれを共有する。
     early_exit_err(正規化y単位)は fit_bezier_curve の早期終了閾値へ渡す。
+    skip_fastpath は fit_bezier_curve へ素通しする(§6.3 ファストパスのオプトアウト)。
     """
     span = b - a
     internal = range(a + 1, b)
@@ -77,7 +78,9 @@ def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None, category=None):
         return _BEZIER_LINEAR_CP
     xs = [(f - a) / span for f in internal]
     ys = [(sample_fn(f) - a0) / denom for f in internal]
-    cp, _ = fit_bezier_curve(xs, ys, early_exit_err=early_exit_err, category=category)
+    cp, _ = fit_bezier_curve(
+        xs, ys, early_exit_err=early_exit_err, category=category, skip_fastpath=skip_fastpath
+    )
     return cp
 
 
@@ -822,7 +825,7 @@ def _quantize_solution(sol_x):
     return (x1q, y1q, x2q, y2q)
 
 
-def fit_bezier_curve(xs, ys, early_exit_err=None, category=None):
+def fit_bezier_curve(xs, ys, early_exit_err=None, category=None, skip_fastpath=False):
     """正規化サンプル (xs, ys) に VMD補間曲線をフィットする(§5.2, §5.4)。
 
     制御点 (x1,y1,x2,y2) を 0..127 整数に量子化して返し、最大絶対誤差は量子化後の曲線を
@@ -835,6 +838,11 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None):
     (tol / |denom|): 区間が許容内にフィットできた時点で打ち切るため、採否(誤差 <= 許容)は
     変わらず、出力は全初期値試行と許容内一致になる。
     None なら早期終了せず全初期値を試す。
+
+    skip_fastpath=True のとき、線形ファストパスと cheap accept を丸ごとスキップし least_squares
+    へ直行する(§6.3)。ファストパスは採否・キー数は不変だが許容内の区間の出力曲線を線形/固定 ease
+    へ寄せるため、曲線形状の忠実度が要る呼び出し側(滑らかさ目的)向けのオプトアウト。across-init
+    早期終了(early_exit_err によるループ内打ち切り)は skip_fastpath でも温存する。既定 False。
     """
     xs = list(xs)
     ys = list(ys)
@@ -852,8 +860,9 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None):
 
     # 線形ファストパス(§6.3): 線形制御点で許容内に収まる区間は least_squares を呼ばず即採用する。
     # 采否は量子化後誤差 <= 許容 の二値なので区間境界(キー数)は変わらず、最適化呼び出しを丸ごと
-    # 省ける。閾値(early_exit_err)が無い全探索では行わない。
-    if early_exit_err is not None:
+    # 省ける。閾値(early_exit_err)が無い全探索では行わない。skip_fastpath で曲線形状の忠実度を
+    # 優先する呼び出し側はこのブロックを切る。
+    if early_exit_err is not None and not skip_fastpath:
         lin_err = quantized_err(_BEZIER_LINEAR_CP)
         if lin_err <= early_exit_err:
             _bump("fastpath_linear", category)
@@ -891,7 +900,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None):
     return (best_cp, best_err)
 
 
-def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None):
+def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None, skip_fastpath=False):
     """共通の係数曲線 y(x)∈[0,1] をフィットし量子化制御点を返す(§5.3)。
 
     回転チャンネル用。fit_bezier_curve がスカラー (xs,ys) を直接合わせるのに対し、
@@ -904,6 +913,9 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None):
     early_exit_err を渡すと、現在の最良の量子化後残差(resid_at の単位=回転では度)の最大値が
     それ以下なら残りの初期値を試さず打ち切る。閾値は呼び出し側が許容誤差(度)から渡す。
     None なら早期終了せず全初期値を試す。
+
+    skip_fastpath=True のとき、線形ファストパスと cheap accept を丸ごとスキップし least_squares
+    へ直行する(§6.3。fit_bezier_curve と同じオプトアウト)。across-init 早期終了は温存。既定 False。
     """
     if not xs:
         return _BEZIER_LINEAR_CP
@@ -919,8 +931,9 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None):
         return max((abs(r) for r in res), default=0.0)
 
     # 線形ファストパス(§6.3): 線形制御点で許容内に収まれば least_squares を呼ばず即採用する。
-    # 閾値(early_exit_err)が無い全探索では行わない。
-    if early_exit_err is not None:
+    # 閾値(early_exit_err)が無い全探索では行わない。skip_fastpath で曲線形状の忠実度を優先する
+    # 呼び出し側はこのブロックを切る。
+    if early_exit_err is not None and not skip_fastpath:
         if quantized_err(_BEZIER_LINEAR_CP) <= early_exit_err:
             _bump("fastpath_linear", category)
             return _BEZIER_LINEAR_CP
