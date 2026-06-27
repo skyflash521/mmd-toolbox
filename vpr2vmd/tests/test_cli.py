@@ -1,17 +1,14 @@
-"""vpr2vmd CLI 骨組みのテスト(vpr2vmd.md §4、実装計画 P-0)。
+"""vpr2vmd CLI 骨組みのテスト(vpr2vmd.md §4)。
 
-P-0 の範囲は CLI の起動・引数解析・検証と `--dry-run` の空実行(出力を書かない)に限る。
-vpr 読み込み・口形イベント確定・VMD 生成は後続ステップ(P-1〜P-4)で検証する。
+範囲は CLI の起動・引数解析・検証と `--dry-run` の空実行(出力を書かない)に限る。
+vpr 読み込み・口形イベント確定・VMD 生成は後続の実装ステップで検証する。
 
 終了コードは既存ツール(shakevmd 等)の規約に倣う:
 0 正常 / 1 入力不正(欠落・非vpr 等) / 2 引数エラー(未知オプション・範囲不正・上書きガード) /
 3 出力書き込み失敗。
 """
 
-import pytest
-
-# P-0 実装前は vpr2vmd.cli が無く import で収集が失敗するため、実装が入るまでスキップする。
-cli = pytest.importorskip("vpr2vmd.cli", reason="impl pending: P-0 CLI骨組み")
+from vpr2vmd import cli
 
 
 def _touch(path):
@@ -85,6 +82,29 @@ def test_default_open_non_float_is_arg_error(tmp_path):
     assert cli.main([src, "--default-open", "abc", "--dry-run"]) == 2
 
 
+def test_open_max_negative_is_arg_error(tmp_path):
+    """開き量は 0〜1。負の --open-max は引数エラー。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--open-max", "-0.1", "--dry-run"]) == 2
+
+
+def test_open_max_over_one_is_arg_error(tmp_path):
+    """開き量は 0〜1。1 を超える --open-max は引数エラー。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--open-max", "1.5", "--dry-run"]) == 2
+
+
+def test_default_open_negative_is_arg_error(tmp_path):
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--default-open", "-0.5", "--dry-run"]) == 2
+
+
+def test_open_amount_bounds_are_accepted(tmp_path):
+    """境界値 0.0 と 1.0 は受理する。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--open-max", "1.0", "--default-open", "0.0", "--dry-run"]) == 0
+
+
 def test_missing_input_file_is_input_error(tmp_path):
     """存在しない入力 vpr は入力不正(終了コード 1)。"""
     missing = str(tmp_path / "nope.vpr")
@@ -109,6 +129,15 @@ def test_overwrite_guard_blocks_input_overwrite(tmp_path):
     """出力先が入力と同一パスのとき、--overwrite 無しは引数エラー。"""
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "-o", src, "--dry-run"]) == 2
+
+
+def test_overwrite_guard_blocks_same_path_even_when_missing(tmp_path):
+    """入力同一パス指定は、そのパスが未存在でも上書きガード(引数エラー)で弾く。
+
+    存在確認(入力不正=1)より同一パス判定を先に行うため、未存在でも 1 でなく 2 になる。
+    """
+    missing = str(tmp_path / "missing.vpr")
+    assert cli.main([missing, "-o", missing, "--dry-run"]) == 2
 
 
 def test_model_name_over_20_bytes_is_arg_error(tmp_path):

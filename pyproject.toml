@@ -21,9 +21,10 @@ dev = [
 mocapvmd = "mocapvmd.cli:main"
 shakevmd = "shakevmd.cli:main"
 sparsevmd = "sparsevmd.cli:main"
+vpr2vmd = "vpr2vmd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*", "lipsync*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr_io*"]
+include = ["mmd_toolbox*", "lipsync*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr2vmd*", "vpr_io*"]
 
 [tool.pytest.ini_options]
 testpaths = ["mmd_toolbox", "lipsync", "mocapvmd", "shakevmd", "sparsevmd", "vpr2vmd", "vpr_io"]
