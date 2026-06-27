@@ -8,23 +8,11 @@ import pytest
 
 from mocapvmd.model_profile import load_mocap_profile
 
-try:
-    from mocapvmd.marker_denoise import (
-        DEFAULT_PRESET,
-        SmoothParams,
-        SmoothResult,
-        smooth,
-    )
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-# impl pending: pose-denoise Step5 marker_denoise
-pytestmark = (
-    []
-    if _IMPORT_OK
-    else pytest.mark.skip(reason="impl pending: pose-denoise Step5 marker_denoise")
+from mocapvmd.marker_denoise import (
+    DEFAULT_PRESET,
+    SmoothParams,
+    SmoothResult,
+    smooth,
 )
 
 _CATEGORIES = {"center", "torso", "head", "arms", "wrists", "legs", "feet"}
@@ -152,6 +140,13 @@ def test_displacement_is_max_change():
         for got, orig in zip(res.markers["head"], series["head"])
     )
     assert res.displacement["head"] == pytest.approx(expected, abs=1e-9)
+
+
+def test_empty_series_is_handled():
+    # フレーム0(空系列)でも例外を出さず空を返す。
+    res = smooth({"head": []}, {"head": "head"})
+    assert res.markers["head"] == []
+    assert res.displacement["head"] == pytest.approx(0.0)
 
 
 def test_smooths_with_profile_categories():
