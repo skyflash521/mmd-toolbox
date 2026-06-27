@@ -1,7 +1,7 @@
 """lipsync コアのモーフキー生成(要求仕様 lipsync.md §4)。
 
 入力(開き量を同梱した口形イベント列＋生成パラメータ)から、標準口モーフ
-(あ・い・う・え・お)のモーフキー列を決定論的に生成する。VMD への組み立て・
+(あ・い・う・え・お・ん)のモーフキー列を決定論的に生成する。VMD への組み立て・
 書き出しは呼び出し側が `mmd_toolbox.vmd` 経由で行う。
 """
 
@@ -15,13 +15,14 @@ from mmd_toolbox.vmd import MorphKey
 
 from .types import GenerationParams, MouthEvent, MouthShape
 
-# 各母音の主モーフ(目的母音と同名の標準口モーフ)。
+# 各母音的口形の主モーフ(目的口形と同名の標準口モーフ)。
 _MAIN_MORPH = {
     MouthShape.A: "あ",
     MouthShape.I: "い",
     MouthShape.U: "う",
     MouthShape.E: "え",
     MouthShape.O: "お",
+    MouthShape.N: "ん",
 }
 
 # 母音合成プロファイル(保持値1.0時の相対重み)。主モーフ以外の
@@ -32,19 +33,21 @@ _PROFILES: dict[MouthShape, dict[str, float]] = {
     MouthShape.U: {"う": 1.0, "お": 0.2},
     MouthShape.E: {"あ": 0.2, "い": 0.2, "え": 1.0},
     MouthShape.O: {"う": 0.2, "お": 1.0},
+    MouthShape.N: {"ん": 1.0},
 }
 
-# vowel_scale=(a, i, u, e, o) の添字。
+# vowel_scale=(a, i, u, e, o, n) の添字。
 _VOWEL_INDEX = {
     MouthShape.A: 0,
     MouthShape.I: 1,
     MouthShape.U: 2,
     MouthShape.E: 3,
     MouthShape.O: 4,
+    MouthShape.N: 5,
 }
 
 # 標準口モーフの固定列(口形差ベクトルの軸・同フレーム出力の決定論的順序)。
-_VOWEL_ORDER = ("あ", "い", "う", "え", "お")
+_VOWEL_ORDER = ("あ", "い", "う", "え", "お", "ん")
 
 
 def _morph_key(name: str, frame: int, weight: float) -> MorphKey:

@@ -34,7 +34,6 @@ def _peak_weights(events, params=None):
     return weights
 
 
-@pytest.mark.xfail(reason="impl pending: ん合成プロファイル", strict=True)
 def test_single_n_four_key_envelope():
     # ん [0,10] open=0.5、プロファイル {ん:1.0} で hold=0.5、attack=2/release=2。
     # 「ん」モーフへ4点: (0,0)・(2,0.5)・(8,0.5)・(10,0)。母音と同じ単一区間形状。
@@ -46,13 +45,11 @@ def test_single_n_four_key_envelope():
         assert w == pytest.approx(expected)
 
 
-@pytest.mark.xfail(reason="impl pending: ん合成プロファイル", strict=True)
 def test_single_n_profile_is_n_only():
     # ん のプロファイルは主モーフ「ん」のみ(補助なし)。hold=0.4 → {ん:0.4}、他モーフは出ない。
     assert _peak_weights([MouthEvent(MouthShape.N, 0.0, 10.0, 0.4)]) == pytest.approx({"ん": 0.4})
 
 
-@pytest.mark.xfail(reason="impl pending: ん合成プロファイル", strict=True)
 def test_n_vowel_scale_indexed_at_five():
     # vowel_scale の「ん」倍率は添字5。倍率2.0・open=0.3 → hold=clamp(0.6,0,0.8)=0.6 → {ん:0.6}。
     p = GenerationParams(vowel_scale=(1.0, 1.0, 1.0, 1.0, 1.0, 2.0))
