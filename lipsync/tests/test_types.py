@@ -24,13 +24,32 @@ def test_mouth_shape_members():
     assert lipsync.MouthShape.LEGATO_GAP.value == "legato_gap"
 
 
+def test_consonant_class_members():
+    """ConsonantClass は NONE/NEUTRAL/ROUNDED/SPREAD を持つ(lipsync.md §2.1/§4.1)。
+
+    NONE=子音なし、NEUTRAL=唇を動かさない子音、ROUNDED=唇を丸める子音、SPREAD=い 方向へ寄せる子音。
+    両唇閉鎖は MouthShape.BILABIAL で表しここには含めない。
+    """
+    names = {c.name for c in lipsync.ConsonantClass}
+    assert names == {"NONE", "NEUTRAL", "ROUNDED", "SPREAD"}
+
+
 def test_mouth_event_defaults():
-    """MouthEvent は shape/start/end を取り、open_amount 既定 0.0。"""
+    """MouthEvent は shape/start/end を取り、open_amount 既定 0.0・consonant_class 既定 NONE。"""
     ev = lipsync.MouthEvent(shape=lipsync.MouthShape.A, start=0.0, end=10.0)
     assert ev.shape is lipsync.MouthShape.A
     assert ev.start == 0.0
     assert ev.end == 10.0
     assert ev.open_amount == 0.0
+    assert ev.consonant_class is lipsync.ConsonantClass.NONE
+
+
+def test_mouth_event_consonant_class_set():
+    """consonant_class は位置引数(shape,start,end,open_amount,consonant_class)で渡せる。"""
+    ev = lipsync.MouthEvent(
+        lipsync.MouthShape.A, 0.0, 10.0, 0.5, lipsync.ConsonantClass.ROUNDED
+    )
+    assert ev.consonant_class is lipsync.ConsonantClass.ROUNDED
 
 
 def test_generation_params_defaults():

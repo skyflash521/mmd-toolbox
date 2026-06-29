@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from mmd_toolbox.vmd import MorphKey
 
-from .types import GenerationParams, MouthEvent, MouthShape
+from .types import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
 # 各母音的口形の主モーフ(目的口形と同名の標準口モーフ)。
 _MAIN_MORPH = {
@@ -25,16 +25,44 @@ _MAIN_MORPH = {
     MouthShape.N: "ん",
 }
 
-# 母音合成プロファイル(保持値1.0時の相対重み)。主モーフ以外の
-# 非ゼロ重みが補助モーフ。表中 0.0 のモーフは持たない。`GenerationParams` とは別の lipsync 既定。
+# 純母音プロファイル(保持値1.0時の主モーフ単独。子音変調は _preprofile が補助を足す)。
+# 純母音を主モーフ単独にすることで母音どうしの口形差(_shape_diff)が最大化する。`GenerationParams`
+# とは別の lipsync 既定。表中に無いモーフは寄与なし(0.0)。
 _PROFILES: dict[MouthShape, dict[str, float]] = {
     MouthShape.A: {"あ": 1.0},
-    MouthShape.I: {"あ": 0.1, "い": 1.0},
-    MouthShape.U: {"う": 1.0, "お": 0.2},
-    MouthShape.E: {"あ": 0.2, "い": 0.2, "え": 1.0},
-    MouthShape.O: {"う": 0.2, "お": 1.0},
+    MouthShape.I: {"い": 1.0},
+    MouthShape.U: {"う": 1.0},
+    MouthShape.E: {"え": 1.0},
+    MouthShape.O: {"お": 1.0},
     MouthShape.N: {"ん": 1.0},
 }
+
+# 子音変調の補助重み(保持値1.0時の相対量。視覚で詰める初期値)。ROUNDED は丸め(う・お方向)、
+# SPREAD は横引き(い方向)の補助を主モーフへ足す。主モーフと同名のモーフへは足さない(二重計上回避)。
+# NONE/NEUTRAL は変調なし(純母音)。CLI 公開はせず lipsync 内の定数として持つ。
+_ROUNDED_U_GAIN = 0.3  # ROUNDED → う 方向の丸め
+_ROUNDED_O_GAIN = 0.0  # ROUNDED → お 方向の丸め(初期は う のみ。視覚で調整)
+_SPREAD_I_GAIN = 0.3  # SPREAD → い 方向の横引き
+
+
+def _preprofile(shape: MouthShape, consonant_class: ConsonantClass) -> dict[str, float]:
+    """母音口形と先頭子音種別から、子音変調を反映した相対プロファイル(保持値1.0時の重み)を作る。
+
+    純母音(NONE/NEUTRAL)は主モーフ単独。ROUNDED は丸め(う・お)、SPREAD は横引き(い)の補助重みを
+    主モーフへ足す。主モーフと同名のモーフへは足さない(母音が既にその方向のとき二重計上しない)。
+    """
+    profile = dict(_PROFILES[shape])
+    main = _MAIN_MORPH[shape]
+    if consonant_class is ConsonantClass.ROUNDED:
+        aux = {"う": _ROUNDED_U_GAIN, "お": _ROUNDED_O_GAIN}
+    elif consonant_class is ConsonantClass.SPREAD:
+        aux = {"い": _SPREAD_I_GAIN}
+    else:
+        aux = {}
+    for morph, gain in aux.items():
+        if gain > 0.0 and morph != main:
+            profile[morph] = profile.get(morph, 0.0) + gain
+    return profile
 
 # vowel_scale=(a, i, u, e, o, n) の添字。
 _VOWEL_INDEX = {
@@ -63,12 +91,14 @@ def _half_up(value: float) -> int:
     return math.floor(value + 0.5)
 
 
-def _effective_profile(shape: MouthShape, params: GenerationParams) -> dict[str, float]:
-    """有効プロファイル(補助重みに誇張係数を乗算した相対重み)。"""
+def _effective_profile(
+    shape: MouthShape, consonant_class: ConsonantClass, params: GenerationParams
+) -> dict[str, float]:
+    """有効プロファイル(子音変調込みの相対重みで、主モーフ以外に誇張係数を乗算)。"""
     main = _MAIN_MORPH[shape]
     return {
         morph: weight if morph == main else weight * params.exaggeration
-        for morph, weight in _PROFILES[shape].items()
+        for morph, weight in _preprofile(shape, consonant_class).items()
     }
 
 
@@ -78,9 +108,14 @@ def _hold_value(shape: MouthShape, open_amount: float, params: GenerationParams)
     return min(max(hold, 0.0), params.open_cap)
 
 
-def _weights_from_hold(shape: MouthShape, hold: float, params: GenerationParams) -> dict[str, float]:
+def _weights_from_hold(
+    shape: MouthShape, consonant_class: ConsonantClass, hold: float, params: GenerationParams
+) -> dict[str, float]:
     """保持値 hold から各口モーフ重みを求める(有効プロファイル × hold、合成総量の比例縮小)。"""
-    weights = {morph: weight * hold for morph, weight in _effective_profile(shape, params).items()}
+    weights = {
+        morph: weight * hold
+        for morph, weight in _effective_profile(shape, consonant_class, params).items()
+    }
     total = sum(weights.values())
     if total > params.open_cap:
         factor = params.open_cap / total
@@ -88,33 +123,39 @@ def _weights_from_hold(shape: MouthShape, hold: float, params: GenerationParams)
     return weights
 
 
-def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) -> dict[str, float]:
+def _compose(
+    shape: MouthShape, consonant_class: ConsonantClass, open_amount: float, params: GenerationParams
+) -> dict[str, float]:
     """母音の合成プロファイルから各口モーフの重みを求める。
 
-    手順: (1)プロファイル選択 →(2)補助重みに誇張係数を乗算 →(3)保持値 hold を上限クランプ →
-    (4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小。
+    手順: (1)母音＋子音種別のプロファイル選択 →(2)補助重みに誇張係数を乗算 →(3)保持値 hold を上限
+    クランプ →(4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小。
     """
-    return _weights_from_hold(shape, _hold_value(shape, open_amount, params), params)
+    return _weights_from_hold(
+        shape, consonant_class, _hold_value(shape, open_amount, params), params
+    )
 
 
-def _shape_diff(shape_a: MouthShape, shape_b: MouthShape, params: GenerationParams) -> float:
-    """両母音の口形差(0〜1)。
+def _shape_diff(
+    shape_a: MouthShape,
+    class_a: ConsonantClass,
+    shape_b: MouthShape,
+    class_b: ConsonantClass,
+    params: GenerationParams,
+) -> float:
+    """両母音的口形(子音変調込み)の口形差(0〜1)。
 
-    各母音の有効プロファイル(誇張適用後・保持値非依存の相対重み)を標準口モーフ6次元ベクトル(あいうえおん)
-    とし、L2 正規化したうえでユークリッド距離を取り sqrt(2) で割る。同一口形は 0.0、互いに重ならない口形
-    方向は 1.0。
+    各口形の有効プロファイル(子音変調・誇張適用後・保持値非依存の相対重み)を標準口モーフ6次元ベクトル
+    (あいうえおん)とし、L2 正規化したうえでユークリッド距離を取り sqrt(2) で割る。同一口形は 0.0、
+    互いに重ならない口形方向は 1.0。比較対象は実際に見える口形なので子音変調を含める。
     """
-    def _unit(shape: MouthShape) -> list[float]:
-        main = _MAIN_MORPH[shape]
-        eff = {
-            morph: weight if morph == main else weight * params.exaggeration
-            for morph, weight in _PROFILES[shape].items()
-        }
+    def _unit(shape: MouthShape, consonant_class: ConsonantClass) -> list[float]:
+        eff = _effective_profile(shape, consonant_class, params)
         vec = [eff.get(morph, 0.0) for morph in _VOWEL_ORDER]
         norm = math.sqrt(sum(x * x for x in vec))
         return [x / norm for x in vec] if norm > 0.0 else vec
 
-    ua, ub = _unit(shape_a), _unit(shape_b)
+    ua, ub = _unit(shape_a, class_a), _unit(shape_b, class_b)
     dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ua, ub)))
     return dist / math.sqrt(2.0)
 
@@ -155,8 +196,11 @@ def _legato_bridge(events: Sequence[MouthEvent], gap_start: float, gap_end: floa
 
 
 def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
-    """連続する同一母音イベントを極大グループへ束ねる。
+    """連続する同一可視口形(母音＋先頭子音種別)のイベントを極大グループへ束ねる。
 
+    可視口形は母音(shape)と先頭子音種別(consonant_class)で決まる(§4.1)ので、母音が同じでも子音種別が
+    違えば別グループにする(例 あ(ROUNDED)→あ(NONE) は連結せず境界で協調調音し、補助モーフが終端0へ閉じる)。
+    これによりグループ内は子音種別が均一になり、アタック/リリース・伸び表現が補助モーフを取りこぼさない。
     プロファイル対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音の
     リリース/アタックの 0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない)。
     """
@@ -168,7 +212,12 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
                 groups.append(current)
                 current = []
             continue
-        if current and ev.shape == current[-1].shape:
+        same = (
+            current
+            and ev.shape == current[-1].shape
+            and ev.consonant_class == current[-1].consonant_class
+        )
+        if same:
             current.append(ev)
         else:
             if current:
@@ -270,10 +319,17 @@ def _normalize_groups(
         elif winner is nxt_anchor and nxt_anchor is not None:
             nxt_anchor.start = run_start
         i = j
-    # 吸収後に直接隣接した同一母音グループを連結へ統合する。
+    # 吸収後に直接隣接した同一可視口形(母音＋子音種別)グループを連結へ統合する。子音種別が違えば
+    # 可視口形が違うので統合しない(グループ内の子音種別を均一に保つ)。
     merged: list[_Group] = []
     for g in survivors:
-        if merged and merged[-1].shape == g.shape and merged[-1].end == g.start:
+        same = (
+            merged
+            and merged[-1].shape == g.shape
+            and merged[-1].events[0].consonant_class == g.events[0].consonant_class
+            and merged[-1].end == g.start
+        )
+        if same:
             merged[-1].events = merged[-1].events + g.events
             merged[-1].end = g.end
         else:
@@ -396,7 +452,9 @@ def _vibrato_targets(
         amp_eff = min(params.vibrato_amp, base)
         offset = amp_eff * math.sin(2.0 * math.pi * (t - plateau_start) / period)
         open_v = min(max(base + offset, 0.0), params.open_cap)
-        for morph, weight in _weights_from_hold(group.shape, open_v, params).items():
+        # グループ内は子音種別が均一(_vowel_groups の連結条件)なので先頭イベントの子音種別で変調する。
+        cc = group.events[0].consonant_class
+        for morph, weight in _weights_from_hold(group.shape, cc, open_v, params).items():
             nodes.append((morph, t, weight))
     return nodes
 
@@ -417,7 +475,10 @@ def generate_morph_keys(
     閉口キーは置かない。整数フレームへの量子化は最後に一括して行う。返すキーは時間順。
     """
     groups = _normalize_groups(events, params)
-    weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g.events] for g in groups]
+    weights = [
+        [_compose(ev.shape, ev.consonant_class, ev.open_amount, params) for ev in g.events]
+        for g in groups
+    ]
     n = len(groups)
     # 直接隣接する異母音グループ境界の協調調音の半幅 T/2(境界 i と i+1 の間)。保持プラトー端の算出にも使う。
     coart_half: dict[int, float] = {}
@@ -426,7 +487,12 @@ def generate_morph_keys(
             continue
         if groups[i].triangle or groups[i + 1].triangle:
             continue  # 三角形短区間は協調調音せず端点を閉口で扱う
-        diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
+        # 境界のクロスフェードは group i の末尾イベントと group i+1 の先頭イベントを繋ぐので、
+        # 口形差もその2イベント(子音変調込み)で測る。
+        left, right = groups[i].events[-1], groups[i + 1].events[0]
+        diff = _shape_diff(
+            left.shape, left.consonant_class, right.shape, right.consonant_class, params
+        )
         shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
         coart_half[i] = _transition_frames(diff, shorter, params) / 2.0
     # 母音グループ i と i+1 の間がレガート間隙なら、その span [gs, ge] を谷で橋渡しする(閉口しない)。

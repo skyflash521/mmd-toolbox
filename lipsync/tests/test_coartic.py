@@ -11,7 +11,7 @@ import math
 import pytest
 
 import lipsync
-from lipsync import GenerationParams, MouthEvent, MouthShape
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 from lipsync import generate
 
 # T=4 を得るための overlap_max=4(T=clamp(4, 1, 短い側10/2=5)=4、境界 b±2 の整数窓[8,12])。
@@ -35,20 +35,30 @@ def _approx_envelope(actual, expected):
 
 # --- 口形差 _shape_diff(純粋ヘルパ。端点と算出可能な部分値) ---
 
+_NONE = ConsonantClass.NONE
+
+
 def test_shape_diff_identical_is_zero():
-    assert generate._shape_diff(MouthShape.A, MouthShape.A, GenerationParams()) == pytest.approx(0.0)
+    assert generate._shape_diff(
+        MouthShape.A, _NONE, MouthShape.A, _NONE, GenerationParams()
+    ) == pytest.approx(0.0)
 
 
 def test_shape_diff_disjoint_is_one():
-    # あ={あ}・う={う,お} はモーフ集合が重ならず直交 → 正規化距離/√2 = 1.0。
-    assert generate._shape_diff(MouthShape.A, MouthShape.U, GenerationParams()) == pytest.approx(1.0)
+    # 純母音 あ={あ}・う={う} はモーフ集合が重ならず直交 → 正規化距離/√2 = 1.0。
+    assert generate._shape_diff(
+        MouthShape.A, _NONE, MouthShape.U, _NONE, GenerationParams()
+    ) == pytest.approx(1.0)
 
 
-def test_shape_diff_partial_known_value():
-    # う={う:1.0,お:0.2}・お={う:0.2,お:1.0}。L2正規化後の距離/√2。
-    dot = (1.0 * 0.2 + 0.2 * 1.0) / 1.04
+def test_shape_diff_partial_known_value_with_consonant():
+    # 純母音どうしは直交だが、子音変調を入れると部分重複が生じる。あ(子音なし)={あ:1.0}・
+    # あ(ROUNDED)={あ:1.0, う:0.3}。L2正規化後の距離/√2。子音変調が口形差に効くことを既知値で固定。
+    dot = 1.0 / math.sqrt(1.09)  # unit_a·unit_b = 1/√(1+0.3²)
     expected = math.sqrt(2.0 - 2.0 * dot) / math.sqrt(2.0)
-    assert generate._shape_diff(MouthShape.U, MouthShape.O, GenerationParams()) == pytest.approx(expected)
+    assert generate._shape_diff(
+        MouthShape.A, _NONE, MouthShape.A, ConsonantClass.ROUNDED, GenerationParams()
+    ) == pytest.approx(expected)
 
 
 # --- 遷移長 _transition_frames(純粋ヘルパ。合成 diff で精密検証) ---
@@ -81,23 +91,21 @@ def test_no_close_at_coartic_boundary():
         _WIDE,
     )
     at10 = {name: w for name, keys in env.items() for f, w in keys if f == 10}
-    assert at10 == pytest.approx({"あ": 0.25, "う": 0.25, "お": 0.05})
+    assert at10 == pytest.approx({"あ": 0.25, "う": 0.25})
 
 
 def test_coartic_full_envelopes():
-    # あ→う、overlap_max=4 で T=min(4, 5)=4(口形差で短縮しない)、窓[8,12]。
-    # 前母音は先頭アタックのみ、次母音は末尾リリースのみ。
+    # あ→う(純母音)、overlap_max=4 で T=min(4, 5)=4(口形差で短縮しない)、窓[8,12]。
+    # 前母音は先頭アタックのみ、次母音は末尾リリースのみ。純母音なので補助モーフは出ない。
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)],
         _WIDE,
     )
-    assert set(env) == {"あ", "う", "お"}
+    assert set(env) == {"あ", "う"}
     # あ: 0からアタックで0.5、保持、遷移始端8で0.5、境界10で0.25、遷移終端12で0(うへ明け渡す)。
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.25), (12, 0.0)])
     # う: 遷移始端8で0、境界0.25、12で0.5に達し保持、末尾リリースで0。
     _approx_envelope(env["う"], [(8, 0.0), (10, 0.25), (12, 0.5), (18, 0.5), (20, 0.0)])
-    # お(うの補助 0.1): 同じ窓で 0→0.05→0.1、保持、リリースで0。
-    _approx_envelope(env["お"], [(8, 0.0), (10, 0.05), (12, 0.1), (18, 0.1), (20, 0.0)])
 
 
 def test_bilabial_between_no_coartic():

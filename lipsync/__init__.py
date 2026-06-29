@@ -6,9 +6,10 @@ vpr2vmd・song2vmd が共有する。開き量を同梱した口形イベント�
 """
 
 from .generate import generate_morph_keys
-from .types import GenerationParams, MouthEvent, MouthShape
+from .types import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
 __all__ = [
+    "ConsonantClass",
     "GenerationParams",
     "MouthEvent",
     "MouthShape",

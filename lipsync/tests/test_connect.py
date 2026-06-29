@@ -10,7 +10,7 @@ identity を保つことを回帰ガードで確認する(境界の具体的な�
 import pytest
 
 import lipsync
-from lipsync import GenerationParams, MouthEvent, MouthShape
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
 
 def _envelope(events, params=None):
@@ -57,17 +57,15 @@ def test_no_reattack_or_close_at_internal_boundary():
             assert weight > 0.0
 
 
-def test_multi_morph_same_vowel_merge():
-    # い[0,10]op0.4・い[10,20]op0.6 を連結。い:{あ:0.1,い:1.0}。主・補助モーフとも連結エンベロープ。
+def test_same_vowel_merge_strong_weak_nodes():
+    # い[0,10]op0.4・い[10,20]op0.6 を連結(純母音 い 単独)。先頭アタック1回・末尾リリース1回、
+    # 内部に開き量差の強弱節点(中央 0.4/0.6)。境界で再アタックや閉口を入れない。
     env = _envelope(
         [MouthEvent(MouthShape.I, 0.0, 10.0, 0.4), MouthEvent(MouthShape.I, 10.0, 20.0, 0.6)]
     )
-    assert set(env) == {"あ", "い"}
+    assert set(env) == {"い"}
     _approx_envelope(
         env["い"], [(0, 0.0), (2, 0.4), (5, 0.4), (15, 0.6), (18, 0.6), (20, 0.0)]
-    )
-    _approx_envelope(
-        env["あ"], [(0, 0.0), (2, 0.04), (5, 0.04), (15, 0.06), (18, 0.06), (20, 0.0)]
     )
 
 
@@ -89,14 +87,29 @@ def test_three_same_vowels_single_attack_release():
     )
 
 
+def test_same_vowel_different_consonant_not_merged():
+    # 同じ母音でも先頭子音種別が違えば可視口形が違うので連結しない。あ(ROUNDED)[0,10]→あ(NONE)[10,20]
+    # は別グループになり境界で協調調音し、補助モーフ「う」は終端0へ閉じて残留しない(連結すると「う」が
+    # 末尾リリースを持たず残る)。
+    env = _envelope(
+        [
+            MouthEvent(MouthShape.A, 0.0, 10.0, 0.5, ConsonantClass.ROUNDED),
+            MouthEvent(MouthShape.A, 10.0, 20.0, 0.5, ConsonantClass.NONE),
+        ]
+    )
+    assert "う" in env  # ROUNDED の丸め補助が立つ
+    assert env["う"][-1][1] == pytest.approx(0.0)  # 協調調音で終端0へ閉じ残留しない
+    assert max(w for _, w in env["う"]) == pytest.approx(0.15)  # プラトーの丸め量
+
+
 def test_different_adjacent_vowels_not_merged():
     # あ[0,10]・う[10,20] は母音が異なるので1保持区間へ連結しない。あ は あ区間側で、う は う区間側で
     # それぞれ別モーフの identity を保つ(境界の具体形=閉口か協調調音かは協調調音が決めるため見ない)。
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)]
     )
-    # あ は あ区間のみ、う・お は う区間のみで、両母音のモーフ集合が混ざらず別々に立つ。
-    assert set(env) == {"あ", "う", "お"}
+    # あ は あ区間のみ、う は う区間のみで、両母音のモーフ集合が混ざらず別々に立つ(純母音)。
+    assert set(env) == {"あ", "う"}
     # あ は前半(境界10より前)で保持値0.5に達し、う は後半(境界10より後)で0.5に達する。
     assert any(f < 10 and w == pytest.approx(0.5) for f, w in env["あ"])
     assert any(f > 10 and w == pytest.approx(0.5) for f, w in env["う"])

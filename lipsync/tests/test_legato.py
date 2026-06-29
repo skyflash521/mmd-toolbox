@@ -34,9 +34,9 @@ def _approx_envelope(actual, expected):
 
 def test_legato_gap_bridges_with_valley():
     # あ[0,10]・LEGATO_GAP[10,14]・い[14,24]。間隙長4 → d = 0.4 − 0.025·4 = 0.3。
-    # 前接は SILENCE でないため先行準備は効かず(A_eff=0)、谷が閉口を置換する。
-    # w_a(あの境界保持)={あ:0.5}、w_b(いの境界保持)={あ:0.05, い:0.5}。
-    # 谷 mid=12(両母音を加算で重ねるオーバーラップ): あ 0.3·(0.5+0.05)=0.165、い 0.3·(0.0+0.5)=0.15。
+    # 前接は SILENCE でないため先行準備は効かず(A_eff=0)、谷が閉口を置換する。純母音なので
+    # w_a(あの境界保持)={あ:0.5}、w_b(いの境界保持)={い:0.5}(補助混合なし)。
+    # 谷 mid=12(両母音を加算で重ねるオーバーラップ): あ 0.3·(0.5+0.0)=0.15、い 0.3·(0.0+0.5)=0.15。
     env = _envelope(
         [
             MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
@@ -46,10 +46,10 @@ def test_legato_gap_bridges_with_valley():
         GenerationParams(),
     )
     assert set(env) == {"あ", "い"}
-    # あ: アタックで0.5、保持、谷の境界10で0.5を維持し mid12で0.165へ、gap_end14で w_b=0.05、保持後リリース。
+    # あ: アタックで0.5、保持、谷の境界10で0.5を維持し mid12で0.15へ、gap_end14で w_b=0(い に あ 寄与なし)。
     _approx_envelope(
         env["あ"],
-        [(0, 0.0), (2, 0.5), (10, 0.5), (12, 0.165), (14, 0.05), (22, 0.05), (24, 0.0)],
+        [(0, 0.0), (2, 0.5), (10, 0.5), (12, 0.15), (14, 0.0)],
     )
     # い: 谷の境界10で0(w_a に無い)、mid12で0.15、gap_end14で w_b=0.5に達し保持、リリースで0。
     _approx_envelope(
@@ -60,7 +60,7 @@ def test_legato_gap_bridges_with_valley():
 
 def test_legato_valley_deepens_with_longer_gap():
     # 谷の深さ d は間隙長に対し線形で深くなる(d 小=谷深い)。同じ前後母音で間隙長だけ変える。
-    # 短間隙(長さ2): d=0.4−0.025·2=0.35、mid=11、あ谷値=0.35·(0.5+0.05)=0.192500。
+    # 短間隙(長さ2): d=0.4−0.025·2=0.35、mid=11、あ谷値=0.35·(0.5+0.0)=0.175(純母音 い に あ 寄与なし)。
     short = _envelope(
         [
             MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
@@ -69,7 +69,7 @@ def test_legato_valley_deepens_with_longer_gap():
         ],
         GenerationParams(),
     )
-    # 長間隙(長さ8): d=0.4−0.025·8=0.2、mid=14、あ谷値=0.2·0.55=0.110000。
+    # 長間隙(長さ8): d=0.4−0.025·8=0.2、mid=14、あ谷値=0.2·(0.5+0.0)=0.100000。
     long = _envelope(
         [
             MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
@@ -80,8 +80,8 @@ def test_legato_valley_deepens_with_longer_gap():
     )
     short_mid = {f: w for f, w in short["あ"]}[11]
     long_mid = {f: w for f, w in long["あ"]}[14]
-    assert short_mid == pytest.approx(0.1925)
-    assert long_mid == pytest.approx(0.11)
+    assert short_mid == pytest.approx(0.175)
+    assert long_mid == pytest.approx(0.1)
     assert long_mid < short_mid  # 間隙が長いほど谷は深い
 
 
@@ -98,5 +98,5 @@ def test_legato_gap_differs_from_silence_closure():
     # SILENCE: あ は後行残しで音符終了10まで保持し11で0へ閉じ、間隙中央12は閉口(キー無し)。
     assert s_a.get(11) == pytest.approx(0.0)
     assert 12 not in s_a
-    # LEGATO_GAP: あ は谷で繋ぎ、間隙中央12に谷キー(オーバーラップ)0.165 を持つ。
-    assert l_a.get(12) == pytest.approx(0.165)
+    # LEGATO_GAP: あ は谷で繋ぎ、間隙中央12に谷キー(オーバーラップ)0.15 を持つ。
+    assert l_a.get(12) == pytest.approx(0.15)

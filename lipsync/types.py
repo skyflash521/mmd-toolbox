@@ -29,6 +29,22 @@ class MouthShape(Enum):
     LEGATO_GAP = "legato_gap"  # レガート間隙(非発音だが完全閉口でなく谷で繋ぐ)
 
 
+class ConsonantClass(Enum):
+    """母音的口形イベントの先頭子音の種別(唇への影響で分類。§4.1 の母音合成を変調する)。
+
+    標準口モーフは唇・顎しか表せないため、子音は唇に影響するものだけが口形を変えられる。
+    NONE は子音なし、NEUTRAL は唇を動かさない子音(軟口蓋 か行・歯茎 さ/た/な/ら行・声門 は行 等。
+    舌/喉が主体で唇効果なし)、ROUNDED は唇を丸める子音(ふ・わ)、SPREAD は視覚補助として
+    い 方向へ寄せる子音(し・ち・じ・拗音)。両唇閉鎖(ま/ば/ぱ行)は `MouthShape.BILABIAL` で
+    表しここには設けない(二重表現を避ける)。合成上 NONE と NEUTRAL は同値(純母音=主モーフ単独)。
+    """
+
+    NONE = "none"
+    NEUTRAL = "neutral"
+    ROUNDED = "rounded"
+    SPREAD = "spread"
+
+
 @dataclass
 class MouthEvent:
     """口形イベント。1イベント=1モーラ。
@@ -41,6 +57,9 @@ class MouthEvent:
     start: float  # 開始フレーム
     end: float  # 終了フレーム
     open_amount: float = 0.0  # 開き量 0〜1。母音的口形(母音・撥音「ん」)区間のみ有意
+    # 先頭子音の種別。母音合成を変調する(§4.1)。母音以外(両唇閉鎖・無音・レガート間隙)では NONE。
+    # 1音符に複数母音があるときはモーラ先頭の母音にのみ付け、後続母音は NONE(呼び出し側の責務)。
+    consonant_class: ConsonantClass = ConsonantClass.NONE
 
 
 @dataclass

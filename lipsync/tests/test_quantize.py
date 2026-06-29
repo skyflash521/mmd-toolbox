@@ -43,13 +43,11 @@ def test_t1_coartic_collision_resolved():
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)],
         p,
     )
-    assert set(env) == {"あ", "う", "お"}
+    assert set(env) == {"あ", "う"}
     # あ: アタック後、境界10で中間口形0.25へ統合、e は半上げで11に分離し0へ。
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (10, 0.25), (11, 0.0)])
     # う: 境界10で0.25、11で0.5に達し保持、末尾リリースで0。
     _approx_envelope(env["う"], [(10, 0.25), (11, 0.5), (18, 0.5), (20, 0.0)])
-    # お(うの補助0.1): 境界10で0.05、11で0.1、保持、リリースで0。
-    _approx_envelope(env["お"], [(10, 0.05), (11, 0.1), (18, 0.1), (20, 0.0)])
 
 
 def test_no_collision_overlap4_unchanged():
@@ -60,4 +58,3 @@ def test_no_collision_overlap4_unchanged():
     )
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.25), (12, 0.0)])
     _approx_envelope(env["う"], [(8, 0.0), (10, 0.25), (12, 0.5), (18, 0.5), (20, 0.0)])
-    _approx_envelope(env["お"], [(8, 0.0), (10, 0.05), (12, 0.1), (18, 0.1), (20, 0.0)])

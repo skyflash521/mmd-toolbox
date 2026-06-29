@@ -8,7 +8,7 @@
 import pytest
 
 import lipsync
-from lipsync import GenerationParams, MouthEvent, MouthShape
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
 
 def _envelope(events, params=None):
@@ -46,11 +46,11 @@ def test_attack_release_frames_honored():
 
 
 def test_each_composed_morph_gets_own_envelope():
-    # い [0,10] open=0.5 → 合成 {あ:0.05, い:0.5}。各モーフが同じ attack/release で4点を持つ。
-    env = _envelope([MouthEvent(MouthShape.I, 0.0, 10.0, 0.5)])
-    assert set(env) == {"あ", "い"}
-    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.05), (8, 0.05), (10, 0.0)])
-    _approx_envelope(env["い"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
+    # ROUNDED あ [0,10] open=0.5 → 合成 {あ:0.5, う:0.15}。各モーフが同じ attack/release で4点を持つ。
+    env = _envelope([MouthEvent(MouthShape.A, 0.0, 10.0, 0.5, ConsonantClass.ROUNDED)])
+    assert set(env) == {"あ", "う"}
+    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
+    _approx_envelope(env["う"], [(0, 0.0), (2, 0.15), (8, 0.15), (10, 0.0)])
 
 
 def test_plateau_is_flat():
@@ -78,9 +78,9 @@ def test_envelope_respects_interval_start():
 
 
 def test_total_clamp_plateau_value():
-    # え open=1.0 は合成総量が cap 超で比例縮小。プラトー値はその縮小後の合成重みで一定。
-    # raw={あ:0.16,い:0.16,え:0.8} 総量1.12>0.8 → factor=0.8/1.12。
-    env = _envelope([MouthEvent(MouthShape.E, 0.0, 10.0, 1.0)])
-    factor = 0.8 / 1.12
-    _approx_envelope(env["え"], [(0, 0.0), (2, 0.8 * factor), (8, 0.8 * factor), (10, 0.0)])
-    assert set(env) == {"あ", "い", "え"}
+    # ROUNDED あ open=1.0 は合成総量が cap 超で比例縮小。プラトー値はその縮小後の合成重みで一定。
+    # raw={あ:0.8, う:0.24} 総量1.04>0.8 → factor=0.8/1.04。
+    env = _envelope([MouthEvent(MouthShape.A, 0.0, 10.0, 1.0, ConsonantClass.ROUNDED)])
+    factor = 0.8 / 1.04
+    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.8 * factor), (8, 0.8 * factor), (10, 0.0)])
+    assert set(env) == {"あ", "う"}
