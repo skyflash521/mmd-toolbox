@@ -169,7 +169,6 @@ song2vmd INPUT [options]
 | `--intensity-curve P` | プリセット値 | 強弱→開き量の非線形指数(累乗則) |
 | `--silence-threshold ON:OFF` | プリセット値 | 無音(閉口)判定のヒステリシス開始/終了しきい値 |
 | `--max-duration SEC` | `300` | 長尺の自動分割境界(処理資源対策。0で無効。6.6) |
-| `--report-json PATH` | なし | モーラ・音素・強弱・キー数の処理統計を出力 |
 | `--dry-run` | off | 出力せず処理計画と診断を表示 |
 | `--keep-intermediate` | off | 中間生成物(正規化PCM・分離WAV・認識結果)を残す(診断用) |
 
@@ -293,7 +292,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../vocal_an
 
 ### 6.7 レポートと診断
 
-`--dry-run` と `--report-json` は以下を出力する。
+`--dry-run` は以下を出力する。
 
 - 選択した各バックエンドと主要パラメータ。
 - 分離の有無、認識音素数、検出モーラ数、音素認識の被覆率。

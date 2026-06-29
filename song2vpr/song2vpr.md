@@ -103,7 +103,6 @@ song2vpr INPUT [options]
 | `--recognizer NAME` | 採用ツール固定 | 音素認識バックエンド選択(vocal_analysis へ渡す)。初期は固定 |
 | `--tempo BPM` | 既定 120 | テンポ(BPM)。未指定時は既定 120 で仮置きし警告(自動推定は将来。実装計画 §4.2) |
 | `--lyrics PATH` | なし | 任意の歌詞テキスト(かな表記前提。モーラ単位で音符へ対応。漢字G2Pは将来。実装計画 §4.1) |
-| `--report-json PATH` | なし | 音符数・ピッチ・音素被覆などの処理統計を出力 |
 | `--dry-run` | off | 出力せず処理計画と診断を表示 |
 
 音声前段のバックエンド選択(`--separate-vocals` / `--recognizer`)は `vocal_analysis` のアダプタを CLI で公開する
