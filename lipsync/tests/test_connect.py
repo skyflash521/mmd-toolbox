@@ -87,10 +87,24 @@ def test_three_same_vowels_single_attack_release():
     )
 
 
+def test_same_vowel_different_consonant_merges_and_aux_fades():
+    # 同じ母音なら子音種別が違っても1つの連続保持に連結する。あ(ROUNDED)[0,10]→あ(NONE)[10,20] は
+    # 連結し、主モーフ「あ」は途中で閉じず連続、補助モーフ「う」はグループ内で 0 へフェード(残留しない)。
+    env = _envelope(
+        [
+            MouthEvent(MouthShape.A, 0.0, 10.0, 0.5, ConsonantClass.ROUNDED),
+            MouthEvent(MouthShape.A, 10.0, 20.0, 0.5, ConsonantClass.NONE),
+        ]
+    )
+    assert set(env) == {"あ", "う"}
+    assert all(w > 0.0 for f, w in env["あ"] if 0 < f < 20)  # 主モーフは連続(途中閉口なし)
+    assert env["う"][-1][1] == pytest.approx(0.0)  # 補助はグループ端で 0 へ(残留しない)
+    assert max(w for _, w in env["う"]) == pytest.approx(0.15)  # ROUNDED 部の丸め量
+
+
 def test_same_vowel_same_profile_different_consonant_merges():
-    # 子音種別が違っても合成プロファイルが同じなら連結する。SPREAD×い と NONE×い はどちらも純い
-    # (SPREAD の補助 い は主モーフと同名で寄与しない)なので1つの保持区間にし、途中で閉口しない。
-    # 短い2モーラが別々に三角形化して境界で閉じる退行(しー の途中閉口)を防ぐ。
+    # SPREAD×い と NONE×い はどちらも純い(SPREAD の補助 い は主モーフと同名で寄与しない)なので連結し、
+    # 途中で閉口しない(しー の途中閉口を防ぐ)。
     env = _envelope(
         [
             MouthEvent(MouthShape.I, 0.0, 4.0, 0.5, ConsonantClass.NONE),
@@ -98,23 +112,22 @@ def test_same_vowel_same_profile_different_consonant_merges():
         ]
     )
     assert set(env) == {"い"}
-    # 連結=先頭アタックと末尾リリースのみ。内部(境界4付近)に 0.0 の閉口キーが無い。
     assert all(w > 0.0 for f, w in env["い"] if 0 < f < 8)
 
 
-def test_same_vowel_different_consonant_not_merged():
-    # 子音種別が違い合成プロファイルも違えば可視口形が違うので連結しない。あ(ROUNDED)[0,10]→あ(NONE)[10,20]
-    # は別グループになり境界で協調調音し、補助モーフ「う」は終端0へ閉じて残留しない(連結すると「う」が
-    # 末尾リリースを持たず残る)。
+def test_short_same_vowel_different_consonant_no_mid_flicker():
+    # 短い同母音モーラが子音種別違いで連続しても、連結して1つの保持にし途中で閉じない(フリッカー防止)。
+    # う(SPREAD)[0,4]→う(NONE)[4,8] は別々に短く三角形化すると境界で開閉のちらつきになるが、連結すれば
+    # 主モーフ「う」は連続し、SPREAD の補助「い」だけがフェードする。
     env = _envelope(
         [
-            MouthEvent(MouthShape.A, 0.0, 10.0, 0.5, ConsonantClass.ROUNDED),
-            MouthEvent(MouthShape.A, 10.0, 20.0, 0.5, ConsonantClass.NONE),
+            MouthEvent(MouthShape.U, 0.0, 4.0, 0.5, ConsonantClass.SPREAD),
+            MouthEvent(MouthShape.U, 4.0, 8.0, 0.5, ConsonantClass.NONE),
         ]
     )
-    assert "う" in env  # ROUNDED の丸め補助が立つ
-    assert env["う"][-1][1] == pytest.approx(0.0)  # 協調調音で終端0へ閉じ残留しない
-    assert max(w for _, w in env["う"]) == pytest.approx(0.15)  # プラトーの丸め量
+    assert "う" in env and "い" in env
+    assert all(w > 0.0 for f, w in env["う"] if 0 < f < 8)  # 主モーフ連続=途中閉口・ちらつきなし
+    assert env["い"][-1][1] == pytest.approx(0.0)  # 補助はフェードして残留しない
 
 
 def test_different_adjacent_vowels_not_merged():

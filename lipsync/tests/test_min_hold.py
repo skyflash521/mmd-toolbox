@@ -10,7 +10,8 @@
 import pytest
 
 import lipsync
-from lipsync import GenerationParams, MouthEvent, MouthShape
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
+from lipsync import generate
 
 
 def _envelope(events, params=None):
@@ -84,3 +85,36 @@ def test_normal_groups_not_shortened():
     # あ[0,10]op0.5: L=10、available=7 >= a+r=4 で短縮なし。形状の4点エンベロープのまま。
     env = _envelope([MouthEvent(MouthShape.A, 0.0, 10.0, 0.5)])
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
+
+
+def test_merged_group_reclassified_to_normal_after_absorption():
+    # 同母音の間に挟まる極短の別母音が吸収され同母音が連結したら、結合後の最終長で短区間分類をやり直し、
+    # 三角形フラグを引きずらない(三角形のままだと三角形経路で後続イベントのプロファイル・補助フェードが落ちる)。
+    groups = generate._normalize_groups(
+        [
+            MouthEvent(MouthShape.A, 0.0, 3.0, 0.5, ConsonantClass.ROUNDED),
+            MouthEvent(MouthShape.I, 3.0, 4.0, 0.5),  # 極短(L=1<triangle_min)→ 吸収
+            MouthEvent(MouthShape.A, 4.0, 7.0, 0.5, ConsonantClass.NONE),
+        ],
+        GenerationParams(),
+    )
+    assert len(groups) == 1
+    g = groups[0]
+    assert (g.start, g.end) == (0.0, 7.0)
+    assert g.triangle is False  # 結合後 7f は通常長(三角形に再分類しない)
+    assert g.attack > 0.0 and g.release > 0.0  # 通常グループはアタック/リリースを持つ
+
+
+def test_consonant_at_uses_nearest_for_absorbed_gap_and_ends():
+    # _consonant_at は区間内ならそのイベント、区間外(吸収で除去された内部ギャップ・延長された端の外側)なら
+    # 最近傍イベントの子音種別を返す(常に先頭へ倒さない)。
+    events = [
+        MouthEvent(MouthShape.A, 0.0, 30.0, 0.5, ConsonantClass.ROUNDED),
+        MouthEvent(MouthShape.A, 31.0, 60.0, 0.5, ConsonantClass.NONE),
+    ]
+    assert generate._consonant_at(events, 15.0) is ConsonantClass.ROUNDED  # 区間内(先頭)
+    assert generate._consonant_at(events, 45.0) is ConsonantClass.NONE  # 区間内(後続)
+    assert generate._consonant_at(events, 30.1) is ConsonantClass.ROUNDED  # ギャップ・30側が近い
+    assert generate._consonant_at(events, 30.9) is ConsonantClass.NONE  # ギャップ・31側が近い
+    assert generate._consonant_at(events, -5.0) is ConsonantClass.ROUNDED  # 先頭外側
+    assert generate._consonant_at(events, 70.0) is ConsonantClass.NONE  # 末尾外側

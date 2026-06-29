@@ -195,26 +195,14 @@ def _legato_bridge(events: Sequence[MouthEvent], gap_start: float, gap_end: floa
     return all(ev.shape is MouthShape.LEGATO_GAP for ev in span)
 
 
-def _same_vowel_profile(a: MouthEvent, b: MouthEvent) -> bool:
-    """2つの母音的イベントが同じ可視口形(同一 shape かつ同一合成プロファイル)か。
-
-    可視口形は母音(shape)と先頭子音種別による合成プロファイル(§4.1)で決まる。子音種別が違っても
-    プロファイルが一致する場合(例 SPREAD×い・NONE×い はどちらも純い=主モーフ単独)は同じ口形なので
-    連結してよい。プロファイルが違う場合(例 ROUNDED×あ={あ,う} と NONE×あ={あ})は別口形として分ける。
-    """
-    return a.shape == b.shape and _preprofile(a.shape, a.consonant_class) == _preprofile(
-        b.shape, b.consonant_class
-    )
-
-
 def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
-    """連続する同一可視口形(同一 shape・同一合成プロファイル)のイベントを極大グループへ束ねる。
+    """連続する同一母音(shape)のイベントを極大グループへ束ねる。
 
-    可視口形は母音(shape)と先頭子音種別による合成プロファイル(§4.1)で決まる。子音種別が違っても
-    プロファイルが同じなら連結し(SPREAD×い と NONE×い は同じ純い)、プロファイルが違えば別グループに
-    する(あ(ROUNDED)→あ(NONE) は連結せず境界で協調調音し補助モーフが終端0へ閉じる)。連結時はグループ内の
-    プロファイルが一意なので、アタック/リリース・伸び表現が補助モーフを取りこぼさない。プロファイル対象外
-    (両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音のリリース/アタックの
+    同じ母音が続く区間は1つの連続した保持にする(子音種別が途中で変わっても分けない)。子音変調で生じる
+    補助モーフ(ROUNDED の う/お、SPREAD の い)はグループ内のイベントごとに異なりうるが、補助はグループ端
+    および補助が消えるイベントの中央で 0 へフェードさせる(§4.2 のエンベロープ)ので、同母音の連続を子音種別で
+    分断して短いモーラを別々に立て閉口を挟む不自然さ(同じ母音なのに途中で口が閉じる)を避ける。プロファイル
+    対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音のリリース/アタックの
     0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない)。
     """
     groups: list[list[MouthEvent]] = []
@@ -225,7 +213,7 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
                 groups.append(current)
                 current = []
             continue
-        if current and _same_vowel_profile(ev, current[-1]):
+        if current and ev.shape == current[-1].shape:
             current.append(ev)
         else:
             if current:
@@ -327,23 +315,23 @@ def _normalize_groups(
         elif winner is nxt_anchor and nxt_anchor is not None:
             nxt_anchor.start = run_start
         i = j
-    # 吸収後に直接隣接した同一可視口形(同一 shape・同一プロファイル)グループを連結へ統合する。
-    # プロファイルが違えば可視口形が違うので統合しない(グループ内のプロファイルを一意に保つ)。
+    # 吸収後に直接隣接した同一母音(shape)グループを連結へ統合する(子音種別が違っても同母音は連続)。
     merged: list[_Group] = []
     for g in survivors:
-        same = (
-            merged
-            and merged[-1].end == g.start
-            and _same_vowel_profile(merged[-1].events[0], g.events[0])
-        )
-        if same:
+        if merged and merged[-1].shape == g.shape and merged[-1].end == g.start:
             merged[-1].events = merged[-1].events + g.events
             merged[-1].end = g.end
         else:
             merged.append(g)
+    # 吸収で span が伸びた/連結で結合した最終長で短区間分類をやり直す。連結で通常長になったグループが
+    # 三角形フラグを引きずって三角形経路(先頭イベントのみ)へ落ち、後続イベントのプロファイル・補助フェードを
+    # 取りこぼすのを防ぐ。
     for g in merged:
+        L = g.end - g.start
+        g.short = L < params.triangle_min_frames
+        g.triangle = (not g.short) and max(0.0, L - params.min_hold_frames) < 2
         if not g.triangle:
-            g.attack, g.release = _effective_attack_release(g.end - g.start, params)
+            g.attack, g.release = _effective_attack_release(L, params)
     return merged
 
 
@@ -426,6 +414,20 @@ def _interp_open(points: Sequence[tuple[float, float]], t: float) -> float:
     return points[-1][1]
 
 
+def _consonant_at(events: Sequence[MouthEvent], t: float) -> ConsonantClass:
+    """時刻 t を含むイベントの先頭子音種別(無ければ最近傍端のもの)。
+
+    同母音グループ内で子音種別が変わりうる(子音付きモーラ＋継続の伸ばし等)ため、伸び表現の各節点は
+    その時刻のイベントの子音種別で変調する。t が(吸収で延長された)端の外側なら最近傍端の値を返す。
+    """
+    for ev in events:
+        if ev.start <= t < ev.end:
+            return ev.consonant_class
+    # t がイベント区間外(吸収で延長された端の外側・吸収で除去された内部ギャップ)なら最近傍イベント。
+    nearest = min(events, key=lambda ev: min(abs(t - ev.start), abs(t - ev.end)))
+    return nearest.consonant_class
+
+
 def _vibrato_targets(
     group: _Group, plateau_start: float, plateau_end: float, params: GenerationParams
 ) -> list[tuple[str, float, float]]:
@@ -459,8 +461,8 @@ def _vibrato_targets(
         amp_eff = min(params.vibrato_amp, base)
         offset = amp_eff * math.sin(2.0 * math.pi * (t - plateau_start) / period)
         open_v = min(max(base + offset, 0.0), params.open_cap)
-        # グループ内はプロファイルが一意(_vowel_groups の連結条件)なので先頭イベントの子音種別で変調する。
-        cc = group.events[0].consonant_class
+        # 同母音グループ内で子音種別が変わりうるので、その時刻のイベントの子音種別で変調する。
+        cc = _consonant_at(group.events, t)
         for morph, weight in _weights_from_hold(group.shape, cc, open_v, params).items():
             nodes.append((morph, t, weight))
     return nodes
@@ -525,6 +527,10 @@ def generate_morph_keys(
                 targets.append((morph, g.end, 0.0))
             plateaus.append((mid, mid))
             continue
+        # グループ内の全モーフ(子音変調でイベントごとに補助モーフが変わりうる)。各モーフはグループ端で
+        # 0 へアンカーし、補助が無いイベントの中央では 0 を置くことで、同母音の連続を保ったまま補助モーフ
+        # (ROUNDED の う/お・SPREAD の い)だけを滑らかに増減させる(残留・途中閉口を防ぐ)。
+        group_morphs = sorted({morph for w in gw for morph in w})
         coart_in = i > 0 and groups[i - 1].end == g.start and not groups[i - 1].triangle
         coart_out = i < n - 1 and groups[i + 1].start == g.end and not groups[i + 1].triangle
         legato_in = (i - 1) in legato_at  # 直前グループとの間がレガート間隙(谷が立ち上がりを担う)
@@ -542,9 +548,9 @@ def generate_morph_keys(
                 f_start, f_attack = g.start - antic, g.start
             else:
                 f_start, f_attack = g.start, g.start + g.attack
-            for morph, weight in gw[0].items():
+            for morph in group_morphs:
                 targets.append((morph, f_start, 0.0))
-                targets.append((morph, f_attack, weight))
+                targets.append((morph, f_attack, gw[0].get(morph, 0.0)))
             plateau_start = f_attack
         if coart_out:
             plateau_end = g.end - coart_half[i]
@@ -559,15 +565,15 @@ def generate_morph_keys(
                 f_hold_end, f_end = g.end, g.end + lag
             else:
                 f_hold_end, f_end = g.end - g.release, g.end
-            for morph, weight in gw[-1].items():
-                targets.append((morph, f_hold_end, weight))
+            for morph in group_morphs:
+                targets.append((morph, f_hold_end, gw[-1].get(morph, 0.0)))
                 targets.append((morph, f_end, 0.0))
             plateau_end = f_hold_end
         if len(g.events) >= 2:
             for ev, w in zip(g.events, gw):
                 f_mid = (ev.start + ev.end) / 2.0
-                for morph, weight in w.items():
-                    targets.append((morph, f_mid, weight))
+                for morph in group_morphs:
+                    targets.append((morph, f_mid, w.get(morph, 0.0)))
         plateaus.append((plateau_start, plateau_end))
     # 隣接する異母音グループ境界の協調調音。閉口を挟まず中間口形へ線形遷移する。
     for i in range(n - 1):
