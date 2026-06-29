@@ -5,8 +5,6 @@
 --pmx のパス不在・非通常ファイルは引数エラー(終了コード2)になる。
 """
 
-import json
-
 import pytest
 
 from mmd_toolbox.vmd import io
@@ -146,24 +144,22 @@ def test_no_denoise_pose_mode_needs_no_pmx(tmp_path):
     assert out.is_file()
 
 
-# --- pose モードの診断レポート(report-json / dry-run。§12) -------------------
+# --- pose モードの診断表示(dry-run。§12) ----------------------------------
 
 
-def test_pose_report_json_has_pose_denoise_block(tmp_path):
-    # pose モードの report-json にトップレベル pose_denoise セクションが出る(§12)。
+def test_pose_dry_run_has_pose_denoise_summary(tmp_path, capsys):
+    # pose モードの dry-run に pose_denoise 要約が出る(§12)。
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "report.json"
     _write_input(src)
-    code = cli.main([str(src), "--dry-run", "--denoise-mode", "pose", "--report-json", str(rep)])
+    code = cli.main([str(src), "--dry-run", "--denoise-mode", "pose"])
     assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
-    pd = data["pose_denoise"]
-    assert pd["enabled"] is True
-    assert pd["pmx"] is None  # --pmx 未指定=既定モデルプロファイル
-    assert pd["markers"]["available"] > 0
-    assert pd["markers"]["required_bones_ok"] is True
-    assert pd["fit"]["frames"] >= 1
-    assert "marker_displacement" in pd
+    out = capsys.readouterr().out
+    assert "pose_denoise" in out
+    assert "既定モデルプロファイル" in out  # --pmx 未指定=既定モデルプロファイル
+    assert "available=" in out
+    assert "required_bones_ok=True" in out
+    assert "marker_disp:" in out
+    assert "fit:" in out
 
 
 def test_pose_dry_run_shows_pose_summary(tmp_path, capsys):
@@ -179,12 +175,10 @@ def test_pose_dry_run_shows_pose_summary(tmp_path, capsys):
     assert "fallback=" in out
 
 
-def test_bone_mode_report_omits_pose_denoise(tmp_path):
-    # 既定 bone モードの report-json に pose_denoise セクションは出ない。
+def test_bone_mode_dry_run_omits_pose_denoise(tmp_path, capsys):
+    # 既定 bone モードの dry-run に pose_denoise 要約は出ない。
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "report.json"
     _write_input(src)
-    code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
+    code = cli.main([str(src), "--dry-run"])
     assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
-    assert "pose_denoise" not in data
+    assert "pose_denoise" not in capsys.readouterr().out

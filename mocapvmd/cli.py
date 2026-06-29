@@ -46,8 +46,6 @@ def _build_parser():
     p.add_argument("--no-reduce", dest="reduce", action="store_false", default=True)
     p.add_argument("--quiet", dest="quiet", action="store_true")
     p.add_argument("--list-bones", dest="list_bones", action="store_true")
-    p.add_argument("--report-json", dest="report_json")
-    p.add_argument("--preview-csv", dest="preview_csv")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
 
@@ -253,10 +251,10 @@ def main(argv=None):
     # 段ラベルは厳密な仕様用語でなく利用者向けの平易な文言にする(平滑化=クリーニング、足IK最適化=足IK
     # 安定化、キーフレーム圧縮=疎化)。
     reporter = progress.ProgressReporter(sys.stderr, enabled=False if args.quiet else None)
-    # 疎化レポートを出すときだけ診断 diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
-    want_report = args.dry_run or args.report_json or args.preview_csv
+    # dry-run の診断表示を出すときだけ diagnostics_out を集める(通常実行ではオーバーヘッドを避ける)。
+    want_report = args.dry_run
     reduction_diag = {} if (args.reduce and want_report) else None
-    # pose モードでレポートを出すときだけ表現空間ノイズ除去の診断素データを集める(§12)。
+    # pose モードの dry-run で表現空間ノイズ除去の診断素データを集める(§12)。
     pose_diag = {} if (args.denoise and args.denoise_mode == "pose" and want_report) else None
     try:
         if args.denoise:
@@ -290,7 +288,7 @@ def main(argv=None):
     finally:
         reporter.close()
 
-    # 診断レポート(dry-run 表示・report-json 出力)。疎化したときは §4.4 の疎化レポート(reduction)も載せる。
+    # dry-run 診断表示。疎化したときは §4.4 の疎化レポート(reduction)も載せる。
     if want_report:
         rep = report.build_report(
             doc.bone,
@@ -304,17 +302,6 @@ def main(argv=None):
         )
         if args.dry_run:
             print(report.format_dry_run(rep))
-        if args.report_json:
-            try:
-                report.write_json(rep, args.report_json)
-            except OSError:
-                return 3
-        # --preview-csv: 入力(クリーニング前)と出力(疎化後)のフレーム毎サンプル比較を CSV 出力する(§3.2)。
-        if args.preview_csv:
-            try:
-                report.write_preview_csv(report.bone_preview_rows(doc.bone, new_bone), args.preview_csv)
-            except OSError:
-                return 3
 
     # dry-run は出力を書かずに終える。
     if args.dry_run:

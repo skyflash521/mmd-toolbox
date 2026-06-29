@@ -3,16 +3,14 @@
 CLI は引数解析 → VMD読み → 全ボーンの一般ノイズ軽減(クリーニング)→ VMD書き。終了コード:
 0 正常 / 1 入力不正 / 2 引数エラー / 3 出力書き込み失敗。
 
-本テストは入出力・パス検証・上書きガード・dry-run・対象外セクション透過・診断レポート・
+本テストは入出力・パス検証・上書きガード・dry-run・対象外セクション透過・診断表示・
 クリーニング(--denoise/--no-denoise)を扱う。
 """
-
-import json
 
 import pytest
 
 from mmd_toolbox.vmd import io
-from mocapvmd import cli
+from mocapvmd import cli, report as mocap_report
 
 from .helpers import (
     BONE_NONLINEAR,
@@ -25,6 +23,8 @@ from .helpers import (
     self_shadow,
     write_vmd,
 )
+
+_FORMAT_DRY_RUN = mocap_report.format_dry_run
 
 
 def _full_doc(path):
@@ -253,16 +253,25 @@ def test_dry_run_does_not_write_default_output(tmp_path):
     assert not (tmp_path / "in_mocap.vmd").exists()
 
 
-# --- 診断レポート(report-json / dry-run 表示) ----------------------------
+# --- 診断表示(dry-run) ---------------------------------------------------
 
 
-def test_report_json_written(tmp_path):
+def _dry_run_report(src, monkeypatch, *args):
+    captured = {}
+
+    def capture(rep):
+        captured["report"] = rep
+        return _FORMAT_DRY_RUN(rep)
+
+    monkeypatch.setattr(mocap_report, "format_dry_run", capture)
+    assert cli.main([str(src), "--dry-run", *args]) == 0
+    return captured["report"]
+
+
+def test_dry_run_builds_report(tmp_path, monkeypatch):
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "report.json"
     _full_doc(src)
-    code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
-    assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
+    data = _dry_run_report(src, monkeypatch)
     names = [e["name"] for e in data["bones"]]
     assert "センター" in names
     center = next(e for e in data["bones"] if e["name"] == "センター")
@@ -271,16 +280,12 @@ def test_report_json_written(tmp_path):
     assert "右足ＩＫ" in data["foot_ik_candidates"]
 
 
-def test_report_reflects_denoise_flag(tmp_path):
+def test_report_reflects_denoise_flag(tmp_path, monkeypatch):
     # dry-run の処理計画にクリーニング有効/無効が反映される。
     src = tmp_path / "in.vmd"
-    rep_on = tmp_path / "on.json"
-    rep_off = tmp_path / "off.json"
     _full_doc(src)
-    assert cli.main([str(src), "--dry-run", "--report-json", str(rep_on)]) == 0
-    assert cli.main([str(src), "--dry-run", "--no-denoise", "--report-json", str(rep_off)]) == 0
-    assert json.loads(rep_on.read_text(encoding="utf-8"))["denoise"] is True
-    assert json.loads(rep_off.read_text(encoding="utf-8"))["denoise"] is False
+    assert _dry_run_report(src, monkeypatch)["denoise"] is True
+    assert _dry_run_report(src, monkeypatch, "--no-denoise")["denoise"] is False
 
 
 def test_dry_run_prints_report(tmp_path, capsys):
@@ -292,28 +297,23 @@ def test_dry_run_prints_report(tmp_path, capsys):
     assert "センター" in out
 
 
-def test_report_json_with_dry_run_does_not_write_output(tmp_path):
+def test_dry_run_does_not_write_output_when_report_is_built(tmp_path):
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "report.json"
     _full_doc(src)
-    code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
+    code = cli.main([str(src), "--dry-run"])
     assert code == 0
-    assert rep.exists()
     assert not (tmp_path / "in_mocap.vmd").exists()
 
 
 # --- --clean-strength(クリーニング強度) / --preset(疎化プリセット) ---------
 
 
-def test_clean_strength_option_resolves_cleaning_in_report(tmp_path):
+def test_clean_strength_option_resolves_cleaning_in_report(tmp_path, monkeypatch):
     from mocapvmd import presets
 
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "report.json"
     _full_doc(src)
-    code = cli.main([str(src), "--dry-run", "--clean-strength", "1.4", "--report-json", str(rep)])
-    assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
+    data = _dry_run_report(src, monkeypatch, "--clean-strength", "1.4")
     foot = next(e for e in data["bones"] if e["name"] == "右足ＩＫ")
     assert foot["cleaning"]["pos_strength"] == pytest.approx(min(1.0, 0.65 * 1.4))
     assert foot["cleaning"] == presets.resolve_cleaning(1.4, "foot_ik")
@@ -334,16 +334,13 @@ def test_invalid_preset_value_is_arg_error(tmp_path):
     assert cli.main([str(src), "--preset", "turbo"]) == 2
 
 
-def test_default_clean_strength_is_unit_in_report_json(tmp_path):
+def test_default_clean_strength_is_unit_in_dry_run_report(tmp_path, monkeypatch):
     # --clean-strength 省略時は倍率1.0(基準値)が適用されることを CLI レベルで検証する。
     from mocapvmd import presets
 
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "report.json"
     _full_doc(src)
-    code = cli.main([str(src), "--dry-run", "--report-json", str(rep)])
-    assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
+    data = _dry_run_report(src, monkeypatch)
     center = next(e for e in data["bones"] if e["name"] == "センター")
     assert center["cleaning"] == presets.resolve_cleaning(1.0, "center")
 
@@ -658,49 +655,39 @@ def test_denoise_output_is_dense_linear(tmp_path):
 # --- 疎化レポートの CLI 配線(§4.4。疎化を実行して reduction 診断をレポートへ載せる) ------
 
 
-def test_report_includes_reduction_section(tmp_path):
-    # 既定(疎化 on)の dry-run/report-json は、全ボーン(多キー・単一キー)に疎化レポート(§4.4)を載せる。
+def test_report_includes_reduction_section(tmp_path, monkeypatch):
+    # 既定(疎化 on)の dry-run は、全ボーン(多キー・単一キー)に疎化レポート(§4.4)を載せる。
     # 特定ボーンだけ診断を渡す不完全な配線を排除する。
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "r.json"
     keys = [bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0)) for f in range(11)]
     keys.append(bone("右腕", 0, pos=(1.0, 0.0, 0.0)))  # 単一キー(逐語・削減なし)も診断に載る
     write_vmd(src, bone=keys)
-    assert cli.main([str(src), "--dry-run", "--report-json", str(rep)]) == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
+    data = _dry_run_report(src, monkeypatch)
     for name in ("センター", "右腕"):
         r = next(e for e in data["bones"] if e["name"] == name)["reduction"]
         assert set(r) == {"output_keys", "reduction_rate", "tol_pos", "tol_rot", "cuts", "errors"}
         assert set(r["errors"]) == {"pos_x", "pos_y", "pos_z", "rot_deg"}
 
 
-def test_report_reduce_flag_follows_reduce_option(tmp_path):
+def test_report_reduce_flag_follows_reduce_option(tmp_path, monkeypatch):
     # 既定はレポート reduce: true、--no-reduce は false かつ reduction セクション無し。
     src = tmp_path / "in.vmd"
-    rep_on = tmp_path / "on.json"
-    rep_off = tmp_path / "off.json"
     _curve_doc(src)
-    assert cli.main([str(src), "--dry-run", "--report-json", str(rep_on)]) == 0
-    assert cli.main([str(src), "--dry-run", "--no-reduce", "--report-json", str(rep_off)]) == 0
-    on = json.loads(rep_on.read_text(encoding="utf-8"))
-    off = json.loads(rep_off.read_text(encoding="utf-8"))
+    on = _dry_run_report(src, monkeypatch)
+    off = _dry_run_report(src, monkeypatch, "--no-reduce")
     assert on["reduce"] is True
     assert off["reduce"] is False
     assert "reduction" not in next(e for e in off["bones"] if e["name"] == "センター")
 
 
-def test_report_reduction_matches_reduce_bones(tmp_path):
+def test_report_reduction_matches_reduce_bones(tmp_path, monkeypatch):
     # レポートの reduction 診断は、同じ入力を reduce_bones に diagnostics_out 付きで通した素データと一致する。
     # --no-denoise --no-foot-ik-stabilize でパイプラインを疎化だけに絞り、配線(CLI が診断を載せる)を固定する。
     from mocapvmd import reduce as mreduce
 
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "r.json"
     _curve_doc(src)
-    assert cli.main(
-        [str(src), "--dry-run", "--no-denoise", "--no-foot-ik-stabilize", "--report-json", str(rep)]
-    ) == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
+    data = _dry_run_report(src, monkeypatch, "--no-denoise", "--no-foot-ik-stabilize")
     in_doc, _ = io.read(str(src))
     diag = {}
     mreduce.reduce_bones(in_doc.bone, "medium", diagnostics_out=diag)
@@ -714,7 +701,7 @@ def test_report_reduction_matches_reduce_bones(tmp_path):
     assert r["reduction_rate"] == pytest.approx(1.0 - d["output_keys"] / d["input_keys"])
 
 
-def test_dry_run_reduction_matches_full_pipeline(tmp_path):
+def test_dry_run_reduction_matches_full_pipeline(tmp_path, monkeypatch):
     # dry-run のレポート reduction は、クリーニング→足IK安定化→疎化の全段を通した診断と一致する
     # (output_keys だけでなく最大再生誤差 errors まで)。clean・stabilize が実際に値を変える入力(接地中の
     # ジッタ)を使い、各段を飛ばすと errors が全段と変わる(=どの段の省略も検出できる)ことを負例で保証する:
@@ -723,10 +710,9 @@ def test_dry_run_reduction_matches_full_pipeline(tmp_path):
     from mocapvmd.cli import _clean_bones, _stabilize_bones
 
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "r.json"
     xs = [0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0]  # 接地中のジッタ(各ステップ<=0.08)
     write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
-    assert cli.main([str(src), "--dry-run", "--report-json", str(rep)]) == 0
+    data = _dry_run_report(src, monkeypatch)
     in_doc, _ = io.read(str(src))
     cleaned = _clean_bones(in_doc.bone, 1.0)
     full = {}
@@ -737,7 +723,6 @@ def test_dry_run_reduction_matches_full_pipeline(tmp_path):
         diag = {}
         mreduce.reduce_bones(skipped, "medium", diagnostics_out=diag)
         assert diag["右足ＩＫ"]["errors"] != d["errors"]
-    data = json.loads(rep.read_text(encoding="utf-8"))
     r = next(e for e in data["bones"] if e["name"] == "右足ＩＫ")["reduction"]
     assert r["output_keys"] == d["output_keys"]
     assert r["cuts"] == d["cuts"]
@@ -840,106 +825,6 @@ def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
     out = tmp_path / "out.vmd"
     src.write_bytes(b"not a vmd")
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "nan"]) == 2
-
-
-# --- --preview-csv(入力/出力サンプル比較 CSV。§3.2) ----------------------------
-
-_PREVIEW_CHANNELS = ("pos_x", "pos_y", "pos_z", "rot_x", "rot_y", "rot_z", "rot_w")
-_PREVIEW_HEADER = ["track", "frame", "channel", "input", "output", "error"]
-
-
-def _read_preview_raw(path):
-    import csv
-
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.reader(f))
-
-
-def _read_preview(path):
-    import csv
-
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
-def _track_by_name(path, name):
-    return sorted((k for k in io.read(str(path))[0].bone if k.name == name), key=lambda k: k.frame)
-
-
-def test_preview_csv_header_order_and_full_cartesian(tmp_path):
-    # ヘッダは列順固定。行は各ボーンの (実在フレーム × 7チャンネル) の直積を漏れなく重複なく1回ずつ出す。
-    # フレーム範囲の異なる2ボーンで、フレーム1回ずつ出すだけの不完全CSVを排除する。
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    csvp = tmp_path / "preview.csv"
-    keys = [bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(5)]          # 0-4
-    keys += [bone("右腕", f, pos=(float(f), 0.0, 0.0)) for f in range(10, 13)]         # 10-12
-    write_vmd(src, bone=keys)
-    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(csvp)]) == 0
-    raw = _read_preview_raw(csvp)
-    assert raw[0] == _PREVIEW_HEADER  # 列順を固定(集合一致では重複列を見逃す)
-    got = [(r[0], int(r[1]), r[2]) for r in raw[1:]]
-    expected = {
-        (name, f, ch)
-        for name, frames in (("センター", range(5)), ("右腕", range(10, 13)))
-        for f in frames
-        for ch in _PREVIEW_CHANNELS
-    }
-    assert set(got) == expected
-    assert len(got) == len(expected)  # 重複行なし
-
-
-def test_preview_csv_input_output_error_match_samples(tmp_path):
-    # input は入力(クリーニング前)サンプル、output は出力VMDサンプル、error=abs(input-output)。値は6桁整形。
-    # クリーニングが値を変えるジッタ入力で、output が input と異なる行が存在することも確かめ、誤って
-    # output に input を流用する実装を排除する。
-    from mmd_toolbox.vmd import interp
-
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    csvp = tmp_path / "preview.csv"
-    xs = [0.0, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, 0.0]  # 接地ジッタ(clean が平滑)
-    write_vmd(src, bone=[bone("センター", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
-    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(csvp)]) == 0
-    in_track = _track_by_name(src, "センター")   # 出力VMDと同じく float32 往復後の値で照合する
-    out_track = _track_by_name(out, "センター")
-    differ = False
-    for r in _read_preview(csvp):
-        f = int(r["frame"])
-        ch = r["channel"]
-        if ch.startswith("pos_"):
-            exp_in = interp.sample(in_track, ch, f)
-            exp_out = interp.sample(out_track, ch, f)
-        else:
-            i = ("rot_x", "rot_y", "rot_z", "rot_w").index(ch)
-            exp_in = interp.sample(in_track, "rot", f)[i]
-            exp_out = interp.sample(out_track, "rot", f)[i]
-        assert r["input"] == f"{exp_in:.6f}"                      # input=raw・6桁整形
-        assert r["output"] == f"{exp_out:.6f}"                    # output=出力VMD・6桁整形
-        assert r["error"] == f"{abs(exp_in - exp_out):.6f}"       # error=abs(input-output)
-        if exp_in != exp_out:
-            differ = True
-    assert differ  # output が input と異なる行が存在する(output=input 流用を排除)
-
-
-def test_preview_csv_also_writes_valid_output_vmd(tmp_path):
-    # --preview-csv は dry-run でないので出力 VMD も書き、それが有効な VMD として読める(出力抑止しない)。
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    csvp = tmp_path / "preview.csv"
-    write_vmd(src, bone=[bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(11)])
-    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(csvp)]) == 0
-    assert csvp.exists()
-    assert any(k.name == "センター" for k in io.read(str(out))[0].bone)  # 出力VMDが読める
-
-
-def test_preview_csv_write_failure_is_exit3(tmp_path):
-    # CSV 書き込み失敗(存在しないディレクトリ)は終了コード3(report-json の書込失敗と同じ扱い)。
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, bone=[bone("センター", 0), bone("センター", 10)])
-    bad = tmp_path / "nodir" / "preview.csv"
-    assert cli.main([str(src), "-o", str(out), "--preview-csv", str(bad)]) == 3
 
 
 def test_version_flag_prints_name_and_version_and_exits_zero(capsys):

@@ -4,7 +4,6 @@
 回転角速度をまとめる。速度は連続フレーム差をキー間フレーム差で1フレームあたりへ正規化する。
 """
 
-import json
 import math
 
 import pytest
@@ -113,15 +112,6 @@ def test_report_counts_clamp_warnings():
     assert _entry(rep, "右足ＩＫ")["clamp_warnings"] >= 1
 
 
-def test_report_json_roundtrip_with_grounding(tmp_path):
-    rep = report.build_report(_grounded_foot_keys(), denoise=False)
-    path = tmp_path / "report.json"
-    report.write_json(rep, str(path))
-    loaded = json.loads(path.read_text(encoding="utf-8"))
-    assert loaded == rep  # 接地区間等が JSON ネイティブ型(リスト)で往復する
-    assert "grounding_segments" in next(e for e in loaded["bones"] if e["name"] == "右足ＩＫ")
-
-
 def test_format_dry_run_shows_grounding_for_foot():
     text = report.format_dry_run(report.build_report(_grounded_foot_keys(), denoise=False))
     foot_line = next(line for line in text.splitlines() if "右足ＩＫ" in line and "foot_ik" in line)
@@ -148,7 +138,7 @@ def test_report_default_clean_strength_is_unit():
 
 
 def test_format_dry_run_shows_cleaning_params():
-    # dry-run も clean_strength で解決したクリーニング強度を表示する(§4.4 は dry-run と report-json の双方に要求)。
+    # dry-run も clean_strength で解決したクリーニング強度を表示する(§4.4)。
     keys = [bone("センター", 0), bone("センター", 10)]
     rep = report.build_report(keys, clean_strength=1.4)
     text = report.format_dry_run(rep)
@@ -241,7 +231,7 @@ def test_report_single_key_track_zero_spikes_and_protected():
 
 
 def test_format_dry_run_shows_spike_and_protected_counts():
-    # dry-run 表示にもスパイク候補数・保護フレーム数が出る(§4.4 は dry-run と report-json の双方に要求)。
+    # dry-run 表示にもスパイク候補数・保護フレーム数が出る(§4.4)。
     keys = [bone("センター", f) for f in range(11)]
     keys[5] = bone("センター", 5, pos=(0.5, 0.0, 0.0))
     rep = report.build_report(keys)
@@ -403,21 +393,6 @@ def test_bones_in_input_appearance_order():
     assert [e["name"] for e in rep["bones"]] == ["右腕", "センター"]
 
 
-def test_write_json_roundtrip(tmp_path):
-    keys = [
-        bone("センター", 0, pos=(0.0, 0.0, 0.0)),
-        bone("センター", 10, pos=(1.0, 0.0, 0.0)),
-        bone("右足ＩＫ", 0),
-        bone("右つま先ＩＫ", 0),
-    ]
-    rep = report.build_report(keys)
-    path = tmp_path / "report.json"
-    report.write_json(rep, str(path))
-    loaded = json.loads(path.read_text(encoding="utf-8"))
-    # 速度・範囲・候補一覧まで含めた完全な往復を保証する(JSON ネイティブ型のみで構成)。
-    assert loaded == rep
-
-
 # --- 疎化レポート(§4.4: キー削減率・適用許容・カット数・最大再生誤差) -------------
 
 
@@ -467,7 +442,7 @@ def test_report_reduce_flag_reflects_reduction_presence():
 
 
 def test_format_dry_run_shows_reduction():
-    # dry-run 表示にも削減率・出力キー数・カット数・最大再生誤差が出る(§4.4 は dry-run と report-json 双方)。
+    # dry-run 表示にも削減率・出力キー数・カット数・最大再生誤差が出る(§4.4)。
     keys = [bone("センター", f) for f in range(11)]
     errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
     red = _reduction("センター", 11, 3, cuts=2, errors=errors)
@@ -481,16 +456,6 @@ def test_format_dry_run_shows_reduction():
     assert "tol=[0.014,0.14]" in tokens          # 適用許容(位置, 回転)
     assert "err_pos=0.012" in tokens             # 最大再生誤差(位置軸の最大 = pos_x)
     assert "err_rot=0.8deg" in tokens            # 最大再生誤差(回転角)
-
-
-def test_report_json_roundtrip_with_reduction(tmp_path):
-    keys = [bone("センター", f) for f in range(11)]
-    errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
-    rep = report.build_report(keys, reduction=_reduction("センター", 11, 3, cuts=2, errors=errors))
-    path = tmp_path / "report.json"
-    report.write_json(rep, str(path))
-    loaded = json.loads(path.read_text(encoding="utf-8"))
-    assert loaded == rep  # reduction セクションが JSON ネイティブ型で往復する
 
 
 # --- 表現空間ノイズ除去レポート(§12: マーカー数・必須ボーン検証・変位・fit改善・フォールバック) ---
@@ -547,16 +512,6 @@ def test_format_dry_run_shows_pose_summary():
     assert "max=0.23" in text                 # 最大マーカー変位
     assert "0.08" in text and "0.03" in text  # fit改善(before -> after)
     assert "fallback=2" in text               # フォールバック数
-
-
-def test_report_json_roundtrip_with_pose_denoise(tmp_path):
-    rep = report.build_report(
-        [bone("センター", 0), bone("センター", 10)], pose_denoise=_pose_denoise_diag()
-    )
-    path = tmp_path / "report.json"
-    report.write_json(rep, str(path))
-    loaded = json.loads(path.read_text(encoding="utf-8"))
-    assert loaded == rep  # pose_denoise セクションが JSON ネイティブ型で往復する
 
 
 def test_report_reduction_rate_derives_from_diagnostics_keys():
