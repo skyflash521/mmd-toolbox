@@ -37,11 +37,14 @@ import sys
 
 
 REASON = (
-    "既にプロジェクトルートが cwd です。冗長な cd / Set-Location を外し、"
+    "既にリポジトリルートが cwd です。冗長な cd（ルートやドライブルートへの移動）を外し、"
     "コマンドを直接実行してください（サブディレクトリへの cd は可）。"
 )
 # Directory-changing verbs (compared case-insensitively, path/extension stripped).
 CD_VERBS = {"cd", "chdir", "pushd"}
+# 裸のドライブルート(/f, /c, f:, f:/, F:\ 等。サブディレクトリは続かない)。cwd は既に
+# リポジトリルートなので、ボリュームのルートへ上がってから repo コマンドを打つのは常に誤り。
+DRIVE_ROOT = re.compile(r"^(/[A-Za-z]|[A-Za-z]:)[/\\]?$")
 # Control operators that separate logical segments within a line.
 OPS = {";", "|", "||", "&", "&&", "|&"}
 # Literal spellings of the project root that survive shlex (no real expansion happens here).
@@ -118,6 +121,10 @@ def _resolve(path, root):
     return posixpath.normpath(full).lower()
 
 
+def _is_drive_root(arg):
+    return bool(arg) and bool(DRIVE_ROOT.match(arg))
+
+
 def _is_root_arg(arg, root):
     if not arg or arg == "-":
         return False
@@ -144,7 +151,7 @@ def classify(command, root=None):
         return "pass", None  # 引用不整合(bash では構文エラー)は不確定 -> pass
     for seg in _split_segments(tokens):
         is_cd, arg = _target_arg(seg)
-        if is_cd and _is_root_arg(arg, root):
+        if is_cd and (_is_root_arg(arg, root) or _is_drive_root(arg)):
             return "deny", REASON
     return "pass", None
 
@@ -206,6 +213,18 @@ def selftest():
         # Git Bash のドライブ表記 /f/... -> deny
         ("cd /f/Repositories/Skyflash/mmd-toolbox", "deny"),
         ("cd /f/Repositories/Skyflash/mmd-toolbox/", "deny"),
+        # 裸のドライブルート(サブディレクトリが続かない)-> deny。cwd は既にリポジトリルートで、
+        # ボリュームのルートへ上がってから repo コマンドを打つのは常に誤り(コミッタが出すことがある)。
+        ("cd /f && git log --oneline -10", "deny"),
+        ("cd /f", "deny"),
+        ("cd /f/", "deny"),
+        ("cd f:", "deny"),
+        ("cd f:/", "deny"),
+        ("cd F:\\", "deny"),
+        ("cd /c && ls", "deny"),
+        # ドライブ直下のサブディレクトリは通常移動 -> pass(誤 deny しない)
+        ("cd /f/Repositories", "pass"),
+        ("cd f:/Repositories", "pass"),
         # 先頭の cd は複数行でも捕捉する -> deny
         ("cd f:/Repositories/Skyflash/mmd-toolbox\npytest", "deny"),
         # subdirectory / parent / other / uncertain -> pass

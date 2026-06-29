@@ -140,14 +140,16 @@ baseline=$(list_logs | sort)
 # Start the grace/wall clocks right after the baseline snapshot.
 start=$(now)
 
-# Pick the newest log for THIS round. RUNID mode: the newest log whose metadata/body contains the
-# RUNID (content-based; concurrent-safe; independent of launch order). Baseline mode (RUNID empty):
-# the newest log that did not exist at the baseline snapshot.
+# Pick the newest log for THIS round in the given mode ($1):
+#   "runid"    — the newest log whose metadata/body contains the RUNID (content-based;
+#                concurrent-safe; independent of launch order).
+#   "baseline" — the newest log that did not exist at the baseline snapshot.
+# Prints empty if none match.
 pick_active() {
-  local p cm best="" bestmt=0
+  local mode="$1" p cm best="" bestmt=0
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    if [ -n "$RUNID" ]; then
+    if [ "$mode" = runid ]; then
       has_runid "$p" || continue
     else
       in_baseline "$p" && continue
@@ -158,13 +160,29 @@ pick_active() {
   printf '%s' "$best"
 }
 
+# Select this round's log, preferring the RUNID-tagged one. The codex rescue agent rebuilds the
+# review prompt when it composes the companion task, so the RUNID marker placed at the top of the
+# prompt can be ABSENT from the job summary/log. When no RUNID-tagged log exists, fall back to
+# baseline selection (newest log not present at the snapshot) so detection still works in a single
+# session. RUNID stays preferred within each poll, so its concurrent-safety holds whenever the
+# marker survives and is present by the time a log is first selected. Accepted limitation: in
+# concurrent same-repo sessions where this round's RUNID-tagged log appears later than another
+# session's new log, baseline may pin the other log first; like baseline mode in general this
+# degrades to a caller retry (the agent response is the primary result channel), never a wrong fix.
+select_log() {
+  local lg=""
+  [ -n "$RUNID" ] && lg=$(pick_active runid)
+  [ -z "$lg" ] && lg=$(pick_active baseline)
+  printf '%s' "$lg"
+}
+
 # Single loop, two backstops (grace is clamped <= wall cap):
 #   - never-identified log: STARTUP_GRACE_SECS -> exit 4 (no-start), checked first.
 #   - identified but no terminal marker: WALL_CAP_SECS -> exit 4 (wall-cap).
 # Once identified, watch it: failure first, then success, then stall.
 log=""
 while :; do
-  [ -z "$log" ] && log=$(pick_active)
+  [ -z "$log" ] && log=$(select_log)
   # No-start fast-fail (retry-favoring HEURISTIC; see header exit 4(a)).
   if [ -z "$log" ] && [ $(( $(now) - start )) -ge "$STARTUP_GRACE_SECS" ]; then
     report "$log" 4 "no-start (no job log within ${STARTUP_GRACE_SECS}s)"

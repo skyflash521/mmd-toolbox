@@ -1,0 +1,134 @@
+"""vpr_io データモデル型のテスト(vpr_io.md §2)。
+
+型定義(フィールド・既定値)のみを検証する。read/write の振る舞いはこのファイルでは扱わない。
+"""
+
+import pytest
+
+
+def test_note_holds_documented_fields():
+    from vpr_io import Note
+
+    note = Note(
+        start_tick=480,
+        duration_tick=240,
+        pitch=60,
+        lyric="ら",
+        phonemes=["r", "a"],
+        velocity=64,
+    )
+    assert note.start_tick == 480
+    assert note.duration_tick == 240
+    assert note.pitch == 60
+    assert note.lyric == "ら"
+    assert note.phonemes == ["r", "a"]
+    assert note.velocity == 64
+
+
+def test_note_phonemes_default_empty_and_independent():
+    from vpr_io import Note
+
+    a = Note(start_tick=0, duration_tick=1, pitch=60, lyric="あ", velocity=0)
+    b = Note(start_tick=0, duration_tick=1, pitch=60, lyric="い", velocity=0)
+    # 音素列は空可(vpr_io.md §2)。既定の可変リストがインスタンス間で共有されないこと。
+    assert a.phonemes == []
+    a.phonemes.append("a")
+    assert b.phonemes == []
+
+
+def test_note_velocity_upper_bound():
+    from vpr_io import Note
+
+    # ベロシティは 0〜127 の生値(vpr_io.md §2)。上限 127 を保持できること。
+    note = Note(start_tick=0, duration_tick=1, pitch=60, lyric="は", velocity=127)
+    assert note.velocity == 127
+
+
+def test_tempo_event_fields():
+    from vpr_io import TempoEvent
+
+    tempo = TempoEvent(tick=0, bpm=120.0)
+    assert tempo.tick == 0
+    assert tempo.bpm == pytest.approx(120.0)
+
+
+def test_time_signature_fields():
+    from vpr_io import TimeSignature
+
+    ts = TimeSignature(tick=0, numerator=3, denominator=4)
+    assert ts.tick == 0
+    assert ts.numerator == 3
+    assert ts.denominator == 4
+
+
+def test_part_holds_absolute_start_and_notes():
+    from vpr_io import Note, Part
+
+    note = Note(start_tick=960, duration_tick=480, pitch=62, lyric="そ", velocity=80)
+    part = Part(name="part1", start_tick=960, notes=[note])
+    assert part.name == "part1"
+    assert part.start_tick == 960
+    assert part.notes == [note]
+
+
+def test_part_notes_default_empty_and_independent():
+    from vpr_io import Part
+
+    a = Part(name="a", start_tick=0)
+    b = Part(name="b", start_tick=0)
+    assert a.notes == []
+    a.notes.append(object())
+    assert b.notes == []
+
+
+def test_track_holds_parts():
+    from vpr_io import Part, Track
+
+    part = Part(name="p", start_tick=0)
+    track = Track(name="vocal", parts=[part])
+    assert track.name == "vocal"
+    assert track.parts == [part]
+
+
+def test_track_parts_default_empty():
+    from vpr_io import Track
+
+    assert Track(name="vocal").parts == []
+
+
+def test_project_holds_resolution_tempos_signatures_tracks():
+    from vpr_io import TempoEvent, TimeSignature, Track, VprProject
+
+    project = VprProject(
+        resolution=480,
+        tempos=[TempoEvent(tick=0, bpm=120.0)],
+        time_signatures=[TimeSignature(tick=0, numerator=4, denominator=4)],
+        tracks=[Track(name="vocal")],
+    )
+    assert project.resolution == 480
+    assert project.tempos[0].bpm == pytest.approx(120.0)
+    assert project.time_signatures[0].numerator == 4
+    assert project.tracks[0].name == "vocal"
+
+
+def test_project_collection_fields_default_empty():
+    from vpr_io import VprProject
+
+    project = VprProject(resolution=480)
+    assert project.tempos == []
+    assert project.time_signatures == []
+    assert project.tracks == []
+
+
+def test_vpr_format_error_is_exception():
+    from vpr_io import VprFormatError
+
+    assert issubclass(VprFormatError, Exception)
+
+
+def test_vpr_warning_holds_code_and_message():
+    from vpr_io import VprWarning
+
+    warning = VprWarning(code="overlap", message="発音区間が重なっています")
+    assert warning.code == "overlap"
+    assert warning.message == "発音区間が重なっています"
