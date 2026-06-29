@@ -13,6 +13,7 @@ import argparse
 import math
 import os
 import sys
+from dataclasses import replace
 
 from lipsync import generate_morph_keys
 from mmd_toolbox.vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
@@ -60,6 +61,62 @@ def _open_amount(text: str) -> float:
     return v
 
 
+def _finite_float(text: str) -> float:
+    """有限な float へ変換する(inf/nan を弾く)。範囲チェックは呼び出し側の検証関数で行う。"""
+    v = float(text)  # 非数値は ValueError → argparse が exit 2 にする
+    if not math.isfinite(v):
+        raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
+    return v
+
+
+def _positive_float(text: str) -> float:
+    """正の有限 float(--legato-max・--ref-bpm)。フレーム数・BPM は 0 以下になり得ない。"""
+    v = _finite_float(text)
+    if v <= 0.0:
+        raise argparse.ArgumentTypeError(f"正の数値が必要: {text!r}")
+    return v
+
+
+def _unit_float(text: str) -> float:
+    """0.0〜1.0 の有限 float(--valley-shallow・--valley-deep)。谷係数は母音高さに対する割合。"""
+    v = _finite_float(text)
+    if not 0.0 <= v <= 1.0:
+        raise argparse.ArgumentTypeError(f"0.0〜1.0 の範囲が必要: {text!r}")
+    return v
+
+
+def _nonneg_float(text: str) -> float:
+    """0 以上の有限 float(--valley-slope)。間隙長あたりの谷係数の減少量は負にならない。"""
+    v = _finite_float(text)
+    if v < 0.0:
+        raise argparse.ArgumentTypeError(f"0 以上の数値が必要: {text!r}")
+    return v
+
+
+def _scale_min(text: str) -> float:
+    """テンポ補正の下げ止まり係数(--tempo-scale-min)。0 超〜1.0 の有限 float。"""
+    v = _finite_float(text)
+    if not 0.0 < v <= 1.0:
+        raise argparse.ArgumentTypeError(f"0 超〜1.0 の範囲が必要: {text!r}")
+    return v
+
+
+def _nonneg_int(text: str) -> int:
+    """0 以上の整数(--anticipation)。0 は先行準備を無効化する。"""
+    v = int(text)  # 非整数は ValueError → argparse が exit 2 にする
+    if v < 0:
+        raise argparse.ArgumentTypeError(f"0 以上の整数が必要: {text!r}")
+    return v
+
+
+def _positive_int(text: str) -> int:
+    """1 以上の整数(--coartic-overlap)。協調調音の重なり=基準長は 1 フレーム以上。"""
+    v = int(text)
+    if v < 1:
+        raise argparse.ArgumentTypeError(f"1 以上の整数が必要: {text!r}")
+    return v
+
+
 def _build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: 仕様外の前置き省略形を受理しない(未知/省略形は exit 2)。
     p = argparse.ArgumentParser(prog="vpr2vmd", allow_abbrev=False)
@@ -76,6 +133,16 @@ def _build_parser() -> argparse.ArgumentParser:
     # 既定はプリセット値。未指定センチネル(None)は presets.resolve がプリセットから解決する。
     p.add_argument("--open-max", dest="open_max", type=_open_amount)
     p.add_argument("--default-open", dest="default_open", type=_open_amount)
+    # 視覚で詰める調整パラメータ(未指定 None はプリセット/既定値を使う)。プリセット解決とテンポ補正の
+    # 後に最終値として上書きする(vpr2vmd.md §3・§4.2)。lipsync の各パラメータの意味は lipsync.md が正本。
+    p.add_argument("--legato-max", dest="legato_max", type=_positive_float)
+    p.add_argument("--valley-shallow", dest="valley_shallow", type=_unit_float)
+    p.add_argument("--valley-deep", dest="valley_deep", type=_unit_float)
+    p.add_argument("--valley-slope", dest="valley_slope", type=_nonneg_float)
+    p.add_argument("--coartic-overlap", dest="coartic_overlap", type=_positive_int)
+    p.add_argument("--anticipation", dest="anticipation", type=_nonneg_int)
+    p.add_argument("--ref-bpm", dest="ref_bpm", type=_positive_float)
+    p.add_argument("--tempo-scale-min", dest="tempo_scale_min", type=_scale_min)
     p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
@@ -111,6 +178,18 @@ def _print_plan(args, output: str) -> None:
         f"default-open: "
         f"{args.default_open if args.default_open is not None else '(プリセット値)'}"
     )
+    # 調整パラメータ(未指定はプリセット/既定値を使う)。
+    def shown(v):
+        return v if v is not None else "(既定)"
+
+    print(f"legato-max: {shown(args.legato_max)}")
+    print(
+        f"valley(shallow/deep/slope): "
+        f"{shown(args.valley_shallow)}/{shown(args.valley_deep)}/{shown(args.valley_slope)}"
+    )
+    print(f"coartic-overlap: {shown(args.coartic_overlap)}")
+    print(f"anticipation: {shown(args.anticipation)}")
+    print(f"tempo(ref-bpm/scale-min): {shown(args.ref_bpm)}/{shown(args.tempo_scale_min)}")
 
 
 def _convert(args, output: str) -> int:
@@ -134,8 +213,29 @@ def _convert(args, output: str) -> int:
     adopted = resolve_overlaps(collect_notes(track))
     openness_params, gen_params = presets.resolve(args.style, args.open_max, args.default_open)
     # 曲の代表BPMから保持・アタック・リリースを縮める(高速テンポでの短母音消失を防ぐ)。
+    # --ref-bpm/--tempo-scale-min はテンポ補正の入力なので未指定なら補正関数の既定に委ねる。
     rep_bpm = timing.representative_bpm(adopted, project.tempos, project.resolution)
-    gen_params = apply_tempo_correction(gen_params, rep_bpm)
+    tempo_kwargs = {}
+    if args.ref_bpm is not None:
+        tempo_kwargs["ref_bpm"] = args.ref_bpm
+    if args.tempo_scale_min is not None:
+        tempo_kwargs["s_min"] = args.tempo_scale_min
+    gen_params = apply_tempo_correction(gen_params, rep_bpm, **tempo_kwargs)
+    # CLI 調整(指定された値だけを最終値として上書き。テンポ補正後に効く=適用順 A)。これらは
+    # テンポでスケールしないパラメータなので、上書き値がそのまま生成に渡る(vpr2vmd.md §3・§4.2)。
+    overrides = {}
+    if args.coartic_overlap is not None:
+        overrides["coartic_overlap_max"] = args.coartic_overlap
+    if args.anticipation is not None:
+        overrides["anticipation_frames"] = args.anticipation
+    if args.valley_shallow is not None:
+        overrides["legato_valley_shallow"] = args.valley_shallow
+    if args.valley_deep is not None:
+        overrides["legato_valley_deep"] = args.valley_deep
+    if args.valley_slope is not None:
+        overrides["legato_valley_slope"] = args.valley_slope
+    if overrides:
+        gen_params = replace(gen_params, **overrides)
     open_by_note = openness.open_amounts(
         [note.velocity for note in adopted],
         lo=openness_params.lo,
@@ -144,12 +244,15 @@ def _convert(args, output: str) -> int:
         default_open=openness_params.default_open,
         gamma=openness_params.gamma,
     )
+    # --legato-max は GenerationParams 外(口形イベント確定段の引数)。未指定なら build_mouth_events の既定。
+    legato_kwargs = {} if args.legato_max is None else {"legato_max_frames": args.legato_max}
     mouth_events = build_mouth_events(
         adopted,
         project.tempos,
         project.resolution,
         use_n_morph=not args.no_n_morph,
         open_by_note=open_by_note,
+        **legato_kwargs,
     )
     morph_keys = generate_morph_keys(mouth_events, gen_params)
 
@@ -165,6 +268,19 @@ def _convert(args, output: str) -> int:
     except OSError:
         return 3  # 出力VMDの書き込み失敗
     return 0
+
+
+def _valley_bounds_inverted(args) -> bool:
+    """解決後の谷係数が下限(deep)>上限(shallow)で退化するか。
+
+    谷係数の不変条件(下限≤上限)は vpr 内容に依らずプリセット既定と CLI 上書きだけで定まるので、
+    入力 vpr を読む前(dry-run を含む)に判定できる。テンポ補正は谷係数を変えないため、ここで
+    プリセット値と上書きだけから解決して判定してよい(vpr2vmd.md §4.2)。
+    """
+    _, gen = presets.resolve(args.style, args.open_max, args.default_open)
+    shallow = args.valley_shallow if args.valley_shallow is not None else gen.legato_valley_shallow
+    deep = args.valley_deep if args.valley_deep is not None else gen.legato_valley_deep
+    return deep > shallow
 
 
 def main(argv=None) -> int:
@@ -186,6 +302,11 @@ def main(argv=None) -> int:
     # 入力と同一パスのときは、出力がまだ無くても(=入力を上書きする指定なので)同様に弾く。
     # 同一パス判定を存在確認より先に置くことで、未存在でも入力上書き指定は引数エラーになる。
     if not args.overwrite and (_same_path(output, args.input) or os.path.exists(output)):
+        return 2
+
+    # 谷係数の不変条件(下限≤上限)は vpr 内容に依らない引数レベルの検証。引数エラー(コード2)を
+    # 入力不正(コード1)より先に評価する規約に従い、存在確認の前に弾く(dry-run でも弾く)。
+    if _valley_bounds_inverted(args):
         return 2
 
     # 入力 vpr の存在確認(欠落は入力不正)。読み込み・形式検証は _convert が行う。

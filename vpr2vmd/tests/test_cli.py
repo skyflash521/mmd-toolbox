@@ -205,3 +205,97 @@ def test_default_output_is_vmd_alongside_input(tmp_path):
     rc = cli.main([src, "--dry-run"])
     assert rc == 0
     assert not (tmp_path / "song.vmd").exists()
+
+
+# --- 調整パラメータの CLI オプション(vpr2vmd.md §4.2) ---
+
+
+def test_parses_tuning_options_in_dry_run(tmp_path):
+    """調整パラメータ一式を受理し --dry-run が 0 で空実行する。"""
+    src = _touch(tmp_path / "in.vpr")
+    rc = cli.main([
+        src,
+        "--legato-max", "10",
+        "--valley-shallow", "0.5",
+        "--valley-deep", "0.25",
+        "--valley-slope", "0.03",
+        "--coartic-overlap", "5",
+        "--anticipation", "8",
+        "--ref-bpm", "160",
+        "--tempo-scale-min", "0.4",
+        "--dry-run",
+    ])
+    assert rc == 0
+
+
+def test_legato_max_non_positive_is_arg_error(tmp_path):
+    """--legato-max は正値。0 以下は引数エラー。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--legato-max", "0", "--dry-run"]) == 2
+
+
+def test_legato_max_non_float_is_arg_error(tmp_path):
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--legato-max", "abc", "--dry-run"]) == 2
+
+
+def test_valley_shallow_out_of_range_is_arg_error(tmp_path):
+    """谷係数は 0.0〜1.0。範囲外は引数エラー。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--valley-shallow", "1.5", "--dry-run"]) == 2
+    assert cli.main([src, "--valley-deep", "-0.1", "--dry-run"]) == 2
+
+
+def test_valley_slope_negative_is_arg_error(tmp_path):
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--valley-slope", "-0.1", "--dry-run"]) == 2
+
+
+def test_coartic_overlap_below_one_is_arg_error(tmp_path):
+    """協調調音の重なりは 1 以上。0 は引数エラー。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--coartic-overlap", "0", "--dry-run"]) == 2
+
+
+def test_anticipation_negative_is_arg_error(tmp_path):
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--anticipation", "-1", "--dry-run"]) == 2
+
+
+def test_anticipation_zero_is_accepted(tmp_path):
+    """先行準備 0(無効化)は受理する。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--anticipation", "0", "--dry-run"]) == 0
+
+
+def test_ref_bpm_non_positive_is_arg_error(tmp_path):
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--ref-bpm", "0", "--dry-run"]) == 2
+
+
+def test_tempo_scale_min_out_of_range_is_arg_error(tmp_path):
+    """下げ止まり係数は 0 超〜1.0。0 と 1 超は引数エラー、1.0 は受理。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--tempo-scale-min", "0", "--dry-run"]) == 2
+    assert cli.main([src, "--tempo-scale-min", "1.5", "--dry-run"]) == 2
+    assert cli.main([src, "--tempo-scale-min", "1.0", "--dry-run"]) == 0
+
+
+def test_valley_deep_above_shallow_is_arg_error_even_in_dry_run(tmp_path):
+    """谷係数の逆転(下限>上限)は vpr 内容に依らない引数エラー。dry-run でも弾く。"""
+    src = _touch(tmp_path / "in.vpr")
+    # pop 既定 shallow=0.45 に対し下限を上回らせる(片側指定×プリセット値の組み合わせ)。
+    assert cli.main([src, "--valley-deep", "0.6", "--dry-run"]) == 2
+    # 明示両指定の逆転も弾く。
+    assert cli.main([src, "--valley-shallow", "0.1", "--valley-deep", "0.2", "--dry-run"]) == 2
+    # 正当な範囲(下限≤上限)は dry-run で受理する。
+    assert cli.main([src, "--valley-shallow", "0.5", "--valley-deep", "0.2", "--dry-run"]) == 0
+
+
+def test_dry_run_plan_shows_tuning_overrides(tmp_path, capsys):
+    """--dry-run の計画表示に調整パラメータの上書き値を出す。"""
+    src = _touch(tmp_path / "in.vpr")
+    cli.main([src, "--legato-max", "12", "--anticipation", "9", "--dry-run"])
+    out = capsys.readouterr().out
+    assert "legato-max: 12" in out
+    assert "anticipation: 9" in out

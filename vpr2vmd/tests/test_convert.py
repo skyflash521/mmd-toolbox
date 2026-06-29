@@ -72,6 +72,92 @@ def test_convert_output_has_frame0_keys_for_used_morphs(monkeypatch, tmp_path):
     assert used <= zero  # 各使用モーフに 0F キーがある
 
 
+def test_convert_cli_overrides_reach_generation_params(monkeypatch, tmp_path):
+    # CLI 調整は最終的な GenerationParams へ届く(指定フィールドを取り違えず上書き)。
+    captured = {}
+
+    real = cli.generate_morph_keys
+
+    def spy(events, params):
+        captured["params"] = params
+        return real(events, params)
+
+    monkeypatch.setattr(cli, "generate_morph_keys", spy)
+    rc, _out = _run(
+        monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]),
+        "--anticipation", "7", "--coartic-overlap", "5",
+        "--valley-shallow", "0.5", "--valley-deep", "0.25", "--valley-slope", "0.03",
+    )
+    assert rc == 0
+    p = captured["params"]
+    assert p.anticipation_frames == 7
+    assert p.coartic_overlap_max == 5
+    assert (p.legato_valley_shallow, p.legato_valley_deep, p.legato_valley_slope) == (
+        0.5, 0.25, 0.03,
+    )
+
+
+def test_convert_ref_bpm_override_changes_tempo_correction(monkeypatch, tmp_path):
+    # --ref-bpm はテンポ補正の入力。基準を代表BPMに合わせると s=1.0 で縮まない。
+    captured = {}
+
+    real = cli.generate_morph_keys
+
+    def spy(events, params):
+        captured["params"] = params
+        return real(events, params)
+
+    monkeypatch.setattr(cli, "generate_morph_keys", spy)
+    project = _project([_note(0, 480, ["a"])], tempos=[TempoEvent(0, 190.0)])
+    rc, _out = _run(monkeypatch, tmp_path, project, "--ref-bpm", "190")
+    assert rc == 0
+    # ref-bpm=190・代表BPM=190 → s=1.0。pop の min_hold 基礎値 3 のまま(既定 ref120 なら 2 へ縮む)。
+    assert captured["params"].min_hold_frames == 3
+
+
+def test_convert_tempo_scale_min_override_reaches_correction(monkeypatch, tmp_path):
+    # --tempo-scale-min はテンポ補正の下げ止まり係数として apply_tempo_correction へ届く。
+    captured = {}
+
+    real = cli.generate_morph_keys
+
+    def spy(events, params):
+        captured["params"] = params
+        return real(events, params)
+
+    monkeypatch.setattr(cli, "generate_morph_keys", spy)
+    project = _project([_note(0, 480, ["a"])], tempos=[TempoEvent(0, 600.0)])
+    rc, _out = _run(monkeypatch, tmp_path, project, "--tempo-scale-min", "0.2")
+    assert rc == 0
+    # 600bpm・ref120 → 比0.2。s_min=0.2 まで下がり s=0.2、min_hold=round(3*0.2)=1(下限1)。
+    # 既定 s_min=0.5 なら s=0.5 で min_hold=2 になるので、上書きが効いていることを固定。
+    assert captured["params"].min_hold_frames == 1
+
+
+def test_convert_valley_deep_above_shallow_is_arg_error(monkeypatch, tmp_path):
+    # 谷係数の下限(deep)が上限(shallow)を上回る指定は不正(pop 既定 shallow=0.45 との組み合わせ)。
+    rc, _out = _run(
+        monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]), "--valley-deep", "0.6"
+    )
+    assert rc == 2
+
+
+def test_convert_legato_max_override_reaches_build_mouth_events(monkeypatch, tmp_path):
+    # --legato-max は口形イベント確定段(間隙分類)の入力として渡る。
+    captured = {}
+
+    real = cli.build_mouth_events
+
+    def spy(*args, **kwargs):
+        captured["legato"] = kwargs.get("legato_max_frames")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "build_mouth_events", spy)
+    rc, _out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]), "--legato-max", "12")
+    assert rc == 0
+    assert captured["legato"] == 12.0
+
+
 def test_convert_writes_only_morph_section(monkeypatch, tmp_path):
     # 生成するのはモーフキーのみ。ボーン・カメラ・照明・セルフ影・IK は空(vpr2vmd.md §5)。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
