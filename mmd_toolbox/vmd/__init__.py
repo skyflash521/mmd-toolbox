@@ -1,4 +1,4 @@
-from .io import normalize, read, write, write_file
+from .io import ensure_frame0_neutral_keys, normalize, read, write, write_file
 from .types import (
     BoneKey,
     CameraKey,
@@ -23,6 +23,7 @@ __all__ = [
     "VmdDocument",
     "VmdFormatError",
     "VmdWarning",
+    "ensure_frame0_neutral_keys",
     "normalize",
     "read",
     "write",

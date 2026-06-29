@@ -350,3 +350,53 @@ def normalize(
             getattr(doc, section), keyer, keyer, section, warnings
         )
     return replace(doc, **updates), warnings
+
+
+# frame-0 中立キー補完 -------------------------------------------------------
+# MMD 既定リニア補間の制御点 (x1, y1, x2, y2)。
+_LINEAR_CP = (20, 20, 107, 107)
+
+
+def _neutral_morph(name_raw: bytes) -> MorphKey:
+    return MorphKey(name_raw, 0, 0.0)
+
+
+def _neutral_bone(name_raw: bytes) -> BoneKey:
+    # 既定リニア補間の構築は reduce 側に既存。io→reduce の読み込み時循環を避けるため遅延 import する。
+    from .reduce import bone_interp_bytes
+
+    interp = bone_interp_bytes(_LINEAR_CP, _LINEAR_CP, _LINEAR_CP, _LINEAR_CP)
+    return BoneKey(name_raw, 0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), interp)
+
+
+# 名前付きセクションのみ中立キーを構築できる(camera/light/self_shadow/ik_property は名前付き使用集合でない)。
+_NEUTRAL_BUILDERS = {"morph": _neutral_morph, "bone": _neutral_bone}
+
+
+def ensure_frame0_neutral_keys(
+    doc: VmdDocument, sections: tuple[str, ...] = ("morph",)
+) -> VmdDocument:
+    """対象セクションの参照名へ frame=0 の中立キーを補う(無ければ挿入・あれば尊重)(vmd-io.md §5)。
+
+    出力VMDで使用モーフ(一般化でボーンも)を 0F に登録しておく MMD 互換・編集上の規約。使用名集合は対象
+    セクション内のキー名から導出し、frame-0 キーを持たない名前にだけ中立キー(モーフ=weight 0.0、ボーン=
+    identity 回転・ゼロ位置・既定リニア補間)を挿入する。`normalize`(ソート・重複後勝ち)とは独立した明示
+    ステップで、`write` は与えた `VmdDocument` をそのまま書く低レベルI/Oのままにする(自動でキーを増やさない)
+    ため、CLI が出力前に本関数を呼ぶ(挿入キーは末尾追加なので、続けて `normalize` でソートしてよい)。
+    対象は名前付きセクション(morph/bone)のみ。camera/light/self_shadow/ik_property は名前付き使用集合でない
+    ので指定するとエラー。
+    """
+    invalid = set(sections) - set(_NEUTRAL_BUILDERS)
+    if invalid:
+        raise ValueError(
+            f"frame-0 中立キーは名前付きセクション(morph/bone)のみ対象: {sorted(invalid)} は非対応"
+        )
+    updates = {}
+    for section in sections:
+        keys = getattr(doc, section)
+        have_zero = {k.name_raw for k in keys if k.frame == 0}
+        missing = [nr for nr in sorted({k.name_raw for k in keys}) if nr not in have_zero]
+        if missing:
+            builder = _NEUTRAL_BUILDERS[section]
+            updates[section] = list(keys) + [builder(nr) for nr in missing]
+    return replace(doc, **updates) if updates else doc
