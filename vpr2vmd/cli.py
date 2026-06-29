@@ -18,9 +18,10 @@ from lipsync import generate_morph_keys
 from mmd_toolbox.vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
 from vpr_io import VprFormatError, read
 
-from . import openness, presets
+from . import openness, presets, timing
 from .events import build_mouth_events, resolve_overlaps
 from .io import TrackSelectionError, collect_notes, select_track
+from .tempo_correction import apply_tempo_correction
 
 # 口パクスタイルプリセット名(vpr2vmd.md §4.2)。具体値の解決は presets.resolve が担う。
 STYLE_NAMES = ("pop", "ballad", "powerful", "whisper", "rap")
@@ -132,6 +133,9 @@ def _convert(args, output: str) -> int:
 
     adopted = resolve_overlaps(collect_notes(track))
     openness_params, gen_params = presets.resolve(args.style, args.open_max, args.default_open)
+    # 曲の代表BPMから保持・アタック・リリースを縮める(高速テンポでの短母音消失を防ぐ)。
+    rep_bpm = timing.representative_bpm(adopted, project.tempos, project.resolution)
+    gen_params = apply_tempo_correction(gen_params, rep_bpm)
     open_by_note = openness.open_amounts(
         [note.velocity for note in adopted],
         lo=openness_params.lo,

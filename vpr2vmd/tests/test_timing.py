@@ -5,9 +5,16 @@ vpr の tick(整数、resolution=tick/四分音符)とテンポマップから 3
 """
 
 import pytest
-from vpr_io import TempoEvent
+from vpr_io import Note, TempoEvent
 
 from vpr2vmd import timing
+
+
+def _note(start, dur):
+    return Note(
+        start_tick=start, duration_tick=dur, pitch=60, lyric="x",
+        velocity=64, phonemes=["a"],
+    )
 
 
 def test_tick_zero_is_frame_zero():
@@ -79,3 +86,54 @@ def test_three_regions_accumulate():
     # tick1440: 0.5 + (480tick@60bpm=1.0) + (480tick@240bpm=0.25) = 1.75秒 = 52.5フレーム。
     tempos = [TempoEvent(0, 120.0), TempoEvent(480, 60.0), TempoEvent(960, 240.0)]
     assert timing.tick_to_frame(1440, tempos, 480) == pytest.approx(52.5)
+
+
+# --- 代表BPM(note_effective_bpm / representative_bpm) ---
+
+
+def test_note_effective_bpm_single_tempo_equals_bpm():
+    # 単一テンポでは有効BPMはそのテンポに一致(発音長に依らない)。
+    assert timing.note_effective_bpm(_note(0, 480), [TempoEvent(0, 150.0)], 480) == pytest.approx(150.0)
+    assert timing.note_effective_bpm(_note(960, 120), [TempoEvent(0, 150.0)], 480) == pytest.approx(150.0)
+
+
+def test_note_effective_bpm_spans_tempo_change_is_time_weighted():
+    # 音符[0,960): [0,480)@120bpm(1拍0.5秒)+[480,960)@240bpm(1拍0.25秒)=2拍0.75秒。
+    # 有効BPM = 60×2/0.75 = 160(実発音秒へ畳んだ一定BPM)。
+    tempos = [TempoEvent(0, 120.0), TempoEvent(480, 240.0)]
+    assert timing.note_effective_bpm(_note(0, 960), tempos, 480) == pytest.approx(160.0)
+
+
+def test_note_effective_bpm_zero_duration_is_none():
+    assert timing.note_effective_bpm(_note(100, 0), [TempoEvent(0, 120.0)], 480) is None
+
+
+def test_representative_bpm_uniform_returns_that_bpm():
+    tempos = [TempoEvent(0, 190.0)]
+    notes = [_note(0, 240), _note(240, 240), _note(480, 240)]
+    assert timing.representative_bpm(notes, tempos, 480) == pytest.approx(190.0)
+
+
+def test_representative_bpm_long_fast_note_dominates():
+    # 100bpm 1拍(0.6秒,重み18)と 200bpm 4拍(1.2秒,重み36)。総54・半分27。
+    # BPM昇順 100(累積18<27)→200(累積54≥27) で代表=200(秒で長く鳴る側が支配)。
+    tempos = [TempoEvent(0, 100.0), TempoEvent(480, 200.0)]
+    slow = _note(0, 480)
+    fast = _note(480, 480 * 4)
+    assert timing.representative_bpm([slow, fast], tempos, 480) == pytest.approx(200.0)
+
+
+def test_representative_bpm_slow_note_dominates_when_longer_in_seconds():
+    # 100bpm 1拍(0.6秒,18)と 200bpm 1拍(0.3秒,9)。総27・半分13.5。
+    # 100(累積18≥13.5) で代表=100。同じ拍数でも遅い側は秒で長く重みが大きい。
+    tempos = [TempoEvent(0, 100.0), TempoEvent(480, 200.0)]
+    assert timing.representative_bpm([_note(0, 480), _note(480, 480)], tempos, 480) == pytest.approx(100.0)
+
+
+def test_representative_bpm_empty_returns_default():
+    assert timing.representative_bpm([], [TempoEvent(0, 120.0)], 480) == pytest.approx(120.0)
+
+
+def test_representative_bpm_all_zero_duration_returns_default():
+    notes = [_note(0, 0), _note(100, 0)]
+    assert timing.representative_bpm(notes, [TempoEvent(0, 120.0)], 480, default_bpm=120.0) == pytest.approx(120.0)
