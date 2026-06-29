@@ -8,7 +8,6 @@
 """
 
 import argparse
-import csv
 import math
 import os
 import sys
@@ -163,7 +162,6 @@ def _build_parser() -> argparse.ArgumentParser:
     # §2.7 運用/プリセット系。
     p.add_argument("--preset", choices=presets.PRESET_NAMES)   # 未知名は argparse が exit 2
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
-    p.add_argument("--preview-csv", dest="preview_csv")
     p.add_argument("-v", "--verbose", action="store_true")
     # 既定 on: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを低減する。
     # --no-smooth で無効化(密キー＋線形のまま出力する)。
@@ -226,18 +224,17 @@ def _resolve_param(name, args, preset):
 
 
 def _shake_stats(orig_camera, baked_keys, applied, cut_pos, cut_rot):
-    """dry-run/verbose/CSV 用の統計を算出する。
+    """dry-run/verbose 用の統計を算出する。
 
-    戻り値: (rows, max_amp, detected_cuts)。rows は (frame, [rot差分3], [pos差分3])。
-    揺れ量 = ベイク値 − 元サンプリング(適用範囲内の各ベイクフレーム)。bake は不変のまま、
-    出力と cuts/interp から算出する。
+    戻り値: (max_amp, detected_cuts)。
+    最大振幅は ベイク値 − 元サンプリング(適用範囲内の各ベイクフレーム) から算出する。
+    bake は不変のまま、出力と cuts/interp から算出する。
     """
     wv = _working_view(orig_camera)
     detected_cuts = cuts.detect_cuts(wv, cut_pos, cut_rot)
     applied_frames = set()
     for a, b in applied:
         applied_frames.update(range(a, b + 1))
-    rows = []
     max_amp = 0.0
     for k in sorted(baked_keys, key=lambda x: x.frame):
         if k.frame not in applied_frames:
@@ -245,10 +242,9 @@ def _shake_stats(orig_camera, baked_keys, applied, cut_pos, cut_rot):
         s = interp.sample_camera(wv, k.frame)
         dr = [k.rotation[i] - s["rotation"][i] for i in range(3)]
         dp = [k.position[i] - s["position"][i] for i in range(3)]
-        rows.append((k.frame, dr, dp))
         for v in dr + dp:
             max_amp = max(max_amp, abs(v))
-    return rows, max_amp, detected_cuts
+    return max_amp, detected_cuts
 
 
 def main(argv=None) -> int:
@@ -268,12 +264,6 @@ def main(argv=None) -> int:
 
     # 上書きガード: 入力と同一パスへの出力は --overwrite 必須(§2.2)。未許可なら書かずにエラー。
     if not args.overwrite and _same_path(output, args.input):
-        return 2
-
-    # --preview-csv は付加出力(§2.7)。出力 VMD や入力と同一パスだと一方を上書きして
-    # データ消失するため、パス衝突は引数エラー(exit 2)とする。
-    if args.preview_csv and (_same_path(args.preview_csv, output)
-                             or _same_path(args.preview_csv, args.input)):
         return 2
 
     # 入力読み込み(欠落・非VMD・カメラキーなし → 入力不正 §9 コード1)。
@@ -351,14 +341,14 @@ def main(argv=None) -> int:
     for w in warnings:
         print(f"warning: {w}", file=sys.stderr)
 
-    # 適用範囲(スナップ後)・統計を算出(dry-run/verbose/preview-csv 用)。bake は不変のまま、
+    # 適用範囲(スナップ後)・統計を算出(dry-run/verbose 用)。bake は不変のまま、
     # 出力と cuts/interp から求める。範囲端は最近接キーへスナップ(§5.2)。
     wv_frames = [k.frame for k in _working_view(doc.camera)]
     if ranges is None:
         applied = [(wv_frames[0], wv_frames[-1])]
     else:
         applied = sorted((_snap(s, wv_frames), _snap(e, wv_frames)) for (s, e) in ranges)
-    rows, max_amp, detected_cuts = _shake_stats(
+    max_amp, detected_cuts = _shake_stats(
         doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
 
     # 詳細統計は --dry-run と --verbose のみで表示(通常実行は出さない、§5.2/§5.3)。
@@ -368,7 +358,7 @@ def main(argv=None) -> int:
         print(f"max amplitude: {max_amp:.6g}")
         print(f"cuts: {detected_cuts}")
 
-    # --dry-run は出力を一切書かない(VMD も preview-csv も)。統計表示のみ(§2.7)。
+    # --dry-run は VMD を書かない。統計表示のみ(§2.7)。
     if args.dry_run:
         return 0
 
@@ -415,16 +405,5 @@ def main(argv=None) -> int:
         return 2
     except Exception:
         return 3
-
-    # フレームごとの揺れ量(各チャンネル)を CSV 出力(§2.7)。失敗は出力書き込み失敗 → コード3。
-    if args.preview_csv:
-        try:
-            with open(args.preview_csv, "w", newline="", encoding="utf-8") as fh:
-                w = csv.writer(fh)
-                w.writerow(["frame", "rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z"])
-                for frame, dr, dp in rows:
-                    w.writerow([frame, *dr, *dp])
-        except Exception:
-            return 3
 
     return 0

@@ -5,7 +5,7 @@ CLI はコアの薄いラッパー: 引数解析 → VMD読み(mmd_toolbox.vmd.i
 (範囲不正・重複・上書き未許可)/ 3 出力書き込み失敗。
 
 `TestCli` はコア CLI(**§2.1-2.6 + §9**: I/O・範囲・主要揺れパラメーター・終了コード)を、
-`TestCliOps` は **§2.7 運用/プリセット系**(`--preset`・`--dry-run`・`--preview-csv`・`-v/--verbose`)
+`TestCliOps` は **§2.7 運用/プリセット系**(`--preset`・`--dry-run`・`-v/--verbose`)
 を検証する。walking の歩調成分(gait_freq/gait_amp)は内蔵パラメーターとして転送・検証する。
 内蔵パラメーター(静止/移動プロファイルのオクターブ重み)のプリセット別調整値はここでは扱わない。
 """
@@ -668,7 +668,7 @@ class TestCli:
         for opt in ("--output", "--range", "--seed", "--amp-rot", "--amp-pos",
                     "--rot-weights", "--freq", "--fade", "--motion-damp",
                     "--settle", "--cut-threshold", "--impulse",
-                    "--preset", "--preview-csv"):
+                    "--preset"):
             assert cli.main([inp, opt]) == 2
 
     def test_rejects_internal_params_exit2(self, tmp_path):
@@ -700,12 +700,8 @@ class TestCli:
         text = capsys.readouterr()
         assert "warning:" in (text.out + text.err).lower()   # 非カメラ透過の警告(安定マーカー)
 
-
-import csv as _csv
-
-
 class TestCliOps:
-    """§2.7 運用/プリセット系: --preset / --dry-run / --preview-csv / -v,--verbose。
+    """§2.7 運用/プリセット系: --preset / --dry-run / -v,--verbose。
 
     プリセットは公開引数の束(個別引数が優先)に加え、walking は内蔵の歩調成分を持つ。
     静止/移動プロファイルのプリセット別調整値はここでは扱わない(モジュール冒頭 docstring 参照)。
@@ -964,106 +960,6 @@ class TestCliOps:
         cap = capsys.readouterr()
         text = cap.out + cap.err
         assert "30" in text and "60" in text     # スナップ後の範囲端
-
-    # --- --preview-csv -----------------------------------------------------
-    def _read_csv(self, path):
-        rows = list(_csv.reader(path.read_text(encoding="utf-8").splitlines()))
-        return rows[0], rows[1:]
-
-    def test_preview_csv_written(self, tmp_path):
-        # --preview-csv はフレームごとの揺れ量(各チャンネル)を CSV 出力する(§2.7)。
-        inp = write_input(tmp_path / "in.vmd")
-        out = tmp_path / "out.vmd"
-        csv_path = tmp_path / "preview.csv"
-        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path), "--no-smooth"]) == 0
-        assert csv_path.exists()
-        header, data = self._read_csv(csv_path)
-        # frame 列 + 回転3 + 位置3 の計7列以上、データ行はベイクフレーム数(61)。
-        assert len(header) >= 7
-        assert "frame" in header[0].lower()
-        assert len(data) == 61
-        assert all(len(r) == len(header) for r in data)
-        # frame 列は実フレーム(0..60)。全行同一フレーム等を排除(§2.7「フレームごと」)。
-        assert [int(r[0]) for r in data] == list(range(0, 61))
-
-    def test_preview_csv_holds_shake_amounts_not_absolute(self, tmp_path):
-        # CSV の値は「揺れ量」(=ベイク値−元サンプリング)であって絶対カメラ値ではない(§2.7)。
-        # 揺れ無し(amp/settle=0)なら全チャンネルほぼ0、既定(揺れ有り)なら非ゼロが現れる、で判別。
-        # 絶対カメラ値なら揺れ無しでも非ゼロ(KEYS の位置は非0)になるはず=これを排除する。
-        inp = write_input(tmp_path / "in.vmd")
-        zero_csv, shake_csv = tmp_path / "zero.csv", tmp_path / "shake.csv"
-        assert cli.main([inp, "-o", str(tmp_path / "z.vmd"), "--preview-csv", str(zero_csv),
-                         "--amp-rot", "0", "--amp-pos", "0", "--settle", "0", "--no-smooth"]) == 0
-        assert cli.main([inp, "-o", str(tmp_path / "s.vmd"), "--preview-csv", str(shake_csv), "--no-smooth"]) == 0
-
-        def channel_vals(path):
-            _, data = self._read_csv(path)
-            return [abs(float(c)) for r in data for c in r[1:]]  # frame 列以外
-
-        assert max(channel_vals(zero_csv)) < 1e-4    # 揺れ無し → ほぼ0(揺れ量である証拠)
-        assert max(channel_vals(shake_csv)) > 1e-4   # 揺れ有り → 非ゼロ
-
-    def test_preview_csv_deltas_reconstruct_baked(self, tmp_path):
-        # CSV の各チャンネル値は「ベイク値 − 元サンプリング」の揺れ量で、列ごとに正しい(§2.7)。
-        # 全フレームで サンプリング + CSV差分 == ベイク値 を確認(無関係/重複列の実装を排除)。
-        from mmd_toolbox.vmd import interp
-        inp = write_input(tmp_path / "in.vmd")
-        out, csv_path = tmp_path / "out.vmd", tmp_path / "p.csv"
-        assert cli.main([inp, "-o", str(out), "--preview-csv", str(csv_path), "--seed", "3", "--no-smooth"]) == 0
-        header, data = self._read_csv(csv_path)
-        col = {name: header.index(name)
-               for name in ("rot_x", "rot_y", "rot_z", "pos_x", "pos_y", "pos_z")}
-        baked = {k.frame: k for k in read_camera(out)}
-        for row in data:
-            f = int(row[0])
-            s = interp.sample_camera(KEYS, f)
-            for j, axis in enumerate(("rot_x", "rot_y", "rot_z")):
-                assert baked[f].rotation[j] == pytest.approx(
-                    s["rotation"][j] + float(row[col[axis]]), abs=1e-4)
-            for j, axis in enumerate(("pos_x", "pos_y", "pos_z")):
-                assert baked[f].position[j] == pytest.approx(
-                    s["position"][j] + float(row[col[axis]]), abs=1e-4)
-
-    def test_preview_csv_still_writes_vmd(self, tmp_path):
-        # --preview-csv は通常出力(VMD)も書く(--dry-run とは異なり出力を抑止しない)。
-        inp = write_input(tmp_path / "in.vmd")
-        out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--preview-csv", str(tmp_path / "p.csv"), "--no-smooth"]) == 0
-        assert out.exists()
-
-    def test_preview_csv_does_not_change_vmd(self, tmp_path):
-        # --preview-csv は付加出力で、ベイクされる VMD を変えない(§2.7)。
-        # 非 preview 実行とバイナリ一致する。
-        inp = write_input(tmp_path / "in.vmd")
-        without, with_csv = tmp_path / "wo.vmd", tmp_path / "w.vmd"
-        assert cli.main([inp, "-o", str(without), "--no-smooth"]) == 0
-        assert cli.main([inp, "-o", str(with_csv), "--preview-csv", str(tmp_path / "p.csv"), "--no-smooth"]) == 0
-        assert with_csv.read_bytes() == without.read_bytes()
-
-    def test_preview_csv_path_collision_exit2(self, tmp_path):
-        # --preview-csv が出力 VMD と同一パスなら CSV が VMD を上書きしてしまう→引数エラー(exit 2)。
-        # 入力と同一でも同様。付加出力の契約(§2.7)を守れない組合せを排除する。
-        inp = write_input(tmp_path / "in.vmd")
-        out = tmp_path / "out.vmd"
-        assert cli.main([inp, "-o", str(out), "--preview-csv", str(out)]) == 2
-        assert cli.main([inp, "-o", str(out), "--preview-csv", inp]) == 2
-
-    def test_preview_csv_write_failure_exit3(self, tmp_path):
-        # CSV 出力の書き込み失敗も出力書き込み失敗(§9 コード3)として扱う。
-        # 親がファイル(ディレクトリでない)の CSV パス → 書き込み不可。
-        inp = write_input(tmp_path / "in.vmd")
-        clash = tmp_path / "afile"
-        clash.write_bytes(b"x")
-        rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--preview-csv", str(clash / "p.csv"), "--no-smooth"])
-        assert rc == 3
-
-    def test_dry_run_suppresses_preview_csv(self, tmp_path):
-        # --dry-run は「出力せず」(§2.7)。--preview-csv 併用でも CSV を書かない。
-        inp = write_input(tmp_path / "in.vmd")
-        csv_path = tmp_path / "p.csv"
-        assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
-                         "--preview-csv", str(csv_path), "--dry-run"]) == 0
-        assert not csv_path.exists()
 
     # --- -v / --verbose ----------------------------------------------------
     def test_verbose_reports_range_and_cuts(self, tmp_path, capsys):
