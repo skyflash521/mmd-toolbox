@@ -15,9 +15,7 @@ import os
 import sys
 from collections import Counter
 
-import math
-
-from mmd_toolbox.vmd import interp, io
+from mmd_toolbox.vmd import io
 
 from . import presets, ranges, report, selection
 from .cuts import parse_cut_threshold_bone, parse_cut_threshold_camera
@@ -138,8 +136,6 @@ def _build_parser():
     p.add_argument("--keep-frame", dest="keep_frames", action="append", type=_nonneg_int, default=[])
     # レポート・運用。
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
-    p.add_argument("--report-json", dest="report_json")
-    p.add_argument("--preview-csv", dest="preview_csv")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -393,7 +389,7 @@ def main(argv=None):
         if not any(lo <= f <= hi for lo, hi in global_ranges):
             print(f"警告: keep-frame {f} は削減範囲外のため無視します", file=sys.stderr)
 
-    want_report = args.dry_run or args.report_json or args.preview_csv
+    want_report = args.dry_run
     want_diag = want_report or args.verbose  # verbose は診断を stderr ログに出す(§2.7/§6.3)
     new_camera = doc.camera
     new_bone = doc.bone
@@ -401,7 +397,6 @@ def main(argv=None):
     bone_errors = None
     camera_diag = None
     bone_diag = None
-    preview_rows = []
     # 削減中の処理経過を stderr に表示する(対話端末時のみ。§2.7)。
     reporter = _Progress(enabled=sys.stderr.isatty())
     did_reduce = False
@@ -426,8 +421,6 @@ def main(argv=None):
                 new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持(§3.1/§3.2)
             if want_report:
                 camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
-            if args.preview_csv:
-                preview_rows.extend(_camera_preview_rows(cam, new_camera, cam_ranges))
         if do_bone:
             bone_diag = {} if want_diag else None
             new_bone = _reduce_bones(
@@ -438,10 +431,6 @@ def main(argv=None):
                 did_reduce = True
             if want_report:
                 bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
-            if args.preview_csv:
-                preview_rows.extend(
-                    _bone_preview_rows(doc.bone, new_bone, selected, global_ranges)
-                )
     except StrictError:
         return 4
 
@@ -449,7 +438,7 @@ def main(argv=None):
     if args.verbose:
         _log_diagnostics(camera_diag, bone_diag)
 
-    # レポート(dry-run 統計・JSON・CSV)。dry-run でも report/preview は書き出す(§2.7)。
+    # dry-run 統計。誤差・診断を含む report dict を作り、テキスト要約だけを標準出力へ出す(§2.7)。
     if want_report:
         rep = report.build_report(
             target=args.target,
@@ -466,13 +455,6 @@ def main(argv=None):
         )
         if args.dry_run:
             print(report.format_dry_run(rep))
-        try:
-            if args.report_json:
-                report.write_json(rep, args.report_json)
-            if args.preview_csv:
-                report.write_preview_csv(preview_rows, args.preview_csv)
-        except OSError:
-            return 3  # レポート書き込み失敗(§9)
 
     if args.dry_run:
         return 0
@@ -547,58 +529,6 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
     # ボーン名(生バイト)・フレーム順に安定ソート(§3.2)。
     out.sort(key=lambda k: (k.name_raw, k.frame))
     return out
-
-
-def _preview_row(track, frame, channel, inp, outp):
-    inp = float(inp)
-    outp = float(outp)
-    return {
-        "track": track, "frame": frame, "channel": channel,
-        "input": inp, "output": outp, "error": abs(inp - outp),
-    }
-
-
-def _camera_preview_rows(source, output, ranges):
-    """カメラのフレーム毎サンプル行を返す(§2.7 --preview-csv)。回転はオイラー度。"""
-    rows = []
-    for f0, f1 in ranges:
-        for f in range(f0, f1 + 1):
-            s = interp.sample_camera(source, f)
-            o = interp.sample_camera(output, f)
-            for i, ax in enumerate(("pos_x", "pos_y", "pos_z")):
-                rows.append(_preview_row("camera", f, ax, s["position"][i], o["position"][i]))
-            rows.append(_preview_row("camera", f, "distance", s["distance"], o["distance"]))
-            rows.append(_preview_row("camera", f, "fov", s["fov"], o["fov"]))
-            for i, ax in enumerate(("rot_x", "rot_y", "rot_z")):
-                rows.append(
-                    _preview_row("camera", f, ax,
-                                 math.degrees(s["rotation"][i]), math.degrees(o["rotation"][i]))
-                )
-    return rows
-
-
-def _bone_preview_rows(in_bone, out_bone, selected, global_ranges):
-    """選択ボーンごとのフレーム毎サンプル行を返す(§2.7)。回転は quaternion 成分。"""
-    in_groups = _bone_keys_by_name(in_bone)
-    out_groups = _bone_keys_by_name(out_bone)
-    rows = []
-    for name in selected:
-        src = sorted(in_groups.get(name, []), key=lambda k: k.frame)
-        out = sorted(out_groups.get(name, []), key=lambda k: k.frame)
-        if not src or not out:
-            continue
-        track_ranges = ranges.intersect(global_ranges, src[0].frame, src[-1].frame)
-        for f0, f1 in track_ranges:
-            for f in range(f0, f1 + 1):
-                for ax in ("pos_x", "pos_y", "pos_z"):
-                    rows.append(
-                        _preview_row(name, f, ax, interp.sample(src, ax, f), interp.sample(out, ax, f))
-                    )
-                sr = interp.sample(src, "rot", f)
-                orr = interp.sample(out, "rot", f)
-                for i, ax in enumerate(("rot_x", "rot_y", "rot_z", "rot_w")):
-                    rows.append(_preview_row(name, f, ax, sr[i], orr[i]))
-    return rows
 
 
 def _measure_bone_errors(in_bone, out_bone, selected, global_ranges):

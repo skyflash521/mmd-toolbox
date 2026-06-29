@@ -1,11 +1,8 @@
-"""レポート(dry-run統計・JSON・CSV)のテスト(sparsevmd.md §2.7)。
+"""dry-run レポートのテスト(sparsevmd.md §2.7)。
 
 report は削減の入出力キー数・削減率・選択ボーン・範囲・keep-frame をまとめ、
-dry-run のテキスト表示、JSON 出力、CSV プレビューを提供する。
+dry-run のテキスト表示を提供する。
 """
-
-import csv
-import json
 
 import pytest
 
@@ -93,45 +90,3 @@ def test_format_dry_run_handles_camera_none(tmp_path):
     assert "センター" in text
 
 
-def test_write_json_roundtrips_and_keeps_japanese_unescaped(tmp_path):
-    r = sample_report()
-    path = tmp_path / "report.json"
-    report.write_json(r, str(path))
-    raw = path.read_text(encoding="utf-8")
-    # 日本語は \uXXXX エスケープされず生で保持(ensure_ascii=False)。生テキストで確認する。
-    assert "センター" in raw and "\\u30bb" not in raw
-    loaded = json.loads(raw)
-    assert loaded["target"] == "all"
-    assert loaded["camera"]["output_keys"] == 2
-    names = {b["name"] for b in loaded["bones"]}
-    assert "センター" in names and "頭" in names
-
-
-def test_write_preview_csv_header_and_rows(tmp_path):
-    # §2.7 --preview-csv はフレーム毎の入力/出力サンプル値と誤差。
-    rows = [
-        {"track": "camera", "frame": 0, "channel": "pos_x", "input": 1.0, "output": 1.0, "error": 0.0},
-        {"track": "camera", "frame": 1, "channel": "pos_x", "input": 2.0, "output": 1.5, "error": 0.5},
-    ]
-    path = tmp_path / "preview.csv"
-    report.write_preview_csv(rows, str(path))
-    out = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
-    header = out[0]
-    assert header == ["track", "frame", "channel", "input", "output", "error"]
-    assert all(len(row) == len(header) for row in out)
-    row1 = [r for r in out[1:] if r[header.index("frame")] == "1"][0]
-    assert row1[header.index("channel")] == "pos_x"
-    assert row1[header.index("input")] == "2.000000"
-    assert row1[header.index("output")] == "1.500000"
-    assert row1[header.index("error")] == "0.500000"
-
-
-def test_write_json_bad_dir_raises(tmp_path):
-    # 親ディレクトリ不在 → 例外(CLI は終了コード3にマップ)。
-    with pytest.raises(OSError):
-        report.write_json(sample_report(), str(tmp_path / "nodir" / "r.json"))
-
-
-def test_write_preview_csv_bad_dir_raises(tmp_path):
-    with pytest.raises(OSError):
-        report.write_preview_csv([], str(tmp_path / "nodir" / "p.csv"))

@@ -5,8 +5,6 @@ VMD書き。終了コード(§9): 0 正常 / 1 入力不正(VMDでない・対�
 2 引数エラー / 3 出力書き込み失敗 / 4 strict で許容誤差を満たせない。
 """
 
-import json
-
 import numpy as np
 import pytest
 
@@ -432,66 +430,18 @@ def test_dry_run_prints_stats_and_no_output(tmp_path, capsys):
     assert "camera" in text and "31" in text  # 統計が表示される
 
 
-def test_report_json_written(tmp_path):
+def test_report_json_option_is_removed(tmp_path):
     src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    rep = tmp_path / "report.json"
     write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
-                     "--report-json", str(rep)])
-    assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
-    assert data["camera"]["input_keys"] == 31
-    assert data["camera"]["output_keys"] == 2
+    code = cli.main([str(src), "--target", "camera", "--report-json", str(tmp_path / "report.json")])
+    assert code == 2
 
 
-def test_report_json_written_even_in_dry_run(tmp_path):
+def test_preview_csv_option_is_removed(tmp_path):
     src = tmp_path / "in.vmd"
-    rep = tmp_path / "report.json"
     write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "--target", "camera", "--curve-mode", "linear",
-                     "--dry-run", "--report-json", str(rep)])
-    assert code == 0
-    assert rep.exists()  # dry-run でもレポートは書く
-
-
-def test_preview_csv_written(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    csv_path = tmp_path / "preview.csv"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
-                     "--preview-csv", str(csv_path)])
-    assert code == 0
-    assert "camera" in csv_path.read_text(encoding="utf-8")
-
-
-def test_report_json_bad_dir_is_write_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
-                     "--report-json", str(tmp_path / "nodir" / "r.json")])
-    assert code == 3
-
-
-def test_preview_csv_written_even_in_dry_run(tmp_path):
-    src = tmp_path / "in.vmd"
-    csv_path = tmp_path / "preview.csv"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "--target", "camera", "--curve-mode", "linear",
-                     "--dry-run", "--preview-csv", str(csv_path)])
-    assert code == 0
-    assert csv_path.exists()  # dry-run でも CSV は書く
-
-
-def test_preview_csv_bad_dir_is_write_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
-                     "--preview-csv", str(tmp_path / "nodir" / "p.csv")])
-    assert code == 3
+    code = cli.main([str(src), "--target", "camera", "--preview-csv", str(tmp_path / "preview.csv")])
+    assert code == 2
 
 
 def test_output_parent_missing_is_write_error(tmp_path):

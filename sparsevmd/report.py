@@ -1,20 +1,13 @@
-"""レポート出力(dry-run統計・JSON・CSV)(sparsevmd.md §2.7)。
+"""dry-run 用レポート生成(sparsevmd.md §2.7)。
 
 削減の入出力キー数・削減率・選択ボーン・範囲・keep-frame をまとめ、dry-run の
-テキスト表示、JSON 出力(build_report の dict)、フレーム毎の CSV プレビューを提供する。
-書き込み失敗は例外を送出し、CLI が終了コード3にする。
+テキスト表示用の report dict を提供する。
 
-dry-run / JSON(build_report の dict): キー数・削減率・選択・範囲・keep に加え、§7.2 の
+build_report の dict はキー数・削減率・選択・範囲・keep に加え、§7.2 の
 軸ごと最大絶対誤差(camera_errors / bone_errors)、§2.7/§6.3 の診断(camera_diag /
 bone_diag = 不連続検出位置 cuts・分割理由 splits・継ぎ目書き換え seam_rewrites)を載せる。
 誤差・診断は reduce 側(measure_*_errors / reduce_*_track の diagnostics)が surface する。
-
---preview-csv(write_preview_csv): フレーム毎の入力/出力サンプル値と誤差(§2.7)。行は
-{track, frame, channel, input, output, error}。CLI が出力を再サンプリングして組み立てる。
 """
-
-import csv
-import json
 
 
 def reduction_rate(input_count, output_count):
@@ -126,28 +119,3 @@ def format_dry_run(report):
     lines.append(f"ranges: {report['ranges']}")
     lines.append(f"keep_frames: {report['keep_frames']}")
     return "\n".join(lines)
-
-
-def write_json(report, path):
-    """レポートを JSON で書き出す(日本語は非エスケープ)。失敗時は例外(CLIで終了コード3)。"""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-
-
-_PREVIEW_HEADER = ["track", "frame", "channel", "input", "output", "error"]
-
-
-def write_preview_csv(rows, path):
-    """フレーム毎の入力/出力サンプル値と誤差を CSV 出力する(§2.7 --preview-csv)。失敗時は例外。
-
-    rows は {track, frame, channel, input, output, error} の dict 列(各値はスカラー)。
-    入力/出力/誤差は小数6桁で整形する。トラック別の要約・誤差・分割理由は --report-json 側。
-    """
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(_PREVIEW_HEADER)
-        for r in rows:
-            w.writerow([
-                r["track"], r["frame"], r["channel"],
-                f"{r['input']:.6f}", f"{r['output']:.6f}", f"{r['error']:.6f}",
-            ])

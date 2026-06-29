@@ -1,13 +1,11 @@
-"""削減診断の surface とレポート出力のテスト(sparsevmd.md §2.7, §6.3)。
+"""削減診断の surface と dry-run レポートのテスト(sparsevmd.md §2.7, §6.3)。
 
-§2.7 はレポートに「不連続検出位置」(dry-run)・「分割理由」(JSON)を求める。§6.3 は
+§2.7 はレポートに「不連続検出位置」・「分割理由」を求める。§6.3 は
 継ぎ目の補間曲線書き換えを「レポートに明示する」と求める。reduce_*_track は diagnostics
 out-param(dict)を受け取り、cuts(検出カット位置)・splits(分割フレームと駆動チャンネル)・
 seam_rewrites(継ぎ目で曲線を書き換えたフレーム)を埋める。build_report はこれを各トラック
-エントリに載せ、dry-run と JSON に出す。
+エントリに載せ、dry-run に出す。
 """
-
-import json
 
 import pytest
 
@@ -150,36 +148,32 @@ def test_format_dry_run_shows_cut_positions():
     assert "15" in text
 
 
-def test_cli_report_json_includes_diagnostics(tmp_path):
-    # CLI 経由で --report-json が不連続検出位置を含むことをエンドツーエンドで確認する。
+def test_cli_dry_run_includes_diagnostics(tmp_path, capsys):
+    # CLI 経由の dry-run が不連続検出位置を含むことをエンドツーエンドで確認する。
     from mmd_toolbox.vmd import io
     from mmd_toolbox.vmd.types import VmdDocument
     from sparsevmd import cli
 
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
-    rep = tmp_path / "r.json"
     keys = [
         cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0))
         for f in range(31)
     ]
     io.write_file(VmdDocument(camera=keys), str(src))
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--report-json", str(rep)])
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--dry-run"])
     assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
-    assert "diagnostics" in data["camera"]
-    assert 15 in data["camera"]["diagnostics"]["cuts"]
+    text = capsys.readouterr().out
+    assert "cuts" in text
+    assert "15" in text
 
 
-def test_write_json_includes_splits_and_seams(tmp_path):
+def test_build_report_includes_splits_and_seams():
     rep = report.build_report(
         target="camera", camera=(31, 5), bones=None, selected_bones=set(),
         ranges=[(0, 30)], keep_frames=[], camera_diag=_diag(),
     )
-    p = tmp_path / "r.json"
-    report.write_json(rep, str(p))
-    data = json.loads(p.read_text(encoding="utf-8"))
-    diag = data["camera"]["diagnostics"]
+    diag = rep["camera"]["diagnostics"]
     assert diag["splits"][0]["channel"] == "position"
     assert diag["seam_rewrites"] == [10]
     assert diag["cuts"] == [15]
@@ -280,22 +274,21 @@ def test_build_report_preserves_verify_passthrough():
     assert rep["camera"]["diagnostics"]["verify"][0]["added_total"] == 0
 
 
-def test_cli_report_json_includes_verify(tmp_path):
-    # CLI 経由の --report-json に verify レコードが出ることをエンドツーエンドで確認する。
+def test_cli_dry_run_includes_verify(tmp_path, capsys):
+    # CLI 経由の dry-run に verify レコードが出ることをエンドツーエンドで確認する。
     from mmd_toolbox.vmd import io
     from mmd_toolbox.vmd.types import VmdDocument
     from sparsevmd import cli
 
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
-    rep = tmp_path / "r.json"
     keys = [cam(f, dist=-30.0 - float(f)) for f in range(31)]
     io.write_file(VmdDocument(camera=keys), str(src))
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--report-json", str(rep)])
+    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--dry-run"])
     assert code == 0
-    data = json.loads(rep.read_text(encoding="utf-8"))
-    assert "verify" in data["camera"]["diagnostics"]
-    assert data["camera"]["diagnostics"]["verify"][0]["iterations"] >= 1
+    text = capsys.readouterr().out
+    assert "verify" in text
+    assert "iterations=" in text
 
 
 def test_format_dry_run_shows_verify():
@@ -314,7 +307,7 @@ def test_format_dry_run_shows_verify():
 
 
 def test_log_diagnostics_shows_verify(capsys):
-    # verbose の stderr ログにも出力後検証の反復・追加が出る(§C「JSON と verbose の両方」)。
+    # verbose の stderr ログにも出力後検証の反復・追加が出る。
     from sparsevmd import cli
 
     diag = dict(_diag())
