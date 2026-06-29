@@ -152,7 +152,7 @@ def test_format_dry_run_shows_cleaning_params():
     rep = report.build_report(keys, preset="strong")
     text = report.format_dry_run(rep)
     center_line = next(line for line in text.splitlines() if "センター" in line and "center" in line)
-    assert "0.63" in center_line  # center 位置強度 0.45×1.4
+    assert "0.63" in center_line  # center 位置のブレンド率 0.45×1.4
 
 
 def test_report_counts_spike_candidate_frames():

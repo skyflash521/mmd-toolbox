@@ -1,6 +1,6 @@
 """クリーニングプリセット解決のテスト(mocapvmd.md §5.2)。
 
-種別ごとの基準パラメータ(位置窓・回転窓・位置強度・回転強度)に、--preset の強度倍率を
+種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)に、--preset のブレンド率の倍率を
 掛けてクリーニングパラメータを解決する。窓幅は倍率で変えない。light=0.5 / balanced=1.0 /
 strong=1.4(全種別)/ stable-foot=foot_ik のみ 1.5・他 1.0。
 """
@@ -30,7 +30,7 @@ _BASE = {
 
 
 def _expected_multiplier(preset, category):
-    # §5.2 強度倍率表。stable-foot は foot_ik のみ 1.5、他は 1.0。
+    # §5.2 ブレンド率の倍率表。stable-foot は foot_ik のみ 1.5、他は 1.0。
     if preset == "stable-foot":
         return 1.5 if category == "foot_ik" else 1.0
     return {"light": 0.5, "balanced": 1.0, "strong": 1.4}[preset]
@@ -50,8 +50,8 @@ def test_balanced_base_values(category):
 @pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
 @pytest.mark.parametrize("category", list(_BASE))
 def test_multiplier_applies_to_strength_only(preset, category):
-    # 全プリセット×全種別で、倍率は位置・回転の両強度のみに掛かり、窓幅は不変であることを検証する。
-    # これにより種別ごとの適用漏れ・回転強度への誤適用・窓幅の誤変更を一括して捕捉する。
+    # 全プリセット×全種別で、倍率は位置・回転の両ブレンド率のみに掛かり、窓幅は不変であることを検証する。
+    # これにより種別ごとの適用漏れ・回転のブレンド率への誤適用・窓幅の誤変更を一括して捕捉する。
     pw, rw, ps, rs = _BASE[category]
     m = _expected_multiplier(preset, category)
     p = presets.resolve_cleaning(preset, category)

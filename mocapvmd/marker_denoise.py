@@ -1,7 +1,7 @@
 """マーカー軌跡のロバスト平滑化。
 
 カット境界で区間分割し、区間ごとに Hampel型外れ値置換でスパイクを抑え、
-Savitzky-Golay で低域化し、強度ブレンドと最大変位クランプで部位別に平滑化する。
+Savitzky-Golay で低域化し、ブレンド率での合成と最大変位クランプで部位別に平滑化する。
 非外れ値は保持されるため定数・線形運動は鈍らない。前後の最大変位を診断に残す。
 """
 
@@ -68,7 +68,7 @@ def _hampel(arr, window, k=3.0):
 
 
 def _smooth_axis(seg, params):
-    """1区間1軸を Hampel→Savitzky-Golay→強度ブレンドした値を返す(クランプ前)。"""
+    """1区間1軸を Hampel→Savitzky-Golay→ブレンド率での合成をした値を返す(クランプ前)。"""
     n = len(seg)
     window = _odd_at_most(min(params.window, n))
     if window < 3:

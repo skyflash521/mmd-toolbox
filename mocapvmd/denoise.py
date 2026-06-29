@@ -372,8 +372,8 @@ def _pos_smoothed(pos, segs, window):
 def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength, rot_strength):
     """密サンプルに一般ノイズ軽減を適用し、平滑化済みの (位置列, 回転列) を返す(§4.2, §5.5)。
 
-    位置は中央値フィルタ後 Savitzky-Golay を位置強度でブレンド、回転は窓内正規化平均を回転強度で
-    ブレンドする。アクセント run・カット境界・範囲端は保護(変更しない)。スパイクは窓基準により
+    位置は中央値フィルタ後 Savitzky-Golay を位置のブレンド率で合成、回転は窓内正規化平均を回転のブレンド率で
+    合成する。アクセント run・カット境界・範囲端は保護(変更しない)。スパイクは窓基準により
     抑制される。1フレームの元値からの変更は 位置 各軸 0.3 / 回転 5度 にクランプする。
     """
     det = detect_noise_events(positions, rotations, pos_window=pos_window, rot_window=rot_window)
