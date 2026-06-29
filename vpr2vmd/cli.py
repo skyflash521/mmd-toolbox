@@ -1,8 +1,9 @@
 """vpr2vmd CLI(vpr2vmd.md §4)。
 
 vpr を入力に、口形イベント列と開き量を作って lipsync に渡し、口パク VMD を 1 コマンドで
-出力する薄いラッパー。引数解析・検証・出力先解決と --dry-run の空実行を担い、変換パイプライン
-(vpr 読み込み → 口形イベント確定 → 開き量 → lipsync → VMD 出力)は _convert() が束ねる。
+出力する薄いラッパー。引数解析・検証・出力先解決を担い、vpr 読み込みから口パク VMD
+ドキュメント生成までの変換パイプライン(vpr 読み込み → 口形イベント確定 → 開き量 → lipsync)は
+_build() が束ねる。--dry-run は出力VMDを書かず、処理計画と診断を表示する。
 
 終了コード(既存ツール shakevmd 等の規約に倣う):
 0 正常 / 1 入力不正(入力 vpr の欠落・非vpr 等) / 2 引数エラー(未知オプション・範囲不正・
@@ -13,14 +14,19 @@ import argparse
 import math
 import os
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from lipsync import generate_morph_keys
 from mmd_toolbox.vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
 from vpr_io import VprFormatError, read
 
 from . import loudness, openness, presets, timing
-from .events import build_mouth_events, resolve_overlaps
+from .events import (
+    EventDiagnostics,
+    OverlapDiagnostics,
+    build_mouth_events,
+    resolve_overlaps,
+)
 from .io import TrackSelectionError, collect_notes, select_track
 from .tempo_correction import apply_tempo_correction
 
@@ -191,12 +197,25 @@ def _print_plan(args, output: str) -> None:
     print(f"tempo(ref-bpm/scale-min): {shown(args.ref_bpm)}/{shown(args.tempo_scale_min)}")
 
 
-def _convert(args, output: str) -> int:
-    """vpr → 口パク VMD の変換本体(vpr2vmd.md §3〜§5)。
+@dataclass
+class _Diagnostics:
+    """--dry-run の診断要約に出す統計と注意事項(vpr2vmd.md §4.4)。"""
+
+    adopted: int  # 採用音符数
+    events: int  # 口形イベント数
+    morph_keys: int  # モーフキー数
+    open_amounts: list[float]  # 採用音符別の開き量(最小/最大/平均の素材)
+    overlap: OverlapDiagnostics  # 重複音符の除外・切り詰め件数
+    event: EventDiagnostics  # 母音未確定件数・自前イベントを作らない記号
+
+
+def _build(args):
+    """vpr を読み口パク VMD ドキュメントと診断を組み立てる(書き込みはしない。vpr2vmd.md §3〜§5)。
 
     vpr_io 解析 → 対象トラック選択 → 重なり解決 → 口形イベント確定 → 開き量 → lipsync →
-    モーフキー VMD 出力を束ねる。終了コードは vpr2vmd.md §4.3 に従う(形式失敗・対象トラック
-    皆無=1、`--track` の不正値=2、出力書き込み失敗=3、それ以外は 0)。
+    モーフキーまでを束ね、`(VmdDocument, _Diagnostics)` を返す。書き込みと診断表示・警告は
+    呼び出し側(main)が担う(`--dry-run` でも処理は同じで、出力VMDだけ書かない)。入力不正
+    (非vpr・対象トラック皆無)は終了コード 1、`--track` の不正値は 2 を返す(vpr2vmd.md §4.3)。
     """
     try:
         project, _warnings = read(args.input)
@@ -209,7 +228,7 @@ def _convert(args, output: str) -> int:
     except TrackSelectionError:
         return 2  # --track の値が当該入力で有効な選択にならない=引数エラー
 
-    adopted = resolve_overlaps(collect_notes(track))
+    adopted, overlap_diag = resolve_overlaps(collect_notes(track))
     openness_params, gen_params = presets.resolve(args.style, args.open_max, args.default_open)
     # 曲の代表BPMから保持・アタック・リリースを縮める(高速テンポでの短母音消失を防ぐ)。
     # --ref-bpm/--tempo-scale-min はテンポ補正の入力なので未指定なら補正関数の既定に委ねる。
@@ -256,7 +275,7 @@ def _convert(args, output: str) -> int:
         )
     # --legato-max は GenerationParams 外(口形イベント確定段の引数)。未指定なら build_mouth_events の既定。
     legato_kwargs = {} if args.legato_max is None else {"legato_max_frames": args.legato_max}
-    mouth_events = build_mouth_events(
+    mouth_events, event_diag = build_mouth_events(
         adopted,
         project.tempos,
         project.resolution,
@@ -273,11 +292,35 @@ def _convert(args, output: str) -> int:
     # 使用モーフを 0F に中立登録してから(編集・MMD互換規約)フレーム順へ正規化する。
     document = ensure_frame0_neutral_keys(document, sections=("morph",))
     document, _warnings = normalize(document, sections=["morph"])
-    try:
-        write_file(document, output)
-    except OSError:
-        return 3  # 出力VMDの書き込み失敗
-    return 0
+    diagnostics = _Diagnostics(
+        adopted=len(adopted),
+        events=len(mouth_events),
+        # 実際に書き込まれるキー数(0F 中立登録・normalize 後)を数える。
+        morph_keys=len(document.morph),
+        open_amounts=list(open_by_note),
+        overlap=overlap_diag,
+        event=event_diag,
+    )
+    return document, diagnostics
+
+
+def _print_diagnostics(diag: _Diagnostics) -> None:
+    """--dry-run の診断要約を標準出力へ出す(vpr2vmd.md §4.4)。"""
+    print("--- 診断 ---")
+    print(f"採用音符数: {diag.adopted}")
+    print(f"口形イベント数: {diag.events}")
+    print(f"モーフキー数: {diag.morph_keys}")
+    if diag.open_amounts:
+        lo = min(diag.open_amounts)
+        hi = max(diag.open_amounts)
+        avg = sum(diag.open_amounts) / len(diag.open_amounts)
+        print(f"開き量(最小/最大/平均): {lo:.3f}/{hi:.3f}/{avg:.3f}")
+    print(f"母音未確定: {diag.event.vowel_undetermined}")
+    print(f"重複音符 除外: {diag.overlap.excluded} 切り詰め: {diag.overlap.truncated}")
+    symbols = diag.event.non_event_symbols
+    if symbols:
+        listed = " ".join(f"{sym}({symbols[sym]})" for sym in sorted(symbols))
+        print(f"イベント外記号: {listed}")
 
 
 def _valley_bounds_inverted(args) -> bool:
@@ -319,12 +362,28 @@ def main(argv=None) -> int:
     if _valley_bounds_inverted(args):
         return 2
 
-    # 入力 vpr の存在確認(欠落は入力不正)。読み込み・形式検証は _convert が行う。
+    # 入力 vpr の存在確認(欠落は入力不正)。読み込み・形式検証は _build が行う。
     if not os.path.isfile(args.input):
         return 1
 
+    # --dry-run でも読み込み・処理は同じく行い(出力VMDだけ書かない)、診断・警告を出せるようにする。
+    built = _build(args)
+    if isinstance(built, int):
+        return built  # 入力不正(1)・--track の不正値(2)
+    document, diagnostics = built
+
+    # 対象トラックに有効な発音が無い(採用音符列が空)→ 標準エラーへ警告(エラーではなく正常終了。
+    # vpr2vmd.md §4.3・§4.4)。--dry-run の有無に依らず出す。
+    if diagnostics.adopted == 0:
+        print("警告: 対象トラックに有効な発音がありません", file=sys.stderr)
+
     if args.dry_run:
         _print_plan(args, output)
+        _print_diagnostics(diagnostics)
         return 0
 
-    return _convert(args, output)
+    try:
+        write_file(document, output)
+    except OSError:
+        return 3  # 出力VMDの書き込み失敗
+    return 0

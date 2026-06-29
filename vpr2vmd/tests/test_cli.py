@@ -9,6 +9,7 @@ vpr 読み込み・口形イベント確定・VMD 生成の統合は test_conver
 """
 
 import pytest
+from vpr_io import Note, Part, TempoEvent, Track, VprProject
 
 from vpr2vmd import cli
 
@@ -16,6 +17,27 @@ from vpr2vmd import cli
 def _touch(path):
     path.write_bytes(b"")
     return str(path)
+
+
+@pytest.fixture(autouse=True)
+def _stub_read(monkeypatch):
+    """--dry-run も vpr を読み処理するため、read を最小の合成プロジェクトへ差し替える。
+
+    引数解析・検証の経路を実 vpr 無しで決定論的に通す(引数エラーは読み込み前に確定するので、
+    その分岐は本スタブを使わない)。トラック名は `--track` 名指定テストが一致できるよう `Vocal`。
+    """
+    project = VprProject(
+        resolution=480,
+        tempos=[TempoEvent(0, 120.0)],
+        tracks=[Track(name="Vocal", parts=[Part(
+            name="p", start_tick=0,
+            notes=[Note(
+                start_tick=0, duration_tick=480, pitch=60,
+                lyric="x", velocity=64, phonemes=["a"],
+            )],
+        )])],
+    )
+    monkeypatch.setattr(cli, "read", lambda _src: (project, []))
 
 
 def test_parses_full_option_set_in_dry_run(tmp_path):
@@ -53,7 +75,7 @@ def test_report_json_is_now_unknown_option(tmp_path):
 def test_track_accepts_non_integer_name(tmp_path):
     """--track は整数 INDEX だけでなく非整数の Track 名も受理する(vpr2vmd.md §4.2)。"""
     src = _touch(tmp_path / "in.vpr")
-    assert cli.main([src, "--track", "Lead Vocal", "--dry-run"]) == 0
+    assert cli.main([src, "--track", "Vocal", "--dry-run"]) == 0
 
 
 def test_unknown_option_is_arg_error(tmp_path):

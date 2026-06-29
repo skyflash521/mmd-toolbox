@@ -32,25 +32,25 @@ _RES = 480
 
 def _build_se(adopted, *, use_n_morph=True, legato_max_frames=None):
     kw = {} if legato_max_frames is None else {"legato_max_frames": legato_max_frames}
-    return [
-        (e.shape, e.start, e.end)
-        for e in events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=use_n_morph, **kw)
-    ]
+    result, _diag = events.build_mouth_events(
+        adopted, _TEMPOS, _RES, use_n_morph=use_n_morph, **kw
+    )
+    return [(e.shape, e.start, e.end) for e in result]
 
 
 def test_empty():
-    assert events.resolve_overlaps([]) == []
+    assert events.resolve_overlaps([])[0] == []
 
 
 def test_no_overlap_unchanged():
     notes = [_note(0, 100), _note(200, 100)]
-    assert _spans(events.resolve_overlaps(notes)) == [(0, 100), (200, 300)]
+    assert _spans(events.resolve_overlaps(notes)[0]) == [(0, 100), (200, 300)]
 
 
 def test_same_start_keeps_longest_only():
     # collect_notes の整列で同一 start は duration 降順。先頭(最長)だけ残す。
     notes = [_note(0, 120, lyric="long"), _note(0, 80, lyric="short")]
-    adopted = events.resolve_overlaps(notes)
+    adopted, _diag = events.resolve_overlaps(notes)
     assert [n.lyric for n in adopted] == ["long"]
     assert _spans(adopted) == [(0, 120)]
 
@@ -59,7 +59,7 @@ def test_same_start_same_duration_keeps_first_in_order():
     # 同一 start・同一 duration(別パートの同時同長など)は、collect_notes の整列順
     # (パート出現順・索引昇順)の先頭を残す。同長時に後続を選ぶ実装を落とすため。
     notes = [_note(0, 100, lyric="first"), _note(0, 100, lyric="second")]
-    adopted = events.resolve_overlaps(notes)
+    adopted, _diag = events.resolve_overlaps(notes)
     assert [n.lyric for n in adopted] == ["first"]
     assert _spans(adopted) == [(0, 100)]
 
@@ -67,28 +67,29 @@ def test_same_start_same_duration_keeps_first_in_order():
 def test_truncate_to_next_start():
     # 後続開始へ切り詰め: [0,480) は次音符 start=240 まで詰めて [0,240)。
     notes = [_note(0, 480), _note(240, 240)]
-    assert _spans(events.resolve_overlaps(notes)) == [(0, 240), (240, 480)]
+    assert _spans(events.resolve_overlaps(notes)[0]) == [(0, 240), (240, 480)]
 
 
 def test_contained_notes_truncated_in_chain():
     notes = [_note(0, 1000), _note(100, 200), _note(150, 900)]
-    assert _spans(events.resolve_overlaps(notes)) == [(0, 100), (100, 150), (150, 1050)]
+    assert _spans(events.resolve_overlaps(notes)[0]) == [(0, 100), (100, 150), (150, 1050)]
 
 
 def test_zero_duration_note_dropped():
     # 長さ 0 以下の音符は採用しない(発音区間を持たない)。
-    assert events.resolve_overlaps([_note(0, 0)]) == []
+    assert events.resolve_overlaps([_note(0, 0)])[0] == []
 
 
 def test_zero_duration_note_dropped_others_kept():
     notes = [_note(0, 0), _note(100, 100)]
-    assert _spans(events.resolve_overlaps(notes)) == [(100, 200)]
+    assert _spans(events.resolve_overlaps(notes)[0]) == [(100, 200)]
 
 
 # --- 組み立て: 採用音符列→フレーム変換→休符 SILENCE・直前口形継続・全時間軸被覆の MouthEvent 列 ---
 
 def test_build_empty_is_empty():
-    assert events.build_mouth_events([], _TEMPOS, _RES, use_n_morph=True) == []
+    result, _diag = events.build_mouth_events([], _TEMPOS, _RES, use_n_morph=True)
+    assert result == []
 
 
 def test_build_single_vowel_note():
@@ -228,7 +229,7 @@ def test_build_geminate_is_silence():
 def test_build_is_contiguous_and_covers_full_axis():
     # 連続(終端=次の始端)・先頭 0・末尾=採用音符列の最後の終端、で全時間軸を被覆する。
     adopted = [_note(240, 240, phonemes=["m", "a"]), _note(720, 240, phonemes=["i"])]
-    result = events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=True)
+    result, _diag = events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=True)
     assert result[0].start == 0.0
     for a, b in zip(result, result[1:]):
         assert a.end == b.start
@@ -238,12 +239,10 @@ def test_build_is_contiguous_and_covers_full_axis():
 # --- 開き量の付与: 母音的口形イベントへ音符別開き量を刻印、無音は 0 ---
 
 def _build_so(adopted, *, use_n_morph=True, open_by_note=None):
-    return [
-        (e.shape, e.open_amount)
-        for e in events.build_mouth_events(
-            adopted, _TEMPOS, _RES, use_n_morph=use_n_morph, open_by_note=open_by_note
-        )
-    ]
+    result, _diag = events.build_mouth_events(
+        adopted, _TEMPOS, _RES, use_n_morph=use_n_morph, open_by_note=open_by_note
+    )
+    return [(e.shape, e.open_amount) for e in result]
 
 
 def test_build_open_defaults_zero_without_open_by_note():

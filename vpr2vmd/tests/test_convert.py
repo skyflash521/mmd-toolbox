@@ -1,8 +1,9 @@
-"""vpr→VMD 変換パイプライン(_convert)の統合テスト(vpr2vmd.md §3〜§5)。
+"""vpr→VMD 変換パイプライン(cli._build と main)の統合テスト(vpr2vmd.md §3〜§5)。
 
-cli._convert は vpr_io 解析結果(合成フィクスチャ)を入口に、トラック選択→重なり解決→口形イベント
-確定→開き量→lipsync→モーフキー VMD 出力までを束ねる。vpr_io.read と mmd_toolbox の write_file は
-monkeypatch で差し替え、配線と終了コードを決定論的に検証する。
+cli._build は vpr_io 解析結果(合成フィクスチャ)を入口に、トラック選択→重なり解決→口形イベント
+確定→開き量→lipsync→モーフキー生成までを束ね、main が書き込み・診断表示・警告を担う。
+vpr_io.read と mmd_toolbox の write_file は monkeypatch で差し替え、配線と終了コードを決定論的に
+検証する。
 """
 
 import re
@@ -283,11 +284,7 @@ def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):
     assert cli.main([str(src), "-o", str(out)]) == 3
 
 
-# --- P-5 診断(--dry-run。vpr2vmd.md §4.4)。実装未了のため xfail(strict)で緑を保つ。
-#     実装フェーズで印を外す(外し忘れは XPASS=strict 失敗で表面化する)。 ---
-
-_DIAG_PENDING = "impl pending: dry-run diagnostics"
-_WARN_PENDING = "impl pending: empty-track warning"
+# --- P-5 診断(--dry-run。vpr2vmd.md §4.4)。 ---
 
 
 def _dry_run(monkeypatch, tmp_path, project, capsys, *args):
@@ -300,7 +297,6 @@ def _dry_run(monkeypatch, tmp_path, project, capsys, *args):
     return rc, captured.out, captured.err
 
 
-@pytest.mark.xfail(reason=_DIAG_PENDING, strict=True)
 def test_dry_run_reports_adopted_event_and_morph_counts(monkeypatch, tmp_path, capsys):
     # --dry-run は採用音符数・口形イベント数・モーフキー数を診断に出す。
     project = _project([_note(0, 240, ["a"]), _note(480, 240, ["i"])])
@@ -314,7 +310,6 @@ def test_dry_run_reports_adopted_event_and_morph_counts(monkeypatch, tmp_path, c
     assert mk and int(mk.group(1)) >= 1
 
 
-@pytest.mark.xfail(reason=_DIAG_PENDING, strict=True)
 def test_dry_run_reports_openness_stats(monkeypatch, tmp_path, capsys):
     # 開き量統計(最小/最大/平均)を出す(velocity に強弱差のある2音符)。
     project = _project(
@@ -330,7 +325,6 @@ def test_dry_run_reports_openness_stats(monkeypatch, tmp_path, capsys):
     assert lo <= avg <= hi
 
 
-@pytest.mark.xfail(reason=_DIAG_PENDING, strict=True)
 def test_dry_run_reports_vowel_undetermined_count(monkeypatch, tmp_path, capsys):
     # 母音が得られない音符(母音なし・撥音/促音でもない)を母音未確定として計上する。
     # 母音音符に続けて、その他子音のみの音符(直前口形継続=母音未確定)を置く。
@@ -340,7 +334,6 @@ def test_dry_run_reports_vowel_undetermined_count(monkeypatch, tmp_path, capsys)
     assert "母音未確定: 1" in out
 
 
-@pytest.mark.xfail(reason=_DIAG_PENDING, strict=True)
 def test_dry_run_reports_overlap_exclusion_and_truncation(monkeypatch, tmp_path, capsys):
     # 同一 start の重複は除外、後続開始への切り詰めは切り詰めとして計上する。
     project = _project([
@@ -355,7 +348,6 @@ def test_dry_run_reports_overlap_exclusion_and_truncation(monkeypatch, tmp_path,
     assert "切り詰め: 1" in out
 
 
-@pytest.mark.xfail(reason=_DIAG_PENDING, strict=True)
 def test_dry_run_lists_non_event_symbols(monkeypatch, tmp_path, capsys):
     # 自前の口形イベントを作らない記号(その他子音・未知記号)を記号種・件数で列挙する。
     # 表明はラベルと「記号(件数)」形でパス文字列への偶発一致を避ける(単独 "k" 等は不可)。
@@ -366,7 +358,6 @@ def test_dry_run_lists_non_event_symbols(monkeypatch, tmp_path, capsys):
     assert "k(1)" in out
 
 
-@pytest.mark.xfail(reason=_WARN_PENDING, strict=True)
 def test_dry_run_empty_track_warns_on_stderr(monkeypatch, tmp_path, capsys):
     # 採用音符列が空 → 標準エラーへ警告を出す(--dry-run でも、出力VMDは書かない・exit 0)。
     rc, _out, err = _dry_run(monkeypatch, tmp_path, _project([]), capsys)
@@ -374,7 +365,6 @@ def test_dry_run_empty_track_warns_on_stderr(monkeypatch, tmp_path, capsys):
     assert "警告" in err
 
 
-@pytest.mark.xfail(reason=_WARN_PENDING, strict=True)
 def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys):
     # 通常実行でも採用音符列が空なら標準エラーへ警告を出す(空VMD出力・exit 0)。
     rc, out = _run(monkeypatch, tmp_path, _project([]))
