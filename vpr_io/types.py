@@ -53,12 +53,34 @@ class Note:
 
 
 @dataclass
+class ControllerEvent:
+    """連続コントローラ曲線の1点。tick はプロジェクト絶対 tick、value はファイル格納の生値。"""
+
+    tick: int
+    value: int
+
+
+@dataclass
+class ControllerCurve:
+    """パート単位の連続コントローラ曲線(声量 dynamics・表情 s5Expression・音色 等)。
+
+    vpr の各パートが持つ連続パラメータ自動化を生値のまま保持する。どれが声量かの選別・値域の正規化・
+    開き量への写像は呼び出し側(各CLI)の責務で、vpr_io は形式の事実(名前と (tick, 生値) 列)だけ
+    公開する(vpr_io.md §2)。
+    """
+
+    name: str  # vpr の controller 名(例 "dynamics"・"s5Expression")
+    events: list[ControllerEvent] = field(default_factory=list)  # tick の昇順
+
+
+@dataclass
 class Part:
     """歌唱区間。start_tick はパートの開始位置(プロジェクト絶対 tick)。"""
 
     name: str
     start_tick: int
     notes: list[Note] = field(default_factory=list)  # start_tick の昇順
+    controllers: list[ControllerCurve] = field(default_factory=list)  # 連続コントローラ曲線
 
 
 @dataclass

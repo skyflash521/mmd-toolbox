@@ -42,8 +42,10 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 - **テンポ・拍子**: 時刻と vpr の時間表現(tick/拍)の相互変換に必要な情報。
 - **トラック/パート構造**: 歌唱トラックとその中のパート(歌唱区間)。
 - **音符(ノート)**: 開始時刻・長さ(タイミング)、ピッチ(音高)、歌詞、音素(発音)、強弱。正規化公開モデルの
-  強弱は**ベロシティ(0〜127 の生値)**とする(下記「確定事項」)。より細かなダイナミクス曲線は公開モデルに
-  含めず、保持する場合はロスレス未解釈データ側(§3・§5)に置く。
+  強弱は**ベロシティ(0〜127 の生値)**とする(下記「確定事項」)。
+- **連続コントローラ曲線**: パートが持つ連続パラメータ自動化(声量 `dynamics`・表情 `s5Expression`・音色 等)を、
+  名前と (絶対 tick, 生値) 列として**全コントローラ生値のまま**公開する。どれが声量かの選別・値域の正規化・他
+  パラメータへの写像は利用先の責務(設計境界 1.2)で、vpr_io は形式の事実だけを公開する(下記「確定事項」)。
 - **休符**: 音符間の空き(無音区間)として観測できる情報。
 
 利用先が使う部分集合は 1.3 のとおり。`vpr2vmd` とS-1ゲートは時刻・音素・(vpr2vmd は)強弱を使い、`song2vpr`
@@ -58,8 +60,10 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
   (§6)。tick⇔秒変換に必要なテンポマップ・分解能(tick/四分音符)・拍子も公開する。
 - **音素の粒度**: 音素は **音符単位** とし、各音符が音素列(発音記号の並び)を持つ。音符内の音素別タイミングは
   初期スコープ外(必要になれば拡張)。
-- **強弱の表現**: 各音符の **ベロシティ(0〜127 の生値)** を持つ。より細かなダイナミクス曲線の保持は
-  ロスレス範囲(§3・§5、形式レイアウト確定後)に委ねる。
+- **強弱の表現**: 各音符の **ベロシティ(0〜127 の生値)** を持つ。加えて、パート単位の**連続コントローラ曲線**を
+  生値のまま公開する(`dynamics` 等の声量曲線を含む)。曲線の時刻は音符と同じく**プロジェクト絶対 tick**で、値は
+  ファイル格納の生値。声量コントローラの選別・値域正規化・開き量への写像は利用先(各CLI)が定める(設計境界 1.2)。
+  vpr_io はどのコントローラが何を意味するか・被覆外の値の扱いを解釈しない。
 - **休符**: 明示の型を持たせず、同一トラック内の**発音区間(各音符の [開始, 開始+長さ))の和集合の補集合**として
   観測する(隣接差分でなく和集合の補集合とすることで、万一区間が重なっても偽の休符を作らない)。先頭音符より
   前・解析範囲末尾までの無音を含み、解析範囲は呼び出し側が定める。歌唱トラックは単音想定(発音区間の重なりを
@@ -80,7 +84,11 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 - `TimeSignature`: `tick: int`、`numerator: int`、`denominator: int`。
 - `Track`: `name: str`、`parts: list[Part]`。
 - `Part`: `name: str`、`start_tick: int`(プロジェクト絶対 tick。パートの開始位置)、
-  `notes: list[Note]`(`start_tick` の昇順)。
+  `notes: list[Note]`(`start_tick` の昇順)、`controllers: list[ControllerCurve]`(連続コントローラ曲線。既定は空)。
+- `ControllerCurve`: `name: str`(vpr の controller 名。例 `"dynamics"`/`"s5Expression"`)、
+  `events: list[ControllerEvent]`(`tick` の昇順)。声量の選別・正規化は利用先の責務で、ここでは全コントローラを
+  生値で公開する。
+- `ControllerEvent`: `tick: int`(プロジェクト絶対 tick)、`value: int`(ファイル格納の生値)。
 - `Note`: `start_tick: int`、`duration_tick: int`、`pitch: int`(MIDI ノート番号)、`lyric: str`(表示歌詞)、
   `velocity: int`(0〜127)、`phonemes: list[str]`(音符内の音素列。空可、既定は空リスト)。
   `start_tick` は**プロジェクト絶対 tick**、`duration_tick` は **tick 長**で持つ(vpr がパート相対で格納する場合、
@@ -127,8 +135,11 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
   (分解能と先行する拍子から各小節の tick 長を積算)して `TimeSignature(tick, numerator=numer, denominator=denom)`。
 - `VprProject.tracks` ← `tracks` のうち歌唱トラック(`type` = 2)。`Track(name, parts)`。オーディオトラック
   (`type` = 1)は音符を持たず公開データモデルに現れない(その保持は §3.3)。
-- `Part(name, start_tick=part.pos, notes)`。`notes` は `start_tick` 昇順。
+- `Part(name, start_tick=part.pos, notes, controllers)`。`notes` は `start_tick` 昇順。
 - `Note(start_tick=part.pos + note.pos, duration_tick=duration, pitch=number, lyric, velocity, phonemes=phoneme.split())`。
+- `Part.controllers` ← `part.controllers`。各 `ControllerCurve(name, events)` で、`events` は
+  `ControllerEvent(tick=part.pos + event.pos, value=event.value)`(音符と同じく part 開始位置を加算して絶対化)を
+  `tick` 昇順に整列。声量に限らず全コントローラを生値で公開する(選別・正規化は利用先)。
 - 休符は専用型を持たず、§2.1 のとおり発音区間の和集合の補集合として導出する。
 
 ### 3.1 構造異常(`VprFormatError`)

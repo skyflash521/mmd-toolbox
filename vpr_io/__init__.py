@@ -1,6 +1,8 @@
 from .io import read
 from .rests import rest_intervals
 from .types import (
+    ControllerCurve,
+    ControllerEvent,
     Note,
     Part,
     TempoEvent,
@@ -12,6 +14,8 @@ from .types import (
 )
 
 __all__ = [
+    "ControllerCurve",
+    "ControllerEvent",
     "Note",
     "Part",
     "TempoEvent",

@@ -573,3 +573,73 @@ def test_vprproject_raw_sequence_defaults_to_none():
     # 手組みの VprProject(read を介さない)は raw_sequence を持たない(既定 None)。
     project = VprProject(resolution=480)
     assert project.raw_sequence is None
+
+
+def _singing_track_with_controllers(notes, controllers, part_pos=0, part_duration=1920):
+    return {
+        "type": 2,
+        "name": "vocal",
+        "parts": [
+            {
+                "name": "p",
+                "pos": part_pos,
+                "duration": part_duration,
+                "notes": notes,
+                "controllers": controllers,
+            }
+        ],
+    }
+
+
+def test_controllers_extracted_with_absolute_tick():
+    # コントローラ曲線を生値で抽出し、events の pos に part 開始位置を加算して絶対 tick 化する。
+    from vpr_io import read
+
+    controllers = [{"name": "dynamics", "events": [{"pos": 100, "value": 64}, {"pos": 300, "value": 90}]}]
+    seq = _sequence([_singing_track_with_controllers([], controllers, part_pos=480)])
+    project, _ = read(_make_vpr(seq))
+    curves = project.tracks[0].parts[0].controllers
+    assert len(curves) == 1
+    assert curves[0].name == "dynamics"
+    assert [(e.tick, e.value) for e in curves[0].events] == [(580, 64), (780, 90)]
+
+
+def test_controllers_default_empty_when_absent():
+    # controllers キーが無いパートは空リスト(欠落は許容)。
+    from vpr_io import read
+
+    project, _ = read(_make_vpr(_sequence([_singing_track([])])))
+    assert project.tracks[0].parts[0].controllers == []
+
+
+def test_controller_events_sorted_by_tick():
+    # events は tick 昇順に整列する(ファイル順に依存しない)。
+    from vpr_io import read
+
+    controllers = [{"name": "dynamics", "events": [{"pos": 300, "value": 90}, {"pos": 100, "value": 64}]}]
+    project, _ = read(_make_vpr(_sequence([_singing_track_with_controllers([], controllers)])))
+    ticks = [e.tick for e in project.tracks[0].parts[0].controllers[0].events]
+    assert ticks == sorted(ticks)
+
+
+def test_multiple_controllers_all_preserved_in_order():
+    # 声量以外も含め全コントローラを生値で公開する(選別は呼び出し側)。
+    from vpr_io import read
+
+    controllers = [
+        {"name": "dynamics", "events": [{"pos": 0, "value": 64}]},
+        {"name": "s5Expression", "events": [{"pos": 0, "value": 30}]},
+        {"name": "brightness", "events": [{"pos": 0, "value": 64}]},
+    ]
+    project, _ = read(_make_vpr(_sequence([_singing_track_with_controllers([], controllers)])))
+    names = [c.name for c in project.tracks[0].parts[0].controllers]
+    assert names == ["dynamics", "s5Expression", "brightness"]
+
+
+def test_controller_event_missing_value_is_format_error():
+    # events の必須キー(value)欠落は構造異常。
+    from vpr_io import VprFormatError, read
+
+    controllers = [{"name": "dynamics", "events": [{"pos": 0}]}]
+    with pytest.raises(VprFormatError):
+        read(_make_vpr(_sequence([_singing_track_with_controllers([], controllers)])))

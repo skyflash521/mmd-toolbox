@@ -8,6 +8,8 @@ import json
 import zipfile
 
 from .types import (
+    ControllerCurve,
+    ControllerEvent,
     Note,
     Part,
     TempoEvent,
@@ -141,6 +143,28 @@ def _notes(raw_notes, part_pos, part_path) -> list[Note]:
     return notes
 
 
+def _controllers(raw_controllers, part_pos, part_path) -> list[ControllerCurve]:
+    """パートの連続コントローラ曲線を絶対 tick 化して写像する(音符と同じく events の pos に part 開始
+    位置を加算)。声量の選別・正規化は呼び出し側の責務なので、ここでは全コントローラを生値で公開する。
+    """
+    curves: list[ControllerCurve] = []
+    for i, controller in enumerate(raw_controllers):
+        path = f"{part_path}.controllers[{i}]"
+        name = _require(controller, "name", path, str)
+        events: list[ControllerEvent] = []
+        for j, event in enumerate(_optional_list(controller, "events", path)):
+            event_path = f"{path}.events[{j}]"
+            events.append(
+                ControllerEvent(
+                    tick=part_pos + _require(event, "pos", event_path, int),
+                    value=_require(event, "value", event_path, int),
+                )
+            )
+        events.sort(key=lambda e: e.tick)
+        curves.append(ControllerCurve(name=name, events=events))
+    return curves
+
+
 def _tracks(raw_tracks) -> list[Track]:
     """歌唱トラック(type==2)のみをデータモデルへ写像する。"""
     tracks: list[Track] = []
@@ -157,6 +181,9 @@ def _tracks(raw_tracks) -> list[Track]:
                     name=_require(part, "name", part_path, str),
                     start_tick=part_pos,
                     notes=_notes(_optional_list(part, "notes", part_path), part_pos, part_path),
+                    controllers=_controllers(
+                        _optional_list(part, "controllers", part_path), part_pos, part_path
+                    ),
                 )
             )
         tracks.append(Track(name=_require(track, "name", path, str), parts=parts))

@@ -74,7 +74,8 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `pos` | int | パート開始位置(プロジェクト絶対 tick) |
 | `duration` | int | パート長(tick) |
 | `notes[]` | list | 音符 |
-| その他 | — | `styleName`/`aiVoice`/`controllers` 等 |
+| `controllers[]` | list | パート単位の連続コントローラ曲線(下記「parts[] の controllers[]」) |
+| その他 | — | `styleName`/`aiVoice` 等 |
 
 オーディオトラックのパートは `{name, pos, wav, region}` を持ち `notes` を持たない。
 
@@ -94,6 +95,27 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 実サンプルの全音符に存在するフィールドは `pos`・`duration`・`number`・`lyric`・`phoneme`・`velocity` の6つ。
 `exp`/`aiExp`/`vibrato`/`singingSkill`/`phonemePositions` は音符により有無が異なる(省略可)。
 
+### parts[] の controllers[]
+
+パート単位の連続パラメータ自動化(オートメーション)曲線。各要素が1本の曲線。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `name` | str | コントローラ名(下記の観測値) |
+| `events[]` | list | 曲線の制御点。各要素 `{pos: int, value: int}`。`pos` は **パート相対 tick**(`part.pos` を加算して絶対化、notes と同じ)、`value` は生の整数値。ファイル上の `pos` は必ずしも昇順でない |
+
+観測されたコントローラ名と値域(実ファイル解析。ボイスバンク/エディタ版により出現するものが異なる):
+
+| name | 値域(観測) | 備考 |
+|---|---|---|
+| `dynamics` | 0〜127(中立 64) | VOCALOID の DYN(強弱・音量)。標準ボイスバンクで出現 |
+| `s5Expression` | 0〜63(観測) | VOCALOID5 系/互換ボイスバンク由来の表情量。`dynamics` の代わりに出現する例を確認 |
+| `character` / `s5Character` | 約 −4〜13(観測) | 声色 |
+| `pitchBend` / `breathiness` / `brightness` / `clearness` / `portamento` / `growl` | — | ピッチ・息・音色等(実サンプルでは定数のことが多い) |
+
+- 曲線は曲全体を被覆するとは限らない(部分区間だけ制御点を持つ例を確認。被覆外の値の扱いは読み手側の解釈)。
+- 各コントローラが表す意味の確定・値域の正規化・他パラメータへの写像は本書の範囲外(読み手側が定める)。
+
 ## 確証の状況
 
 - **分解能 480:** ファイル内に分解能フィールドは無いが、実ファイルの音符位置(四分音符=480、1小節=1920)と
@@ -103,6 +125,11 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
   が `note.pos + part.pos` で絶対化しており、これに従いパート相対とみなす。解析に用いた実ファイルはいずれも
   `part.pos` = 0 のため、相対/絶対をローカルの実測だけでは区別できない(非ゼロ `part.pos` の実ファイルが
   得られれば最終確認できる)。`read` は `part.pos` を加算して絶対化する。
-- **未解析の領域:** `exp`/`aiExp`/`vibrato`/`controllers` 等の表現パラメータの内部構造、オーディオトラックの
+- **controllers の event `pos` のパート相対:** note `pos` と同様に `part.pos` を加算して絶対化する(同じ tick
+  空間。実ファイルでも controller event の tick 範囲が note の tick 範囲と整合する)。`part.pos` = 0 のため相対/
+  絶対の最終区別は非ゼロ `part.pos` の実ファイル待ち(上の note `pos` と同じ状況)。コントローラの基本レイアウト
+  (`name`・events の `pos`/`value`)は解析済みだが、観測したコントローラ名の網羅・各名前が表す意味・被覆外の値の
+  解釈は確定していない。
+- **未解析の領域:** `exp`/`aiExp`/`vibrato` 等の音符単位の表現パラメータの内部構造、オーディオトラックの
   詳細、`Project/sequence.json` 以外の ZIP エントリ(`Project/Audio/*.wav` 等)は、本書で詳細レイアウトを
   解析していない(確証が低い領域)。実ファイルで確定でき次第、本書を更新する。
