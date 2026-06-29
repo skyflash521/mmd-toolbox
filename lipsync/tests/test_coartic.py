@@ -1,10 +1,9 @@
 """協調調音のテスト(lipsync.md §3/§4)。
 
-両唇閉鎖・無音を挟まず直接隣接する異母音グループの境界で、閉口を挟まず中間口形へ短く遷移すること、
-遷移長が口形差と区間長で決まること、両唇閉鎖を挟む境界では協調調音を作らないことを既知値で検証する。
-口形差・遷移長は純粋ヘルパとして精密に、境界のキー配置は遷移長が偶数(T=2)になる
-coartic_overlap_max=4 の明快なフィクスチャで検証する(既定 overlap_max=2 では T=1 が量子化で潰れ
-衝突解決が量子化の管轄になるため)。
+両唇閉鎖・無音を挟まず直接隣接する異母音グループの境界で、閉口を挟まず中間口形へ遷移すること、
+遷移長が基準長と区間長で決まる(口形差では短縮しない)こと、両唇閉鎖を挟む境界では協調調音を作らないことを
+既知値で検証する。境界のキー配置は遷移長が偶数(T=4)になる coartic_overlap_max=4 の明快なフィクスチャで
+検証する(短い側区間長10/2=5 で頭打ちされず基準長4が効く)。
 """
 
 import math
@@ -15,7 +14,7 @@ import lipsync
 from lipsync import GenerationParams, MouthEvent, MouthShape
 from lipsync import generate
 
-# T=2 を得るための overlap_max=4(直交対 diff=1 で T=round(4*(1-0.5))=2、境界 b±1 の整数窓)。
+# T=4 を得るための overlap_max=4(T=clamp(4, 1, 短い側10/2=5)=4、境界 b±2 の整数窓[8,12])。
 _WIDE = GenerationParams(coartic_overlap_max=4)
 
 
@@ -55,26 +54,28 @@ def test_shape_diff_partial_known_value():
 # --- 遷移長 _transition_frames(純粋ヘルパ。合成 diff で精密検証) ---
 
 @pytest.mark.parametrize(
-    "diff,shorter_len,overlap_max,expected",
+    "shorter_len,overlap_max,expected",
     [
-        (1.0, 10.0, 4, 2),   # 4*(1-0.5)=2、cap=min(4,5)=4 → 2
-        (0.5, 10.0, 4, 3),   # 4*0.75=3 → 3(diff 大ほど短い: 1.0→2 < 0.5→3)
-        (0.0, 10.0, 4, 4),   # 4*1=4 → 4
-        (0.0, 4.0, 4, 2),    # 値4だが短い側1/2=2 で頭打ち(自動短縮)
-        (1.0, 10.0, 2, 1),   # 既定 overlap_max=2: 2*0.5=1.0(ちょうど下限上)
-        (1.0, 10.0, 1, 1),   # overlap_max=1: 1*0.5=0.5 < 1 を clamp 下限1へ引き上げ
+        (10.0, 4, 4),   # min(4, 5)=4(基準長まで広く取る)
+        (4.0, 4, 2),    # 短い側1/2=2 で頭打ち(自動短縮)
+        (10.0, 2, 2),   # min(2, 5)=2
+        (10.0, 1, 1),   # min(1, 5)=1
+        (1.0, 4, 1),    # 短い側1/2=0.5 < 1 を clamp 下限1へ引き上げ
     ],
 )
-def test_transition_frames_formula(diff, shorter_len, overlap_max, expected):
+def test_transition_frames_clamped_to_base_and_half(shorter_len, overlap_max, expected):
+    # 遷移長 = clamp(基準長, 1, 短い側区間長/2)。口形差で短縮しない(差に依らず同じ)。
     p = GenerationParams(coartic_overlap_max=overlap_max)
-    assert generate._transition_frames(diff, shorter_len, p) == expected
+    for diff in (0.0, 0.5, 1.0):
+        assert generate._transition_frames(diff, shorter_len, p) == expected
 
 
-# --- 境界のキー配置(統合。overlap_max=4 で T=2) ---
+# --- 境界のキー配置(統合。overlap_max=4 で T=4) ---
 
 def test_no_close_at_coartic_boundary():
     # あ[0,10]・う[10,20] は直接隣接の異母音 → 境界10で閉口せず中間口形へ。
-    # diff=1 で T=2、窓[9,11]、境界10は中間口形 あ:0.25・う:0.25・お:0.05(いずれも非ゼロ)。
+    # overlap_max=4 で T=min(4, 短い側10/2=5)=4、窓[8,12]、境界10は中間口形 あ:0.25・う:0.25・お:0.05。
+    # 中間口形値 (w_a+w_b)/2 は T に依らない(窓幅だけ変わる)。
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)],
         _WIDE,
@@ -84,18 +85,19 @@ def test_no_close_at_coartic_boundary():
 
 
 def test_coartic_full_envelopes():
-    # あ→う、overlap_max=4 で T=2、窓[9,11]。前母音は先頭アタックのみ、次母音は末尾リリースのみ。
+    # あ→う、overlap_max=4 で T=min(4, 5)=4(口形差で短縮しない)、窓[8,12]。
+    # 前母音は先頭アタックのみ、次母音は末尾リリースのみ。
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)],
         _WIDE,
     )
     assert set(env) == {"あ", "う", "お"}
-    # あ: 0からアタックで0.5、保持、境界で0.25へ、遷移終端11で0(うへ明け渡す)。
-    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (9, 0.5), (10, 0.25), (11, 0.0)])
-    # う: 遷移始端9で0、境界0.25、11で0.5に達し保持、末尾リリースで0。
-    _approx_envelope(env["う"], [(9, 0.0), (10, 0.25), (11, 0.5), (18, 0.5), (20, 0.0)])
+    # あ: 0からアタックで0.5、保持、遷移始端8で0.5、境界10で0.25、遷移終端12で0(うへ明け渡す)。
+    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.25), (12, 0.0)])
+    # う: 遷移始端8で0、境界0.25、12で0.5に達し保持、末尾リリースで0。
+    _approx_envelope(env["う"], [(8, 0.0), (10, 0.25), (12, 0.5), (18, 0.5), (20, 0.0)])
     # お(うの補助 0.1): 同じ窓で 0→0.05→0.1、保持、リリースで0。
-    _approx_envelope(env["お"], [(9, 0.0), (10, 0.05), (11, 0.1), (18, 0.1), (20, 0.0)])
+    _approx_envelope(env["お"], [(8, 0.0), (10, 0.05), (12, 0.1), (18, 0.1), (20, 0.0)])
 
 
 def test_bilabial_between_no_coartic():

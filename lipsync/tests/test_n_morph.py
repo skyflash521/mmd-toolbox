@@ -167,10 +167,10 @@ def test_short_n_absorbed_into_neighbor():
 
 
 def test_n_vowel_boundary_short_coarticulation():
-    # 「ん」↔母音の境界は、口形差が最大(直交)なので協調調音が最短遷移(基準長2で T=1)になる。
-    # 閉口を挟まず中間口形へクロスフェードする。N[0,10]+A[10,20] open=0.5 の既知値:
-    #   ん: (0,0)・(2,0.5)・(10,0.25)・(11,0)、 あ: (10,0.25)・(11,0.5)・(18,0.5)・(20,0)。
-    # 境界フレーム10で両モーフが 0.25(中間口形)=閉口(全モーフ0)を挟まない最短遷移。
+    # 「ん」↔母音の境界も母音同士と同じく協調調音(口形差で短縮しないので基準長2で T=min(2, 5)=2)。
+    # 閉口を挟まず中間口形へクロスフェードする。N[0,10]+A[10,20] open=0.5、窓[9,11] の既知値:
+    #   ん: (0,0)・(2,0.5)・(9,0.5)・(10,0.25)・(11,0)、 あ: (9,0)・(10,0.25)・(11,0.5)・(18,0.5)・(20,0)。
+    # 境界フレーム10で両モーフが 0.25(中間口形)=閉口(全モーフ0)を挟まない遷移。
     keys = lipsync.generate_morph_keys(
         [
             MouthEvent(MouthShape.N, 0.0, 10.0, 0.5),
@@ -184,9 +184,9 @@ def test_n_vowel_boundary_short_coarticulation():
     for name in by_morph:
         by_morph[name].sort()
     assert set(by_morph) == {"ん", "あ"}
-    assert [f for f, _ in by_morph["ん"]] == [0, 2, 10, 11]
-    for (_, w), e in zip(by_morph["ん"], [0.0, 0.5, 0.25, 0.0]):
+    assert [f for f, _ in by_morph["ん"]] == [0, 2, 9, 10, 11]
+    for (_, w), e in zip(by_morph["ん"], [0.0, 0.5, 0.5, 0.25, 0.0]):
         assert w == pytest.approx(e)
-    assert [f for f, _ in by_morph["あ"]] == [10, 11, 18, 20]
-    for (_, w), e in zip(by_morph["あ"], [0.25, 0.5, 0.5, 0.0]):
+    assert [f for f, _ in by_morph["あ"]] == [9, 10, 11, 18, 20]
+    for (_, w), e in zip(by_morph["あ"], [0.0, 0.25, 0.5, 0.5, 0.0]):
         assert w == pytest.approx(e)

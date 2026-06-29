@@ -100,8 +100,8 @@ def _compose(shape: MouthShape, open_amount: float, params: GenerationParams) ->
 def _shape_diff(shape_a: MouthShape, shape_b: MouthShape, params: GenerationParams) -> float:
     """両母音の口形差(0〜1)。
 
-    各母音の有効プロファイル(誇張適用後・保持値非依存の相対重み)を標準口モーフ5次元ベクトルとし、
-    L2 正規化したうえでユークリッド距離を取り sqrt(2) で割る。同一口形は 0.0、互いに重ならない口形
+    各母音の有効プロファイル(誇張適用後・保持値非依存の相対重み)を標準口モーフ6次元ベクトル(あいうえおん)
+    とし、L2 正規化したうえでユークリッド距離を取り sqrt(2) で割る。同一口形は 0.0、互いに重ならない口形
     方向は 1.0。
     """
     def _unit(shape: MouthShape) -> list[float]:
@@ -122,13 +122,12 @@ def _shape_diff(shape_a: MouthShape, shape_b: MouthShape, params: GenerationPara
 def _transition_frames(diff: float, shorter_len: float, params: GenerationParams) -> int:
     """協調調音の遷移長。
 
-    基準長(=重なり上限)× (1 − 0.5・口形差) を、下限1・上限 min(重なり上限, 短い側区間長/2) で
-    クランプして整数フレーム化する。
+    基準長 `coartic_overlap_max` を、下限1・上限 短い側区間長/2 でクランプして整数フレーム化する。
+    口形差での短縮はしない(隣接母音の自然な移行には広い遷移窓が要るため、差に依らず基準長まで広く取り、
+    短い区間だけ区間長 1/2 で頭打ちする)。`diff` は将来の調整余地として受けるが現状は使わない。
     """
-    base = params.coartic_overlap_max
-    value = base * (1.0 - 0.5 * diff)
-    cap = min(float(base), shorter_len / 2.0)
-    return _half_up(max(1.0, min(value, cap)))
+    cap = shorter_len / 2.0
+    return _half_up(max(1.0, min(float(params.coartic_overlap_max), cap)))
 
 
 def _valley_depth(gap_len: float, params: GenerationParams) -> float:
