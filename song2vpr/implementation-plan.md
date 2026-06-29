@@ -41,7 +41,7 @@
 ## 3. テスト方針
 
 - `mmd_toolbox` のテスト規約(pytest・決定論・乱数シード固定・ネットワーク/GPU 不要)に従う。
-- 音声前段(分離・認識)の外部モデル依存は `vocal_analysis` 側に隔離される(vocal_analysis 実装計画 §3)。
+- 音声前段(分離・認識)の外部モデル依存は `vocal_analysis` 側に隔離される([vocal_analysis](../vocal_analysis/vocal_analysis.md) §8 のアダプタ)。
   `song2vpr` のテストは、`vocal_analysis` の出力(ボーカルWAV・音素セグメント列)を合成フィクスチャまたは
   モックで与え、F0推定・音符分割・歌詞対応の純関数核を決定論的に検証する。
 - **ピッチ推定・音符分割の核**(F0→音高写像、F0安定区間と音素境界からの音符切り出し、歌詞/音素対応)を純関数
@@ -64,7 +64,7 @@
 `phonemes:list[str]`・`velocity:int` 0–127)、`VprProject`(`resolution:int`=tick/四分音符・`tempos`)
 ([vpr_io.md](../vpr_io/vpr_io.md) §2.1)。`vocal_analysis` の `Segment`(`type`∈vowel/consonant/gap・
 `start_sec`・`end_sec`・`phoneme:str|None`(IPA)・`confidence`)、`RmsEnvelope`(相対正規化RMS)、`AnalysisResult`
-([vocal_analysis 実装計画](../vocal_analysis/implementation-plan.md) §4.4)。
+([vocal_analysis](../vocal_analysis/vocal_analysis.md) §2.1)。
 
 ### 4.1 歌詞・音素対応付け(確定)
 
@@ -79,7 +79,7 @@
   写像規則自体=「`None`・gap を除く音素セグメントを時間順に採る」は記号集合に依らず確定)。
 - **`lyric`(`--lyrics` なし)**: 音符の代表母音に対応する**母音仮名**(あ/い/う/え/お)を入れる。代表母音は音符区間で
   最も長い vowel セグメントの IPA を `vocal_analysis` の IPA→5母音写像
-  ([vocal_analysis 実装計画](../vocal_analysis/implementation-plan.md) §4.3)で5母音へ落として決める。母音が得られない
+  ([vocal_analysis](../vocal_analysis/vocal_analysis.md) §7)で5母音へ落として決める。母音が得られない
   音符(vowel セグメント無し)は既定 `あ` を入れ、診断に「母音未確定」と記録する。
 - **`lyric`(`--lyrics` あり)**: 与えた歌詞テキストを**モーラ単位**に分割し、音符列へ先頭から順に1音符=1モーラで
   対応付ける。各音符 `lyric` は対応モーラの仮名、`phonemes` は上記(セグメント由来)を優先する。

@@ -170,7 +170,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
   Apache-2.0)。残るは品質検証で、代表となる日本語歌唱サンプルで母音正解率・境界時刻ずれを実測し、先に定めた
   受入基準を満たすことをゲートにする。S2が成立しないと後段が成立しないため、満たさなければ
   Julius(phone-loop構成)等を評価する。受入基準・代表データ・指標は
-  [implementation-plan.md](implementation-plan.md) §4.1 で確定する。
+  [vocal_analysis.md](vocal_analysis.md) §9 で確定する。
 - **ライセンス(確定)**: 本体 MIT / soundfile BSD-3 / libsndfile LGPL-2.1(依存・両立) / Demucs(adefossez fork・
   htdemucs 重み)MIT / transformers Apache-2.0 / torch BSD-3 / wav2vec2 モデル(上記)Apache-2.0 / 代替:
   audio-separator MIT・Spleeter MIT・Julius エンジン BSD-3 / **Allosaurus GPL-3.0=不採用**。ffmpeg は方針A
