@@ -472,8 +472,10 @@ def generate_morph_keys(
             targets.append((morph, f_s, a))
             targets.append((morph, f_b, (a + b) / 2.0))
             targets.append((morph, f_e, b))
-    # レガート間隙の谷橋渡し: 完全閉口でなく、前母音の境界保持値 w_a から谷値 d·(w_a+w_b)/2 を経て
-    # 次母音の境界保持値 w_b へ線形に繋ぐ。前後母音の 0.0 リリース/アタックキーは上で抑制済み。
+    # レガート間隙(あ→閉じかけ→う)の谷橋渡し: 完全閉口でなく前後母音の口形を中央で重ねる(オーバーラップ)。
+    # 前母音の境界保持値 w_a から、谷値 d·(w_a+w_b)(両母音を加算で重ねた値。d で部分的な閉じ=閉じかけへ抑制)を
+    # 経て、次母音の境界保持値 w_b へ線形に繋ぐ。隣接の自然な移行(§4.3 のクロスフェード)と違い、ここでは加算で
+    # 重ねるが、d<1 が総開き量を抑えるので開きすぎない。前後母音の 0.0 リリース/アタックキーは上で抑制済み。
     for i, (gs, ge) in legato_at.items():
         wa, wb = weights[i][-1], weights[i + 1][0]
         gm = (gs + ge) / 2.0
@@ -483,7 +485,7 @@ def generate_morph_keys(
             if a == 0.0 and b == 0.0:
                 continue
             targets.append((morph, gs, a))
-            targets.append((morph, gm, depth * (a + b) / 2.0))
+            targets.append((morph, gm, depth * (a + b)))
             targets.append((morph, ge, b))
     # 伸び表現: 公称エンベロープ・強弱・協調調音の後に、長い保持プラトーへ揺らぎ節点を加える(任意)。
     if params.vibrato_amp > 0.0 and params.vibrato_period > 0:
