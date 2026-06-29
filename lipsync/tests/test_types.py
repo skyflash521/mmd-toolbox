@@ -44,6 +44,7 @@ def test_generation_params_defaults():
     assert p.attack_frames == 2
     assert p.release_frames == 2
     assert p.min_hold_frames == 3
+    assert p.triangle_min_frames == 2.0
     assert p.coartic_overlap_max == 2
     assert p.anticipation_frames == 1
     assert p.legato_valley_shallow == 0.4

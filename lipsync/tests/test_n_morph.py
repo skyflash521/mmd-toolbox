@@ -152,18 +152,18 @@ def test_n_anticipation_after_silence_like_vowel():
 
 
 def test_short_n_absorbed_into_neighbor():
-    # 最小保持未満の短い「ん」は、母音と同じく隣接母音的口形へ吸収され独立キーを残さない。
+    # 吸収対象(L<triangle_min)の短い「ん」は、母音と同じく隣接母音的口形へ吸収され独立キーを残さない。
     # 両隣の「あ」(開き量同値・長さ同値→前側へ吸収)が span を貫き、吸収後に同母音連結して一区間化。
     events = [
         MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
-        MouthEvent(MouthShape.N, 10.0, 12.0, 0.5),  # 長さ2 < 最小保持+2、短区間
-        MouthEvent(MouthShape.A, 12.0, 22.0, 0.5),
+        MouthEvent(MouthShape.N, 10.0, 11.0, 0.5),  # 長さ1 < triangle_min=2、吸収対象
+        MouthEvent(MouthShape.A, 11.0, 21.0, 0.5),
     ]
     keys = lipsync.generate_morph_keys(events, GenerationParams())
-    # 「ん」は吸収され出力に現れない。連結後は単一「あ」区間で、weight 0.0 は外端(0, 22)だけ。
+    # 「ん」は吸収され出力に現れない。連結後は単一「あ」区間で、weight 0.0 は外端(0, 21)だけ。
     assert {k.name for k in keys} == {"あ"}
     zero_frames = {k.frame for k in keys if k.weight == pytest.approx(0.0)}
-    assert zero_frames == {0, 22}
+    assert zero_frames == {0, 21}
 
 
 def test_n_vowel_boundary_short_coarticulation():

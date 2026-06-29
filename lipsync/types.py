@@ -63,6 +63,8 @@ class GenerationParams:
     attack_frames: int = 2
     release_frames: int = 2
     min_hold_frames: int = 3
+    # 三角形短区間の下限(フレーム)。L<triangle_min は吸収、triangle_min≤L<min_hold+2 は三角形ピーク。
+    triangle_min_frames: float = 2.0
     coartic_overlap_max: int = 2  # 協調調音の重なり上限(=基準長)
     anticipation_frames: int = 1  # 母音口形の先行準備
     # レガート間隙(LEGATO_GAP)の谷係数 d を間隙長から決める線形関数のパラメータ。

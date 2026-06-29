@@ -190,7 +190,8 @@ class _Group:
     start: float
     end: float
     shape: MouthShape
-    short: bool = False
+    short: bool = False  # L<triangle_min: 吸収対象
+    triangle: bool = False  # triangle_min≤L<min_hold+2: 三角形ピークで残す
     attack: float = 0.0
     release: float = 0.0
 
@@ -241,8 +242,12 @@ def _normalize_groups(
     出力は実効スパンと実効アタック/リリースを持つ生き残りグループ列(フレーム浮動小数。量子化は後段)。
     """
     groups = [_Group(g, g[0].start, g[-1].end, g[0].shape) for g in _vowel_groups(events)]
+    # 長さで3分類: L<triangle_min は吸収(short)、triangle_min≤L<min_hold+2 は三角形(triangle、生存)、
+    # それ以上は通常形状。三角形は極短母音を1点ピークで残し、発声中の閉口を防ぐ(§4.9・§4.4)。
     for g in groups:
-        g.short = max(0.0, (g.end - g.start) - params.min_hold_frames) < 2
+        L = g.end - g.start
+        g.short = L < params.triangle_min_frames
+        g.triangle = (not g.short) and max(0.0, L - params.min_hold_frames) < 2
     # 短区間 run を隣接母音アンカーへ吸収/除去する。
     survivors: list[_Group] = []
     i, n = 0, len(groups)
@@ -274,7 +279,8 @@ def _normalize_groups(
         else:
             merged.append(g)
     for g in merged:
-        g.attack, g.release = _effective_attack_release(g.end - g.start, params)
+        if not g.triangle:
+            g.attack, g.release = _effective_attack_release(g.end - g.start, params)
     return merged
 
 
@@ -400,10 +406,10 @@ def generate_morph_keys(
 ) -> list[MorphKey]:
     """口形イベント列からモーフキー列を生成する(要求仕様 lipsync.md §4)。
 
-    連続する同一母音イベントを1グループへ連結し、最小保持未満の短区間を隣接母音へ吸収/除去し競合短縮で
-    実効アタック/リリースを求めたうえで、グループごとにエンベロープを置く: 先頭にのみアタック(開始0.0・
-    保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量の強弱節点を置いて節点間を
-    線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、協調調音(境界 b を中心とした幅 T の
+    連続する同一母音イベントを1グループへ連結し、長さで3分類(極短は吸収/除去・短いものは三角形ピークで残す・
+    通常は競合短縮で実効アタック/リリースを求める)したうえで、グループごとにエンベロープを置く: 通常グループは
+    先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量の強弱節点を
+    置いて節点間を線形に変え、三角形グループは中央に保持値ピーク1点を置く。直接隣接する異母音グループの境界では閉口を挟まず、協調調音(境界 b を中心とした幅 T の
     窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、境界に中間口形を置く)へ置き換える。
     無音に隣接する母音は、先行準備で立ち上がりを無音側へ伸ばして緩やかに開き(音符開始で保持値へ達する)、
     後行残しで閉じを無音側へ伸ばして緩やかに閉じる(開き量比例)。長く伸ばす母音の保持プラトーには伸び表現で
@@ -418,12 +424,16 @@ def generate_morph_keys(
     for i in range(n - 1):
         if groups[i].end != groups[i + 1].start:
             continue
+        if groups[i].triangle or groups[i + 1].triangle:
+            continue  # 三角形短区間は協調調音せず端点を閉口で扱う
         diff = _shape_diff(groups[i].shape, groups[i + 1].shape, params)
         shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
         coart_half[i] = _transition_frames(diff, shorter, params) / 2.0
     # 母音グループ i と i+1 の間がレガート間隙なら、その span [gs, ge] を谷で橋渡しする(閉口しない)。
     legato_at: dict[int, tuple[float, float]] = {}
     for i in range(n - 1):
+        if groups[i].triangle or groups[i + 1].triangle:
+            continue  # 三角形短区間は谷橋渡しの対象外(境界保持値を持たない)
         gs, ge = groups[i].end, groups[i + 1].start
         if _legato_bridge(events, gs, ge):
             legato_at[i] = (gs, ge)
@@ -433,8 +443,17 @@ def generate_morph_keys(
     # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
     for i, g in enumerate(groups):
         gw = weights[i]
-        coart_in = i > 0 and groups[i - 1].end == g.start
-        coart_out = i < n - 1 and groups[i + 1].start == g.end
+        if g.triangle:
+            # 三角形短区間: 中央に保持値ピーク1点(開始0→中央w→終了0)。極短母音を吸収せず開いて見せる。
+            mid = (g.start + g.end) / 2.0
+            for morph, weight in gw[0].items():
+                targets.append((morph, g.start, 0.0))
+                targets.append((morph, mid, weight))
+                targets.append((morph, g.end, 0.0))
+            plateaus.append((mid, mid))
+            continue
+        coart_in = i > 0 and groups[i - 1].end == g.start and not groups[i - 1].triangle
+        coart_out = i < n - 1 and groups[i + 1].start == g.end and not groups[i + 1].triangle
         legato_in = (i - 1) in legato_at  # 直前グループとの間がレガート間隙(谷が立ち上がりを担う)
         legato_out = i in legato_at  # 次グループとの間がレガート間隙(谷が立ち下がりを担う)
         if coart_in:
