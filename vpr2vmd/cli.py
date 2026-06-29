@@ -143,7 +143,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--anticipation", dest="anticipation", type=_nonneg_int)
     p.add_argument("--ref-bpm", dest="ref_bpm", type=_positive_float)
     p.add_argument("--tempo-scale-min", dest="tempo_scale_min", type=_scale_min)
-    p.add_argument("--report-json", dest="report_json")
     p.add_argument("--dry-run", dest="dry_run", action="store_true")
     return p
 

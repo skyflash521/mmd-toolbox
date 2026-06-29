@@ -44,7 +44,6 @@ def test_dry_run_writes_no_output(tmp_path):
     assert not out.exists()
 
 
-@pytest.mark.xfail(reason="impl pending: report-json removal", strict=True)
 def test_report_json_is_now_unknown_option(tmp_path):
     """--report-json は廃止。未知オプションとして引数エラー(コード2。vpr2vmd.md §4.2・§4.4)。"""
     src = _touch(tmp_path / "in.vpr")
