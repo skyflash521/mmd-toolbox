@@ -15,7 +15,7 @@ import os
 import sys
 
 from lipsync import generate_morph_keys
-from mmd_toolbox.vmd import VmdDocument, write_file
+from mmd_toolbox.vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
 from vpr_io import VprFormatError, read
 
 from . import openness, presets
@@ -153,6 +153,9 @@ def _convert(args, output: str) -> int:
         model_name_raw=args.model_name.encode("cp932").ljust(20, b"\x00"),
         morph=morph_keys,
     )
+    # 使用モーフを 0F に中立登録してから(編集・MMD互換規約)フレーム順へ正規化する。
+    document = ensure_frame0_neutral_keys(document, sections=("morph",))
+    document, _warnings = normalize(document, sections=["morph"])
     try:
         write_file(document, output)
     except OSError:

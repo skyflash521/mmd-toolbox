@@ -59,6 +59,19 @@ def test_convert_single_vowel_writes_morph_vmd(monkeypatch, tmp_path):
     assert "あ" in _morph_names(out)
 
 
+def test_convert_output_has_frame0_keys_for_used_morphs(monkeypatch, tmp_path):
+    # 出力VMDは使用モーフを 0F に中立登録する(編集・MMD互換規約。ensure_frame0_neutral_keys 経由)。
+    rc, out = _run(
+        monkeypatch, tmp_path, _project([_note(0, 240, ["a"]), _note(480, 240, ["i"])])
+    )
+    assert rc == 0
+    doc = _read_doc(out)
+    used = {k.name for k in doc.morph}
+    zero = {k.name for k in doc.morph if k.frame == 0}
+    assert used  # 使用モーフがある
+    assert used <= zero  # 各使用モーフに 0F キーがある
+
+
 def test_convert_writes_only_morph_section(monkeypatch, tmp_path):
     # 生成するのはモーフキーのみ。ボーン・カメラ・照明・セルフ影・IK は空(vpr2vmd.md §5)。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
