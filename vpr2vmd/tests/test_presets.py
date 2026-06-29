@@ -45,7 +45,8 @@ def test_pop_generation_params():
     assert gen.triangle_min_frames == pytest.approx(2.0)
     assert gen.exaggeration == 1.0
     assert gen.vibrato_threshold == 10
-    assert gen.vibrato_amp == pytest.approx(0.13)
+    assert gen.vibrato_amp == pytest.approx(0.05)
+    assert gen.vibrato_period == 22
     assert (gen.legato_valley_shallow, gen.legato_valley_deep, gen.legato_valley_slope) == (
         pytest.approx(0.45),
         pytest.approx(0.30),
@@ -62,6 +63,7 @@ def test_nonpop_presets_keep_default_continuity_params():
         assert gen.triangle_min_frames == pytest.approx(default.triangle_min_frames)
         assert gen.vibrato_threshold == default.vibrato_threshold
         assert gen.vibrato_amp == pytest.approx(default.vibrato_amp)
+        assert gen.vibrato_period == default.vibrato_period
         assert gen.legato_valley_shallow == pytest.approx(default.legato_valley_shallow)
         assert gen.legato_valley_deep == pytest.approx(default.legato_valley_deep)
         assert gen.legato_valley_slope == pytest.approx(default.legato_valley_slope)

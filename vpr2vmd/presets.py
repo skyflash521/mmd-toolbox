@@ -44,6 +44,7 @@ class _Preset:
     triangle_min: float = 2.0
     vibrato_threshold: int = 18
     vibrato_amp: float = 0.05
+    vibrato_period: int = 15
     legato_valley_shallow: float = 0.4
     legato_valley_deep: float = 0.2
     legato_valley_slope: float = 0.025
@@ -56,7 +57,7 @@ class _Preset:
 _PRESETS: dict[str, _Preset] = {
     "pop": _Preset(
         0.30, 0.75, 0.90, 2, 2, 6, 11, 3, 1.0,
-        vibrato_threshold=10, vibrato_amp=0.13,
+        vibrato_threshold=10, vibrato_amp=0.05, vibrato_period=22,
         legato_valley_shallow=0.45, legato_valley_deep=0.30, legato_valley_slope=0.02,
     ),
     "ballad": _Preset(0.20, 0.55, 0.70, 3, 3, 3, 1, 4, 0.8),
@@ -103,5 +104,6 @@ def resolve(
         exaggeration=preset.exaggeration,
         vibrato_threshold=preset.vibrato_threshold,
         vibrato_amp=preset.vibrato_amp,
+        vibrato_period=preset.vibrato_period,
     )
     return openness, params
