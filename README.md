@@ -110,7 +110,7 @@ mocapvmd <入力ファイル名>.vmd
 キーが大きく減るぶん、細かい動きが省かれて元の動きとの差が大きくなる。PC の性能や VMD の長さによっては、`faster` でも時間がかかる。
 
 ```sh
-mocapvmd <入力ファイル名>.vmd --reduce-preset faster
+mocapvmd <入力ファイル名>.vmd --preset faster
 ```
 
 処理の特徴:

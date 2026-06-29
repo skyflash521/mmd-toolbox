@@ -302,33 +302,40 @@ def test_report_json_with_dry_run_does_not_write_output(tmp_path):
     assert not (tmp_path / "in_mocap.vmd").exists()
 
 
-# --- --preset(クリーニング強度) -------------------------------------------
+# --- --clean-strength(クリーニング強度) / --preset(疎化プリセット) ---------
 
 
-def test_preset_option_resolves_cleaning_in_report(tmp_path):
+def test_clean_strength_option_resolves_cleaning_in_report(tmp_path):
     from mocapvmd import presets
 
     src = tmp_path / "in.vmd"
     rep = tmp_path / "report.json"
     _full_doc(src)
-    code = cli.main([str(src), "--dry-run", "--preset", "stable-foot", "--report-json", str(rep)])
+    code = cli.main([str(src), "--dry-run", "--clean-strength", "1.4", "--report-json", str(rep)])
     assert code == 0
     data = json.loads(rep.read_text(encoding="utf-8"))
     foot = next(e for e in data["bones"] if e["name"] == "右足ＩＫ")
-    assert foot["cleaning"]["pos_strength"] == pytest.approx(0.65 * 1.5)
-    assert foot["cleaning"] == presets.resolve_cleaning("stable-foot", "foot_ik")
+    assert foot["cleaning"]["pos_strength"] == pytest.approx(min(1.0, 0.65 * 1.4))
+    assert foot["cleaning"] == presets.resolve_cleaning(1.4, "foot_ik")
+
+
+@pytest.mark.parametrize("bad", ["-0.1", "nan", "inf"])
+def test_invalid_clean_strength_is_arg_error(tmp_path, bad):
+    # 非有限・負のクリーニング強度倍率は引数エラー(終了コード2)。
+    src = tmp_path / "in.vmd"
+    _full_doc(src)
+    assert cli.main([str(src), "--clean-strength", bad]) == 2
 
 
 def test_invalid_preset_value_is_arg_error(tmp_path):
     src = tmp_path / "in.vmd"
     _full_doc(src)
-    # 未知のプリセット値は引数エラー(終了コード2)。
+    # 未知の疎化プリセット値は引数エラー(終了コード2)。
     assert cli.main([str(src), "--preset", "turbo"]) == 2
 
 
-def test_default_preset_is_balanced_in_report_json(tmp_path):
-    # --preset 省略時は balanced が適用されることを CLI レベルで検証する(誤って別プリセットを
-    # 明示渡しする実装を排除)。
+def test_default_clean_strength_is_unit_in_report_json(tmp_path):
+    # --clean-strength 省略時は倍率1.0(基準値)が適用されることを CLI レベルで検証する。
     from mocapvmd import presets
 
     src = tmp_path / "in.vmd"
@@ -338,7 +345,7 @@ def test_default_preset_is_balanced_in_report_json(tmp_path):
     assert code == 0
     data = json.loads(rep.read_text(encoding="utf-8"))
     center = next(e for e in data["bones"] if e["name"] == "センター")
-    assert center["cleaning"] == presets.resolve_cleaning("balanced", "center")
+    assert center["cleaning"] == presets.resolve_cleaning(1.0, "center")
 
 
 # --- denoise クリーニング統合 -----------------------------------------------
@@ -482,7 +489,7 @@ def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
     foot = sorted((k for k in in_doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
-    params = presets.resolve_cleaning("balanced", "foot_ik")
+    params = presets.resolve_cleaning(1.0, "foot_ik")
     cpos, _ = denoise.apply_denoise(
         [k.position for k in foot], [k.rotation for k in foot],
         pos_window=params["pos_window"], rot_window=params["rot_window"],
@@ -555,7 +562,7 @@ def test_foot_slide_suppression_zero_preserves_slide_one_removes(tmp_path):
     assert (max(x1) - min(x1)) < (max(in_x) - min(in_x))              # S=1: 振れ幅が縮む
 
 
-# --- インプロセス疎化統合(--reduce-preset / --curve-mode / --no-reduce) ---------
+# --- インプロセス疎化統合(--preset / --curve-mode / --no-reduce) ---------
 
 
 def _ramp_doc(path):
@@ -609,8 +616,8 @@ def test_reduce_preset_validation(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _ramp_doc(src)
-    assert cli.main([str(src), "-o", str(out), "--reduce-preset", "slower"]) == 0
-    assert cli.main([str(src), "--reduce-preset", "turbo"]) == 2  # 未知プリセットは引数エラー
+    assert cli.main([str(src), "-o", str(out), "--preset", "slower"]) == 0
+    assert cli.main([str(src), "--preset", "turbo"]) == 2  # 未知プリセットは引数エラー
 
 
 def test_curve_mode_validation(tmp_path):
@@ -721,7 +728,7 @@ def test_dry_run_reduction_matches_full_pipeline(tmp_path):
     write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(x, 0.0, 0.0)) for f, x in enumerate(xs)])
     assert cli.main([str(src), "--dry-run", "--report-json", str(rep)]) == 0
     in_doc, _ = io.read(str(src))
-    cleaned = _clean_bones(in_doc.bone, "balanced")
+    cleaned = _clean_bones(in_doc.bone, 1.0)
     full = {}
     mreduce.reduce_bones(_stabilize_bones(cleaned, 1.0), "medium", diagnostics_out=full)
     d = full["右足ＩＫ"]

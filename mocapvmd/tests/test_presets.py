@@ -1,8 +1,8 @@
-"""クリーニングプリセット解決のテスト(mocapvmd.md §5.2)。
+"""クリーニング強度解決のテスト(mocapvmd.md §5.2)。
 
-種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)に、--preset のブレンド率の倍率を
-掛けてクリーニングパラメータを解決する。窓幅は倍率で変えない。light=0.5 / balanced=1.0 /
-strong=1.4(全種別)/ stable-foot=foot_ik のみ 1.5・他 1.0。
+種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)に、--clean-strength の
+数値倍率をブレンド率のみへ掛けてクリーニングパラメータを解決する。窓幅は倍率で変えない。倍率適用後の
+ブレンド率は 0〜1 にクランプ(1.0=完全平滑化を超えない)。倍率は有限の非負値のみ。
 """
 
 import pytest
@@ -10,12 +10,13 @@ import pytest
 from mocapvmd import presets
 
 
-def test_preset_names():
-    assert presets.PRESET_NAMES == ("light", "balanced", "stable-foot", "strong")
+def test_preset_names_are_reduction_levels():
+    # 本ツール唯一の名前付きプリセット(--preset)は疎化トレランスの速度軸。
+    assert presets.PRESET_NAMES == ("slower", "slow", "medium", "fast", "faster")
 
 
-# §5.2 初期パラメータ表(balanced 基準): category -> (pos_window, rot_window, pos_strength, rot_strength)。
-# 期待値オラクル。resolve_cleaning の balanced 出力と一致するべき基準。
+# §5.2 初期パラメータ表(倍率 1.0 基準): category -> (pos_window, rot_window, pos_strength, rot_strength)。
+# 期待値オラクル。resolve_cleaning の strength=1.0 出力と一致するべき基準。
 _BASE = {
     "root": (3, 3, 0.15, 0.10),
     "center": (7, 5, 0.45, 0.25),
@@ -29,54 +30,62 @@ _BASE = {
 }
 
 
-def _expected_multiplier(preset, category):
-    # §5.2 ブレンド率の倍率表。stable-foot は foot_ik のみ 1.5、他は 1.0。
-    if preset == "stable-foot":
-        return 1.5 if category == "foot_ik" else 1.0
-    return {"light": 0.5, "balanced": 1.0, "strong": 1.4}[preset]
-
-
 @pytest.mark.parametrize("category", list(_BASE))
-def test_balanced_base_values(category):
-    # balanced は基準値そのもの(倍率1.0)。
+def test_unit_strength_base_values(category):
+    # strength=1.0 は基準値そのもの。
     pw, rw, ps, rs = _BASE[category]
-    p = presets.resolve_cleaning("balanced", category)
+    p = presets.resolve_cleaning(1.0, category)
     assert p["pos_window"] == pw
     assert p["rot_window"] == rw
     assert p["pos_strength"] == pytest.approx(ps)
     assert p["rot_strength"] == pytest.approx(rs)
 
 
-@pytest.mark.parametrize("preset", ["light", "balanced", "stable-foot", "strong"])
+@pytest.mark.parametrize("strength", [0.0, 0.5, 1.0, 1.4])
 @pytest.mark.parametrize("category", list(_BASE))
-def test_multiplier_applies_to_strength_only(preset, category):
-    # 全プリセット×全種別で、倍率は位置・回転の両ブレンド率のみに掛かり、窓幅は不変であることを検証する。
-    # これにより種別ごとの適用漏れ・回転のブレンド率への誤適用・窓幅の誤変更を一括して捕捉する。
+def test_strength_multiplier_applies_to_blend_only(strength, category):
+    # 全倍率×全種別で、倍率は位置・回転の両ブレンド率のみに掛かり(0〜1 クランプ)、窓幅は不変。
+    # 種別ごとの適用漏れ・回転のブレンド率への誤適用・窓幅の誤変更を一括して捕捉する。
     pw, rw, ps, rs = _BASE[category]
-    m = _expected_multiplier(preset, category)
-    p = presets.resolve_cleaning(preset, category)
+    p = presets.resolve_cleaning(strength, category)
     assert p["pos_window"] == pw       # 窓幅は倍率で変えない
     assert p["rot_window"] == rw
-    assert p["pos_strength"] == pytest.approx(ps * m)
-    assert p["rot_strength"] == pytest.approx(rs * m)
+    assert p["pos_strength"] == pytest.approx(min(1.0, ps * strength))
+    assert p["rot_strength"] == pytest.approx(min(1.0, rs * strength))
+
+
+def test_strength_clamps_blend_to_one():
+    # 大きな倍率でもブレンド率は 1.0 を超えない(平滑化値を逸脱する外挿を防ぐ)。
+    p = presets.resolve_cleaning(10.0, "foot_ik")  # 0.65×10=6.5 → 1.0 にクランプ
+    assert p["pos_strength"] == pytest.approx(1.0)
+    assert p["rot_strength"] == pytest.approx(1.0)
+
+
+def test_zero_strength_keeps_original():
+    # 倍率 0 はブレンド率 0(元値保持=無加工相当)。
+    p = presets.resolve_cleaning(0.0, "center")
+    assert p["pos_strength"] == pytest.approx(0.0)
+    assert p["rot_strength"] == pytest.approx(0.0)
 
 
 def test_unknown_category_conservative():
     # 分類不能 unknown は保守的な弱設定(窓3/3・強度0.10/0.10)。
-    p = presets.resolve_cleaning("balanced", "unknown")
+    p = presets.resolve_cleaning(1.0, "unknown")
     assert (p["pos_window"], p["rot_window"]) == (3, 3)
     assert p["pos_strength"] == pytest.approx(0.10)
     assert p["rot_strength"] == pytest.approx(0.10)
 
 
-def test_invalid_preset_raises():
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -0.01])
+def test_invalid_strength_raises(bad):
+    # 非有限・負の倍率は ValueError(CLI で終了コード2へ変換される)。
     with pytest.raises(ValueError):
-        presets.resolve_cleaning("turbo", "center")
+        presets.resolve_cleaning(bad, "center")
 
 
 def test_invalid_category_raises():
     with pytest.raises(ValueError):
-        presets.resolve_cleaning("balanced", "nonexistent")
+        presets.resolve_cleaning(1.0, "nonexistent")
 
 
 # --- 疎化の許容誤差解決(§5.3)-----------------------------------------------

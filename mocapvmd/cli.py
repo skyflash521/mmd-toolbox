@@ -31,7 +31,8 @@ def _build_parser():
     p.add_argument("input")
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
-    p.add_argument("--preset", choices=presets.PRESET_NAMES, default="balanced")
+    p.add_argument("--preset", choices=presets.PRESET_NAMES, default="medium")
+    p.add_argument("--clean-strength", dest="clean_strength", type=float, default=1.0)
     p.add_argument("--denoise", dest="denoise", action="store_true", default=True)
     p.add_argument("--no-denoise", dest="denoise", action="store_false")
     p.add_argument("--denoise-mode", dest="denoise_mode", choices=("bone", "pose"), default="bone")
@@ -39,9 +40,6 @@ def _build_parser():
     p.add_argument("--foot-ik-stabilize", dest="foot_ik_stabilize", action="store_true", default=True)
     p.add_argument("--no-foot-ik-stabilize", dest="foot_ik_stabilize", action="store_false")
     p.add_argument("--foot-slide-suppression", dest="foot_slide_suppression", type=float, default=1.0)
-    p.add_argument(
-        "--reduce-preset", dest="reduce_preset", choices=presets.REDUCTION_PRESET_NAMES, default="medium"
-    )
     p.add_argument("--reduce-error-bone-pos", dest="reduce_error_bone_pos", type=float, default=None)
     p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=float, default=None)
     p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier")
@@ -101,12 +99,13 @@ def _validate_bones(bone_keys):
     denoise.validate_bone_values([k.position for k in bone_keys], [k.rotation for k in bone_keys])
 
 
-def _clean_bones(bone_keys, preset):
+def _clean_bones(bone_keys, clean_strength):
     """全ボーンを種別別パラメータで一般ノイズ軽減し、密キー(線形補間)で返す(§4.1, §4.2)。
 
     各トラックを名前ごとに時系列順へまとめ、クリーニング後の密サンプルを線形補間キーとして組み直す
-    (§3.3 のクリーニング後の密キー形式)。キー1個以下のトラックは平滑化できないため逐語保持する。
-    値の健全性は呼び出し前に _validate_bones で検証済みとする。
+    (§3.3 のクリーニング後の密キー形式)。クリーニング強度の倍率 clean_strength を種別別の基準ブレンド率へ
+    掛ける(§5.2)。キー1個以下のトラックは平滑化できないため逐語保持する。値の健全性は呼び出し前に
+    _validate_bones で検証済みとする。
     """
     order = []
     groups = {}
@@ -124,7 +123,7 @@ def _clean_bones(bone_keys, preset):
         if len(ks) < 2:
             out.extend(ks)
             continue
-        params = presets.resolve_cleaning(preset, classify.classify(name))
+        params = presets.resolve_cleaning(clean_strength, classify.classify(name))
         cpos, crot = denoise.apply_denoise(
             positions,
             rotations,
@@ -216,6 +215,10 @@ def main(argv=None):
         if v is not None and (not math.isfinite(v) or v < 0.0):
             return 2
 
+    # クリーニング強度の倍率は非有限・負を引数エラー(終了コード2)とする(§3.2 / §5.2)。
+    if not math.isfinite(args.clean_strength) or args.clean_strength < 0.0:
+        return 2
+
     # 横滑り抑制は 0〜1 の有限値のみ許容(範囲外・非有限は引数エラー=終了コード2。§4.3 / §5.4)。
     s = args.foot_slide_suppression
     if not math.isfinite(s) or not 0.0 <= s <= 1.0:
@@ -267,7 +270,7 @@ def main(argv=None):
                 except (MocapModelProfileError, PmxFormatError):
                     return 1
             else:
-                new_bone = _clean_bones(doc.bone, args.preset)
+                new_bone = _clean_bones(doc.bone, args.clean_strength)
         else:
             new_bone = doc.bone
         if args.foot_ik_stabilize:
@@ -277,7 +280,7 @@ def main(argv=None):
             reporter.stage("キーフレーム圧縮")
             new_bone = reduce.reduce_bones(
                 new_bone,
-                args.reduce_preset,
+                args.preset,
                 override_pos=args.reduce_error_bone_pos,
                 override_rot=args.reduce_error_bone_rot,
                 curve_mode=args.curve_mode,
@@ -292,6 +295,7 @@ def main(argv=None):
         rep = report.build_report(
             doc.bone,
             args.preset,
+            clean_strength=args.clean_strength,
             denoise=args.denoise,
             foot_ik_stabilize=args.foot_ik_stabilize,
             reduction=reduction_diag,

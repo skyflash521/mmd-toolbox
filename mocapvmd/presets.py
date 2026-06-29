@@ -1,20 +1,17 @@
 """プリセットと種別別パラメータの解決(mocapvmd.md §5.2 / §5.3 / §5.4)。
 
-クリーニング強度(§5.2): 種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)を balanced
-基準で持ち、`--preset` の倍率を**ブレンド率のみ**に掛けて解決する(窓幅は倍率で変えない)。位置のブレンド率・
-回転のブレンド率は元値と平滑化値のブレンド係数(0で元値保持、1で平滑化値採用)。
+クリーニング強度(§5.2): 種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)を
+基準で持ち、`--clean-strength` の倍率を**ブレンド率のみ**に掛けて解決する(窓幅は倍率で変えない)。位置のブレンド率・
+回転のブレンド率は元値と平滑化値のブレンド係数(0で元値保持、1で平滑化値採用)で、倍率適用後は 0〜1 にクランプする。
 
-接地ロック強度(§5.4)は resolve_foot_lock、疎化の許容誤差(§5.3。`--reduce-preset` の基準値 × 種別
-スケール)は resolve_reduction_tolerances で解決する。疎化プリセット値は mocapvmd 独自で sparsevmd と
-共有しない。
+名前付きプリセット(§5.3)は疎化の許容誤差 `--preset`(PRESET_NAMES)1つに集約する。接地ロック強度(§5.4)は
+resolve_foot_lock、疎化の許容誤差(§5.3。`--preset` の基準値 × 種別スケール)は resolve_reduction_tolerances で
+解決する。疎化プリセット値は mocapvmd 独自で sparsevmd と共有しない。
 """
 
 import math
 
-# クリーニング強度プリセット名(§5.2)。
-PRESET_NAMES = ("light", "balanced", "stable-foot", "strong")
-
-# §5.2 初期パラメータ表(balanced 基準)。
+# §5.2 種別別クリーニング基準パラメータ表(`--clean-strength` 1.0 基準)。
 # 種別 -> (位置の窓幅, 回転の窓幅, 位置のブレンド率, 回転のブレンド率)。
 _BASE = {
     "root": (3, 3, 0.15, 0.10),
@@ -92,34 +89,24 @@ def resolve_foot_detection(suppression):
     }
 
 
-def _strength_multiplier(preset, category):
-    """§5.2 ブレンド率の倍率。stable-foot は foot_ik のみ 1.5、他は 1.0。"""
-    if preset == "stable-foot":
-        return 1.5 if category == "foot_ik" else 1.0
-    multipliers = {"light": 0.5, "balanced": 1.0, "strong": 1.4}
-    return multipliers[preset]
+def resolve_cleaning(strength, category):
+    """クリーニング強度の倍率と種別から、クリーニングパラメータ dict を返す(§5.2)。
 
-
-def resolve_cleaning(preset, category):
-    """プリセットと種別から、クリーニングパラメータ dict を返す(§5.2)。
-
-    返す dict: pos_window / rot_window / pos_strength / rot_strength。倍率はブレンド率のみに掛け、
-    窓幅は据え置く。未知のプリセット名・未知の種別は ValueError。
+    返す dict: pos_window / rot_window / pos_strength / rot_strength。倍率(`--clean-strength`)は
+    ブレンド率のみに掛け、窓幅は据え置く。倍率適用後のブレンド率は 0〜1 にクランプする(1.0=完全平滑化を
+    超えない)。倍率は有限の非負値のみ。非有限・負の倍率、未知の種別は ValueError。
     """
-    if preset not in PRESET_NAMES:
-        raise ValueError(
-            f"未知のプリセット: {preset!r}(有効: {', '.join(PRESET_NAMES)})"
-        )
+    if not math.isfinite(strength) or strength < 0:
+        raise ValueError(f"クリーニング強度は有限の非負値である必要があります: {strength!r}")
     if category not in _BASE:
         raise ValueError(f"未知の種別: {category!r}")
 
     pos_window, rot_window, pos_strength, rot_strength = _BASE[category]
-    m = _strength_multiplier(preset, category)
     return {
         "pos_window": pos_window,
         "rot_window": rot_window,
-        "pos_strength": pos_strength * m,
-        "rot_strength": rot_strength * m,
+        "pos_strength": min(1.0, pos_strength * strength),
+        "rot_strength": min(1.0, rot_strength * strength),
     }
 
 
@@ -127,7 +114,8 @@ def resolve_cleaning(preset, category):
 # mocapvmd 独自値で sparsevmd と共有しない。
 # 速度の観点で命名(遅い=高忠実・キー多・処理遅、速い=高圧縮・キー少・処理速)。既定は中央の
 # medium(0.20 / 1.50)。許容を緩めるほどキーが減り疎化処理も速い(fast / faster)。位置と回転は連動して粗くする。
-REDUCTION_PRESET_NAMES = ("slower", "slow", "medium", "fast", "faster")
+# 本ツール唯一の名前付きプリセット(`--preset`)。
+PRESET_NAMES = ("slower", "slow", "medium", "fast", "faster")
 _REDUCTION_BASE = {
     "slower": (0.05, 0.40),
     "slow": (0.10, 0.75),
@@ -162,7 +150,7 @@ def resolve_reduction_tolerances(preset, category, override_pos=None, override_r
     """
     if preset not in _REDUCTION_BASE:
         raise ValueError(
-            f"未知の疎化プリセット: {preset!r}(有効: {', '.join(REDUCTION_PRESET_NAMES)})"
+            f"未知の疎化プリセット: {preset!r}(有効: {', '.join(PRESET_NAMES)})"
         )
     if category not in _REDUCTION_SCALE:
         raise ValueError(f"未知の種別: {category!r}")

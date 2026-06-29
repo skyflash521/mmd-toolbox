@@ -73,7 +73,7 @@ def test_report_grounding_reflects_denoise_then_stabilize():
     rep = report.build_report(keys, denoise=True)
     e = _entry(rep, "右足ＩＫ")
     foot = sorted(keys, key=lambda k: k.frame)
-    params = presets.resolve_cleaning("balanced", "foot_ik")
+    params = presets.resolve_cleaning(1.0, "foot_ik")
     cpos, _ = dn.apply_denoise(
         [k.position for k in foot], [k.rotation for k in foot],
         pos_window=params["pos_window"], rot_window=params["rot_window"],
@@ -131,25 +131,26 @@ def test_format_dry_run_shows_grounding_for_foot():
 
 
 def test_report_includes_resolved_cleaning_params():
-    # 各ボーンに、選択プリセットで解決したクリーニングパラメータが付く(チューニング確認用、§4.5)。
+    # 各ボーンに、clean_strength で解決したクリーニングパラメータが付く(チューニング確認用、§4.5)。
     keys = [bone("センター", 0), bone("右足ＩＫ", 0)]
-    rep = report.build_report(keys, preset="stable-foot")
+    rep = report.build_report(keys, clean_strength=1.4)
     center = _entry(rep, "センター")
-    assert center["cleaning"] == presets.resolve_cleaning("stable-foot", "center")
+    assert center["cleaning"] == presets.resolve_cleaning(1.4, "center")
     foot = _entry(rep, "右足ＩＫ")
-    assert foot["cleaning"] == presets.resolve_cleaning("stable-foot", "foot_ik")
+    assert foot["cleaning"] == presets.resolve_cleaning(1.4, "foot_ik")
 
 
-def test_report_default_preset_is_balanced():
+def test_report_default_clean_strength_is_unit():
     keys = [bone("センター", 0)]
     rep = report.build_report(keys)
-    assert _entry(rep, "センター")["cleaning"] == presets.resolve_cleaning("balanced", "center")
+    assert _entry(rep, "センター")["cleaning"] == presets.resolve_cleaning(1.0, "center")
+    assert rep["clean_strength"] == pytest.approx(1.0)
 
 
 def test_format_dry_run_shows_cleaning_params():
-    # dry-run も適用プリセットで解決したクリーニング強度を表示する(§4.4 は dry-run と report-json の双方に要求)。
+    # dry-run も clean_strength で解決したクリーニング強度を表示する(§4.4 は dry-run と report-json の双方に要求)。
     keys = [bone("センター", 0), bone("センター", 10)]
-    rep = report.build_report(keys, preset="strong")
+    rep = report.build_report(keys, clean_strength=1.4)
     text = report.format_dry_run(rep)
     center_line = next(line for line in text.splitlines() if "センター" in line and "center" in line)
     assert "0.63" in center_line  # center 位置のブレンド率 0.45×1.4

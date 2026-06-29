@@ -36,7 +36,7 @@ def _track_diagnostics(keys):
     return max_speed, max_ang
 
 
-def _spike_protected_counts(keys, preset, category):
+def _spike_protected_counts(keys, clean_strength, category):
     """トラックのスパイク候補フレーム数と保護フレーム数を返す(§4.4)。
 
     種別の窓で検出し、スパイク候補は位置・回転候補フレームの和集合、保護フレームは境界(カット両側・
@@ -45,7 +45,7 @@ def _spike_protected_counts(keys, preset, category):
     """
     if len(keys) < 2:
         return 0, 0
-    params = presets.resolve_cleaning(preset, category)
+    params = presets.resolve_cleaning(clean_strength, category)
     try:
         det = denoise.detect_noise_events(
             [k.position for k in keys],
@@ -60,11 +60,11 @@ def _spike_protected_counts(keys, preset, category):
     return len(spike_frames), len(protected)
 
 
-def _stabilization(bone_keys, preset, denoise_on, suppression):
+def _stabilization(bone_keys, clean_strength, denoise_on, suppression):
     """foot_ik/toe_ik トラックを接地安定化し、name -> TrackStabilization を返す(§4.4)。
 
     パイプライン(一般ノイズ軽減→足IK安定化)と同じ順序で診断を出すため、denoise_on のときは
-    クリーニング(apply_denoise)後の位置で安定化する。preset はクリーニングに、横滑り抑制 S は
+    クリーニング(apply_denoise)後の位置で安定化する。clean_strength はクリーニングに、横滑り抑制 S は
     接地検出・ロックに使う。値が検証を通らない・キー1個以下のトラックは対象外とする。
     """
     order = []
@@ -88,7 +88,7 @@ def _stabilization(bone_keys, preset, denoise_on, suppression):
         except ValueError:
             continue
         if denoise_on:
-            params = presets.resolve_cleaning(preset, category)
+            params = presets.resolve_cleaning(clean_strength, category)
             positions, _ = denoise.apply_denoise(
                 positions, rotations,
                 pos_window=params["pos_window"], rot_window=params["rot_window"],
@@ -107,13 +107,14 @@ def _reduction_rate(input_count, output_count):
     return 1.0 - output_count / input_count
 
 
-def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=True, reduction=None,
-                 suppression=1.0, pose_denoise=None):
+def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, foot_ik_stabilize=True,
+                 reduction=None, suppression=1.0, pose_denoise=None):
     """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
 
-    名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。
-    各ボーンには、選択プリセットで解決したクリーニングパラメータ(presets.resolve_cleaning の戻り)を
-    付けてチューニングを確認できるようにする(§4.5)。
+    名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。preset は疎化の
+    許容誤差プリセット名(表示用。§5.3)、clean_strength はクリーニング強度の倍率(§5.2)。各ボーンには、
+    clean_strength で解決したクリーニングパラメータ(presets.resolve_cleaning の戻り)を付けてチューニングを
+    確認できるようにする(§4.5)。
 
     reduction(reduce.reduce_bones の diagnostics_out。トラック名 -> {input_keys, output_keys,
     tol_pos, tol_rot, cuts, errors})を渡すと、トップレベルに reduce フラグ(疎化したか= reduction を
@@ -131,7 +132,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
             order.append(k.name)
         groups[k.name].append(k)
 
-    stab = _stabilization(bone_keys, preset, denoise, suppression) if foot_ik_stabilize else {}
+    stab = _stabilization(bone_keys, clean_strength, denoise, suppression) if foot_ik_stabilize else {}
 
     bones = []
     foot_ik = []
@@ -142,7 +143,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
         all_frames.extend(k.frame for k in keys)
         category = classify.classify(name)
         max_speed, max_ang = _track_diagnostics(keys)
-        spike_candidates, protected_frames = _spike_protected_counts(keys, preset, category)
+        spike_candidates, protected_frames = _spike_protected_counts(keys, clean_strength, category)
         entry = {
             "name": name,
             "category": category,
@@ -153,7 +154,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
             "max_ang_speed_deg": max_ang,
             "spike_candidates": spike_candidates,
             "protected_frames": protected_frames,
-            "cleaning": presets.resolve_cleaning(preset, category),
+            "cleaning": presets.resolve_cleaning(clean_strength, category),
         }
         if name in stab:
             ts = stab[name]
@@ -184,6 +185,7 @@ def build_report(bone_keys, preset="balanced", denoise=True, foot_ik_stabilize=T
 
     result = {
         "preset": preset,
+        "clean_strength": clean_strength,
         "denoise": denoise,
         "foot_ik_stabilize": foot_ik_stabilize,
         "foot_slide_suppression": suppression,
@@ -209,6 +211,7 @@ def format_dry_run(report):
     クリーニングパラメータ・IK候補を表示する。"""
     lines = [
         f"preset: {report['preset']}",
+        f"clean_strength: {report.get('clean_strength')}",
         f"denoise: {'on' if report['denoise'] else 'off'}",
         f"foot_ik_stabilize: {'on' if report.get('foot_ik_stabilize') else 'off'}",
         f"foot_slide_suppression: {report.get('foot_slide_suppression')}",
