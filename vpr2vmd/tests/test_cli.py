@@ -30,7 +30,6 @@ def test_parses_full_option_set_in_dry_run(tmp_path):
         "--style", "ballad",
         "--open-max", "0.8",
         "--default-open", "0.5",
-        "--report-json", str(tmp_path / "rep.json"),
         "--dry-run",
     ])
     assert rc == 0
@@ -45,13 +44,11 @@ def test_dry_run_writes_no_output(tmp_path):
     assert not out.exists()
 
 
-def test_dry_run_writes_no_report_json(tmp_path):
-    """--dry-run は report-json も書かない(出力せず、が原則。vpr2vmd.md §4.2)。"""
+@pytest.mark.xfail(reason="impl pending: report-json removal", strict=True)
+def test_report_json_is_now_unknown_option(tmp_path):
+    """--report-json は廃止。未知オプションとして引数エラー(コード2。vpr2vmd.md §4.2・§4.4)。"""
     src = _touch(tmp_path / "in.vpr")
-    rep = tmp_path / "rep.json"
-    rc = cli.main([src, "--report-json", str(rep), "--dry-run"])
-    assert rc == 0
-    assert not rep.exists()
+    assert cli.main([src, "--report-json", str(tmp_path / "rep.json"), "--dry-run"]) == 2
 
 
 def test_track_accepts_non_integer_name(tmp_path):
