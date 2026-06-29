@@ -6,7 +6,16 @@ monkeypatch で差し替え、配線と終了コードを決定論的に検証�
 """
 
 import pytest
-from vpr_io import Note, Part, TempoEvent, Track, VprFormatError, VprProject
+from vpr_io import (
+    ControllerCurve,
+    ControllerEvent,
+    Note,
+    Part,
+    TempoEvent,
+    Track,
+    VprFormatError,
+    VprProject,
+)
 
 from mmd_toolbox.vmd import read as vmd_read
 from vpr2vmd import cli
@@ -113,6 +122,37 @@ def test_convert_ref_bpm_override_changes_tempo_correction(monkeypatch, tmp_path
     assert rc == 0
     # ref-bpm=190・代表BPM=190 → s=1.0。pop の min_hold 基礎値 3 のまま(既定 ref120 なら 2 へ縮む)。
     assert captured["params"].min_hold_frames == 3
+
+
+def test_convert_loudness_controller_drives_open_amount(monkeypatch, tmp_path):
+    # 声量コントローラ(dynamics)があれば velocity でなく曲線から開き量を出す。大音量の音符の開き量が
+    # 小音量より大きくなる(velocity は一様でも声量曲線で強弱が出る)。
+    captured = {}
+
+    real = cli.build_mouth_events
+
+    def spy(*args, **kwargs):
+        captured["open"] = kwargs.get("open_by_note")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "build_mouth_events", spy)
+    part = Part(
+        name="p",
+        start_tick=0,
+        notes=[_note(0, 240, ["a"]), _note(480, 240, ["a"])],
+        controllers=[
+            ControllerCurve(
+                name="dynamics",
+                events=[ControllerEvent(0, 120), ControllerEvent(480, 10)],
+            )
+        ],
+    )
+    project = VprProject(
+        resolution=480, tempos=[TempoEvent(0, 120.0)], tracks=[Track(name="Vocal", parts=[part])]
+    )
+    rc, _out = _run(monkeypatch, tmp_path, project)
+    assert rc == 0
+    assert captured["open"][0] > captured["open"][1]  # 大音量(note0) > 小音量(note1)
 
 
 def test_convert_tempo_scale_min_override_reaches_correction(monkeypatch, tmp_path):

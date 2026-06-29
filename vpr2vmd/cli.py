@@ -19,7 +19,7 @@ from lipsync import generate_morph_keys
 from mmd_toolbox.vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
 from vpr_io import VprFormatError, read
 
-from . import openness, presets, timing
+from . import loudness, openness, presets, timing
 from .events import build_mouth_events, resolve_overlaps
 from .io import TrackSelectionError, collect_notes, select_track
 from .tempo_correction import apply_tempo_correction
@@ -236,14 +236,25 @@ def _convert(args, output: str) -> int:
         overrides["legato_valley_slope"] = args.valley_slope
     if overrides:
         gen_params = replace(gen_params, **overrides)
-    open_by_note = openness.open_amounts(
-        [note.velocity for note in adopted],
+    # 開き量(強弱): 声量コントローラ曲線(dynamics/s5Expression)があればモーラ区間平均から写し、
+    # 無ければ velocity 由来へフォールバックする(vpr2vmd.md §3)。
+    open_by_note = loudness.open_amounts_from_loudness(
+        track.parts,
+        adopted,
         lo=openness_params.lo,
         hi=openness_params.hi,
         open_max=openness_params.open_max,
-        default_open=openness_params.default_open,
         gamma=openness_params.gamma,
     )
+    if open_by_note is None:
+        open_by_note = openness.open_amounts(
+            [note.velocity for note in adopted],
+            lo=openness_params.lo,
+            hi=openness_params.hi,
+            open_max=openness_params.open_max,
+            default_open=openness_params.default_open,
+            gamma=openness_params.gamma,
+        )
     # --legato-max は GenerationParams 外(口形イベント確定段の引数)。未指定なら build_mouth_events の既定。
     legato_kwargs = {} if args.legato_max is None else {"legato_max_frames": args.legato_max}
     mouth_events = build_mouth_events(
