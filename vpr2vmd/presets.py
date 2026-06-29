@@ -41,6 +41,8 @@ class _Preset:
     anticipation: int
     min_hold: int
     exaggeration: float
+    # 母音的口形別(a, i, u, e, o, n)の開き量倍率。既定は全口形 1 倍(母音別の差をつけない)。
+    vowel_scale: tuple[float, float, float, float, float, float] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     triangle_min: float = 2.0
     vibrato_threshold: int = 18
     vibrato_amp: float = 0.05
@@ -57,6 +59,7 @@ class _Preset:
 _PRESETS: dict[str, _Preset] = {
     "pop": _Preset(
         0.30, 0.75, 0.90, 2, 2, 6, 11, 3, 1.0,
+        vowel_scale=(1.30, 1.20, 1.70, 0.80, 1.70, 1.00),
         vibrato_threshold=10, vibrato_amp=0.05, vibrato_period=22,
         legato_valley_shallow=0.45, legato_valley_deep=0.30, legato_valley_slope=0.02,
     ),
@@ -92,6 +95,7 @@ def resolve(
     )
     params = GenerationParams(
         open_cap=resolved_open_max,
+        vowel_scale=preset.vowel_scale,
         attack_frames=preset.attack,
         release_frames=preset.release,
         min_hold_frames=preset.min_hold,

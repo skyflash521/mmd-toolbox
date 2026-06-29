@@ -37,6 +37,7 @@ def test_pop_generation_params():
     # (テンポ補正はこれを別途縮める)。協調調音は広め・先行準備は緩やか・レガート谷と伸び表現を持つ。
     _, gen = presets.resolve("pop")
     assert gen.open_cap == 0.90
+    assert gen.vowel_scale == (1.30, 1.20, 1.70, 0.80, 1.70, 1.00)  # 母音別開き量(え小・う/お大)
     assert gen.attack_frames == 2
     assert gen.release_frames == 2
     assert gen.coartic_overlap_max == 6
@@ -60,6 +61,7 @@ def test_nonpop_presets_keep_default_continuity_params():
     default = GenerationParams()
     for style in ("ballad", "powerful", "whisper", "rap"):
         _, gen = presets.resolve(style)
+        assert gen.vowel_scale == default.vowel_scale  # 母音別開き量は既定(全1倍)のまま
         assert gen.triangle_min_frames == pytest.approx(default.triangle_min_frames)
         assert gen.vibrato_threshold == default.vibrato_threshold
         assert gen.vibrato_amp == pytest.approx(default.vibrato_amp)
