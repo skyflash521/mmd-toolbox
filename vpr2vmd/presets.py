@@ -25,7 +25,12 @@ class OpennessParams:
 
 @dataclass(frozen=True)
 class _Preset:
-    """プリセット1件の出発点値(開き量レンジ・上限・タイミング・誇張)。"""
+    """プリセット1件の出発点値(開き量レンジ・上限・タイミング・連続感・誇張)。
+
+    末尾の連続感パラメータ(三角形下限・伸び表現・レガート谷)は既定を `lipsync` の
+    `GenerationParams` 既定相当に置き、視覚で詰めたスタイルだけが上書きする。これにより各スタイルが
+    渡す生成パラメータが presets で完結する(`GenerationParams` 既定への暗黙依存を残さない)。
+    """
 
     lo: float
     hi: float
@@ -36,12 +41,24 @@ class _Preset:
     anticipation: int
     min_hold: int
     exaggeration: float
+    triangle_min: float = 2.0
+    vibrato_threshold: int = 18
+    vibrato_amp: float = 0.05
+    legato_valley_shallow: float = 0.4
+    legato_valley_deep: float = 0.2
+    legato_valley_slope: float = 0.025
 
 
-# スタイルごとの出発点値(開き量レンジ・上限・タイミング・誇張。実データで調整しうる)。
-# _Preset(lo, hi, open_max, attack, release, coartic_overlap, anticipation, min_hold, exaggeration)
+# スタイルごとの出発点値(開き量レンジ・上限・タイミング・連続感・誇張。実データで調整しうる)。
+# _Preset(lo, hi, open_max, attack, release, coartic_overlap, anticipation, min_hold, exaggeration, ...)
+# pop は視覚チューニング(MMD目視)で定めた標準値(緩やかな先行準備・広い協調調音・レガート谷・伸び表現を
+# 含む)。他スタイルは連続感パラメータを既定のまま据え置き、必要になったら個別に視覚で詰める。
 _PRESETS: dict[str, _Preset] = {
-    "pop": _Preset(0.30, 0.75, 0.90, 2, 2, 2, 1, 3, 1.0),
+    "pop": _Preset(
+        0.30, 0.75, 0.90, 2, 2, 6, 11, 3, 1.0,
+        vibrato_threshold=10, vibrato_amp=0.13,
+        legato_valley_shallow=0.45, legato_valley_deep=0.30, legato_valley_slope=0.02,
+    ),
     "ballad": _Preset(0.20, 0.55, 0.70, 3, 3, 3, 1, 4, 0.8),
     "powerful": _Preset(0.40, 0.95, 0.97, 1, 1, 2, 2, 3, 1.3),
     "whisper": _Preset(0.10, 0.35, 0.50, 2, 2, 2, 1, 3, 0.7),
@@ -77,8 +94,14 @@ def resolve(
         attack_frames=preset.attack,
         release_frames=preset.release,
         min_hold_frames=preset.min_hold,
+        triangle_min_frames=preset.triangle_min,
         coartic_overlap_max=preset.coartic_overlap,
         anticipation_frames=preset.anticipation,
+        legato_valley_shallow=preset.legato_valley_shallow,
+        legato_valley_deep=preset.legato_valley_deep,
+        legato_valley_slope=preset.legato_valley_slope,
         exaggeration=preset.exaggeration,
+        vibrato_threshold=preset.vibrato_threshold,
+        vibrato_amp=preset.vibrato_amp,
     )
     return openness, params

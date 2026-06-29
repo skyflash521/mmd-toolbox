@@ -33,14 +33,38 @@ def test_pop_openness_params():
 
 
 def test_pop_generation_params():
+    # pop は視覚チューニング(MMD目視)で定めた標準値。attack/release/min_hold は基礎値
+    # (テンポ補正はこれを別途縮める)。協調調音は広め・先行準備は緩やか・レガート谷と伸び表現を持つ。
     _, gen = presets.resolve("pop")
     assert gen.open_cap == 0.90
     assert gen.attack_frames == 2
     assert gen.release_frames == 2
-    assert gen.coartic_overlap_max == 2
-    assert gen.anticipation_frames == 1
+    assert gen.coartic_overlap_max == 6
+    assert gen.anticipation_frames == 11
     assert gen.min_hold_frames == 3
+    assert gen.triangle_min_frames == pytest.approx(2.0)
     assert gen.exaggeration == 1.0
+    assert gen.vibrato_threshold == 10
+    assert gen.vibrato_amp == pytest.approx(0.13)
+    assert (gen.legato_valley_shallow, gen.legato_valley_deep, gen.legato_valley_slope) == (
+        pytest.approx(0.45),
+        pytest.approx(0.30),
+        pytest.approx(0.02),
+    )
+
+
+def test_nonpop_presets_keep_default_continuity_params():
+    # pop 以外は連続感パラメータ(三角形下限・伸び表現・レガート谷)を lipsync 既定のまま据え置く。
+    # presets が明示フィールドへ移行しても既定挙動が保たれることを固定する。
+    default = GenerationParams()
+    for style in ("ballad", "powerful", "whisper", "rap"):
+        _, gen = presets.resolve(style)
+        assert gen.triangle_min_frames == pytest.approx(default.triangle_min_frames)
+        assert gen.vibrato_threshold == default.vibrato_threshold
+        assert gen.vibrato_amp == pytest.approx(default.vibrato_amp)
+        assert gen.legato_valley_shallow == pytest.approx(default.legato_valley_shallow)
+        assert gen.legato_valley_deep == pytest.approx(default.legato_valley_deep)
+        assert gen.legato_valley_slope == pytest.approx(default.legato_valley_slope)
 
 
 def test_ballad_values():
