@@ -118,3 +118,62 @@ def test_consonant_at_uses_nearest_for_absorbed_gap_and_ends():
     assert generate._consonant_at(events, 30.9) is ConsonantClass.NONE  # ギャップ・31側が近い
     assert generate._consonant_at(events, -5.0) is ConsonantClass.ROUNDED  # 先頭外側
     assert generate._consonant_at(events, 70.0) is ConsonantClass.NONE  # 末尾外側
+
+
+def _total_open(env, frame):
+    """各モーフを線形補間して総開き量(全モーフ重みの和)を返す(有声区間内の閉口検出用)。"""
+    def interp(keys, f):
+        if not keys:
+            return 0.0
+        if f <= keys[0][0]:
+            return keys[0][1]
+        if f >= keys[-1][0]:
+            return keys[-1][1]
+        for (f0, v0), (f1, v1) in zip(keys, keys[1:]):
+            if f0 <= f <= f1:
+                return v0 if f1 == f0 else v0 + (v1 - v0) * (f - f0) / (f1 - f0)
+        return keys[-1][1]
+    return sum(interp(keys, frame) for keys in env.values())
+
+
+def test_adjacent_triangles_connect_without_closure():
+    # 短い う(三角形)→ 短い え(三角形)が直接隣接。協調調音で繋ぎ、有声区間内で口を閉じない
+    # (三角形どうしが各々0端点で閉じる開閉ちらつき=フリッカーを防ぐ)。曲頭・曲末だけ閉口。
+    env = _envelope(
+        [MouthEvent(MouthShape.U, 0.0, 4.0, 0.5), MouthEvent(MouthShape.E, 4.0, 8.0, 0.5)]
+    )
+    for f in range(1, 8):
+        assert _total_open(env, f) > 0.05  # 内部(境界4含む)は閉口しない
+    assert _total_open(env, 0) == pytest.approx(0.0)  # 曲頭は閉口
+    assert _total_open(env, 8) == pytest.approx(0.0)  # 曲末は閉口
+
+
+def test_triangle_closes_on_closure_side_only():
+    # 三角形が片側 SILENCE・片側 母音。SILENCE 側は0で閉じ、母音側は協調調音で繋ぐ。
+    # SILENCE[0,4]・う[4,8]三角形・え[8,16]通常。う は SILENCE 側(4)で閉口、え 側は閉じない。
+    env = _envelope(
+        [
+            MouthEvent(MouthShape.SILENCE, 0.0, 4.0),
+            MouthEvent(MouthShape.U, 4.0, 8.0, 0.5),
+            MouthEvent(MouthShape.E, 8.0, 16.0, 0.5),
+        ]
+    )
+    assert _total_open(env, 4) == pytest.approx(0.0)  # SILENCE 側は閉口
+    for f in range(6, 15):
+        assert _total_open(env, f) > 0.05  # う→え は協調調音で閉口しない
+
+
+def test_triangle_legato_triangle_bridged_without_closure():
+    # 三角形→レガート間隙→三角形(同じ「あ」の繰り返しが間隙で区切られ短く三角形化)。谷で橋渡しし、
+    # 有声区間内で閉口しない(間隙の谷でも0に落ちない)。
+    env = _envelope(
+        [
+            MouthEvent(MouthShape.A, 0.0, 4.0, 0.5),
+            MouthEvent(MouthShape.LEGATO_GAP, 4.0, 6.0),
+            MouthEvent(MouthShape.A, 6.0, 10.0, 0.5),
+        ]
+    )
+    for f in range(1, 10):
+        assert _total_open(env, f) > 0.05  # 間隙の谷を含め内部は閉口しない
+    assert _total_open(env, 0) == pytest.approx(0.0)
+    assert _total_open(env, 10) == pytest.approx(0.0)

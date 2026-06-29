@@ -490,12 +490,11 @@ def generate_morph_keys(
     ]
     n = len(groups)
     # 直接隣接する異母音グループ境界の協調調音の半幅 T/2(境界 i と i+1 の間)。保持プラトー端の算出にも使う。
+    # 三角形短区間も含める(三角形は境界保持値=ピーク相当の合成重みで協調調音に参加し、有声側で閉口しない)。
     coart_half: dict[int, float] = {}
     for i in range(n - 1):
         if groups[i].end != groups[i + 1].start:
             continue
-        if groups[i].triangle or groups[i + 1].triangle:
-            continue  # 三角形短区間は協調調音せず端点を閉口で扱う
         # 境界のクロスフェードは group i の末尾イベントと group i+1 の先頭イベントを繋ぐので、
         # 口形差もその2イベント(子音変調込み)で測る。
         left, right = groups[i].events[-1], groups[i + 1].events[0]
@@ -505,10 +504,9 @@ def generate_morph_keys(
         shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
         coart_half[i] = _transition_frames(diff, shorter, params) / 2.0
     # 母音グループ i と i+1 の間がレガート間隙なら、その span [gs, ge] を谷で橋渡しする(閉口しない)。
+    # 三角形短区間も含める(三角形のピーク相当の合成重みを境界保持値として谷に参加させる)。
     legato_at: dict[int, tuple[float, float]] = {}
     for i in range(n - 1):
-        if groups[i].triangle or groups[i + 1].triangle:
-            continue  # 三角形短区間は谷橋渡しの対象外(境界保持値を持たない)
         gs, ge = groups[i].end, groups[i + 1].start
         if _legato_bridge(events, gs, ge):
             legato_at[i] = (gs, ge)
@@ -519,20 +517,27 @@ def generate_morph_keys(
     for i, g in enumerate(groups):
         gw = weights[i]
         if g.triangle:
-            # 三角形短区間: 中央に保持値ピーク1点(開始0→中央w→終了0)。極短母音を吸収せず開いて見せる。
+            # 三角形短区間: 中央に保持値ピーク1点。極短母音を吸収せず開いて見せる。有声(協調調音・レガート
+            # 間隙)に接する側は端点 0 を置かず境界キー(クロスフェード/谷)へ繋ぎ、閉口/曲端に接する側だけ
+            # 0 へ閉じる(有声が続く区間内で口を閉じてフリッカーにしない)。
             mid = (g.start + g.end) / 2.0
+            connect_in = (i - 1) in coart_half or (i - 1) in legato_at
+            connect_out = i in coart_half or i in legato_at
             for morph, weight in gw[0].items():
-                targets.append((morph, g.start, 0.0))
+                if not connect_in:
+                    targets.append((morph, g.start, 0.0))
                 targets.append((morph, mid, weight))
-                targets.append((morph, g.end, 0.0))
+                if not connect_out:
+                    targets.append((morph, g.end, 0.0))
             plateaus.append((mid, mid))
             continue
         # グループ内の全モーフ(子音変調でイベントごとに補助モーフが変わりうる)。各モーフはグループ端で
         # 0 へアンカーし、補助が無いイベントの中央では 0 を置くことで、同母音の連続を保ったまま補助モーフ
         # (ROUNDED の う/お・SPREAD の い)だけを滑らかに増減させる(残留・途中閉口を防ぐ)。
         group_morphs = sorted({morph for w in gw for morph in w})
-        coart_in = i > 0 and groups[i - 1].end == g.start and not groups[i - 1].triangle
-        coart_out = i < n - 1 and groups[i + 1].start == g.end and not groups[i + 1].triangle
+        # 協調調音する境界(三角形隣接も含む)は coart_half の有無で判定する。
+        coart_in = (i - 1) in coart_half
+        coart_out = i in coart_half
         legato_in = (i - 1) in legato_at  # 直前グループとの間がレガート間隙(谷が立ち上がりを担う)
         legato_out = i in legato_at  # 次グループとの間がレガート間隙(谷が立ち下がりを担う)
         if coart_in:
