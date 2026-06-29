@@ -6,7 +6,7 @@ VOCALOID 日本語の音素(X-SAMPA)を、口形イベント確定で使うカ�
 標準で確定したもの。
 """
 
-from lipsync import MouthShape
+from lipsync import ConsonantClass, MouthShape
 
 from vpr2vmd import phonemes
 
@@ -70,3 +70,21 @@ def test_unknown_symbols_categorized_as_other():
 def test_geminate_categorized_as_geminate_stop():
     # 促音「っ」(Q)は閉鎖・詰まりで、口形イベントは無音(閉口)にするため専用カテゴリにする。
     assert phonemes.categorize("Q") is Cat.GEMINATE_STOP
+
+
+def test_rounded_consonants_mapped_to_rounded():
+    # 唇を丸める子音 ふ(p\)・わ(w)は ConsonantClass.ROUNDED。
+    for sym in ["p\\", "w"]:
+        assert phonemes.consonant_class(sym) is ConsonantClass.ROUNDED
+
+
+def test_spread_consonants_mapped_to_spread():
+    # い 方向へ寄せる子音 し(S)・じ(dZ)・ち(tS)・拗音のわたり(j)は ConsonantClass.SPREAD。
+    for sym in ["S", "dZ", "tS", "j"]:
+        assert phonemes.consonant_class(sym) is ConsonantClass.SPREAD
+
+
+def test_other_and_unknown_consonants_mapped_to_neutral():
+    # 唇を動かさない子音(軟口蓋/歯茎/声門 等)と未知記号は ConsonantClass.NEUTRAL(純母音扱い)。
+    for sym in ["k", "k'", "g", "s", "z", "t", "d", "n", "J", "4", "ts", "dz", "h", "zzz"]:
+        assert phonemes.consonant_class(sym) is ConsonantClass.NEUTRAL

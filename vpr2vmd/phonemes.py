@@ -8,7 +8,7 @@ VOCALOID 日本語の音素(X-SAMPA 表記)を、口形イベント確定で使�
 
 from enum import Enum
 
-from lipsync import MouthShape
+from lipsync import ConsonantClass, MouthShape
 
 
 class PhonemeCategory(Enum):
@@ -47,6 +47,13 @@ _GEMINATE_STOPS = {"Q"}
 # 継続/メリスマ(直前音を伸ばす音符の記号)。
 _CONTINUATIONS = {"-"}
 
+# 唇に影響する子音(母音合成を変調する。lipsync の ConsonantClass へ写像。X-SAMPA)。
+# ROUNDED=唇を丸める ふ(p\)・わ(w)。SPREAD=い 方向へ寄せる し(S)・じ(dZ)・ち(tS)・拗音のわたり(j)。
+# これら以外の子音(唇を動かさない軟口蓋/歯茎/声門子音)と未知記号は NEUTRAL(純母音扱い)。
+# 両唇音(ま/ば/ぱ行)は MouthShape.BILABIAL で表すため本写像の対象外。
+_ROUNDED_CONSONANTS = {"p\\", "w"}
+_SPREAD_CONSONANTS = {"S", "dZ", "tS", "j"}
+
 
 def vowel_shape(symbol: str) -> MouthShape | None:
     """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。"""
@@ -71,3 +78,17 @@ def categorize(symbol: str) -> PhonemeCategory:
     if symbol in _CONTINUATIONS:
         return PhonemeCategory.CONTINUATION
     return PhonemeCategory.OTHER
+
+
+def consonant_class(symbol: str) -> ConsonantClass:
+    """子音記号を ConsonantClass へ写像する(唇への影響で分類。vpr2vmd.md §3)。
+
+    唇を丸める子音は ROUNDED、い 方向へ寄せる子音は SPREAD、それ以外の子音(唇を動かさない子音)と
+    未知記号は NEUTRAL。両唇音(ま/ば/ぱ行)は MouthShape.BILABIAL で表すので本写像の対象外で、
+    呼び出し側が両唇音(BILABIAL カテゴリ)を除いた語頭子音を渡す。
+    """
+    if symbol in _ROUNDED_CONSONANTS:
+        return ConsonantClass.ROUNDED
+    if symbol in _SPREAD_CONSONANTS:
+        return ConsonantClass.SPREAD
+    return ConsonantClass.NEUTRAL

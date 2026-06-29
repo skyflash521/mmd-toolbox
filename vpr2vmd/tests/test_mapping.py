@@ -7,13 +7,17 @@
 組み立て段で直前口形を継続する(既定母音「あ」フォールバックは行わない)。
 """
 
-from lipsync import MouthShape
+from lipsync import ConsonantClass, MouthShape
 
 from vpr2vmd import mapping
 
 
 def _shapes_spans(eventlist):
     return [(e.shape, e.start, e.end) for e in eventlist]
+
+
+def _classes(eventlist):
+    return [(e.shape, e.consonant_class) for e in eventlist]
 
 
 def test_single_vowel_fills_note():
@@ -128,6 +132,66 @@ def test_bilabial_fricative_is_not_bilabial_event():
     # 全区間を占める。p 接頭辞などで p\ を誤って両唇閉鎖にする実装を落とす。
     assert _shapes_spans(mapping.note_mouth_events(["p\\", "M"], 0.0, 30.0)) == [
         (MouthShape.U, 0.0, 30.0),
+    ]
+
+
+def test_onset_consonant_class_attached_to_leading_vowel():
+    # 先頭母音に先頭子音の ConsonantClass を付ける。し(S=SPREAD)・ふぁ(p\=ROUNDED)・か(k=NEUTRAL)・
+    # 母音単独(子音なし=NONE)。両唇音は別イベントで表すので語頭子音から除く。
+    assert _classes(mapping.note_mouth_events(["S", "a"], 0.0, 30.0)) == [
+        (MouthShape.A, ConsonantClass.SPREAD),
+    ]
+    assert _classes(mapping.note_mouth_events(["p\\", "a"], 0.0, 30.0)) == [
+        (MouthShape.A, ConsonantClass.ROUNDED),
+    ]
+    assert _classes(mapping.note_mouth_events(["k", "o"], 0.0, 30.0)) == [
+        (MouthShape.O, ConsonantClass.NEUTRAL),
+    ]
+    assert _classes(mapping.note_mouth_events(["a"], 0.0, 30.0)) == [
+        (MouthShape.A, ConsonantClass.NONE),
+    ]
+
+
+def test_bilabial_onset_excluded_palatalized_keeps_spread():
+    # 両唇音は ConsonantClass の対象外(別イベント)。ば は あ が NONE、両唇閉鎖イベントも NONE。
+    assert _classes(mapping.note_mouth_events(["b", "a"], 0.0, 30.0)) == [
+        (MouthShape.BILABIAL, ConsonantClass.NONE),
+        (MouthShape.A, ConsonantClass.NONE),
+    ]
+    # みゃ(m=両唇は除外、j=拗音わたり=SPREAD): 両唇閉鎖イベント + あ が SPREAD。
+    assert _classes(mapping.note_mouth_events(["m", "j", "a"], 0.0, 30.0)) == [
+        (MouthShape.BILABIAL, ConsonantClass.NONE),
+        (MouthShape.A, ConsonantClass.SPREAD),
+    ]
+
+
+def test_onset_class_only_on_first_mora_vowel():
+    # 1音符に母音が複数あるとき、先頭母音にだけ子音種別を付け後続母音は NONE。
+    assert _classes(mapping.note_mouth_events(["k", "a", "i"], 0.0, 30.0)) == [
+        (MouthShape.A, ConsonantClass.NEUTRAL),
+        (MouthShape.I, ConsonantClass.NONE),
+    ]
+
+
+def test_onset_class_priority_when_multiple_consonants():
+    # 複数の語頭子音は優先順 ROUNDED > SPREAD > NEUTRAL で1つに決める。
+    # きゃ(k=NEUTRAL + j=SPREAD)→ SPREAD、くゎ(k=NEUTRAL + w=ROUNDED)→ ROUNDED。
+    assert mapping.note_mouth_events(["k", "j", "a"], 0.0, 30.0)[0].consonant_class is (
+        ConsonantClass.SPREAD
+    )
+    assert mapping.note_mouth_events(["k", "w", "a"], 0.0, 30.0)[0].consonant_class is (
+        ConsonantClass.ROUNDED
+    )
+    # ROUNDED は SPREAD より優先(両方が語頭にある場合の決定論的なタイブレーク)。
+    assert mapping.note_mouth_events(["w", "j", "a"], 0.0, 30.0)[0].consonant_class is (
+        ConsonantClass.ROUNDED
+    )
+
+
+def test_unknown_onset_consonant_is_neutral():
+    # 未知の語頭子音は NEUTRAL(純母音扱い)。
+    assert _classes(mapping.note_mouth_events(["zzz", "a"], 0.0, 30.0)) == [
+        (MouthShape.A, ConsonantClass.NEUTRAL),
     ]
 
 
