@@ -86,16 +86,17 @@ def test_legato_valley_deepens_with_longer_gap():
 
 
 def test_legato_gap_differs_from_silence_closure():
-    # 同じ配置で SILENCE は完全閉口(境界に0.0)、LEGATO_GAP は谷(境界に非ゼロ)。両者が区別されること。
+    # 同じ配置で SILENCE は間隙内で完全閉口、LEGATO_GAP は谷で繋ぐ。間隙中央12で両者が区別されること
+    # (境界10は SILENCE 側も後行残しで保持値0.5のため、区別は間隙中央で見る)。
     base = [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), None, MouthEvent(MouthShape.I, 14.0, 24.0, 0.5)]
     silence = base[:]
     silence[1] = MouthEvent(MouthShape.SILENCE, 10.0, 14.0)
     legato = base[:]
     legato[1] = MouthEvent(MouthShape.LEGATO_GAP, 10.0, 14.0)
-    env_s = _envelope(silence, GenerationParams())
-    env_l = _envelope(legato, GenerationParams())
-    # SILENCE: あ は境界10で0.0へ閉じる。LEGATO_GAP: あ は境界10で保持値0.5(閉じない)。
-    at10_s = {f: w for f, w in env_s["あ"]}.get(10)
-    at10_l = {f: w for f, w in env_l["あ"]}.get(10)
-    assert at10_s == pytest.approx(0.0)
-    assert at10_l == pytest.approx(0.5)
+    s_a = {f: w for f, w in _envelope(silence, GenerationParams())["あ"]}
+    l_a = {f: w for f, w in _envelope(legato, GenerationParams())["あ"]}
+    # SILENCE: あ は後行残しで音符終了10まで保持し11で0へ閉じ、間隙中央12は閉口(キー無し)。
+    assert s_a.get(11) == pytest.approx(0.0)
+    assert 12 not in s_a
+    # LEGATO_GAP: あ は谷で繋ぎ、間隙中央12に谷キー(オーバーラップ)0.165 を持つ。
+    assert l_a.get(12) == pytest.approx(0.165)

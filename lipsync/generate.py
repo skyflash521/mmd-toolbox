@@ -286,15 +286,26 @@ def _preceding_event(events: Sequence[MouthEvent], start: float) -> MouthEvent |
     return None
 
 
-def _anticipation_frames(prev: MouthEvent | None, params: GenerationParams) -> int:
-    """先行準備の前倒し量 A_eff。
+def _following_event(events: Sequence[MouthEvent], end: float) -> MouthEvent | None:
+    """始端フレームが end に一致する直後イベント(連続契約により一意。無ければ None)。"""
+    for ev in events:
+        if ev.start == end:
+            return ev
+    return None
 
-    直前が無音区間のときのみ、先行フレーム数を直前区間長の 1/2 で自動短縮した値。直前が無い・母音・
-    両唇閉鎖のときは 0(先行しない)。前区間長の 1/2 上限により前区間を侵食せず負フレームにも出ない。
+
+def _lead_lag_eff(neighbor: MouthEvent | None, opening: float, params: GenerationParams) -> int:
+    """先行準備(立ち上がり前倒し)/後行残し(閉じ後ろずらし)の実効量。
+
+    隣接が無音区間のときのみ働く(直前/直後が無い・母音・両唇閉鎖は 0)。基準フレーム `anticipation_frames`
+    を開き量比 `opening/open_cap` でスケールするため、機械的な固定値にならず開きの大小で量が変動する
+    (大きく開くほど長い余韻)。隣接無音長の 1/2 上限で前/後区間を侵食しすぎない。先行準備と後行残しで対称。
     """
-    if prev is None or prev.shape is not MouthShape.SILENCE:
+    if neighbor is None or neighbor.shape is not MouthShape.SILENCE:
         return 0
-    return min(params.anticipation_frames, math.floor((prev.end - prev.start) / 2))
+    ratio = opening / params.open_cap if params.open_cap > 0.0 else 0.0
+    want = params.anticipation_frames * min(max(ratio, 0.0), 1.0)
+    return min(_half_up(want), math.floor((neighbor.end - neighbor.start) / 2))
 
 
 def _quantize_targets(targets: Sequence[tuple[str, float, float]]) -> list[MorphKey]:
@@ -394,9 +405,10 @@ def generate_morph_keys(
     保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量の強弱節点を置いて節点間を
     線形に変える。直接隣接する異母音グループの境界では閉口を挟まず、協調調音(境界 b を中心とした幅 T の
     窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、境界に中間口形を置く)へ置き換える。
-    無音直後の母音は先行準備でアタックを前倒す。長く伸ばす母音の保持プラトーには伸び表現で揺らぎ節点を
-    任意に加える。両唇閉鎖・無音は隣接母音の 0.0 キーとキー不在(MMD 上 0.0)で閉口を表し、専用の閉口
-    キーは置かない。整数フレームへの量子化は最後に一括して行う。返すキーは時間順。
+    無音に隣接する母音は、先行準備で立ち上がりを無音側へ伸ばして緩やかに開き(音符開始で保持値へ達する)、
+    後行残しで閉じを無音側へ伸ばして緩やかに閉じる(開き量比例)。長く伸ばす母音の保持プラトーには伸び表現で
+    揺らぎ節点を任意に加える。両唇閉鎖・無音は隣接母音の 0.0 キーとキー不在(MMD 上 0.0)で閉口を表し、専用の
+    閉口キーは置かない。整数フレームへの量子化は最後に一括して行う。返すキーは時間順。
     """
     groups = _normalize_groups(events, params)
     weights = [[_compose(ev.shape, ev.open_amount, params) for ev in g.events] for g in groups]
@@ -431,10 +443,13 @@ def generate_morph_keys(
             # 谷が onset を担うため先頭アタックの 0.0/到達キーは置かない。
             plateau_start = g.start
         else:
-            # 先行準備: 直前が無音なら口形の立ち上がりを A_eff だけ前倒す(実効アタック長は不変)。
-            antic = _anticipation_frames(_preceding_event(events, g.start), params)
-            f_start = g.start - antic
-            f_attack = g.start - antic + g.attack
+            # 先行準備: 直前が無音なら口形を A_eff フレーム手前から緩やかに立ち上げ、音符開始で保持値へ達する
+            # (開き量比例)。先行が無ければ通常アタック。
+            antic = _lead_lag_eff(_preceding_event(events, g.start), max(gw[0].values()), params)
+            if antic > 0:
+                f_start, f_attack = g.start - antic, g.start
+            else:
+                f_start, f_attack = g.start, g.start + g.attack
             for morph, weight in gw[0].items():
                 targets.append((morph, f_start, 0.0))
                 targets.append((morph, f_attack, weight))
@@ -445,8 +460,13 @@ def generate_morph_keys(
             # 谷が offset を担うため末尾リリースの保持/0.0 キーは置かない。
             plateau_end = g.end
         else:
-            f_hold_end = g.end - g.release
-            f_end = g.end
+            # 後行残し: 直後が無音なら音符終了まで保持し、その後 R_eff フレームかけて緩やかに閉じる
+            # (先行準備と対称・開き量比例)。直後が無音でなければ通常リリース。
+            lag = _lead_lag_eff(_following_event(events, g.end), max(gw[-1].values()), params)
+            if lag > 0:
+                f_hold_end, f_end = g.end, g.end + lag
+            else:
+                f_hold_end, f_end = g.end - g.release, g.end
             for morph, weight in gw[-1].items():
                 targets.append((morph, f_hold_end, weight))
                 targets.append((morph, f_end, 0.0))
