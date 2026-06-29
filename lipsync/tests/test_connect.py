@@ -87,8 +87,23 @@ def test_three_same_vowels_single_attack_release():
     )
 
 
+def test_same_vowel_same_profile_different_consonant_merges():
+    # 子音種別が違っても合成プロファイルが同じなら連結する。SPREAD×い と NONE×い はどちらも純い
+    # (SPREAD の補助 い は主モーフと同名で寄与しない)なので1つの保持区間にし、途中で閉口しない。
+    # 短い2モーラが別々に三角形化して境界で閉じる退行(しー の途中閉口)を防ぐ。
+    env = _envelope(
+        [
+            MouthEvent(MouthShape.I, 0.0, 4.0, 0.5, ConsonantClass.NONE),
+            MouthEvent(MouthShape.I, 4.0, 8.0, 0.5, ConsonantClass.SPREAD),
+        ]
+    )
+    assert set(env) == {"い"}
+    # 連結=先頭アタックと末尾リリースのみ。内部(境界4付近)に 0.0 の閉口キーが無い。
+    assert all(w > 0.0 for f, w in env["い"] if 0 < f < 8)
+
+
 def test_same_vowel_different_consonant_not_merged():
-    # 同じ母音でも先頭子音種別が違えば可視口形が違うので連結しない。あ(ROUNDED)[0,10]→あ(NONE)[10,20]
+    # 子音種別が違い合成プロファイルも違えば可視口形が違うので連結しない。あ(ROUNDED)[0,10]→あ(NONE)[10,20]
     # は別グループになり境界で協調調音し、補助モーフ「う」は終端0へ閉じて残留しない(連結すると「う」が
     # 末尾リリースを持たず残る)。
     env = _envelope(

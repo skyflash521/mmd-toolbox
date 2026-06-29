@@ -195,14 +195,27 @@ def _legato_bridge(events: Sequence[MouthEvent], gap_start: float, gap_end: floa
     return all(ev.shape is MouthShape.LEGATO_GAP for ev in span)
 
 
-def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
-    """連続する同一可視口形(母音＋先頭子音種別)のイベントを極大グループへ束ねる。
+def _same_vowel_profile(a: MouthEvent, b: MouthEvent) -> bool:
+    """2つの母音的イベントが同じ可視口形(同一 shape かつ同一合成プロファイル)か。
 
-    可視口形は母音(shape)と先頭子音種別(consonant_class)で決まる(§4.1)ので、母音が同じでも子音種別が
-    違えば別グループにする(例 あ(ROUNDED)→あ(NONE) は連結せず境界で協調調音し、補助モーフが終端0へ閉じる)。
-    これによりグループ内は子音種別が均一になり、アタック/リリース・伸び表現が補助モーフを取りこぼさない。
-    プロファイル対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音の
-    リリース/アタックの 0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない)。
+    可視口形は母音(shape)と先頭子音種別による合成プロファイル(§4.1)で決まる。子音種別が違っても
+    プロファイルが一致する場合(例 SPREAD×い・NONE×い はどちらも純い=主モーフ単独)は同じ口形なので
+    連結してよい。プロファイルが違う場合(例 ROUNDED×あ={あ,う} と NONE×あ={あ})は別口形として分ける。
+    """
+    return a.shape == b.shape and _preprofile(a.shape, a.consonant_class) == _preprofile(
+        b.shape, b.consonant_class
+    )
+
+
+def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
+    """連続する同一可視口形(同一 shape・同一合成プロファイル)のイベントを極大グループへ束ねる。
+
+    可視口形は母音(shape)と先頭子音種別による合成プロファイル(§4.1)で決まる。子音種別が違っても
+    プロファイルが同じなら連結し(SPREAD×い と NONE×い は同じ純い)、プロファイルが違えば別グループに
+    する(あ(ROUNDED)→あ(NONE) は連結せず境界で協調調音し補助モーフが終端0へ閉じる)。連結時はグループ内の
+    プロファイルが一意なので、アタック/リリース・伸び表現が補助モーフを取りこぼさない。プロファイル対象外
+    (両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音のリリース/アタックの
+    0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない)。
     """
     groups: list[list[MouthEvent]] = []
     current: list[MouthEvent] = []
@@ -212,12 +225,7 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
                 groups.append(current)
                 current = []
             continue
-        same = (
-            current
-            and ev.shape == current[-1].shape
-            and ev.consonant_class == current[-1].consonant_class
-        )
-        if same:
+        if current and _same_vowel_profile(ev, current[-1]):
             current.append(ev)
         else:
             if current:
@@ -319,15 +327,14 @@ def _normalize_groups(
         elif winner is nxt_anchor and nxt_anchor is not None:
             nxt_anchor.start = run_start
         i = j
-    # 吸収後に直接隣接した同一可視口形(母音＋子音種別)グループを連結へ統合する。子音種別が違えば
-    # 可視口形が違うので統合しない(グループ内の子音種別を均一に保つ)。
+    # 吸収後に直接隣接した同一可視口形(同一 shape・同一プロファイル)グループを連結へ統合する。
+    # プロファイルが違えば可視口形が違うので統合しない(グループ内のプロファイルを一意に保つ)。
     merged: list[_Group] = []
     for g in survivors:
         same = (
             merged
-            and merged[-1].shape == g.shape
-            and merged[-1].events[0].consonant_class == g.events[0].consonant_class
             and merged[-1].end == g.start
+            and _same_vowel_profile(merged[-1].events[0], g.events[0])
         )
         if same:
             merged[-1].events = merged[-1].events + g.events
@@ -452,7 +459,7 @@ def _vibrato_targets(
         amp_eff = min(params.vibrato_amp, base)
         offset = amp_eff * math.sin(2.0 * math.pi * (t - plateau_start) / period)
         open_v = min(max(base + offset, 0.0), params.open_cap)
-        # グループ内は子音種別が均一(_vowel_groups の連結条件)なので先頭イベントの子音種別で変調する。
+        # グループ内はプロファイルが一意(_vowel_groups の連結条件)なので先頭イベントの子音種別で変調する。
         cc = group.events[0].consonant_class
         for morph, weight in _weights_from_hold(group.shape, cc, open_v, params).items():
             nodes.append((morph, t, weight))
