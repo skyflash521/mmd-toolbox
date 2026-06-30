@@ -5,8 +5,8 @@ ProgressReporter は重い処理(ベイク・平滑化)の進行を stderr へ1�
 summary で完了行を1行残す。完了イベント(update)と再描画(ハートビートスレッド)を分離し、update が
 来ない待ち時間でも経過時間(now() - 段開始)を進め続けることで、重い処理で表示が停滞して見えるのを防ぐ。
 
-mocapvmd 版に対する shakevmd 固有の2点を併せて検証する:
-  - update に note スロットを持たせ、描画行へ note を併記する(engine の「出力後検証」表示)。
+shakevmd 固有の次の2点も併せて検証する:
+  - update に note スロットを持たせ、描画行へ note を併記する(進捗据え置き区間の注記、例: 出力後検証)。
   - stderr 書き込みが失敗(エンコード不能等)しても例外を外へ漏らさず enabled=False に落ち、以後 no-op。
     書き込み失敗で表示が無効化された後も、close はハートビートスレッドを必ず停止・join する。
 
@@ -19,10 +19,7 @@ import time
 
 import pytest
 
-# 実装は後続フェーズで追加する。未存在のうちはモジュール全体を skip(収集失敗を回避)。
-progress = pytest.importorskip(
-    "shakevmd.progress", reason="impl pending: Step2 progress module"
-)
+from shakevmd import progress
 
 ProgressReporter = progress.ProgressReporter
 
@@ -66,7 +63,7 @@ def test_format_line_hides_count_when_total_unset():
 
 
 def test_format_line_appends_note_when_present():
-    # note があれば行末へ併記する(engine の「出力後検証」)。note 既定("")では併記しない。
+    # note があれば行末へ併記する(進捗据え置き区間の注記、例: 出力後検証)。note 既定("")では併記しない。
     assert progress._format_line("平滑化", 60, 60, 5.0, "出力後検証") == "[平滑化] 60/60 経過 0:05 出力後検証"
     assert progress._format_line("平滑化", 60, 60, 5.0, "") == "[平滑化] 60/60 経過 0:05"
 
@@ -251,7 +248,7 @@ def test_summary_writes_line_only_when_enabled():
     assert stream2.getvalue() == ""
 
 
-# 書き込み失敗保護が捕捉すべき例外種別(計画 §4.1)。cp932 端末での全角エンコード不能は UnicodeError 系。
+# 書き込み失敗保護が捕捉すべき例外種別。端末のエンコード不能(全角ラベルが端末コーデックで表せない等)は UnicodeError 系。
 # OSError だけ捕捉する実装を弾くため、3種すべてで保護が効くことを固定する。
 _WRITE_FAILURES = [OSError("io failed"), ValueError("bad stream"), UnicodeError("encode failed")]
 
