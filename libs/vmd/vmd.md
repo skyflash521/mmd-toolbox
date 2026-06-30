@@ -12,8 +12,8 @@ VMD フォーマット層 — VMD ファイルの読み書き・補間曲線評�
 ### 1.1 目的
 
 VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に閉じた評価・変換
-(MMD 互換の補間曲線評価、カメラ座標変換、キーフレーム疎化)を提供する。各ツール
-(shakevmd・sparsevmd・mocapvmd ほか)が共有するフォーマット層。
+(MMD 互換の補間曲線評価、カメラ座標変換、キーフレーム疎化)を提供する。複数のツールが
+共有するフォーマット層。
 
 フォーマット層共通の設計原則(形式の事実のみを扱う・ロスレス・CLI非依存・無出力・構造化警告/エラー)は
 [../../docs/conventions/layering.md](../../docs/conventions/layering.md) §3 を正本とし、本書では重複記述しない。
@@ -118,8 +118,8 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
 
 ## 6. 疎化フィットの性能特性・棄却済み最適化
 
-`vmd/fit.py` のベジェフィット(`fit_bezier_curve`・`_fit_coeff_curve`)は shakevmd /
-sparsevmd / mocapvmd が共有する疎化エンジンで、疎化処理時間の支配項。**本節を、この共有
+`vmd/fit.py` のベジェフィット(`fit_bezier_curve`・`_fit_coeff_curve`)は疎化を行う複数ツールが
+共有する疎化エンジンで、疎化処理時間の支配項。**本節を、この共有
 エンジンの性能特性と「試して棄却した最適化」の正本とする**(各ツール仕様・性能改善の計画は
 本節を参照し、結論を二重に持たない)。fit.py を高速化する前に必ず本節を読むこと。
 
@@ -161,7 +161,7 @@ sparsevmd / mocapvmd が共有する疎化エンジンで、疎化処理時間�
 > `_fit_coeff_curve` の `skip_fastpath=True`、または上位 API(`_axis_curve` / 各カメラチャンネル /
 > `reduce_camera_track` の `force_bezier=True`)で**両ファストパスをスキップ**して
 > `least_squares` 由来の実フィットを強制できる。**いずれも既定 False=従来挙動**(ファストパス有効)
-> なので sparsevmd / mocapvmd の採否・性能・出力は不変。across-init 早期終了(`early_exit_err`)は
+> なので各利用ツールの採否・性能・出力は不変。across-init 早期終了(`early_exit_err`)は
 > `skip_fastpath` でも温存される(実 `least_squares` の結果を返すため形状を損なわない)。
 - **初期値順の最適化**: 当たりの良い順(線形・前回採用解など)に初期値を並べ、許容由来の
   早期終了で打ち切り回数を減らす。
