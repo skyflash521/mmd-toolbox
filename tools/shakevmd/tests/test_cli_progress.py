@@ -11,14 +11,9 @@
 import io
 import sys
 
-import pytest
-
 from shakevmd import cli, progress
 from vmd import io as vmd_io
 from vmd.types import CameraKey, VmdDocument
-
-# 実装は後続フェーズで入る。未実装のうちは各テストを xfail で印を付け、緑コミットを保つ。
-pytestmark = pytest.mark.xfail(reason="impl pending: Step3 cli wiring", strict=False)
 
 LINEAR = bytes([20, 107, 20, 107]) * 6
 

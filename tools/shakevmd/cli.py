@@ -14,7 +14,7 @@ import sys
 
 from vmd import interp, io
 from vmd.reduce import Tolerances, reduce_camera_track
-from shakevmd import cuts, presets
+from shakevmd import __version__, cuts, presets, progress
 from shakevmd.bake import bake
 
 # 公開引数の hard-default(§2.3-2.6)。プリセット/個別引数が未指定の項目に使う。
@@ -143,6 +143,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: 仕様外の前置き省略形(--over→--overwrite 等)を受理しない。
     # 未知/省略形は exit 2(§8/§2.7 の非公開・繰延フラグ拒否とも整合)。
     p = argparse.ArgumentParser(prog="shakevmd", allow_abbrev=False)
+    p.add_argument("--version", action="version", version=f"shakevmd {__version__}")
     p.add_argument("input")
     p.add_argument("-o", "--output")
     p.add_argument("--overwrite", action="store_true")
@@ -166,6 +167,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # 既定 on: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを低減する。
     # --no-smooth で無効化(密キー＋線形のまま出力する)。
     p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction)
+    # 進捗表示の抑制(§2.7.1)。抑制するのは進捗表示だけで、警告・統計・終了コードは変えない。
+    p.add_argument("--quiet", dest="quiet", action="store_true")
     return p
 
 
@@ -305,105 +308,124 @@ def main(argv=None) -> int:
     # 例: walking の歩調成分 gait_freq/gait_amp。bake 既定(無効)を上書きする。
     internal = {k: preset[k] for k in presets.INTERNAL_PARAM_NAMES if k in preset}
 
-    # ベイク。引数由来の異常は §9 コード2 に集約する:
-    # - ValueError: 範囲の重複/接触(空カメラは上で弾き済み)。
-    # - OverflowError: 有限だが過大な値(例 --fade 1e308 → int(round(fade*FPS)) が inf 変換で失敗)。
+    # 進捗のライブ表示(§2.7.1)。重いベイク・平滑化の進行を端末へ出す(--quiet で無効、既定は
+    # stderr が端末のときだけ)。副作用専用=出力VMD・終了コード・統計・警告を変えない。最初の stage 以降は
+    # 捕捉例外で終了コードを返す経路・dry-run の早期 return・想定外例外のいずれでも heartbeat を止め行を
+    # 消すため try/finally で囲む(§2.7.1)。close は二重呼び出しに耐えるので明示 close と finally が重なって安全。
+    reporter = progress.ProgressReporter(sys.stderr, enabled=False if args.quiet else None)
     try:
-        result = bake(
-            doc.camera,
-            ranges=ranges,
-            seed=args.seed,
-            amp_rot=amp_rot,
-            amp_pos=amp_pos,
-            rot_weights=rot_weights,
-            freq=freq,
-            motion_damp=motion_damp,
-            settle=settle,
-            fade_sec=fade,
-            cut_pos_threshold=cut_threshold[0],
-            cut_rot_threshold=cut_threshold[1],
-            impulses=tuple(args.impulses or ()),
-            **internal,
-        )
-    except (ValueError, OverflowError):
-        return 2
+        # ベイク。引数由来の異常は §9 コード2 に集約する:
+        # - ValueError: 範囲の重複/接触(空カメラは上で弾き済み)。
+        # - OverflowError: 有限だが過大な値(例 --fade 1e308 → int(round(fade*FPS)) が inf 変換で失敗)。
+        reporter.stage("ベイク")
+        try:
+            result = bake(
+                doc.camera,
+                ranges=ranges,
+                seed=args.seed,
+                amp_rot=amp_rot,
+                amp_pos=amp_pos,
+                rot_weights=rot_weights,
+                freq=freq,
+                motion_damp=motion_damp,
+                settle=settle,
+                fade_sec=fade,
+                cut_pos_threshold=cut_threshold[0],
+                cut_rot_threshold=cut_threshold[1],
+                impulses=tuple(args.impulses or ()),
+                **internal,
+            )
+        except (ValueError, OverflowError):
+            return 2
+        # 進捗行を解放してから warning(stderr)・統計を出す(行の混線を防ぐ、§2.7.1)。
+        reporter.close()
 
-    # 焼き出力が非有限(inf/nan)なら引数起因の異常 → 引数エラー(§9 コード2)。
-    # bake 内の乗算で有限引数が inf 化しても float32 は inf を素通しするため明示検査する。
-    if not _all_finite(result.camera_keys):
-        return 2
+        # 焼き出力が非有限(inf/nan)なら引数起因の異常 → 引数エラー(§9 コード2)。
+        # bake 内の乗算で有限引数が inf 化しても float32 は inf を素通しするため明示検査する。
+        if not _all_finite(result.camera_keys):
+            return 2
 
-    # 警告表示(§3.1): io.read の警告 + bake の警告 + 非カメラセクション透過。常に表示する。
-    warnings = [f"{w.code}: {w.message}" for w in read_warnings]
-    warnings += list(result.warnings)
-    if doc.bone or doc.morph or doc.light or doc.self_shadow or doc.ik_property:
-        warnings.append("カメラ以外のセクションは無加工で透過した(§3.1)")
-    for w in warnings:
-        print(f"warning: {w}", file=sys.stderr)
+        # 警告表示(§3.1): io.read の警告 + bake の警告 + 非カメラセクション透過。常に表示する。
+        warnings = [f"{w.code}: {w.message}" for w in read_warnings]
+        warnings += list(result.warnings)
+        if doc.bone or doc.morph or doc.light or doc.self_shadow or doc.ik_property:
+            warnings.append("カメラ以外のセクションは無加工で透過した(§3.1)")
+        for w in warnings:
+            print(f"warning: {w}", file=sys.stderr)
 
-    # 適用範囲(スナップ後)・統計を算出(dry-run/verbose 用)。bake は不変のまま、
-    # 出力と cuts/interp から求める。範囲端は最近接キーへスナップ(§5.2)。
-    wv_frames = [k.frame for k in _working_view(doc.camera)]
-    if ranges is None:
-        applied = [(wv_frames[0], wv_frames[-1])]
-    else:
-        applied = sorted((_snap(s, wv_frames), _snap(e, wv_frames)) for (s, e) in ranges)
-    max_amp, detected_cuts = _shake_stats(
-        doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
+        # 適用範囲(スナップ後)・統計を算出(dry-run/verbose 用)。bake は不変のまま、
+        # 出力と cuts/interp から求める。範囲端は最近接キーへスナップ(§5.2)。
+        wv_frames = [k.frame for k in _working_view(doc.camera)]
+        if ranges is None:
+            applied = [(wv_frames[0], wv_frames[-1])]
+        else:
+            applied = sorted((_snap(s, wv_frames), _snap(e, wv_frames)) for (s, e) in ranges)
+        max_amp, detected_cuts = _shake_stats(
+            doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
 
-    # 詳細統計は --dry-run と --verbose のみで表示(通常実行は出さない、§5.2/§5.3)。
-    if args.dry_run or args.verbose:
-        print(f"range: {applied}")
-        print(f"keys: {len(result.camera_keys)}")
-        print(f"max amplitude: {max_amp:.6g}")
-        print(f"cuts: {detected_cuts}")
+        # 詳細統計は --dry-run と --verbose のみで表示(通常実行は出さない、§5.2/§5.3)。
+        if args.dry_run or args.verbose:
+            print(f"range: {applied}")
+            print(f"keys: {len(result.camera_keys)}")
+            print(f"max amplitude: {max_amp:.6g}")
+            print(f"cuts: {detected_cuts}")
 
-    # --dry-run は VMD を書かない。統計表示のみ(§2.7)。
-    if args.dry_run:
+        # --dry-run は VMD を書かない。統計表示のみ(§2.7)。進捗行は finally の close で消える。
+        if args.dry_run:
+            return 0
+
+        # --smooth: ベイクした密キーをプロセス内でそのまま reduce へ渡し、疎ベジェへ変換する
+        # (中間VMDは作らない)。範囲はベイクと同じスナップ後範囲 result.resolved を使い、CLI
+        # パイプラインと同値にする。
+        # カット境界: bake は原本の隣接キーで、reduce はベイク後の毎フレーム値でカットを検出するため
+        # 検出ドメインが異なる。reduce 側の再検出は無効化し(no_cut_detect=True)、ベイクが確定した
+        # カット detected_cuts だけを境界とする。カット F は F-1→F の不連続なので、両側を必須キーに
+        # して境界をまたぐ曲線を作らないよう F-1 と F の対を keep_frames に渡す(perspective 切替は
+        # reduce が常に境界化する)。再検出を切ることで、振幅の大きい手ぶれを区間内の偽カットと
+        # 誤判定する余地も無くす。
+        camera_out = result.camera_keys
+        if args.smooth:
+            reporter.stage("平滑化")
+            # 機械的 grid: 各範囲を max_seg 間隔のキーで区切る。sliding max_seg は「線形でも許容内に収まる」
+            # 長区間を作り、手ぶれを疎キー＋線形補間=キー境界のコーナーで返すため 30fps 超でカクつき、
+            # サブフレームでは揺れを取りこぼす。grid を keep に与えて区間長を max_seg 以下に抑えると、各区間は
+            # 手ぶれが線形許容に収まらずベジェ曲線でフィットされ、曲線で滑らかに(judder低減)かつサブフレーム
+            # でも揺れを許容内に保つ。区間が短く bounded なので least_squares 回数も抑えられ高速。
+            grid = {f for f0, f1 in result.resolved for f in range(int(f0), int(f1) + 1, _SMOOTH_MAX_SEG)}
+            keep = sorted({f for c in detected_cuts for f in (c - 1, c) if f >= 0} | grid)
+            # progress=reporter.update: reduce は progress(処理済みフレーム, 全フレーム総数, note) を
+            # 3 引数で呼び、出力後検証区間では note="出力後検証" を添える。reporter.update のシグネチャと
+            # 一致するので中継 lambda を挟まず直接渡す(§2.7.1)。
+            camera_out = reduce_camera_track(
+                result.camera_keys,
+                result.resolved,
+                _SMOOTH_TOLERANCES,
+                cut_thresholds=(cut_threshold[0], cut_threshold[1], _SMOOTH_CUT_DIST),
+                keep_frames=tuple(keep),
+                no_cut_detect=True,
+                min_seg=1,
+                max_seg=_SMOOTH_MAX_SEG,
+                strict=False,
+                curve_mode="bezier",
+                force_bezier=True,
+                progress=reporter.update,
+            )
+            reporter.close()
+
+        doc.camera = camera_out
+
+        # 出力書き込み。失敗の原因で終了コードを分ける(§9):
+        # - OverflowError: 過大な値が float32 シリアライズで溢れた=引数起因 → コード2。
+        # - その他の例外: 実際の I/O 失敗(権限・不正パス・ディスク等)→ コード3。
+        try:
+            io.write_file(doc, output)
+        except OverflowError:
+            return 2
+        except Exception:
+            return 3
+
+        # 書き込み成功後に完了行を1回残す(進捗行は close で消えている)。
+        reporter.summary(f"完了 {output}")
         return 0
-
-    # --smooth: ベイクした密キーをプロセス内でそのまま reduce へ渡し、疎ベジェへ変換する
-    # (中間VMDは作らない)。範囲はベイクと同じスナップ後範囲 result.resolved を使い、CLI
-    # パイプラインと同値にする。
-    # カット境界: bake は原本の隣接キーで、reduce はベイク後の毎フレーム値でカットを検出するため
-    # 検出ドメインが異なる。reduce 側の再検出は無効化し(no_cut_detect=True)、ベイクが確定した
-    # カット detected_cuts だけを境界とする。カット F は F-1→F の不連続なので、両側を必須キーに
-    # して境界をまたぐ曲線を作らないよう F-1 と F の対を keep_frames に渡す(perspective 切替は
-    # reduce が常に境界化する)。再検出を切ることで、振幅の大きい手ぶれを区間内の偽カットと
-    # 誤判定する余地も無くす。
-    camera_out = result.camera_keys
-    if args.smooth:
-        # 機械的 grid: 各範囲を max_seg 間隔のキーで区切る。sliding max_seg は「線形でも許容内に収まる」
-        # 長区間を作り、手ぶれを疎キー＋線形補間=キー境界のコーナーで返すため 30fps 超でカクつき、
-        # サブフレームでは揺れを取りこぼす。grid を keep に与えて区間長を max_seg 以下に抑えると、各区間は
-        # 手ぶれが線形許容に収まらずベジェ曲線でフィットされ、曲線で滑らかに(judder低減)かつサブフレーム
-        # でも揺れを許容内に保つ。区間が短く bounded なので least_squares 回数も抑えられ高速。
-        grid = {f for f0, f1 in result.resolved for f in range(int(f0), int(f1) + 1, _SMOOTH_MAX_SEG)}
-        keep = sorted({f for c in detected_cuts for f in (c - 1, c) if f >= 0} | grid)
-        camera_out = reduce_camera_track(
-            result.camera_keys,
-            result.resolved,
-            _SMOOTH_TOLERANCES,
-            cut_thresholds=(cut_threshold[0], cut_threshold[1], _SMOOTH_CUT_DIST),
-            keep_frames=tuple(keep),
-            no_cut_detect=True,
-            min_seg=1,
-            max_seg=_SMOOTH_MAX_SEG,
-            strict=False,
-            curve_mode="bezier",
-            force_bezier=True,
-        )
-
-    doc.camera = camera_out
-
-    # 出力書き込み。失敗の原因で終了コードを分ける(§9):
-    # - OverflowError: 過大な値が float32 シリアライズで溢れた=引数起因 → コード2。
-    # - その他の例外: 実際の I/O 失敗(権限・不正パス・ディスク等)→ コード3。
-    try:
-        io.write_file(doc, output)
-    except OverflowError:
-        return 2
-    except Exception:
-        return 3
-
-    return 0
+    finally:
+        reporter.close()
