@@ -8,22 +8,15 @@ import json
 
 import pytest
 
-try:
-    from cli_events import (
-        EVENT_TYPES,
-        ArgumentParseError,
-        EventEmitter,
-        MachineArgumentParser,
-        StreamTerminatedError,
-        argparse_error_event,
-        error_event,
-    )
-
-    _IMPORTED = True
-except ImportError:
-    _IMPORTED = False
-
-pytestmark = pytest.mark.skipif(not _IMPORTED, reason="impl pending: Step1 cli_events")
+from cli_events import (
+    EVENT_TYPES,
+    ArgumentParseError,
+    EventEmitter,
+    MachineArgumentParser,
+    StreamTerminatedError,
+    argparse_error_event,
+    error_event,
+)
 
 
 def _lines(buf):
@@ -152,3 +145,45 @@ def test_argparse_error_converts_to_error_event():
     assert ev["field"] == "--n"
     assert ev["path"] is None
     assert ev["message"]  # argparse のメッセージを載せる
+
+
+def test_result_then_result_rejected():
+    # 終端の対称パターン: result の後の result も拒否する(ちょうど 1 つ)。
+    buf = io.BytesIO()
+    em = EventEmitter(buf)
+    em.result(mode="bake")
+    with pytest.raises(StreamTerminatedError):
+        em.result(mode="bake")
+
+
+def test_empty_payload_emits_type_only():
+    # ペイロード無しの送出は type だけのオブジェクトになる。
+    buf = io.BytesIO()
+    em = EventEmitter(buf)
+    em.result()
+    assert json.loads(buf.getvalue().decode("utf-8")) == {"type": "result"}
+
+
+def test_flushless_stream_ok():
+    # flush を持たない write-only stream でも例外なく書ける(getattr ガード)。
+    class _WriteOnly:
+        def __init__(self):
+            self.data = b""
+
+        def write(self, b):
+            self.data += b
+
+    s = _WriteOnly()
+    EventEmitter(s).result(mode="bake")
+    assert json.loads(s.data.decode("utf-8"))["type"] == "result"
+
+
+def test_help_and_version_not_converted_to_parse_error():
+    # --help/--version は parser.exit 経由のメタ操作で error() を通らないため、
+    # MachineArgumentParser でも ArgumentParseError でなく SystemExit になる(cli_events.md §4)。
+    p = MachineArgumentParser(prog="x")
+    p.add_argument("--version", action="version", version="x 1.0")
+    with pytest.raises(SystemExit):
+        p.parse_args(["--help"])
+    with pytest.raises(SystemExit):
+        p.parse_args(["--version"])
