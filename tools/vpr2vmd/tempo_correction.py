@@ -2,7 +2,7 @@
 
 代表BPMが基準テンポ `ref_bpm` より速いほど、保持・アタック・リリースのフレーム数を縮める。
 高速テンポで短い母音が吸収閾値を下回って消え、口が開きっぱなしに見えるのを防ぐ。`lipsync` は
-フレーム基準でテンポ概念を持たないため、テンポ→パラメータ補正は `vpr2vmd` が担う(CLAUDE.md 境界)。
+フレーム基準でテンポ概念を持たないため、テンポ→パラメータ補正は `vpr2vmd` が担う(docs/conventions/layering.md の設計境界)。
 """
 
 from dataclasses import replace

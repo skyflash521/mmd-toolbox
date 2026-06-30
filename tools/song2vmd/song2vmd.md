@@ -31,7 +31,7 @@
 
 ### 1.2 設計境界
 
-CLAUDE.md の設計境界に従う。
+[../../docs/conventions/layering.md](../../docs/conventions/layering.md) の設計境界に従う。
 
 - フォーマット層(VMDの読み書き)は `vmd` に置く。
 - 音声前段(ボーカル抽出・音素/母音認識・強弱RMS算出)と IPA→5母音写像規則・S-1認識ゲートは共有モジュール

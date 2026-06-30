@@ -59,7 +59,7 @@
 
 机上で確定できる入口処理(歌詞/音素対応付け・テンポと秒⇔tick変換・音符分割の初期規則)を §4.1〜§4.3 に確定する。
 実データ・実 vpr でしか決まらない項目(F0手法選定・音符分割品質の調整・自動テンポ推定・vpr 形式)は §4.4 にリスク/
-後送りとして分ける。配置は CLAUDE.md の設計境界に従い、抽象契約は [song2vpr.md](song2vpr.md)、具体型/値は本節に置く。
+後送りとして分ける。配置は [../../docs/conventions/layering.md](../../docs/conventions/layering.md) の設計境界に従い、抽象契約は [song2vpr.md](song2vpr.md)、具体型/値は本節に置く。
 **主たる新規リスクはピッチ系**(歌唱の F0 は装飾・ずれが多く、音符化が難しい)で、その品質調整は §4.4(後送り)。
 
 下流の確定型: `vpr` の `Note`(`start_tick`・`duration_tick`・`pitch:int`(MIDI)・`lyric:str`・

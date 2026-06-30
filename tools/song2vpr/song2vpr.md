@@ -23,7 +23,7 @@
 
 ### 1.2 設計境界
 
-CLAUDE.md の設計境界に従う。
+[../../docs/conventions/layering.md](../../docs/conventions/layering.md) の設計境界に従う。
 
 - **音声前段**(ボーカル抽出・音素認識・ボーカルWAV・RMS)は共有モジュール
   [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する。
