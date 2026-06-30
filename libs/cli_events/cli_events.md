@@ -48,12 +48,22 @@ UTF-8 固定)は[CLI インターフェース規約](../../docs/conventions/cli-
 
 エミッタは出力ストリーム(機械モードでは標準出力)を受け取り、各種別のイベントを 1 行ずつ送出する。
 
-- **符号化**: 各行を UTF-8 で書く。プラットフォームのロケール符号化(Windows の cp932 等)に依存させず、
-  リダイレクト・パイプでもロケール外の文字で符号化に失敗して途切れさせない(規約 §4)。
+- **符号化**: エミッタは UTF-8 バイトを書き込むバイナリストリーム(機械モードでは標準出力のバイナリ
+  バッファ)を受け取り、各行を UTF-8 で書く。プラットフォームのロケール符号化(Windows の cp932 等)に
+  依存させず、リダイレクト・パイプでもロケール外の文字で符号化に失敗して途切れさせない(規約 §4)。
+  非 ASCII 文字は `\uXXXX` へエスケープせず UTF-8 のまま出す(`json.dumps(ensure_ascii=False)` 相当)。
 - **1 行 1 オブジェクト**: 各イベントを単一行の JSON として書き、行末で改行する。JSON 内に生の改行を入れず、
   呼び出し側が逐次パースできるようにする。
 - **終端規則の保証**: `result` / `error` を送出したら、それ以降のイベント送出を許さない(終端後の追記で
   JSON Lines を壊さないため)。1 ストリームにつき終端イベントはちょうど 1 つ。
+
+### 3.1 公開 API
+
+- `EventEmitter(stream)`: `progress` / `warning` / `result` / `error` の各メソッド(`**fields` でペイロードを
+  受ける)と `terminated` プロパティを持つ。`result` / `error` の後の送出は `StreamTerminatedError` を送出する。
+- `error_event(*, code, message, exit_code, field=None, path=None)`: `error` イベントの dict ビルダー
+  (`type:"error"` 固定、`field`/`path` は既定 `None`)。返り値はそのまま `EventEmitter.error(**event)` へ展開できる。
+- `EVENT_TYPES`: イベント種別の語彙タプル `("progress", "warning", "result", "error")`。
 
 ## 4. argparse エラー変換ヘルパ
 
@@ -63,6 +73,14 @@ argparse は既定で使用法エラーを標準エラーへ出して終了す�
 で固定**する(基底 `0`〜`3` の意味は全ツール共通で各ツール裁量にしない。規約 §6)。一方、安定 `code` 値・
 該当 `field`・`message` は各ツールが定めるので、ヘルパはそれらを呼び出し側から受け取って載せる
 (具体の `code` 値は各ツールの仕様書が定める)。
+
+公開 API:
+
+- `MachineArgumentParser`(`argparse.ArgumentParser` のサブクラス): 使用法エラー時に標準エラーへ出して終了
+  する代わりに `ArgumentParseError`(`message` 保持)を送出する。`--help` / `--version` は `error()` を経由
+  しないため影響を受けない(規約 §3 のメタ操作の例外)。
+- `argparse_error_event(error, *, code, field=None)`: `ArgumentParseError` を `error` イベントへ変換し、
+  `exit_code` は基底共通の `2` で固定する(`code`/`field` は呼び出し側が渡す)。
 
 ## 5. テスト
 
