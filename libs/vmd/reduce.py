@@ -1,11 +1,11 @@
-"""区間分割・キー削減の全体制御(sparsevmd.md §5.1, §5.5, §2.5)。
+"""区間分割・キー削減の全体制御(vmd-reduce.md §4, §6, §3)。
 
 必須境界(範囲端・不連続・keep-frame。cuts.py 由来)の間を区間化し、各区間を全
 チャンネルが許容誤差以内で表現できるか検査する。超過時は最大正規化誤差フレームで
 再帰分割する(error-split)。max-segment-frames は出力キー間隔の sliding 上限で、許容内でも
 非定数区間が上限を超える場合だけ上限位置で分割する(maxspan-cap)。機械的な等分点は出力キーに
 seed しない。min-segment-frames を下回る tol 探索分割はしない。非strictでは min-segment まで
-分割しても満たせない区間を1フレームまで密に保持し(§1.2 の破綻回避)、strictでは StrictError
+分割しても満たせない区間を1フレームまで密に保持し(vmd-reduce.md §4 の破綻回避)、strictでは StrictError
 (終了コード4)を送出する。
 
 チャンネルは normalized(a, b) -> (正規化誤差, 最大誤差フレーム|None) を持つダックタイプ。
@@ -40,7 +40,7 @@ from vmd.types import BoneKey, CameraKey
 
 @dataclasses.dataclass
 class Tolerances:
-    """各チャンネルの最大許容誤差(§2.4)。
+    """各チャンネルの最大許容誤差(vmd-reduce.md §2)。
 
     単位: bone_pos/camera_pos/camera_distance は MMD距離単位、
     bone_rot/camera_rot/camera_fov は度。
@@ -116,7 +116,7 @@ BONE_LINEAR_INTERP = bone_interp_bytes(_LINEAR_CP, _LINEAR_CP, _LINEAR_CP, _LINE
 
 
 def build_camera_keys(source_keys, frames, segment_interp=None):
-    """削減後フレーム列からカメラ出力キーを生成する(§3.2, §4.2)。
+    """削減後フレーム列からカメラ出力キーを生成する(vmd-reduce.md §9, §1)。
 
     各フレームで位置・回転(Euler)・距離・視野角(整数度へ四捨五入)・perspective
     (直近ホールド)をソースキーからサンプリングする。補間ブロックは既定で線形固定。
@@ -150,7 +150,7 @@ def build_camera_keys(source_keys, frames, segment_interp=None):
 
 
 def build_bone_keys(source_keys, frames, segment_interp=None):
-    """削減後フレーム列からボーン出力キーを生成する(§3.2)。
+    """削減後フレーム列からボーン出力キーを生成する(vmd-reduce.md §9)。
 
     name_raw はソースの生バイトを保持する。各フレームで位置・回転(quaternion)を
     サンプリングする。補間ブロックは既定で線形固定。segment_interp(前フレーム,
@@ -182,23 +182,23 @@ def build_bone_keys(source_keys, frames, segment_interp=None):
 
 
 class StrictError(Exception):
-    """--strict 指定時に許容誤差を満たせない(§2.5、終了コード4)。"""
+    """--strict 指定時に許容誤差を満たせない(vmd-reduce.md §3、終了コード4)。"""
 
 
 def _angle_diff_deg(a, b):
     """2つの角度(ラジアン)の最小角度差(度、非負)。±2πのラップに不変。
 
-    単一フレームの軸別角度誤差を unwrap 後と同値に測る(§7.2/§5.3)。
+    単一フレームの軸別角度誤差を unwrap 後と同値に測る(vmd-reduce.md §8.2/§5.2)。
     """
     d = a - b
     return abs(math.degrees(math.atan2(math.sin(d), math.cos(d))))
 
 
 def verify_camera_track(source_keys, output_keys, ranges, tols):
-    """出力キーを再サンプリングし、§7.2 メトリクスで許容超過フレームを返す(§7.3)。
+    """出力キーを再サンプリングし、vmd-reduce.md §8.2 メトリクスで許容超過フレームを返す(vmd-reduce.md §8.3)。
 
     各範囲を 1 フレーム間隔で元サンプルと比較する。視野角は出力に保存済みの整数度キーを
-    補間した値で評価する(保存時に丸め済みなので再度丸めない)。丸め由来の差は §7.2/§7.3 の
+    補間した値で評価する(保存時に丸め済みなので再度丸めない)。丸め由来の差は vmd-reduce.md §8.2/§8.3 の
     とおり許容(0.5度以上)内なら超過にならない。回転は軸別角度誤差(ラップ不変)の最大。
     戻り値は超過フレームの昇順リスト(空なら合格)。
     """
@@ -222,7 +222,7 @@ def verify_camera_track(source_keys, output_keys, ranges, tols):
 
 
 def verify_bone_track(source_keys, output_keys, ranges, tols):
-    """出力キーを再サンプリングし、§7.2 メトリクスで許容超過フレームを返す(§7.3)。
+    """出力キーを再サンプリングし、vmd-reduce.md §8.2 メトリクスで許容超過フレームを返す(vmd-reduce.md §8.3)。
 
     位置はユークリッド距離、回転は quaternion 角度距離で測る。戻り値は昇順リスト。
     """
@@ -252,7 +252,7 @@ def verify_bone_track(source_keys, output_keys, ranges, tols):
 
 
 def _verify_record(f0, f1, bad_counts, added_counts):
-    """出力後検証(§7.3)の範囲ごとの反復記録を作る(§2.7 diagnostics)。
+    """出力後検証(vmd-reduce.md §8.3)の範囲ごとの反復記録を作る(vmd-reduce.md §8.3)。
 
     iterations は検証回数(=ループ反復数)。bad_counts/added_counts は反復ごとの許容超過
     フレーム数/追加フレーム数で長さは iterations に一致する。added_total は密化で追加した
@@ -269,7 +269,7 @@ def _verify_record(f0, f1, bad_counts, added_counts):
 
 
 def _interval_clear_of_ranges(ranges, lo, hi):
-    """開区間 (lo, hi) がどの処理範囲とも重ならないか(§6.3 継ぎ目の安全判定)。
+    """開区間 (lo, hi) がどの処理範囲とも重ならないか(vmd-reduce.md §7.3 継ぎ目の安全判定)。
 
     継ぎ目区間に別範囲の出力キーが挟まると、最近ソースキー基準の再フィットが実際の
     出力セグメントと一致せず壊れる。重なる場合は継ぎ目書き換えをスキップする。
@@ -278,9 +278,9 @@ def _interval_clear_of_ranges(ranges, lo, hi):
 
 
 def measure_camera_errors(source_keys, output_keys, ranges):
-    """出力 vs 元サンプルの §7.2 チャンネル別・軸別最大絶対誤差を返す(レポート用)。
+    """出力 vs 元サンプルの vmd-reduce.md §8.2 チャンネル別・軸別最大絶対誤差を返す(レポート用)。
 
-    位置は軸別の絶対誤差(§7.2「軸ごとの最大絶対誤差」)、距離・視野角は絶対差、回転は
+    位置は軸別の絶対誤差(vmd-reduce.md §8.2「軸ごとの最大絶対誤差」)、距離・視野角は絶対差、回転は
     軸別角度誤差(度)の最大。範囲が空なら全0。
     """
     m = {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "distance": 0.0, "fov": 0.0, "rot_deg": 0.0}
@@ -301,7 +301,7 @@ def measure_camera_errors(source_keys, output_keys, ranges):
 
 
 def measure_bone_errors(source_keys, output_keys, ranges):
-    """出力 vs 元サンプルの §7.2 軸別位置誤差と回転角度距離(度)の最大を返す(レポート用)。"""
+    """出力 vs 元サンプルの vmd-reduce.md §8.2 軸別位置誤差と回転角度距離(度)の最大を返す(レポート用)。"""
     m = {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "rot_deg": 0.0}
     axes = ("pos_x", "pos_y", "pos_z")
     for f0, f1 in ranges:
@@ -326,7 +326,7 @@ def _nearest_source_before(source_keys, frame):
 
 
 def _camera_seam_interp(source_keys, a, b, tols, force_bezier=False):
-    """区間 [a,b] を元サンプルからベジェ再フィットしカメラ補間24バイトを返す(§6.3)。
+    """区間 [a,b] を元サンプルからベジェ再フィットしカメラ補間24バイトを返す(vmd-reduce.md §7.3)。
 
     範囲端の到達側曲線が範囲外区間 [a,b] を支配する継ぎ目で、元の動きを忠実に保つよう
     各チャンネルを元サンプルから再フィットする。単一区間のため整数量子化が誤差下限になる。
@@ -348,7 +348,7 @@ def _camera_seam_interp(source_keys, a, b, tols, force_bezier=False):
     dist_ch = LinearScalarChannel(a, distances, tols.camera_distance, mode="bezier", force_bezier=force_bezier)
     fov_ch = FovChannel(a, fovs, tols.camera_fov, mode="bezier", force_bezier=force_bezier)
     rot_ch = CameraRotationChannel(a, eulers, tols.camera_rot, mode="bezier", force_bezier=force_bezier)
-    # 継ぎ目再フィットもチャンネル種別へ帰属させ、種別別カウントを exhaustive に保つ(§2.7 診断)。
+    # 継ぎ目再フィットもチャンネル種別へ帰属させ、種別別カウントを exhaustive に保つ(vmd-reduce.md §6 診断)。
     pos_ch.label, dist_ch.label, fov_ch.label, rot_ch.label = (
         "position", "distance", "fov", "rotation",
     )
@@ -358,7 +358,7 @@ def _camera_seam_interp(source_keys, a, b, tols, force_bezier=False):
     )
 
 
-# §3.5 位置C1平滑化の有効化。spawn ワーカーも import 時に同じ環境変数を読むよう env で切り替える
+# vmd-reduce.md §8.4 位置C1平滑化の有効化。spawn ワーカーも import 時に同じ環境変数を読むよう env で切り替える
 # (計測・視聴比較で C1 あり/なしを一貫させるため)。既定は有効。
 _C1_SMOOTHING = os.environ.get("MOCAP_C1_SMOOTHING", "1") != "0"
 
@@ -374,7 +374,7 @@ def _bone_channel_cp(interp_bytes, c):
 
 
 def _apply_c1_bone(keys, source_keys):
-    """位置の補間制御点 Y 端点を各内部キーでのソース実速度(中心差分)へ近づける(§3.5 位置端点速度平滑化)。
+    """位置の補間制御点 Y 端点を各内部キーでのソース実速度(中心差分)へ近づける(vmd-reduce.md §8.4 位置端点速度平滑化)。
 
     キー k の補間(到達側=区間 [k-1,k])の y2 を左区間の端速度、キー k+1 の補間(区間 [k,k+1])の y1 を
     右区間の始速度として、両者をソース中心差分速度 τ_k に近づける。ベジェ端点の値速度は
@@ -417,7 +417,7 @@ def _apply_c1_bone(keys, source_keys):
 
 
 def _bone_seam_interp(source_keys, a, b, tols):
-    """区間 [a,b] を元サンプルからベジェ再フィットしボーン補間64バイトを返す(§6.3)。"""
+    """区間 [a,b] を元サンプルからベジェ再フィットしボーン補間64バイトを返す(vmd-reduce.md §7.3)。"""
     rng = range(a, b + 1)
     positions = [
         (
@@ -430,26 +430,26 @@ def _bone_seam_interp(source_keys, a, b, tols):
     quats = [interp.sample(source_keys, "rot", f) for f in rng]
     pos_ch = EuclideanVectorChannel(a, positions, tols.bone_pos, mode="bezier")
     rot_ch = BoneRotationChannel(a, quats, tols.bone_rot, mode="bezier")
-    # 継ぎ目再フィットもチャンネル種別へ帰属させ、種別別カウントを exhaustive に保つ(§2.7 診断)。
+    # 継ぎ目再フィットもチャンネル種別へ帰属させ、種別別カウントを exhaustive に保つ(vmd-reduce.md §6 診断)。
     pos_ch.label, rot_ch.label = "position", "rotation"
     cp_x, cp_y, cp_z = pos_ch.curve(a, b)
     return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
 
 def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, caps=None, progress=None):
-    """必須境界とチャンネル群から、出力キーのフレーム列(昇順)を返す(§5.1)。
+    """必須境界とチャンネル群から、出力キーのフレーム列(昇順)を返す(vmd-reduce.md §4)。
 
     初期キーは必須境界(範囲端・不連続・keep-frame)だけにし、機械的な等分点は出力キーに seed
-    しない(§5.1 step3)。各必須境界間の区間を _process_segment で再帰処理し、許容超過は最大正規化
+    しない(vmd-reduce.md §4 step3)。各必須境界間の区間を _process_segment で再帰処理し、許容超過は最大正規化
     誤差フレームで分割(error-split)、許容内でも非定数区間が max_seg を超える場合は sliding 上限
     位置で分割(maxspan-cap)する。全チャンネル定数の区間は maxspan-cap の対象外で、上限を超える
-    間隔のまま残す(§5.1 step3)。
+    間隔のまま残す(vmd-reduce.md §4 step3)。
 
-    splits にリストを渡すと error-split したフレームと駆動チャンネル(§2.7 の分割理由)を
+    splits にリストを渡すと error-split したフレームと駆動チャンネル(vmd-reduce.md §6 の分割理由)を
     {"frame", "channel", "norm_error"} で追記する。caps にリストを渡すと maxspan-cap したフレームを
-    {"frame"} で追記する(§5.5 の診断理由 maxspan-cap)。
+    {"frame"} で追記する(vmd-reduce.md §6 の診断理由 maxspan-cap)。
     progress を渡すと、再帰分割で部分区間が確定するごとに progress(処理済みフレーム数,
-    全フレーム数) を呼ぶ(§2.7 の処理経過表示)。1区間の重いベジェフィット(長い必須境界間ほど重い)の
+    全フレーム数) を呼ぶ(処理経過の通知)。1区間の重いベジェフィット(長い必須境界間ほど重い)の
     途中でも確定した部分区間の分だけ進捗が進むため、表示が長く停滞しない。
     """
     bounds = sorted(set(boundaries))
@@ -471,7 +471,7 @@ def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, ca
 
 
 def _span_is_constant(a, b, channels):
-    """span [a,b] の全チャンネルが定数(無変化)か(§5.1 step3)。
+    """span [a,b] の全チャンネルが定数(無変化)か(vmd-reduce.md §4 step3)。
 
     全チャンネルが is_constant(a, b) を実装し、かつ全て True のときだけ True を返す。is_constant を
     持たないチャンネルが1つでもあれば False を返し、非定数扱い(maxspan-cap の対象)にする
@@ -508,14 +508,14 @@ def _worst_channel(a, b, channels):
 
 
 def _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits=None, caps=None, on_resolve=None):
-    """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える(§5.1 step4-8)。
+    """区間 [a,b] を再帰的に処理し、必要なキーを keys に加える(vmd-reduce.md §4 step4-8)。
 
     許容超過(max_norm>1.0)は最大正規化誤差フレームで error-split する。許容内でも非定数区間が
     max_seg を超える場合は sliding 上限位置(原則 a+max_seg)で maxspan-cap する。max_seg=None なら
     上限なし(無制限)で maxspan-cap せず、許容内の区間は長さに依らず受理する。全チャンネル定数の
-    区間は maxspan-cap の対象外で上限超過を許す(§5.1 step3)。on_resolve を渡すと、確定した(これ以上
+    区間は maxspan-cap の対象外で上限超過を許す(vmd-reduce.md §4 step3)。on_resolve を渡すと、確定した(これ以上
     分割しない)部分区間ごとにその区間長 on_resolve(b - a) を呼ぶ。葉区間の長さの総和は元区間長
-    [a,b] に一致するため、呼び出し側で処理経過のフレーム数として積算できる(§2.7)。
+    [a,b] に一致するため、呼び出し側で処理経過のフレーム数として積算できる。
     """
     stack = [(a, b)]
     while stack:
@@ -530,14 +530,14 @@ def _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits=None
         fits = max_norm <= 1.0
 
         # 許容内かつ、上限なし(max_seg=None=無制限)・上限以下・全チャンネル定数のいずれかなら受理
-        # (定数区間は上限の対象外。§5.1 step3)。
+        # (定数区間は上限の対象外。vmd-reduce.md §4 step3)。
         if fits and (max_seg is None or span <= max_seg or _span_is_constant(a, b, channels)):
             if on_resolve is not None:
                 on_resolve(span)
             continue
 
         # 両側を min_seg で割れない区間はこれ以上分割不可。許容内なら(上限超過でも)許容は満たすので
-        # そのまま受理し、許容超過なら atomic 扱いにする(§2.5)。
+        # そのまま受理し、許容超過なら atomic 扱いにする(vmd-reduce.md §3)。
         if span < 2 * min_seg:
             if not fits:
                 _atomic_fail(a, b, strict, keys)
@@ -568,10 +568,10 @@ def _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits=None
 
 
 def _atomic_fail(a, b, strict, keys):
-    """min_seg 下限に達しても許容を満たせない区間の処理(§2.5)。"""
+    """min_seg 下限に達しても許容を満たせない区間の処理(vmd-reduce.md §3)。"""
     if strict:
         raise StrictError(f"許容誤差を満たせない区間: [{a}, {b}]")
-    # 非strict: 下限を無視し1フレームまで密に保持(§1.2 の破綻回避)。
+    # 非strict: 下限を無視し1フレームまで密に保持(vmd-reduce.md §4 の破綻回避)。
     for f in range(a + 1, b):
         keys.add(f)
 
@@ -581,7 +581,7 @@ def _in_any_range(frame, ranges):
 
 
 def _boundary_with_predecessor(frames, f0):
-    """不連続フレーム F に対し F-1 も境界に加える(§6.2)。
+    """不連続フレーム F に対し F-1 も境界に加える(vmd-reduce.md §7.2)。
 
     境界は F-1 と F の間にあり、境界をまたいで補間曲線を作らない。両側を必須キーに
     することで、許容誤差が緩い場合でもジャンプが平滑化されず隣接フレームとして残る。
@@ -618,19 +618,19 @@ def reduce_camera_track(
     diagnostics=None,
     progress=None,
 ):
-    """カメラトラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
+    """カメラトラックを範囲ごとに削減し、出力キー列(昇順)を返す(vmd-reduce.md §4, §9)。
 
     各範囲を 30fps 整数フレームでサンプリングし、不連続検出→必須境界→チャンネル評価→
-    区間削減→出力キー生成→出力後検証(§7.3)する。範囲外の元キーは逐語保持する。
+    区間削減→出力キー生成→出力後検証(vmd-reduce.md §8.3)する。範囲外の元キーは逐語保持する。
     curve_mode="bezier" ではチャンネルが1本のベジェ曲線で採否を判定し(より少ないキーに
     削減)、各出力区間の制御点を到達側キーの補間バイトに格納する。
 
-    出力後検証(§7.3)は verify_camera_track で出力を再サンプリングし、許容超過があれば
+    出力後検証(vmd-reduce.md §8.3)は verify_camera_track で出力を再サンプリングし、許容超過があれば
     非strictは超過フレームをキーに追加して再構築(1フレーム間隔まで密化すれば元値を逐語
-    保持でき必ず収束)、strictは StrictError。float32 格納差は §2.4 で量子化誤差として
+    保持でき必ず収束)、strictは StrictError。float32 格納差は vmd-reduce.md §2 で量子化誤差として
     許容されるため float64 上の検証で扱う。
 
-    範囲端の下側継ぎ目(§6.3)は bezier で、範囲開始キー(範囲内)の到達側曲線を元サンプルから
+    範囲端の下側継ぎ目(vmd-reduce.md §7.3)は bezier で、範囲開始キー(範囲内)の到達側曲線を元サンプルから
     再フィットし、手前の範囲外キーから範囲開始までの動きを忠実に保つ(_camera_seam_interp)。
     範囲外キーは変更不可のため、上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。
 
@@ -638,12 +638,12 @@ def reduce_camera_track(
     cheap accept を切って実ベジェ曲線を強制する(曲線形状の忠実度が要る滑らかさ目的。vmd.md
     §6.3)。既定 False は従来挙動(ファストパス有効・採否/キー数/性能不変)。
 
-    diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(error-split したフレームと
-    駆動チャンネルと正規化誤差)・maxspan_caps(maxspan-cap したフレーム, §5.5)・seam_rewrites(下側継ぎ目で
+    diagnostics に dict を渡すと vmd-reduce.md §6/§7.3 用に cuts(不連続検出位置)・splits(error-split したフレームと
+    駆動チャンネルと正規化誤差)・maxspan_caps(maxspan-cap したフレーム, vmd-reduce.md §6)・seam_rewrites(下側継ぎ目で
     曲線を書き換えた範囲開始フレーム)を埋める。
 
     progress を渡すと処理経過として progress(処理済みフレーム数, 全範囲のフレーム総数, フェーズ名)
-    を呼ぶ(§2.7)。区間の再帰分割中も部分区間ごとに進み、重い出力後検証区間では note="出力後検証"
+    を呼ぶ(処理経過の通知)。区間の再帰分割中も部分区間ごとに進み、重い出力後検証区間では note="出力後検証"
     を添える。
     """
     reduced = []
@@ -654,7 +654,7 @@ def reduce_camera_track(
     diag_verify = [] if diagnostics is not None else None
     if diagnostics is not None:
         reset_fit_counters()
-    # 全範囲のフレーム総数に対する処理経過(§2.7)。範囲ごとに base を進める。
+    # 全範囲のフレーム総数に対する処理経過。範囲ごとに base を進める。
     total_frames = sum(f1 - f0 for f0, f1 in ranges)
     progress_base = 0
     for f0, f1 in ranges:
@@ -666,7 +666,7 @@ def reduce_camera_track(
 
         cuts = detect_cuts_camera(f0, positions, eulers, distances, cut_thresholds)
         pcuts = perspective_cut_frames(f0, persp)
-        # 閾値カットは no_cut_detect で無効化されるが、perspective 切替は常に境界(§6.2)。
+        # 閾値カットは no_cut_detect で無効化されるが、perspective 切替は常に境界(vmd-reduce.md §7.2)。
         if not no_cut_detect:
             diag_cuts.update(cuts)
         diag_cuts.update(pcuts)
@@ -707,10 +707,10 @@ def reduce_camera_track(
                 )
 
         # 出力後検証は reduce_track の後で別途重くなりうる。フレーム進捗は
-        # 100%付近で止まって見えるため、フェーズ名を添えて停滞表示でないことを示す(§2.7)。
+        # 100%付近で止まって見えるため、フェーズ名を添えて停滞表示でないことを示す。
         if progress is not None:
             progress(progress_base, total_frames, "出力後検証")
-        # §7.3 出力後検証: 出力を再サンプリングし許容超過があれば、非strictは超過フレームを
+        # vmd-reduce.md §8.3 出力後検証: 出力を再サンプリングし許容超過があれば、非strictは超過フレームを
         # キーに追加して再構築(1フレーム間隔は元値を逐語保持し必ず収束)、strictはエラー。
         # 超過フレームは出力キー上には現れない(キー上は元値格納でフィット誤差0)ため、
         # added は必ず非空 → range_frames は厳密に増え [f0,f1] 内で必ず収束する。
@@ -738,7 +738,7 @@ def reduce_camera_track(
         if record:
             diag_verify.append(_verify_record(f0, f1, bad_counts, added_counts))
 
-        # §6.3 範囲端の下側継ぎ目: 範囲開始キー f0(範囲内)の到達側曲線を元サンプルから
+        # vmd-reduce.md §7.3 範囲端の下側継ぎ目: 範囲開始キー f0(範囲内)の到達側曲線を元サンプルから
         # 再フィットし、手前の範囲外キーから f0 までの区間の動きを忠実に保つ(bezier のみ)。
         # 範囲外キーは変更不可なので、上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。
         # 継ぎ目区間に別範囲の出力キーが挟まる場合は安全側でスキップする。
@@ -780,12 +780,12 @@ def reduce_bone_track(
     curve_mode="linear",
     diagnostics=None,
 ):
-    """ボーントラックを範囲ごとに削減し、出力キー列(昇順)を返す(§5.1, §3.2)。
+    """ボーントラックを範囲ごとに削減し、出力キー列(昇順)を返す(vmd-reduce.md §4, §9)。
 
     cut_thresholds は (POS, ROT)。範囲外の元キーは逐語保持する。curve_mode="bezier" では
     位置(軸別)と回転(slerp 係数)を1本のベジェ曲線で採否判定し、制御点を出力キーへ格納する。
     範囲端の下側継ぎ目は範囲開始キー(範囲内)の曲線のみ再フィット(範囲外キーは変更不可)。
-    diagnostics に dict を渡すと cuts・splits(error-split)・maxspan_caps(§5.5)・seam_rewrites を埋める(§2.7/§6.3)。
+    diagnostics に dict を渡すと cuts・splits(error-split)・maxspan_caps(vmd-reduce.md §6)・seam_rewrites を埋める(vmd-reduce.md §6/§7.3)。
     """
     reduced = []
     diag_cuts = set()
@@ -824,7 +824,7 @@ def reduce_bone_track(
                 cp_x, cp_y, cp_z = pos_ch.curve(a, b)
                 return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
-        # §7.3 出力後検証(カメラと同様。非strictは密化で収束、strictはエラー)。
+        # vmd-reduce.md §8.3 出力後検証(カメラと同様。非strictは密化で収束、strictはエラー)。
         # added は必ず非空(超過フレームは元値格納のキー上には現れない)ため厳密に増え収束する。
         # 進行不能(added 空)は理論上到達しないが、無限ループ防止に明示ガードを置く。
         record = diag_verify is not None  # 診断未指定時は記録のオーバーヘッドを持たない
@@ -833,7 +833,7 @@ def reduce_bone_track(
         while True:
             keys = build_bone_keys(source_keys, sorted(range_frames), segment_interp)
             if curve_mode == "bezier" and _C1_SMOOTHING:
-                c1_keys = _apply_c1_bone(keys, source_keys)  # §3.5 位置端点速度平滑化ポストパス
+                c1_keys = _apply_c1_bone(keys, source_keys)  # vmd-reduce.md §8.4 位置端点速度平滑化ポストパス
                 # strict は C1 が許容を破ったら適用せず元フィットを残す(C1 で許容契約を破らない)。
                 # 非strict は後段の密化が C1 の誤差を吸収するため無条件に適用する。
                 if not strict or not verify_bone_track(source_keys, c1_keys, [(f0, f1)], tols):
@@ -856,7 +856,7 @@ def reduce_bone_track(
         if record:
             diag_verify.append(_verify_record(f0, f1, bad_counts, added_counts))
 
-        # §6.3 範囲端の下側継ぎ目のみ(範囲内の範囲開始キーを再フィット)。範囲外キーは変更不可
+        # vmd-reduce.md §7.3 範囲端の下側継ぎ目のみ(範囲内の範囲開始キーを再フィット)。範囲外キーは変更不可
         # なので上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。bezier のみ。
         if curve_mode == "bezier":
             prev_src = _nearest_source_before(source_keys, f0)

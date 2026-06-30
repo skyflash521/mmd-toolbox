@@ -1,4 +1,4 @@
-"""出力キー再構築のテスト(sparsevmd.md §3.2, §4.2)。
+"""出力キー再構築のテスト(vmd-reduce.md §9, §1)。
 
 build_camera_keys / build_bone_keys は、削減後のキーフレーム列とソースキー列から、
 各フレームでサンプリングした値を持つ出力 CameraKey / BoneKey を生成する。
@@ -109,7 +109,7 @@ def test_build_camera_keys_samples_values():
 
 def test_build_camera_keys_samples_arriving_side_curve():
     # ソースキーが非線形(ease)補間を持つ場合、build は到達側カーブを評価した値を
-    # サンプリングする(単純なフレーム比例ではない。§3.2 到達側キー格納)。
+    # サンプリングする(単純なフレーム比例ではない。vmd-reduce.md §9 到達側キー格納)。
     # 出発側(frame0)は線形、到達側(frame10)のみ ease。補間は到達側キーに格納されるため、
     # 到達側カーブを読む正しい実装は frame3≈2.37523、出発側を読む誤実装は3.0になる。
     source = [
@@ -146,7 +146,7 @@ def test_build_bone_keys_samples_values_and_name():
     assert [k.frame for k in keys] == [0, 5, 10]
     assert keys[1].position[1] == pytest.approx(5.0)
     assert all(k.name == "センター" for k in keys)
-    # name_raw はソースの15バイト生バイト(null終端含む)をそのまま保持する(§3.2 ソート規約)。
+    # name_raw はソースの15バイト生バイト(null終端含む)をそのまま保持する(vmd-reduce.md §9 ソート規約)。
     assert all(k.name_raw == source[0].name_raw for k in keys)
     assert len(keys[0].name_raw) == 15
     assert all(k.interpolation == BONE_LINEAR_INTERP for k in keys)

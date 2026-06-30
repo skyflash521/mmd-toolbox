@@ -1,4 +1,4 @@
-"""定数(無変化)区間判定 is_constant のテスト(flat-span-presplit-plan §4.2)。
+"""定数(無変化)区間判定 is_constant のテスト(vmd-reduce.md §3)。
 
 各チャンネル種別が自分の単位で「区間 [a,b] が無変化か」を is_constant(a, b) で返す。
 - 位置(EuclideanVectorChannel): 各成分 X/Y/Z の区間サンプル最大−最小がしきい値以下。

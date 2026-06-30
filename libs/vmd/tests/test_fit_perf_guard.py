@@ -19,7 +19,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _LIBS_DIR = _REPO_ROOT / "libs"
 
-# 代表ワークロード。外部ファイルを要求せずテスト内で組み立てる(§4.1)。出力が空でないことも確認。
+# 代表ワークロード。外部ファイルを要求せずテスト内で組み立てる(vmd.md §4.1)。出力が空でないことも確認。
 _DRIVER = r"""
 import math
 from vmd import reduce

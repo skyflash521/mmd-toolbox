@@ -1,13 +1,13 @@
-"""出力後検証のテスト(sparsevmd.md §7.3, §7.2)。
+"""出力後検証のテスト(vmd-reduce.md §8.3, §8.2)。
 
 書き出し直前に対象トラック全体を再サンプリングし、全フレームが許容誤差以内かを
-§7.2 のメトリクスで検証する。verify_camera_track / verify_bone_track は許容超過
+vmd-reduce.md §8.2 のメトリクスで検証する。verify_camera_track / verify_bone_track は許容超過
 フレームの昇順リストを返す(空なら合格)。reduce_*_track はこれを使い、非 strict では
 超過フレームを必須キーに追加して再構築し(1フレーム間隔まで密にすれば元値を逐語保持
 できるため必ず収束)、strict では StrictError(終了コード4)を送出する。
 
 視野角の整数丸め誤差は分割不能な量子化誤差として扱い、許容(0.5度以上)を満たす限り
-超過扱いにしない(§7.3)。
+超過扱いにしない(vmd-reduce.md §8.3)。
 """
 
 import pytest
@@ -125,7 +125,7 @@ def test_verify_bone_detects_position_violation():
 
 def _bad_curve(monkeypatch):
     # 全チャンネルの curve を線形固定にし、採否(bezier)が曲線で受理した区間でも
-    # 出力には線形を格納させて、出力段で必ず誤差を発生させる(§7.3 の検査経路を励起)。
+    # 出力には線形を格納させて、出力段で必ず誤差を発生させる(vmd-reduce.md §8.3 の検査経路を励起)。
     import vmd.fit as fit
 
     linear_cp = (20, 20, 107, 107)

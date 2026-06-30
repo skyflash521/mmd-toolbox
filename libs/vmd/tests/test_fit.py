@@ -1,8 +1,8 @@
-"""線形チャンネル評価器のテスト(sparsevmd.md §5.2 線形部分, §7.2)。
+"""線形チャンネル評価器のテスト(vmd-reduce.md §5.1 線形部分, §8.2)。
 
 LinearScalarChannel は、区間 [a,b] の両端を結ぶ線形補間で内部フレームを予測し、
 元サンプルとの最大絶対誤差と最大誤差フレーム(内部)を返す。normalized は誤差を
-許容誤差で割った無次元量で、許容0は誤差0なら0・正なら無限大とする(§5.5)。
+許容誤差で割った無次元量で、許容0は誤差0なら0・正なら無限大とする(vmd-reduce.md §6)。
 """
 
 import math
@@ -58,7 +58,7 @@ def test_residual_frame_offset_start():
 
 def test_residual_prefers_velocity_reversal_over_max_error():
     # 端点 0,20 の直線に対し、最大誤差は単調区間の frame3(誤差11)だが、
-    # 速度反転(極値)は frame1/frame2。§5.5 に従い分割候補は極値中の誤差最大 frame2。
+    # 速度反転(極値)は frame1/frame2。vmd-reduce.md §6 に従い分割候補は極値中の誤差最大 frame2。
     # 採否用の最大絶対誤差は真の最大(11.0)を返す。
     ch = LinearScalarChannel(0, [0.0, 10.0, 2.0, 4.0, 20.0], tol=1.0)
     err, frame = ch.residual(0, 4)

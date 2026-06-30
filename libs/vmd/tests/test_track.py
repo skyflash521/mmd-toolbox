@@ -1,4 +1,4 @@
-"""トラック統合(per-track 削減パイプライン)のテスト(sparsevmd.md §5.1, §3.2)。
+"""トラック統合(per-track 削減パイプライン)のテスト(vmd-reduce.md §4, §9)。
 
 reduce_camera_track / reduce_bone_track は、ソースキー列と処理範囲から、各範囲を
 サンプリング→不連続検出→チャンネル構築→区間削減→出力キー生成し、範囲外の
@@ -89,7 +89,7 @@ def test_camera_peak_kept():
 
 def test_camera_cut_detected_preserved_as_adjacent_jump():
     # frame10 で位置が大ジャンプ(不連続)。境界として保持され、ジャンプは
-    # 隣接フレーム(9→10)としてなまらず残る(§6.2)。区間をまたいだ補間をしない。
+    # 隣接フレーム(9→10)としてなまらず残る(vmd-reduce.md §7.2)。区間をまたいだ補間をしない。
     source = []
     for f in range(21):
         x = 0.0 if f < 10 else 50.0
@@ -133,8 +133,8 @@ def test_camera_keep_frame_forced():
 
 def test_camera_range_outside_keys_preserved_verbatim():
     # 範囲[0,10]のみ削減。範囲外の元キー(20,30)は元のフィールド値・補間ブロックを
-    # そのまま逐語保持する(§3.2)。
-    # (削減区間に隣接する範囲外キーの到着側補間曲線書き換え=§6.3 は本MVPでは行わず、
+    # そのまま逐語保持する(vmd-reduce.md §9)。
+    # (削減区間に隣接する範囲外キーの到着側補間曲線書き換え=vmd-reduce.md §7.3 は本MVPでは行わず、
     #  範囲外キーは逐語保持する方針。将来 --snap-range / 境界キー注入で対応。)
     source = [cam(f, center=(float(f), 0.0, 0.0), fov=30 + f) for f in (0, 5, 10, 20, 30)]
     keys = camera_track(source, [(0, 10)])
@@ -192,7 +192,7 @@ def test_bone_peak_kept():
 
 
 def test_bone_cut_detected_preserved_as_adjacent_jump():
-    # frame10 で位置が大ジャンプ。境界として隣接フレームで保持(§6.2)。
+    # frame10 で位置が大ジャンプ。境界として隣接フレームで保持(vmd-reduce.md §7.2)。
     source = [bone("センター", f, pos=(0.0, 0.0 if f < 10 else 5.0, 0.0)) for f in range(21)]
     keys = bone_track(source, [(0, 20)])
     fr = frames(keys)
