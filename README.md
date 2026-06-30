@@ -169,10 +169,7 @@ shakevmd <入力ファイル名>.vmd
 | `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
 | `libs/lipsync/` | 口パク生成の共有ドメインライブラリ |
 | `libs/vocal_analysis/` | 音声解析の共有ドメインライブラリ |
-| `tools/mocapvmd/` | `mocapvmd` コマンド本体と仕様・テスト |
-| `tools/shakevmd/` | `shakevmd` コマンド本体と仕様・テスト |
-| `tools/sparsevmd/` | `sparsevmd` コマンド本体と仕様・テスト |
-| `tools/vpr2vmd/` | `vpr2vmd` コマンド本体と仕様・テスト |
+| `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は `pyproject.toml`、おもなツールの使い方は冒頭「ツール」一覧 |
 
 ### 開発環境
 
