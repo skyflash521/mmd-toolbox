@@ -54,10 +54,9 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
 | [../pmx/pmx.md](../pmx/pmx.md) | pmx.types, pmx.io, pmx.pose | PMX読み取り・ボーン階層データモデル・FK評価(別フォーマット層 `pmx`) |
 
 キーフレーム疎化の共通機構 `vmd.reduce`(支援: `vmd.cuts`・`vmd.fit`・`vmd.sample`)は
-複数ツール(shakevmd・sparsevmd・mocapvmd)が共有する。疎化アルゴリズム(区間分割・キー削減・
-継ぎ目処理・誤差検証・ベジェ採否)の現行の詳細記述は
-[../../tools/sparsevmd/sparsevmd.md](../../tools/sparsevmd/sparsevmd.md) にあり、`vmd.reduce` の docstring も
-そこを参照する(フォーマット層側での正式な仕様化は未整備で、当面この記述を参照先とする暫定状態)。`reduce` は
+複数ツールが共有する。疎化アルゴリズム(区間分割・キー削減・
+継ぎ目処理・誤差検証・ベジェ採否)のフォーマット層側でのまとまった仕様化は未整備で、
+現行は `vmd.reduce`(支援モジュール含む)の実装と docstring を根拠とする。`reduce` は
 カメラ枠を含む共通 `Tolerances` を扱うが、ボーンだけを扱うツール向けに、ボーンの位置・回転許容誤差だけを
 受け取り未使用のカメラ枠を内部で埋めて `Tolerances` を返すヘルパ `build_bone_tolerances` を提供する。
 
@@ -114,16 +113,6 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
   `libs/vmd/tests/data/README.md`)。既知値が必要なデータ(カット入り・順不同・切り詰め・
   v1形式・混在セクション・ベイク済み等)はテストコード内のフィクスチャとして
   組み立てる。
-
----
-
-## 5. 利用ツール
-
-| ツール | 利用機能 |
-|---|---|
-| shakevmd ([../../tools/shakevmd/shakevmd.md](../../tools/shakevmd/shakevmd.md)) | vmd.io, vmd.types, vmd.interp, vmd.camera, vmd.reduce |
-| sparsevmd ([../../tools/sparsevmd/sparsevmd.md](../../tools/sparsevmd/sparsevmd.md)) | vmd.io, vmd.interp, vmd.reduce(+cuts, fit, sample) |
-| mocapvmd ([../../tools/mocapvmd/mocapvmd.md](../../tools/mocapvmd/mocapvmd.md)) | vmd.io, vmd.types, vmd.reduce(+cuts) |
 
 ---
 
@@ -224,7 +213,7 @@ sparsevmd / mocapvmd が共有する疎化エンジンで、疎化処理時間�
   では lsq を 16〜52% 削り wall も縮んだが、**前提が偽**: 3次ベジェ(`least_squares`)は線形・ease 候補が
   外れる曲線も許容内へ収められるので、フィット可能な回転区間を誤って分割する(単一区間で表せる回転が全
   フレーム分割される回帰をテストが検出)。共有エンジンの正しさを速度と引き換えにするため不採用。
-- **回転C1平滑化**: 位置C1(../../tools/sparsevmd/sparsevmd.md §7.4)の回転版として、slerp 係数の端点速度を端点間角度 Ω で
+- **回転C1平滑化**: 位置キーのC1平滑化(区間の端点で速度を連続にする平滑化)の回転版として、slerp 係数の端点速度を端点間角度 Ω で
   重み付けした角スピード連続へ寄せる案。理論は妥当だが、回転は角度誤差が係数曲線の形に敏感で、端点速度を
   強制すると許容を破って密化し、代表 mocap で出力キーが約13%増。効果は角スピード連続のみ(軸が変わるキー
   の方向不連続は残る)でキー増に見合わず不採用。
