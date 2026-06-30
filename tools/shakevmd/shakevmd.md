@@ -3,7 +3,9 @@
 MMDカメラモーション(VMD)に手ぶれを焼き込むCLIツール
 
 実装言語: Python 3.11+
-依存: vmd(同リポジトリのフォーマット層ライブラリ、../../libs/vmd/vmd.md), numpy, scipy, click または argparse
+依存: vmd(同リポジトリのフォーマット層ライブラリ、../../libs/vmd/vmd.md), cli_events(同リポジトリの
+共有ドメイン層ライブラリ、機械モードのイベント送出、../../libs/cli_events/cli_events.md), numpy, scipy,
+click または argparse
 
 ---
 
@@ -111,6 +113,26 @@ MMDカメラモーション(VMD)に手ぶれを焼き込むCLIツール
 指定時は表示しない(完了行も含めて出さない)。進捗表示は副作用専用であり、出力VMD・終了コード・
 `--dry-run`/`--verbose` の標準出力統計・`warning:` は変えない。`--quiet` が抑制するのは進捗表示だけで、
 警告・統計・終了コードは抑制しない。
+
+### 2.8 機械モードとメタ操作(機械可読インターフェース)
+
+他のソフトウェアが子プロセスとして呼ぶ機械利用のために、機械可読の起動フラグを持つ。共通の契約
+(チャネル固定・イベント種別の語彙・終端規則・終了コードの基底・標準出力の UTF-8 固定)は
+[CLI インターフェース規約](../../docs/conventions/cli-interface.md)が正で、共通のイベント送出基盤は
+[cli_events](../../libs/cli_events/cli_events.md)を用いる。shakevmd 固有のイベントペイロード・`code` 値は §12 が定める。
+
+| 引数 | 説明 |
+|---|---|
+| `--machine` | 出力を JSON Lines のイベントストリームにする(§12)。標準出力はイベント専用、標準エラーは人間向けログ・警告、終了コードは §9。既定(非指定)の人間向け表示・終了コードは変えない |
+| `--describe` | VMD を読まずにオプション定義とプリセット一覧の result イベント(§12.4)を出して終了する。`--version`/`--help` と同じ独立メタ操作で、`--machine` を要さず単独で起動でき、入力 positional も要求しない |
+
+- **入力検査**: `--machine --dry-run` は VMD を書かず、入力メタ情報の result イベント(§12.2 の `mode:"inspect"`)を
+  出す。既存 `--dry-run`(書かない統計表示)の意味を機械モードへ写したもの。
+- **`--help`/`--version` の機械モード挙動**: `--machine` と併用しても両者は従来どおり人間向けテキストを出して
+  終了コード0で終わり、イベントストリームには載せない(処理を起動しないメタ操作のため。規約 §3 のメタ操作の例外)。
+- **`--help` の説明**: 各オプション・引数の役割(§2.2–§2.7 の説明)を人間向けに出す。機械向けの自己記述
+  `--describe` とは別軸で、対話利用者が `--help` だけで使い方を把握できる。
+- 真偽フラグは `--x`/`--no-x` の様式に揃える(現状 `--smooth`/`--no-smooth`)。
 
 ---
 
@@ -399,6 +421,14 @@ shakevmdを通した統合確認として実施する。
 | 1 | 入力ファイル不正(VMDでない / カメラキーなし) |
 | 2 | 引数エラー(範囲不正・重複、上書き未許可 など) |
 | 3 | 出力書き込み失敗 |
+| 130 | 協調的な中断(Ctrl-C 等。§12.6) |
+
+- `0`〜`3` は[CLI インターフェース規約](../../docs/conventions/cli-interface.md) §5 の基底と同じ意味。`130` は
+  全ツール共通の中断予約コード(§12.6)で、基底 `0`〜`3` の意味へ押し込めない。
+- 想定外の内部エラー(ベイク・平滑化・統計算出 等の未捕捉例外)は最も近い基底へ寄せて `1` で終える。
+  機械モードでは §12.5 の `internal_error` error イベントで read 起因の `not_vmd` と識別でき、非機械モードでは
+  理由を標準エラーへ最低1行出す(いずれもトレースバックは出さない)。
+- 機械モードでは終了コードに加え、§12.5 の error イベントで「どのフィールド/パスが・なぜ不正か」を返す。
 
 ---
 
@@ -502,3 +532,167 @@ walking 等の挙動を失うため、bake の全成分を漏れなく連続評�
 ### 11.6 スコープ外
 - 品質プリセット体系の変更(sparsevmd 等の品質プリセット体系を含む)。
 - shakevmd からの bone 経路利用(shakevmd はカメラのみ)。
+
+---
+
+## 12. 機械モード(機械可読インターフェース)
+
+機械利用(子プロセス呼び出し)向けに、`--machine` で出力を JSON Lines のイベントストリームへ切り替える
+(§2.8)。共通の契約・語彙は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)が正、
+イベント送出は共有基盤[cli_events](../../libs/cli_events/cli_events.md)を用いる。本章は **shakevmd 固有の
+ペイロード形・`code` 値**を定める(規約は種別の語彙と終端規則のみを共通化し、ツール固有ペイロードは持たない)。
+
+- **チャネル固定**(規約 §3): 機械モードの標準出力は §12.2 のイベント**のみ**(UTF-8 固定、ロケール符号化に
+  依存しない)。人間向けログ・警告テキストは標準エラーへ出す。
+- **終端規則**(規約 §4): ストリームは result または error の**ちょうど1つ**で終端する。呼び出し側が
+  プロセスを強制終了した場合のみ終端イベントを出せず途切れる(規約 §4 の唯一の例外、§12.6)。
+- 各イベントは種別フィールド `type` を持つ。`code` は機械利用側の分岐に使い、人間向け `message` と分離する。
+  shakevmd 由来の `code` は安定 snake_case。ライブラリ(`vmd.io`)由来の警告コードはライブラリの形式のまま
+  (ハイフン区切り)透過する(§12.3)。
+
+### 12.1 起動
+
+- `--machine`: 機械モード。標準出力をイベント専用にする(§2.8)。
+- `--machine --dry-run`: 入力検査。VMD を書かず入力メタ情報の result(§12.2 の `mode:"inspect"`)を出す。
+- `--describe`: 自己記述。VMD を読まずオプション定義とプリセット一覧の result(§12.2 の `mode:"describe"`、
+  中身は §12.4)を出す。`--machine` を要さず、入力 positional も要求しない独立メタ操作。
+- `--help`/`--version` は `--machine` 併用でも人間向けテキストを出して終了コード0で終わり、イベント
+  ストリームには載せない(§2.8)。
+
+### 12.2 イベントペイロード
+
+各イベントは `type` を持つ。
+
+- **progress**: `{type:"progress", stage, done, total, note, elapsed}`。`stage` は `"bake"` / `"smooth"` の
+  安定 id。`done`/`total` はフレーム進捗で、`total` が実行時に不明な段は `null`、`note` は補足文字列
+  (無ければ `""`)、`elapsed` は段開始からの経過秒。各段は開始時に `done=0, total=null` の progress を1本出す。
+- **warning**: `{type:"warning", code, message, section}`。`section` は対象セクション名の配列(該当が無ければ
+  `null`)。複数セクションにまたがる警告は1イベントで配列に並べる。`code` 割り当ては §12.3。
+- **result**: 正常終了の終端イベント。`mode` で形が決まる:
+  - `mode:"bake"`(通常実行): `{type:"result", mode:"bake", output, keys, applied_ranges, max_amplitude,
+    detected_cuts}`。`output` は書き出しパス(文字列)。`keys` は出力 VMD のカメラキー数(`--smooth` 適用後の
+    キー数。`--no-smooth` なら密キー数)。`applied_ranges` はスナップ後の適用範囲の `[start, end]` 配列、
+    `max_amplitude` は最大振幅(float)、`detected_cuts` は検出カットフレームの配列。
+  - `mode:"inspect"`(入力検査 `--machine --dry-run`): `{type:"result", mode:"inspect", output, input_kind,
+    keys, frame_range, duration_sec, sections, applied_ranges, max_amplitude, detected_cuts}`。VMD を書かないので
+    `output:null`。`input_kind` は常に `"camera"`。`keys` は**入力カメラキー数**(正規化作業ビュー=フレーム
+    ソート・同一フレーム重複を後勝ちで畳んだ入力キーの数。ベイク後の密キー数ではない)。`frame_range` は入力
+    カメラキーの `[最小フレーム, 最大フレーム]`、`duration_sec` は最大フレーム÷30、`sections` は入力に存在する
+    セクション名の配列(`"camera"` と混在する非カメラセクション)。加えて `--dry-run` の揺れプレビュー統計
+    `applied_ranges`/`max_amplitude`/`detected_cuts` を併記する(`bake` と同義。ベイク後の密キー数はここには載せない)。
+  - `mode:"describe"`(自己記述 `--describe`): `{type:"result", mode:"describe", options, presets}`(§12.4)。
+    VMD を読まないので bake 統計キー(`output`/`keys`/`applied_ranges`/`max_amplitude`/`detected_cuts`)は
+    載せない(キー自体を出さない)。`bake`/`inspect` は逆に `options`/`presets` を載せない。
+- **error**: `{type:"error", code, exit_code, field, path, message}`。`field`/`path` は対象が無ければ `null`。
+  失敗の終端イベント。`code`/`field`/`exit_code` の割り当ては §12.5。
+
+### 12.3 warning の `code` 割り当て
+
+- ライブラリ層(`vmd.io.read`)の警告は `VmdWarning.code` をそのまま載せる(ハイフン区切りのライブラリ形式を
+  透過し snake_case へ変換しない)。`read()` が返す現行値は `decode-error` / `sections-missing`。
+- shakevmd 由来の警告は安定コードを付番する:
+
+| 発生源 | `code` | `section` |
+|---|---|---|
+| ベイク正規化の同一フレーム重複破棄(§3.1) | `bake_normalize_duplicate` | `["camera"]` |
+| 範囲長が 2×fade 未満でのフェード自動短縮(§5.1) | `fade_shortened` | `null` |
+| ノイズのオクターブ帯域クランプ(§6.1) | `octave_clamped` | `null` |
+| カメラ以外のセクションを無加工透過(§3.1) | `non_camera_sections_passthrough` | 透過した全セクション名の配列(例 `["bone","morph"]`) |
+
+shakevmd 由来の警告は現状コード無しの自由文字列で(一部は `noise` の `octave-clamped:` のように疑似接頭を
+持つ)、上表の snake_case コードを **shakevmd 側で付番**し、元の自由文字列の文言は `message` に保持する。
+これらはライブラリ由来のハイフンコード(上記 `vmd.io` の `VmdWarning.code` 透過)とは別物で、shakevmd 由来を
+ハイフンのまま透過しない(現状の疑似接頭 `octave-clamped:` も上表の `octave_clamped` へ置き換える)。
+
+### 12.4 `--describe` の中身
+
+`options` は**ベイクを駆動する引数**の配列。対象は positional `input` と、§2.2–§2.7 の処理用フラグ
+(`--output`/`--overwrite`/`--range`/揺れ・強度・モーション適応・カット系・`--preset`/`--dry-run`/`--smooth`/
+`--seed`/`--impulse`/`--fade`/`--verbose`/`--quiet`)。メタ/モード操作(`--describe`/`--version`/`--help`/
+`--machine`)は含めない(処理を駆動せず、フォーム生成の対象外)。各要素は `{name, type, constraint, default, help}`
+(キーは常に5つ、該当しない値は `null`):
+
+- `name`: 長形式フラグ文字列(例 `"--amp-rot"`)。positional は `"input"`。
+- `type`: 固定語彙 `"float"` / `"int"` / `"str"` / `"flag"`(真偽) / `"enum"`(選択肢) / `"compound"`(複合
+  トークン)のいずれか。
+- `constraint`: `type` ごとに決まる(キーは型ごとに固定):
+  - 数値(`float`/`int`): `{min, max, exclusive_min}`(3キー常設)。`exclusive_min` は常に bool。`max` は上限が
+    無ければ `null`。型関数から機械導出する: 非負 float は `{min:0, max:null, exclusive_min:false}`、正 float は
+    `{min:0, max:null, exclusive_min:true}`、有限のみの float は `{min:null, max:null, exclusive_min:false}`。
+    範囲制約の無い裸の数値(`--seed` の `int`)は `constraint:null`。
+  - `enum`: `{choices:[...]}`(例 `--preset` は `presets.PRESET_NAMES`)。
+  - `compound`: `{format, fields}`。`format` はトークン文法の文字列、`fields` は各トークンの制約配列で
+    要素は `{name, type, min, max, exclusive_min}`(`type` は `"int"`/`"float"`、数値制約3キーは単純数値
+    引数と同義。上限が無ければ `max:null`)。cli.py の各 compound パーサが課す値制約を機械導出する:
+    - `--rot-weights`=`"P,Y,R"`: 各 float・有限のみ。`P`/`Y`/`R` とも `{type:"float", min:null, max:null,
+      exclusive_min:false}`。
+    - `--cut-threshold`=`"位置,角度"`: 各 float・有限かつ非負。`位置`/`角度` とも `{type:"float", min:0,
+      max:null, exclusive_min:false}`。
+    - `--impulse`=`"F:S:D"`(複数可): `F`=`{type:"int", min:0, max:null, exclusive_min:false}`、
+      `S`=`{type:"float", min:0, max:null, exclusive_min:false}`、`D`=`{type:"float", min:0, max:null,
+      exclusive_min:true}`。
+    - `--range`=`"START:END"`(各辺省略可、複数可): `START`/`END` とも `{type:"int", min:0, max:null,
+      exclusive_min:false}`。各辺は省略可(省略時はそのトークンを与えない)。`START<=END` の順序制約は
+      トークン横断のため `fields` に含めず、parse 時に `bad_argument`/`range_reversed`(§12.5)で返す。
+  - `flag`: `null`。
+- `default`: 公開オプションを次の規則で全て覆う(`cli.py` の定義から機械導出):
+  - 揺れパラメーター(`--amp-rot`/`--amp-pos`/`--rot-weights`/`--freq`/`--fade`/`--motion-damp`/`--settle`/
+    `--cut-threshold`): 解決後の hard-default の値(例 `amp_rot=0.8`、`cut_threshold=[5.0, 20.0]`)。argparse 既定は
+    未指定センチネルだが describe には解決後の hard-default を出す。
+  - `--seed`: `1`。
+  - 真偽フラグ: `--overwrite`/`--dry-run`/`--verbose`/`--quiet` は `false`、`--smooth`(既定 on)は `true`。
+  - `--preset`: `null`(未指定)。
+  - `--output`: `null`(既定は入力名由来の算出値 `<入力名>_shake.vmd` で固定リテラルにできないため。算出規則は
+    `help` に記す)。
+  - 複数指定系(`--range`/`--impulse`)は既定を持たないので `null`。
+- `help`: 人間向け説明(§2.2–§2.7 の各引数説明文)。
+
+`presets` は各要素 `{name, values}` の配列(キーは常に2つ)。`name` は `presets.PRESET_NAMES` の名前文字列、
+`values` は公開引数名→値のオブジェクト(キーは `amp_rot`/`amp_pos`/`rot_weights`/`freq`/`motion_damp`/`settle`/
+`cut_threshold` のうちそのプリセットが定義する分)。プリセットが定義しない公開引数は `values` に載せない
+(未指定でその引数の hard-default を継承する、§2.7)。内蔵パラメーター(`presets.INTERNAL_PARAM_NAMES`)は
+CLI 非公開なので `values` に出さない(§8 の非公開方針と一致)。
+
+### 12.5 構造化エラー
+
+失敗は終了コード(§9)に加え、機械モードでは error イベントで「どのフィールド/パスが・なぜ」を返す。
+非機械モードでも理由を標準エラーへ最低1行出す(トレースバックは出さない)。各経路の `code`/`field`/`exit_code`:
+
+| 事象 | `code` | `field` | `exit_code` |
+|---|---|---|---|
+| 入力が VMD でない・破損 | `not_vmd` | `"input"` | 1 |
+| カメラキー0件 | `no_camera_keys` | `"input"` | 1 |
+| 範囲書式・逆順 `START>END`・未知オプション・型エラー・positional 欠落等(argparse 検出) | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`) | 2 |
+| 省略端を解決した結果が逆順(例 `999:` で末尾<999) | `range_reversed` | `"--range"` | 2 |
+| 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
+| 範囲の重複・接触(ベイクの ValueError) | `range_overlap` | `"--range"` | 2 |
+| 有限だが過大な値が float32 で溢れた(ベイク中・書き込み時の OverflowError) | `value_overflow` | `null` | 2 |
+| 焼き結果が inf/nan(非有限出力) | `non_finite_output` | `null` | 2 |
+| 出力書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"`(+ `path`) | 3 |
+| 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
+| 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
+
+- `not_vmd` は握り潰していた例外の種別を `message` に載せる。`bad_argument` は複数の検証失敗が同一終了コード `2`
+  に集約される場合もイベント側で1件ずつ区別する。
+- `value_overflow`・`non_finite_output` の `field` を `null` にするのは、起因引数を単一に帰属させられないため
+  (無理に1つ選ばず `message` に状況を載せる)。書き込み例外のうち `OverflowError` は過大値起因なので
+  `value_overflow`(exit 2)、それ以外の I/O 失敗のみ `write_failed`(exit 3)。
+- `internal_error` は表の各分類に当たらない未捕捉例外の受け皿で、`main()` 本体(引数解析後)をトップレベルで
+  捕捉して畳む。終了コードは最も近い基底へ寄せて `1` とし、機械モードでは `code:"internal_error"` で read 起因の
+  `not_vmd` と識別できる。`KeyboardInterrupt` は内部エラーでなく中断(`cancelled`/`130`、§12.6)として手前で分岐する。
+
+### 12.6 中断
+
+長時間処理(ベイク・既定 on の平滑化)を呼び出し側から安全に中断できる。
+
+- **出力の原子性**: VMD 出力は一時ファイルへ書き切ってから最終パスへ置換する(`vmd.io` で既達)。途中終了で
+  中途半端な出力ファイルを残さない。
+- **中断機構**: `main()` 全体で `KeyboardInterrupt`(端末 Ctrl-C / 親プロセスの中断)を捕捉する。**機械モード**
+  では `cancelled` の error イベントを標準出力へ出してストリームを終端し、**非機械モード**では標準出力に JSON を
+  出さず中断理由を標準エラーへ1行出す。どちらも終了コード `130` を返す。VMD 書き込みは全計算後に1回だけ起きる
+  ため、ベイク・平滑化実行中の `KeyboardInterrupt` は書き込み前に処理を中断し、原子性により中途半端な出力は
+  残らない。専用の停止フラグ・チェックポイント API は設けない。
+- **Windows**: POSIX シグナルに依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む。
+- **終了コード `130`**: 基底 `0`〜`3` へ押し込めず、全ツール共通の中断予約コード(規約 §5/§8)とする。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の唯一の例外)。
+  原子性により中途半端な出力は残らない。
