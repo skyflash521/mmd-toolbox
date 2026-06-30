@@ -17,7 +17,7 @@ class VmdFormatError(Exception):
 
 @dataclass
 class VmdWarning:
-    """続行可能な事象の構造化報告(mmd_toolbox.md §3)。"""
+    """続行可能な事象の構造化報告(vmd.md §3)。"""
 
     code: str
     message: str

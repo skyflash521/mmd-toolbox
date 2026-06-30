@@ -3,7 +3,7 @@
 vpr の音符ベロシティ(0–127、常在)を各モーラの開き量(`MouthEvent.open_amount`、0〜1)へ
 決定論的に写像する。写像式と既定の扱いは各関数の docstring に持つ。開き量は lipsync の合成保持値の
 スケールに使われ、合成総量の上限クランプ(open_cap)は lipsync 側が行う
-([lipsync 仕様](../lipsync/lipsync.md) §4.1)。
+([lipsync 仕様](../../libs/lipsync/lipsync.md) §4.1)。
 """
 
 GAMMA_DEFAULT = 0.6  # 累乗カーブの既定指数(弱音側を持ち上げる)

@@ -10,15 +10,15 @@
 
 ## 1. 前提と依存
 
-- 実装言語 Python 3.11+。`mmd_toolbox` 本体の必須依存は `numpy`/`scipy` のまま保つ。
+- 実装言語 Python 3.11+。本リポジトリ本体の必須依存は `numpy`/`scipy` のまま保つ。
 - 音声前段(S0–S3: 入力読み込み・ボーカル分離・音素認識・RMS算出)と S-1認識ゲート、およびその重い依存
-  (分離・認識のライブラリ・モデル)は共有モジュール [vocal_analysis](../vocal_analysis/vocal_analysis.md) に
-  委譲する(採用ツール・受入基準は [vocal_analysis](../vocal_analysis/vocal_analysis.md) §8・§9)。
+  (分離・認識のライブラリ・モデル)は共有モジュール [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に
+  委譲する(採用ツール・受入基準は [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §8・§9)。
   重い依存は vocal_analysis 側に閉じる。
-- VMD 書き出しは `mmd_toolbox.vmd.io`。生成するのはモーフキーのみ(汎用疎化は使わない。song2vmd.md §9)。
-- アニメ的口パクのキーフレーム生成は共有モジュール [lipsync](../lipsync/lipsync.md) に委譲する。`song2vmd` は
+- VMD 書き出しは `vmd.io`。生成するのはモーフキーのみ(汎用疎化は使わない。song2vmd.md §9)。
+- アニメ的口パクのキーフレーム生成は共有モジュール [lipsync](../../libs/lipsync/lipsync.md) に委譲する。`song2vmd` は
   口形イベント列と開き量を作って `lipsync` へ渡す(モーフ生成コア・既定プロファイルは
-  [lipsync 仕様](../lipsync/lipsync.md))。
+  [lipsync 仕様](../../libs/lipsync/lipsync.md))。
 - 音声前段の外部ツールは vocal_analysis が内部で呼ぶ。利用者は `song2vmd INPUT` の1コマンドのみ。
 
 ---
@@ -32,7 +32,7 @@
 **ツール横断の着手順**: アニメ的口パクのモーフ生成コアは共有モジュール `lipsync` にあり、`vpr2vmd`(vpr
 入力・認識不要)で先に実装・チューニングして見た目の品質を詰める。音声前段(S0–S3)と S2母音認識の成立可否
 (S-1ゲート)は共有モジュール `vocal_analysis` の実装で行い
-([vocal_analysis](../vocal_analysis/vocal_analysis.md) §2 の S0–S3 と §9 のゲート)、S-1ゲートは `vpr2vmd` と
+([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §2 の S0–S3 と §9 のゲート)、S-1ゲートは `vpr2vmd` と
 並行に早期評価する。`song2vmd` は、実証済みの `lipsync` コアと `vocal_analysis` の共有出力へ、入口処理
 (口形イベント確定・RMS→開き量)を接続する位置づけで、S-1ゲート合格後に進める。下表のうち S-1〜S-5 は
 `vocal_analysis` 側の実装で、S-0・S-6〜S-11 が `song2vmd` 固有のステップ。
@@ -40,9 +40,9 @@
 | 区分 | ステップ | 内容 | 主な受入条件 |
 |---|---|---|---|
 | 基盤 | S-0 | パッケージ雛形・CLI骨組み(引数パース)・依存宣言・`--dry-run` の空実行 | CLIが起動し引数を解釈する |
-| 前段(vocal_analysis) | S-1〜S-5 | S-1 認識ゲート・S0 入力読み込み・S1 ボーカル抽出・S2 音素認識・S3 強弱RMS算出は `vocal_analysis` が担う([vocal_analysis](../vocal_analysis/vocal_analysis.md) §2 の S0–S3、受入基準・認識器固定・推論条件は同 §9・§5.1) | vocal_analysis の受入条件に従う。S-1ゲート合格後に song2vmd の入口(S-6)へ進む |
+| 前段(vocal_analysis) | S-1〜S-5 | S-1 認識ゲート・S0 入力読み込み・S1 ボーカル抽出・S2 音素認識・S3 強弱RMS算出は `vocal_analysis` が担う([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §2 の S0–S3、受入基準・認識器固定・推論条件は同 §9・§5.1) | vocal_analysis の受入条件に従う。S-1ゲート合格後に song2vmd の入口(S-6)へ進む |
 | 中核 | S-6 | 口形イベント確定(入口): vocal_analysis の音素セグメント列＋RMSから、IPA→5母音写像の適用・両唇閉鎖判定・gap解決・無音/閉口確定・母音境界のオンセット補正で口形イベント列を確定。各モーラのRMSから開き量を決定(4.2・4.3・4.6) | 口形イベント列(母音・両唇閉鎖・無音)と開き量が決定論的に得られる |
-| 中核 | S-7 | S4 モーフ生成: 口形イベント列＋開き量＋プリセットを共有モジュール `lipsync` へ渡しモーフキーを生成([lipsync.md](../lipsync/lipsync.md) §4)。VMD出力は `mmd_toolbox.vmd.io` | lipsync.md §3 の品質基準を満たす疎なモーフキーVMDを出力 |
+| 中核 | S-7 | S4 モーフ生成: 口形イベント列＋開き量＋プリセットを共有モジュール `lipsync` へ渡しモーフキーを生成([lipsync.md](../../libs/lipsync/lipsync.md) §4)。VMD出力は `vmd.io` | lipsync.md §3 の品質基準を満たす疎なモーフキーVMDを出力 |
 | 段 | S-8 | 長尺分割(無音区切り/無音なし時は最大チャンク長で強制分割、オーバーラップ・中央採用・継ぎ目結合・曲全体RMS正規化) | 継ぎ目でキーの重複・欠落がなく、境界母音が結合され(再アタック・保持値跳ねなし)、中央採用・曲全体RMS基準が保たれる |
 | 仕上げ | S-9 | スタイルプリセット(8.1)とパラメータ確定 | プリセットで開き量レンジ・タイミングが切り替わる |
 | 仕上げ | S-10 | レポート/診断(`--dry-run`)・`--keep-intermediate` | 仕様6.7の統計を出力 |
@@ -57,20 +57,20 @@ S-7 の `lipsync` 生成を全曲へ1回適用する(4.5)。
 
 ## 3. テスト方針
 
-- `mmd_toolbox` のテスト規約(pytest・決定論・乱数シード固定・ネットワーク/GPU 不要)に従う。
+- `vmd` のテスト規約(pytest・決定論・乱数シード固定・ネットワーク/GPU 不要)に従う。
 - 入出力のVMDはラウンドトリップと既知値フィクスチャで検証。モーフキーの値・フレーム・名称(Shift-JIS)を確認。
-- 音声前段(S0–S3)の外部モデル依存は vocal_analysis 側に隔離される([vocal_analysis](../vocal_analysis/vocal_analysis.md) §8 のアダプタ)。`song2vmd` の
+- 音声前段(S0–S3)の外部モデル依存は vocal_analysis 側に隔離される([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §8 のアダプタ)。`song2vmd` の
   入口処理(S-6 の gap解決・あいうえお写像の適用・閉鎖判定、および S-8 の継ぎ目結合の中核)は正規化中間形式
   (セグメント列・RMS)だけに依存させ、合成したセグメント列＋合成RMSのフィクスチャで決定論的にモックテストする。
 - **共有モーフ生成コア(`lipsync`)の正しさ・回帰は、`song2vmd` と `vpr2vmd` のツール間比較では捉えられない**
   (両者は同じ `lipsync` コアを通るため相殺される)。lipsync コアの回帰は
-  [lipsync 仕様](../lipsync/lipsync.md) §7 の既知値フィクスチャで担保する(ツール間比較で
+  [lipsync 仕様](../../libs/lipsync/lipsync.md) §7 の既知値フィクスチャで担保する(ツール間比較で
   代替しない)。`song2vmd` 側は S-7 で口形イベント列・開き量を `lipsync` へ渡す接続を検証する。
 - S-8 のチャンク制御は vocal_analysis(S0–S2)を扱うため、純関数の核(継ぎ目結合・無音判定ヒステリシス)を
   分離してテストし、前段呼び出し部は小サンプルまたはモックで確認する。RMS算出(S3)自体の純関数核テストは
   vocal_analysis 側で行う。
 - 実モデルを使う検証(S-1ゲート)は vocal_analysis 側で重テストとして分離し、通常の `pytest` には含めない
-  ([vocal_analysis](../vocal_analysis/vocal_analysis.md) §9)。
+  ([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §9)。
 - **開発時のE2E検証(vpr由来データ)**: 音声と対の vpr があるとき、`song2vmd`(音声)の出力する口形イベント列を、
   同じ vpr 由来の口形イベント(同じ vpr を入れた `vpr2vmd` の出力)と突き合わせ、認識・入口側の誤差の傾向を見る。
   **未監査の vpr は厳密な正解でなく補助比較に限る**(正式な合否は §4.1 の監査済みゲートデータで行う)。これは
@@ -89,13 +89,13 @@ S-7 の `lipsync` 生成を全曲へ1回適用する(4.5)。
 
 S-1認識ゲート(代表データ・ラベル・vpr由来自動ラベルと監査・採点対象段階・母音正解率・過開口率・区間
 対応付け・境界ずれ・集計受入基準・再現性)は共有モジュール `vocal_analysis` の責務であり、
-[vocal_analysis](../vocal_analysis/vocal_analysis.md) §9 を正本とする。`song2vmd` は S-1ゲート
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §9 を正本とする。`song2vmd` は S-1ゲート
 合格後に入口(S-6)へ進む。本書では重複定義しない。
 
 ### 4.2 母音境界の確定とgap解決(入口)
 
 認識器の固定(モデルid/revision・16kHz mono・推論条件)、CTC区間化(60ms吸収)、IPA→5母音写像規則は
-`vocal_analysis`([vocal_analysis](../vocal_analysis/vocal_analysis.md) §5.1・§7)が正本。
+`vocal_analysis`([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §5.1・§7)が正本。
 `song2vmd` 入口は vocal_analysis の母音/子音/gap セグメント列＋IPAラベルへ次を適用して口形イベント列を確定する
 (処理順は4.6)。
 
@@ -127,7 +127,7 @@ S-1認識ゲート(代表データ・ラベル・vpr由来自動ラベルと監�
 
 モーフ生成のアルゴリズム(母音合成・協調調音の遷移長・最小保持の併合/間引き・区間内競合短縮・連結区間内の
 強弱節点・30fps量子化・伸び揺らぎ)と**既定の母音合成プロファイル**は共有モジュール `lipsync` が持つ
-([lipsync 仕様](../lipsync/lipsync.md) §4 が正本)。本節は `song2vmd` が `lipsync` へ渡す
+([lipsync 仕様](../../libs/lipsync/lipsync.md) §4 が正本)。本節は `song2vmd` が `lipsync` へ渡す
 **プリセットの具体値**と、`song2vmd` 入口の **RMS→開き量の写像・低信頼判定**を定める。時間はフレーム(30fps)。
 `pop` を基準とし、他プリセットは開き量レンジと下表を調整する(値は `lipsync` のタイミング/誇張パラメータへ渡す)。
 
@@ -188,7 +188,7 @@ S-1認識ゲート(代表データ・ラベル・vpr由来自動ラベルと監�
 
 - **S2品質(最大リスク)**: 歌唱での母音認識が受入基準に届くか。これは vocal_analysis の S-1ゲートで先に潰す
   (届かなければ vocal_analysis 側で認識器を差し替える)。音声前段の依存の重さ・速度・決定論(分離・認識の
-  モデル取得・非決定性)も含め、これらは vocal_analysis 側のリスク([vocal_analysis](../vocal_analysis/vocal_analysis.md) §8)。
+  モデル取得・非決定性)も含め、これらは vocal_analysis 側のリスク([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §8)。
 - **song2vmd 固有の未確定**: 入口処理(口形イベント確定・RMS消費による開き量決定)の各初期値(4.2〜4.4)、長尺の
   継ぎ目結合(4.5)、`lipsync` への接続。これらは vocal_analysis の共有出力が揃った後に詰める。
 

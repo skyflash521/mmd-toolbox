@@ -13,7 +13,7 @@
 
 ## 1. 前提と依存
 
-- 実装言語 Python 3.11+。重い依存は `vocal_analysis` 側(パッケージのextra等)に閉じ、`mmd_toolbox` 本体の
+- 実装言語 Python 3.11+。重い依存は `vocal_analysis` 側(パッケージのextra等)に閉じ、本リポジトリ本体の
   必須依存 `numpy`/`scipy` は保つ。
   - S0: `soundfile`(BSD-3)。読めない形式のみ ffmpeg(自動検出・非再配布。**オプション**。vocal_analysis.md §3)。
   - S1: `demucs`(adefossez fork・MIT)を `demucs.api` で in-process。`torch`(BSD-3)。
@@ -21,8 +21,8 @@
     `torch` は S1 と共有。
   - S3: `numpy/scipy`(外部ツールに依存しない)。
 - 音素→5母音写像(vocal_analysis.md §7)は**共有モジュール**として実装する。VOCALOID(X-SAMPA)系は `vpr2vmd`
-  が既に実装済み(`vpr2vmd/phonemes.py`)のため、これを共有モジュールへ移して `vpr2vmd` とゲートが共用する。
-- S-1ゲートの vpr由来ラベル生成は [vpr_io](../vpr_io/vpr_io.md) を読む(tick→秒変換はラベル生成側の責務)。
+  が既に実装済み(`tools/vpr2vmd/phonemes.py`)のため、これを共有モジュールへ移して `vpr2vmd` とゲートが共用する。
+- S-1ゲートの vpr由来ラベル生成は [vpr](../vpr/vpr.md) を読む(tick→秒変換はラベル生成側の責務)。
 
 ---
 
@@ -43,13 +43,13 @@
 | A-G | S-1 認識ゲート(§9)。代表データで母音正解率・境界ずれ等を測り受入基準を判定 | §9 の受入基準を満たす。満たさなければ Julius 等を評価して認識器を確定 |
 
 依存関係: A-2/A-3 は A-1 の出力に依存。A-4/A-5 は A-3 の出力(母音区間・IPA)に依存。A-G(ゲート)は A-3(認識)と
-A-5(写像)を用い、`vpr_io` の read(vpr由来ラベル生成)を使える。
+A-5(写像)を用い、`vpr` の read(vpr由来ラベル生成)を使える。
 
 ---
 
 ## 3. テスト方針
 
-- `mmd_toolbox` のテスト規約(pytest・決定論・乱数シード固定・ネットワーク/GPU 不要)に従う。
+- `vmd` のテスト規約(pytest・決定論・乱数シード固定・ネットワーク/GPU 不要)に従う。
 - S1/S2 など外部モデル依存は薄いアダプタ層に隔離する。純関数の核(S0 のレベル正規化、S3 のRMS相対正規化、
   音素→5母音写像、CTC区間化)は合成入力フィクスチャで決定論的にテストする。アダプタ呼び出し部は小サンプル
   またはモックで確認する。

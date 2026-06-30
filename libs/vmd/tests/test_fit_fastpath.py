@@ -1,4 +1,4 @@
-"""線形ファストパスのテスト(mmd_toolbox.md §6.3)。
+"""線形ファストパスのテスト(vmd.md §6.3)。
 
 線形制御点で許容内(`early_exit_err` 以内)に収まる区間は `least_squares` を呼ばず即採用し、
 最適化の呼び出し回数そのものを減らす。許容(`early_exit_err`)が無い全探索ではファストパスを
@@ -66,7 +66,7 @@ def test_no_early_exit_err_takes_no_fastpath(monkeypatch):
     assert calls["n"] >= 1
 
 
-# --- skip_fastpath: ファストパスのオプトアウト(mmd_toolbox.md §6.3) -----------------
+# --- skip_fastpath: ファストパスのオプトアウト(vmd.md §6.3) -----------------
 
 # 「線形でも許容内に収まるが実際は曲がっている」サンプル(強いイージング)。
 _CURVED_XS = [(i + 1) / 12 for i in range(11)]

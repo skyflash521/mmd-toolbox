@@ -3,7 +3,7 @@
 密なVMDキーフレームを疎なキーフレームと補間曲線へ変換するCLIツール
 
 実装言語: Python 3.11+
-依存: mmd_toolbox(同リポジトリの共通ライブラリ、../mmd_toolbox/mmd_toolbox.md), numpy, scipy, click または argparse
+依存: vmd(同リポジトリのフォーマット層ライブラリ、../../libs/vmd/vmd.md), numpy, scipy, click または argparse
 
 ---
 
@@ -177,7 +177,7 @@ CLI値の共通書式:
 
 各値は0以上の有限小数。`--camera-fov-tol` 以外の `0` は整数フレーム上での
 完全一致を要求する。ここでの完全一致は§7.1のとおり出力キー(VMDは位置・回転・距離を
-float32で保存する。mmd_toolbox/vmd/io.py)を再サンプリングした値との一致を指す。
+float32で保存する。libs/vmd/io.py)を再サンプリングした値との一致を指す。
 ただし float32 格納による量子化誤差(float32 epsilon 程度)は、§7.2の視野角整数丸めと
 同様に分割不能な量子化誤差として扱い、`0` 許容値でも超過理由にしない。
 すなわち `0` は「曲線フィット由来の誤差を残さない(float32格納誤差のみ許容)」を意味する。
@@ -253,8 +253,8 @@ include/exclude適用後の選択状態、未一致の選択子警告を表示�
 
 ## 3. VMD入出力
 
-VMDの読み書き・データモデル・正規化は共通ライブラリ mmd_toolbox に委譲する
-(仕様: ../mmd_toolbox/vmd-io.md。補間評価: ../mmd_toolbox/vmd-interp.md)。
+VMDの読み書き・データモデル・正規化は共通ライブラリ vmd に委譲する
+(仕様: ../../libs/vmd/vmd-io.md。補間評価: ../../libs/vmd/vmd-interp.md)。
 本章はsparsevmdとしての利用要件のみ規定する。
 
 ### 3.1 入力
@@ -287,14 +287,14 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ mmd_
 - 対象外セクションはバイト単位で保持する。
 - 出力キーはトラックごとにフレーム昇順で書き出す。
   ボーンキーはボーン名(name_raw の生バイト)・フレーム番号の順に安定ソートする。
-  比較は mmd_toolbox の規約どおり生バイトで行い(../mmd_toolbox/mmd_toolbox.md §3、
+  比較は vmd の規約どおり生バイトで行い(../../libs/vmd/vmd.md §3、
   io.normalize と同じ `(name_raw, frame)` キー)、デコード後の表示名では並べない。
 - 補間曲線はMMD互換の制御点範囲 `[0,127]` の整数に量子化して保存する。
   量子化は決定論的に行う(§1.2): 各制御点の実数値を四捨五入(0.5は切り上げ)で
   最近傍整数へ丸めたあと `[0,127]` にクリップする(丸め→クリップの順)。
   量子化後の `x1 <= x2` 単調性は§5.4で再検査する。
 - 補間曲線は区間の到達側(後側)キーに格納する
-  (../mmd_toolbox/vmd-interp.md §2)。
+  (../../libs/vmd/vmd-interp.md §2)。
 - 区間長1フレームでは整数フレーム上の中間サンプルが存在しないため、
   補間曲線は線形に設定する。
 - カメラキーの perspective フラグは§4.2の方針で設定する。
@@ -317,8 +317,8 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ mmd_
 - 回転: Euler X/Y/Z に共通の補間曲線
 - 距離: 個別の補間曲線
 - 視野角: 個別の補間曲線。保存時は整数度へ丸める。
-  丸め規則は mmd_toolbox の既定(四捨五入。0.5は切り上げ)に従い決定論的に行う
-  (../mmd_toolbox/vmd-interp.md §5)。Pythonの`round`(偶数丸め)は使わない
+  丸め規則は vmd の既定(四捨五入。0.5は切り上げ)に従い決定論的に行う
+  (../../libs/vmd/vmd-interp.md §5)。Pythonの`round`(偶数丸め)は使わない
 - perspective(透視投影フラグ, 0=ON / 1=OFF): 補間対象外の離散値。
   区間内では値を変えず、出力キーにはそのフレーム時点で有効な直近の値
   (当該フレーム以前で最も近いキーの値)を設定する。
@@ -344,7 +344,7 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ mmd_
 各トラックについて:
 
 1. 入力モーションを対象範囲内で30fps整数フレームにサンプリングする。
-   サンプリングは mmd_toolbox.vmd.interp の `sample_range` / `sample_camera` に委譲する
+   サンプリングは vmd.interp の `sample_range` / `sample_camera` に委譲する
 2. 範囲端、先頭/末尾、不連続境界、`--keep-frame` を必須キーとして登録する
 3. `--max-segment-frames` は**出力キー間隔の sliding 上限**として扱う。未指定なら上限なし(無制限)で、
    この sliding 上限維持(step 6 の maxspan-cap)を一切行わず、滑らかな長区間を長いまま残す。有限値を
@@ -390,7 +390,7 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ mmd_
 
 カメラ回転:
 - `CameraKey.rotation` はラジアン格納であり、`sample_camera` もラジアンを返す
-  (mmd_toolbox/vmd/types.py、interp.py)。unwrapはラジアン上で行い、
+  (libs/vmd/types.py、interp.py)。unwrapはラジアン上で行い、
   許容誤差・カット閾値との比較は度へ換算した角度誤差で行う。
 - 3軸共通の補間係数 `y` を使って、各軸を `r0 + (r1 - r0) * y` で評価する。
 - 目的関数は3軸の角度誤差の重み付き和とし、最終判定は最大角度誤差で行う。
@@ -407,7 +407,7 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ mmd_
 - 実行可能領域は `0 <= x1 <= x2 <= 1`, `0 <= y1 <= 1`, `0 <= y2 <= 1`。
   `x1 <= x2` はボックス境界ではないため、`least_squares` のボックス境界だけでは
   保証できない。Xを単調増加に保つ(評価側 `_solve_factor` の前提、
-  ../mmd_toolbox/vmd-interp.md §3)ため、`x2 = x1 + (1 - x1) * t`(`t in [0,1]`)と
+  ../../libs/vmd/vmd-interp.md §3)ため、`x2 = x1 + (1 - x1) * t`(`t in [0,1]`)と
   再パラメータ化し、最適化変数 `(x1, t, y1, y2)` をすべてボックス境界 `[0,1]` で扱う。
 - 初期値は線形曲線 `(20,20),(107,107)` を正規化した値とする。
 - `scipy.optimize.least_squares` を使用する。
@@ -550,36 +550,37 @@ MMD 補間曲線として適合する。
 
 `linear` モードはベジェ制御点で接線を調整できないため対象外。回転チャンネルの C1(slerp 係数を端点間
 角度で重み付けした角スピード連続)は検討したが、実データ計測で出力キーが増える割に効果が乏しく不採用と
-した(../mmd_toolbox/mmd_toolbox.md §6)。
+した(../../libs/vmd/vmd.md §6)。
 
 ---
 
 ## 8. パッケージ構成
 
     mmd-toolbox/
-      mmd_toolbox/           # 共通ライブラリ
-        vmd/
+      libs/
+        vmd/                # フォーマット層ライブラリ
           types.py, io.py, interp.py, camera.py
           sample.py       # サンプリング小ヘルパ(perspective 直近ホールド)
           cuts.py         # 不連続検出・必須境界管理
           fit.py          # VMD補間曲線フィット・量子化・誤差評価
           reduce.py       # 区間分割・キー削減の全体制御
-      sparsevmd/
-        __init__.py
-        sample.py       # 対象トラックの正規化・分割・サンプリング(評価は mmd_toolbox.vmd.interp に委譲)
-        ranges.py       # --range の解析・展開・積集合
-        selection.py    # ボーン選択ルールの解決
-        cuts.py         # 閾値文字列パース(検出本体は mmd_toolbox.vmd.cuts を再公開)
-        fit.py          # mmd_toolbox.vmd.fit の後方互換 re-export
-        reduce.py       # mmd_toolbox.vmd.reduce の後方互換 re-export
-        report.py       # dry-run レポート
-        presets.py      # 品質プリセット
-        cli.py          # CLI(コアの薄いラッパー)
+      tools/
+        sparsevmd/
+          __init__.py
+          sample.py       # 対象トラックの正規化・分割・サンプリング(評価は vmd.interp に委譲)
+          ranges.py       # --range の解析・展開・積集合
+          selection.py    # ボーン選択ルールの解決
+          cuts.py         # 閾値文字列パース(検出本体は vmd.cuts を再公開)
+          fit.py          # vmd.fit の後方互換 re-export
+          reduce.py       # vmd.reduce の後方互換 re-export
+          report.py       # dry-run レポート
+          presets.py      # 品質プリセット
+          cli.py          # CLI(コアの薄いラッパー)
 
-- VMD読み書き・補間評価・カメラ座標変換はmmd_toolboxに委譲する。
+- VMD読み書き・補間評価・カメラ座標変換はvmdに委譲する。
 - コアはCLI非依存。Jupyter等からトラック単位で試行できるAPIを提供する。
 - 補間曲線の制約集中管理(fit)・分割戦略(reduce)・不連続検出(cuts)は共通ライブラリ
-  mmd_toolbox.vmd に置き、sparsevmd は旧 import パス維持のため同名モジュールで re-export する。
+  vmd に置き、sparsevmd は旧 import パス維持のため同名モジュールで re-export する。
 
 ---
 
@@ -597,7 +598,7 @@ MMD 補間曲線として適合する。
 
 ## 10. テスト要件
 
-テストフレームワーク・実行方法・テストデータの扱いは mmd_toolbox.md §4 の方針に従う
+テストフレームワーク・実行方法・テストデータの扱いは vmd.md §4 の方針に従う
 (pytest、決定論的、外部サービス不要)。
 
 1. 線形モーション: 連続フレームの線形移動が先頭/末尾キーと線形補間曲線に削減され、
@@ -644,7 +645,7 @@ MMD 補間曲線として適合する。
 
 - `bezier` モードは高品質だが `linear` より計算量が大きい。出力後検証(§7.3)で許容超過があれば
   区間を密化して再フィットするため、長尺・高密度入力ではフィット回数が増えて処理時間が伸びる
-  (フィットコストの支配項は共有エンジンの正本 [mmd_toolbox.md §6.1](../mmd_toolbox/mmd_toolbox.md#61-コストモデルどこが支配的か))。
+  (フィットコストの支配項は共有エンジンの正本 [vmd.md §6.1](../../libs/vmd/vmd.md#61-コストモデルどこが支配的か))。
 - 長尺・高密度入力で待ち時間が問題になる場合の運用回避策:
   - `--range` で区間を分割して必要部分だけ処理する。
   - `--preset aggressive` で許容を緩めてキー数とフィット回数を減らす。
@@ -654,4 +655,4 @@ MMD 補間曲線として適合する。
   固定設定として使う(短い区間で高速にフィットする)。
 - 既定設定で対話的に待てない時間まで未完了になる状態は性能回帰として扱う。
 - フィットコストの支配項・棄却済み最適化(曲線評価の numpy ベクトル化は遅化するため不採用)・
-  有効な高速化方向は、共有エンジンの正本 [mmd_toolbox.md §6](../mmd_toolbox/mmd_toolbox.md#6-疎化フィットの性能特性棄却済み最適化) を参照する(ここに重複して書かない)。
+  有効な高速化方向は、共有エンジンの正本 [vmd.md §6](../../libs/vmd/vmd.md#6-疎化フィットの性能特性棄却済み最適化) を参照する(ここに重複して書かない)。

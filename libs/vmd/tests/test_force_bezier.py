@@ -1,4 +1,4 @@
-"""force_bezier: 共有ファストパスのオプトアウト(mmd_toolbox.md §6.3, shakevmd.md §3.3)。
+"""force_bezier: 共有ファストパスのオプトアウト(vmd.md §6.3, shakevmd.md §3.3)。
 
 線形ファストパス/cheap accept は採否・キー数を変えないが、許容内に収まる区間の出力曲線を
 線形へ寄せる。曲線形状の忠実度が要る呼び出し側向けに、各カメラチャンネルと

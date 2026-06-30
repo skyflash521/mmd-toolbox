@@ -22,7 +22,7 @@
 ```
 
 ボーカル抽出・音素/母音認識・強弱RMS算出の音声前段は共有モジュール
-[vocal_analysis](../vocal_analysis/vocal_analysis.md) に委譲し(外部ツールは vocal_analysis が内部で呼び、固定
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲し(外部ツールは vocal_analysis が内部で呼び、固定
 せず差し替えられる)、`song2vmd` はその共有出力から口形イベント列と開き量を作って `lipsync` へ渡す(4章・7章)。
 
 口パクに必要なのは「時刻ごとの母音(口形)と強弱」であって歌詞の単語ではないため、歌詞の書き起こし
@@ -33,11 +33,11 @@
 
 CLAUDE.md の設計境界に従う。
 
-- フォーマット層(VMDの読み書き)は `mmd_toolbox` に置く。
+- フォーマット層(VMDの読み書き)は `vmd` に置く。
 - 音声前段(ボーカル抽出・音素/母音認識・強弱RMS算出)と IPA→5母音写像規則・S-1認識ゲートは共有モジュール
-  `vocal_analysis` に委譲する([vocal_analysis.md](../vocal_analysis/vocal_analysis.md)。7章)。
+  `vocal_analysis` に委譲する([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md)。7章)。
 - アニメ的口パクのキーフレーム生成(標準口モーフの選択・母音合成プロファイル・生成方針)は共有モジュール
-  `lipsync` に委譲する([lipsync.md](../lipsync/lipsync.md)。3章・6.5)。
+  `lipsync` に委譲する([lipsync.md](../../libs/lipsync/lipsync.md)。3章・6.5)。
 - `song2vmd` 入口の判断(vocal_analysis の出力から口形イベント列を確定する処理＝IPA→母音写像の適用・両唇閉鎖
   判定・無音/閉口判定・境界補正、声の強弱→開き量の写像、CLI引数、プリセットの具体値)は `song2vmd` 側に置く。
 
@@ -48,9 +48,9 @@ CLAUDE.md の設計境界に従う。
 - 二段にすると、音声由来の**連続的な開き量(RMS)が音符のベロシティ/休符へ落ち、時刻も音符単位へ量子化される**
   ため、口パクの開き量と境界が鈍る。直経路はフル自動・音声→VMD の要件(1.1)とも整合する。
 - 共有するのは**音声前段(vocal_analysis)とモーフ生成コア(lipsync)**であって vpr ではない。各CLIは2入力抽象
-  (口形イベント列＋開き量)を別々の入口で用意して同じコアへ渡すので([lipsync.md](../lipsync/lipsync.md) §2)、
+  (口形イベント列＋開き量)を別々の入口で用意して同じコアへ渡すので([lipsync.md](../../libs/lipsync/lipsync.md) §2)、
   コア再利用による効率と直経路による品質を両立できる。
-- この劣化評価は設計上の判断であり、`vpr_io` の読み書きが整えば(vpr 経路を実際に通して)実測で確かめる。
+- この劣化評価は設計上の判断であり、`vpr` の読み書きが整えば(vpr 経路を実際に通して)実測で確かめる。
 
 ### 1.4 独立ツールとする理由
 
@@ -97,7 +97,7 @@ MMDで歌に口パクを手付けするのは手間が大きい。自動生成�
 ## 3. アニメ的口パクの定義(品質基準)
 
 本ツールが満たすべき口パクの質(アニメ的・MMD的な、はっきり開閉する口パク)の品質基準は、共有モジュール
-`lipsync` の [lipsync.md §3](../lipsync/lipsync.md) を正本とする。設計された母音合成・開きすぎない・保持と
+`lipsync` の [lipsync.md §3](../../libs/lipsync/lipsync.md) を正本とする。設計された母音合成・開きすぎない・保持と
 最小保持・協調調音・同母音連結・口形の先行準備・子音と無音の口形・疎なキーといった要件は
 そちらで定義し、本書では重複定義しない。
 
@@ -110,16 +110,16 @@ MMDで歌に口パクを手付けするのは手間が大きい。自動生成�
 ## 4. 処理パイプライン
 
 音声前段(S0–S3: 入力読み込み・ボーカル分離・音素/母音認識・強弱RMS算出)は共有モジュール
-[vocal_analysis](../vocal_analysis/vocal_analysis.md) に委譲する。`song2vmd` はその共有出力(ボーカルWAV・音素
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する。`song2vmd` はその共有出力(ボーカルWAV・音素
 セグメント列・RMS・IPA→5母音写像)から、入口処理で口形イベント列と開き量を作り、共有モジュール
-[lipsync](../lipsync/lipsync.md) へ渡して口パクVMDを生成する。
+[lipsync](../../libs/lipsync/lipsync.md) へ渡して口パクVMDを生成する。
 
 ```text
 入力 音声ファイル(歌, BGM込み可)
   ├─[S0–S3] 音声前段        vocal_analysis(共有)→ ボーカルWAV・音素セグメント列・RMS・IPA→5母音写像
   ├─[入口]  口形イベント確定 song2vmd側 → 写像適用・両唇閉鎖判定・gap解決・無音/閉口確定・オンセット補正(6.3)
   ├─[入口]  開き量の決定     song2vmd側 → RMS→開き量(6.4・6.5)
-  └─[S4]    モーフ生成       lipsync(共有)+ mmd_toolbox → あ・い・う・え・お の口パクVMD
+  └─[S4]    モーフ生成       lipsync(共有)+ vmd → あ・い・う・え・お の口パクVMD
 ```
 
 - すべての処理は `song2vmd` の1コマンド内で完結する。音声前段の外部ツール(分離・認識・復号)は
@@ -177,7 +177,7 @@ song2vmd INPUT [options]
 
 ### 5.3 入出力要件
 
-- 出力VMDの書き出しは `mmd_toolbox.vmd.io` に委譲する。生成するのはモーフキーのみ。
+- 出力VMDの書き出しは `vmd.io` に委譲する。生成するのはモーフキーのみ。
 - ボーン・カメラ・照明・セルフ影セクションは空で出力する。
 - 文字列(モーフ名・モデル名)はShift-JIS(cp932)で格納する。
 - フル自動のみとし、中間生成物を入力に取ってステージをスキップする運用は設けない。中間生成物は
@@ -191,7 +191,7 @@ song2vmd INPUT [options]
 ### 6.1 入力読み込み(S0)
 
 入力読み込み(復号・入力レベル正規化・チャンネル数/サンプルレート保持)は共有モジュール
-[vocal_analysis](../vocal_analysis/vocal_analysis.md) の S0(vocal_analysis.md §3)に委譲する。`song2vmd` は
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の S0(vocal_analysis.md §3)に委譲する。`song2vmd` は
 正規化PCMを直接扱わず、後段の共有出力を消費する。
 
 - **入力ゲインへの頑健性**: 入力の全体ゲイン差は vocal_analysis の入力レベル正規化(S0)で吸収され、分離・
@@ -200,7 +200,7 @@ song2vmd INPUT [options]
 ### 6.2 ボーカル抽出・音素認識・強弱RMS(S1–S3)
 
 ボーカル抽出(S1)・音素/母音認識(S2)・強弱RMS算出(S3)は共有モジュール
-[vocal_analysis](../vocal_analysis/vocal_analysis.md) に委譲する(vocal_analysis.md §4〜§6)。`song2vmd` は共有
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する(vocal_analysis.md §4〜§6)。`song2vmd` は共有
 出力(ボーカルWAV・音素セグメント列・RMS)を消費する。
 
 - **ボーカル抽出(S1)**: vocal_analysis.md §4。分離の挙動 `auto`/`always`/`never` の選択は `song2vmd` の CLI
@@ -212,7 +212,7 @@ song2vmd INPUT [options]
 
 ### 6.3 口形イベント列の確定(入口)
 
-[vocal_analysis](../vocal_analysis/vocal_analysis.md) の音素セグメント列(母音/子音/gap＋IPAラベル)と RMS から、
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の音素セグメント列(母音/子音/gap＋IPAラベル)と RMS から、
 `song2vmd` 入口で口形イベント列(母音・両唇閉鎖・無音)を確定する。母音認識そのもの・IPA→5母音写像規則・
 認識器の採用と実現可能性ゲートは vocal_analysis.md(§5・§7・§9)を正本とする。確定処理は次のとおり(確定した
 口形イベント列からの口パク生成は lipsync。6.5):
@@ -243,7 +243,7 @@ song2vmd INPUT [options]
 
 ### 6.4 強弱(RMS)に基づく入口処理(S3の消費)
 
-RMSエンベロープの算出と相対正規化は [vocal_analysis](../vocal_analysis/vocal_analysis.md) の S3
+RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の S3
 (vocal_analysis.md §6)に委譲する(入力ゲインに不変)。`song2vmd` 入口は、その相対正規化済みRMSを使って
 無音/閉口判定と開き量決定を行う。
 
@@ -262,7 +262,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../vocal_an
 ### 6.5 開き量の決定とモーフ生成への受け渡し
 
 キーフレーム生成そのもの(3章の品質基準を満たすアニメ的口パク)は共有モジュール `lipsync` の
-[lipsync.md §4](../lipsync/lipsync.md) のモーフ生成コアに委譲する。`song2vmd` は入口処理として開き量を決定し、
+[lipsync.md §4](../../libs/lipsync/lipsync.md) のモーフ生成コアに委譲する。`song2vmd` は入口処理として開き量を決定し、
 口形イベント列(6.3)・開き量・生成パラメータを `lipsync` に渡す。
 
 - **開き量の決定(song2vmd 入口。RMS→開き量の写像)**: 各モーラ区間のRMS(6.4)を `--intensity-curve` の
@@ -306,14 +306,14 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../vocal_an
 音声前段(S0–S3)の外部ツール連携機構——内部呼び出し方針(利用者にコマンドを叩かせない)、アダプタ
 interface(Separator / Recognizer)、正規化中間形式、段階方針、初期採用ツールと将来の代替、S2 実現可能性
 ゲート——は共有モジュール
-[vocal_analysis](../vocal_analysis/vocal_analysis.md)(§2・§8・§9)を正本とし、候補比較は
-[vocal_analysis/external-tools.md](../vocal_analysis/external-tools.md) を補助資料とする。本書では重複定義しない。
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md)(§2・§8・§9)を正本とし、候補比較は
+[vocal_analysis/external-tools.md](../../libs/vocal_analysis/external-tools.md) を補助資料とする。本書では重複定義しない。
 
 - 利用者は `song2vmd INPUT` の1コマンドだけを実行する。音声前段の外部ツール(分離・認識・復号)は
   `vocal_analysis` が内部で呼び、利用者がそれらを手で実行することはない。
 - バックエンドの選択(`--separator` / `--recognizer` / `--separate-vocals`)は `song2vmd` の CLI で公開する
   (5.2)。アダプタの追加・切り替えは vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
-- 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、`mmd_toolbox` 本体の
+- 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、本リポジトリ本体の
   必須依存は `numpy/scipy` のまま保つ。
 
 ---
@@ -378,20 +378,20 @@ MMD/MMM上の視覚確認で調整する。特に開き量レンジ・最小保�
 
 ---
 
-## 9. mmd_toolbox との関係
+## 9. vmd との関係
 
-- VMDの読み書きは `mmd_toolbox.vmd.io` に委譲する。`song2vmd` はVMDのバイナリ構造を直接扱わない。
+- VMDの読み書きは `vmd.io` に委譲する。`song2vmd` はVMDのバイナリ構造を直接扱わない。
 - 生成するのはモーフキーのみ。モーフキーがキー間で線形評価される事実(補間曲線を持たない)は
-  [vmd-interp.md](../mmd_toolbox/vmd-interp.md) を正本とする。
+  [vmd-interp.md](../../libs/vmd/vmd-interp.md) を正本とする。
 - アニメ的な疎なキーは生成段階で直接置く(キーフレーム生成は 6.5 で共有モジュール `lipsync` に委譲)。
-  ボーン/カメラ用のベジェ疎化のような汎用疎化器は作らず、`mmd_toolbox` にモーフ用の疎化機能も追加しない
+  ボーン/カメラ用のベジェ疎化のような汎用疎化器は作らず、`vmd` にモーフ用の疎化機能も追加しない
   (設計境界どおり、アニメ的口パクの生成判断は共有モジュール `lipsync` 側、フォーマット入出力は
-  `mmd_toolbox` 側)。
-- 既知の制約: 既存の `mmd_toolbox.vmd.reduce` はボーン/カメラ専用(`Tolerances` も `bone_*`/`camera_*` のみ)で、
+  `vmd` 側)。
+- 既知の制約: 既存の `vmd.reduce` はボーン/カメラ専用(`Tolerances` も `bone_*`/`camera_*` のみ)で、
   モーフ(スカラー)キーの疎化には対応していない。song2vmd は汎用疎化を使わず生成段階で直接疎キーを置くため、
-  この非対応は本ツールの障害にならない。将来モーフ疎化を共通機能として持たせる場合は、`mmd_toolbox` 側に
+  この非対応は本ツールの障害にならない。将来モーフ疎化を共通機能として持たせる場合は、`vmd` 側に
   モーフ対応の追加(修正)が必要になる。
-- 時間軸は30fps基準(`mmd_toolbox` 規約)に従う。
+- 時間軸は30fps基準(`vmd` 規約)に従う。
 
 ---
 

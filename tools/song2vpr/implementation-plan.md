@@ -11,11 +11,11 @@
 ## 1. 前提と依存
 
 - 実装言語 Python 3.11+。
-- 依存モジュール: [vocal_analysis](../vocal_analysis/vocal_analysis.md)(分離・音素認識・ボーカルWAV)、
-  [vpr_io](../vpr_io/vpr_io.md)(vpr 書き出し)。`song2vpr` はこれらを束ね、ピッチ系の固有処理を担う。
+- 依存モジュール: [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md)(分離・音素認識・ボーカルWAV)、
+  [vpr](../../libs/vpr/vpr.md)(vpr 書き出し)。`song2vpr` はこれらを束ね、ピッチ系の固有処理を担う。
 - **F0/ピッチ推定の依存**は `song2vpr` 側に閉じる(手法・ライブラリは実装で確定。4章)。音声前段の重い依存
-  (分離・認識)は `vocal_analysis` 側。`mmd_toolbox` 本体の必須依存は `numpy/scipy` のまま保つ。
-- `vpr_io` の書き出し(write)は `song2vpr` 着手時に拡張する(vpr_io.md §4)。
+  (分離・認識)は `vocal_analysis` 側。本リポジトリ本体の必須依存は `numpy/scipy` のまま保つ。
+- `vpr` の書き出し(write)は `song2vpr` 着手時に拡張する(vpr.md §4)。
 
 ---
 
@@ -32,25 +32,25 @@
 | T-1 | vocal_analysis 接続: 分離・音素認識を呼び、ボーカルWAVと音素セグメント列を得る | vocal_analysis の共有出力(ボーカルWAV・母音/子音/gap＋IPA)を取得できる |
 | T-2 | F0ピッチ推定: ボーカルWAVから F0・有声/無声を推定し音高へ写像 | 時刻ごとの F0・有声/無声と音高(半音/ノート番号)が得られる。決定論(可能な範囲) |
 | T-3 | 音符分割・歌詞/音素対応付け: F0＋音素セグメントから音符(音高・開始/長さ・歌詞/音素・強弱)を構成 | 音符列が決定論的に得られる。任意の歌詞テキスト指定で対応付けが改善する |
-| T-4 | vpr 書き出し: 音符列・テンポを `vpr_io` のデータモデルへ載せ vpr を書き出す(vpr_io の write を拡張) | 書き出した vpr を `vpr_io` で読み戻せる(往復)。VOCALOID で開ける |
+| T-4 | vpr 書き出し: 音符列・テンポを `vpr` のデータモデルへ載せ vpr を書き出す(vpr の write を拡張) | 書き出した vpr を `vpr` で読み戻せる(往復)。VOCALOID で開ける |
 | T-5 | 統合・E2E(小サンプルで音声→vpr)・レポート/診断。**公開時に README のツール表へ `song2vpr` を追記**(README 本体は指示があるまで触らない) | 1コマンドで音声→vpr を生成。統計を出力 |
 
-依存関係: T-2/T-3 は T-1(vocal_analysis 出力)に依存。T-4 は T-3 の音符列と、拡張した `vpr_io` の write に依存
-([vpr_io.md](../vpr_io/vpr_io.md) §4)。
+依存関係: T-2/T-3 は T-1(vocal_analysis 出力)に依存。T-4 は T-3 の音符列と、拡張した `vpr` の write に依存
+([vpr.md](../../libs/vpr/vpr.md) §4)。
 
 ---
 
 ## 3. テスト方針
 
-- `mmd_toolbox` のテスト規約(pytest・決定論・乱数シード固定・ネットワーク/GPU 不要)に従う。
-- 音声前段(分離・認識)の外部モデル依存は `vocal_analysis` 側に隔離される([vocal_analysis](../vocal_analysis/vocal_analysis.md) §8 のアダプタ)。
+- `vmd` のテスト規約(pytest・決定論・乱数シード固定・ネットワーク/GPU 不要)に従う。
+- 音声前段(分離・認識)の外部モデル依存は `vocal_analysis` 側に隔離される([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §8 のアダプタ)。
   `song2vpr` のテストは、`vocal_analysis` の出力(ボーカルWAV・音素セグメント列)を合成フィクスチャまたは
   モックで与え、F0推定・音符分割・歌詞対応の純関数核を決定論的に検証する。
 - **ピッチ推定・音符分割の核**(F0→音高写像、F0安定区間と音素境界からの音符切り出し、歌詞/音素対応)を純関数
   として分離し、合成 F0＋音素セグメントのフィクスチャで決定論的にテストする。実音声を使う F0 精度確認は重テスト
   として分離する。
-- **vpr 往復**: T-4 の書き出しは `vpr_io` で読み戻して往復一致(保持範囲)を検証する。
-- 出力 vpr はフィクスチャ(既知の音符列)から書き出し、`vpr_io` の読みで音符(音高・時刻・歌詞/音素・強弱)を確認
+- **vpr 往復**: T-4 の書き出しは `vpr` で読み戻して往復一致(保持範囲)を検証する。
+- 出力 vpr はフィクスチャ(既知の音符列)から書き出し、`vpr` の読みで音符(音高・時刻・歌詞/音素・強弱)を確認
   する。
 
 ---
@@ -62,26 +62,26 @@
 後送りとして分ける。配置は CLAUDE.md の設計境界に従い、抽象契約は [song2vpr.md](song2vpr.md)、具体型/値は本節に置く。
 **主たる新規リスクはピッチ系**(歌唱の F0 は装飾・ずれが多く、音符化が難しい)で、その品質調整は §4.4(後送り)。
 
-下流の確定型: `vpr_io` の `Note`(`start_tick`・`duration_tick`・`pitch:int`(MIDI)・`lyric:str`・
+下流の確定型: `vpr` の `Note`(`start_tick`・`duration_tick`・`pitch:int`(MIDI)・`lyric:str`・
 `phonemes:list[str]`・`velocity:int` 0–127)、`VprProject`(`resolution:int`=tick/四分音符・`tempos`)
-([vpr_io.md](../vpr_io/vpr_io.md) §2.1)。`vocal_analysis` の `Segment`(`type`∈vowel/consonant/gap・
+([vpr.md](../../libs/vpr/vpr.md) §2.1)。`vocal_analysis` の `Segment`(`type`∈vowel/consonant/gap・
 `start_sec`・`end_sec`・`phoneme:str|None`(IPA)・`confidence`)、`RmsEnvelope`(相対正規化RMS)、`AnalysisResult`
-([vocal_analysis](../vocal_analysis/vocal_analysis.md) §2.1)。
+([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §2.1)。
 
 ### 4.1 歌詞・音素対応付け(確定)
 
-§4.3 で確定した**最終音符区間**(区間・`pitch`)の各音符に、`vpr_io.Note` の `lyric`(表示歌詞)・`phonemes`(音素列)・
+§4.3 で確定した**最終音符区間**(区間・`pitch`)の各音符に、`vpr.Note` の `lyric`(表示歌詞)・`phonemes`(音素列)・
 `velocity` を割り当てる(処理順は §4.3。`--lyrics` のモーラ割当も最終音符列へ行う)。意味のある歌詞書き起こしはしない
 (song2vpr.md §2.2・§3)。
 
 - **`phonemes`(常に)**: 音符区間に重なる `vocal_analysis` の音素セグメント(vowel/consonant)を時間順に並べ、各
-  `phoneme`(IPA)を `vpr_io` の音素表現へ写像した列とする。**`phoneme` が `None` のセグメント・gap セグメントは
-  除外する**(写像できないため `phonemes` に入れない)。除外で `phonemes` が空になっても許容する(`vpr_io.Note.phonemes`
-  は空可)。IPA→VOCALOID 日本語音素アルファベットの具体対応表は `vpr_io` の音素表現に従う(vpr 形式確定=§4.4。
+  `phoneme`(IPA)を `vpr` の音素表現へ写像した列とする。**`phoneme` が `None` のセグメント・gap セグメントは
+  除外する**(写像できないため `phonemes` に入れない)。除外で `phonemes` が空になっても許容する(`vpr.Note.phonemes`
+  は空可)。IPA→VOCALOID 日本語音素アルファベットの具体対応表は `vpr` の音素表現に従う(vpr 形式確定=§4.4。
   写像規則自体=「`None`・gap を除く音素セグメントを時間順に採る」は記号集合に依らず確定)。
 - **`lyric`(`--lyrics` なし)**: 音符の代表母音に対応する**母音仮名**(あ/い/う/え/お)を入れる。代表母音は音符区間で
   最も長い vowel セグメントの IPA を `vocal_analysis` の IPA→5母音写像
-  ([vocal_analysis](../vocal_analysis/vocal_analysis.md) §7)で5母音へ落として決める。母音が得られない
+  ([vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) §7)で5母音へ落として決める。母音が得られない
   音符(vowel セグメント無し)は既定 `あ` を入れ、診断に「母音未確定」と記録する。
 - **`lyric`(`--lyrics` あり)**: 与えた歌詞テキストを**モーラ単位**に分割し、音符列へ先頭から順に1音符=1モーラで
   対応付ける。各音符 `lyric` は対応モーラの仮名、`phonemes` は上記(セグメント由来)を優先する。
@@ -98,7 +98,7 @@
 
 ### 4.2 テンポ・秒⇔tick 変換(確定)
 
-`vocal_analysis` の出力は秒、`vpr_io` は tick。`song2vpr` 入口で秒→tick へ変換して `vpr_io` へ渡す。
+`vocal_analysis` の出力は秒、`vpr` は tick。`song2vpr` 入口で秒→tick へ変換して `vpr` へ渡す。
 
 - **`resolution`**: `VprProject.resolution` は **480 tick/四分音符**(出発点。一般的な PPQ)。
 - **`--tempo` 指定時**: その BPM 一定のテンポマップ(`TempoEvent(tick=0, bpm=指定値)`)を用いる。
@@ -125,7 +125,7 @@ F0 と音素セグメントから音符を切る**初期規則**を確定する(
 - **半音丸め**: 有声フレームの F0(Hz)を MIDI ノート番号へ丸める。`note = round(69 + 12·log2(F0/440))`
   (A4=440Hz=MIDI 69)。
 - **無声/gap→休符・gap クリップ**: 有声区間のみ音符化する。無声(F0 無し)・gap セグメントは音符を作らない(休符は
-  `vpr_io` が発音区間の補集合として導出。[vpr_io.md](../vpr_io/vpr_io.md) §2.1)。**有声区間が gap
+  `vpr` が発音区間の補集合として導出。[vpr.md](../../libs/vpr/vpr.md) §2.1)。**有声区間が gap
   セグメントと部分的に重なる場合は gap 部分を除外して有声区間を gap 境界でクリップ・分割する**(gap は無音なので音符に
   含めない)。クリップで生じた各有声断片を音符化候補とする。
 - **同一音高連結**: 隣接する有声区間が**同一の丸めノート番号**で、間に休符(無声/gap)も母音の切り替わり(別 vowel
@@ -137,7 +137,7 @@ F0 と音素セグメントから音符を切る**初期規則**を確定する(
   区間に対し §4.1 で導出するため、本節では区間と `pitch` のみ扱う)。**休符/gap で隔てられ連続隣接音符が無い孤立した
   短音符**は、吸収先が無いためそのまま単独音符として残す(診断に記録)。
 - **最終音符の最小長クランプ**: §4.2 の秒→tick 量子化後、`duration_tick ≤ 0` となる音符(孤立短音符が量子化で潰れた
-  場合等)は `duration_tick = 1`(最小1 tick)へクランプして出力する(`vpr_io.Note` にゼロ長を渡さない)。
+  場合等)は `duration_tick = 1`(最小1 tick)へクランプして出力する(`vpr.Note` にゼロ長を渡さない)。
 
 ### 4.4 リスクと未確定(実データ・実 vpr で確定)
 
@@ -154,8 +154,8 @@ F0 と音素セグメントから音符を切る**初期規則**を確定する(
   (必要なら仕様 song2vpr.md)を先に更新してから実装と整合させる(§5)。規則自体の変更は同様に正本更新を先に行う。
 - **自動テンポ推定(将来)**: `--tempo` 未指定時の BPM 自動推定・拍子推定は将来対応。評価観点は BPM 誤差・拍位置ずれ。
   v1 は §4.2 の固定既定(120 BPM・4/4)で仮置きする。
-- **vpr 形式の確定**: `vpr_io` の write 拡張(vpr レイアウト確定)が T-4 の前提になる
-  ([vpr_io.md](../vpr_io/vpr_io.md) §4)。§4.1 の IPA→VOCALOID 音素アルファベットの具体対応表は
+- **vpr 形式の確定**: `vpr` の write 拡張(vpr レイアウト確定)が T-4 の前提になる
+  ([vpr.md](../../libs/vpr/vpr.md) §4)。§4.1 の IPA→VOCALOID 音素アルファベットの具体対応表は
   この音素表現確定で定まる(対応付け規則自体は §4.1 で確定済み)。
 - 上記の初期値・採用基準は代表サンプルで調整し、実音声での F0 精度・音符化精度の確認は重テストとして分離する(§3)。
 
@@ -165,5 +165,5 @@ F0 と音素セグメントから音符を切る**初期規則**を確定する(
 
 - 仕様(song2vpr.md)の記述変更が必要な不整合は無い。本計画は仕様が実装での確定に委ねた詳細(4章)の置き場で
   あり、仕様の決定を覆さない。
-- F0推定・音符分割の確定や `vpr_io` の write 確定で仕様の前提が変わる場合は、正本である song2vpr.md を先に
+- F0推定・音符分割の確定や `vpr` の write 確定で仕様の前提が変わる場合は、正本である song2vpr.md を先に
   更新してから本計画と実装を整合させる。

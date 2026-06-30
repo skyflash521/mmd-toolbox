@@ -614,7 +614,7 @@ class TestCli:
 
     def test_read_warnings_propagated(self, tmp_path, capsys, monkeypatch):
         # io.read() の継続可能警告(名前デコード不可・旧版セクション欠落など)もユーザーへ
-        # 伝播する(VMD I/O は mmd_toolbox へ委譲する設計、§3.1)。捨てる実装を排除する。
+        # 伝播する(VMD I/O は vmd へ委譲する設計、§3.1)。捨てる実装を排除する。
         # 実トリガは write/read の round-trip 依存で脆いため、io.read に警告を注入して
         # 「CLI が io.read の警告を surface する」配線そのものを検証する。
         from vmd.types import VmdWarning

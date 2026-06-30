@@ -1,7 +1,7 @@
 """vpr2vmd の vpr 抽出層のテスト(vpr2vmd.md §3・§4)。
 
-vpr の読み込み(vpr_io へ委譲)・対象トラック選択・音符収集(全パートの統合と安定整列)を、
-合成した `VprProject`(vpr_io データモデル)を入力に決定論的に検証する。重なり解決・フレーム変換・
+vpr の読み込み(vpr へ委譲)・対象トラック選択・音符収集(全パートの統合と安定整列)を、
+合成した `VprProject`(vpr データモデル)を入力に決定論的に検証する。重なり解決・フレーム変換・
 口形写像は口形イベント確定(events・timing・mapping)が扱うため、ここでは生の抽出のみを対象にする。
 """
 
@@ -162,7 +162,7 @@ def test_collect_notes_empty_track():
     assert vio.collect_notes(_track([])) == []
 
 
-# --- 代表 vpr からの抽出(読み込みは vpr_io、選択・収集は vpr2vmd)---
+# --- 代表 vpr からの抽出(読み込みは vpr、選択・収集は vpr2vmd)---
 
 def test_extracts_notes_tempo_rests_from_representative_vpr():
     """代表 vpr から音符・休符・テンポが取り出せる(vpr2vmd.md §3、実装計画の受入条件)。"""
@@ -199,7 +199,7 @@ def test_extracts_notes_tempo_rests_from_representative_vpr():
 
 
 def test_non_vpr_bytes_raise_vpr_format_error():
-    """非vpr(壊れた zip)は vpr_io が VprFormatError を送出する(入力不正の根拠)。"""
+    """非vpr(壊れた zip)は vpr が VprFormatError を送出する(入力不正の根拠)。"""
     from vpr import VprFormatError
 
     with pytest.raises(VprFormatError):

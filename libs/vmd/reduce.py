@@ -635,7 +635,7 @@ def reduce_camera_track(
     範囲外キーは変更不可のため、上側(範囲外キーに乗る曲線)は書き換えず逐語保持する。
 
     force_bezier=True は4カメラチャンネルと継ぎ目再フィットへ伝播し、共有の線形ファストパス/
-    cheap accept を切って実ベジェ曲線を強制する(曲線形状の忠実度が要る滑らかさ目的。mmd_toolbox.md
+    cheap accept を切って実ベジェ曲線を強制する(曲線形状の忠実度が要る滑らかさ目的。vmd.md
     §6.3)。既定 False は従来挙動(ファストパス有効・採否/キー数/性能不変)。
 
     diagnostics に dict を渡すと §2.7/§6.3 用に cuts(不連続検出位置)・splits(error-split したフレームと

@@ -1,4 +1,4 @@
-"""vpr_io データモデル型のテスト(vpr_io.md §2)。
+"""vpr データモデル型のテスト(vpr.md §2)。
 
 型定義(フィールド・既定値)のみを検証する。read/write の振る舞いはこのファイルでは扱わない。
 """
@@ -30,7 +30,7 @@ def test_note_phonemes_default_empty_and_independent():
 
     a = Note(start_tick=0, duration_tick=1, pitch=60, lyric="あ", velocity=0)
     b = Note(start_tick=0, duration_tick=1, pitch=60, lyric="い", velocity=0)
-    # 音素列は空可(vpr_io.md §2)。既定の可変リストがインスタンス間で共有されないこと。
+    # 音素列は空可(vpr.md §2)。既定の可変リストがインスタンス間で共有されないこと。
     assert a.phonemes == []
     a.phonemes.append("a")
     assert b.phonemes == []
@@ -39,7 +39,7 @@ def test_note_phonemes_default_empty_and_independent():
 def test_note_velocity_upper_bound():
     from vpr import Note
 
-    # ベロシティは 0〜127 の生値(vpr_io.md §2)。上限 127 を保持できること。
+    # ベロシティは 0〜127 の生値(vpr.md §2)。上限 127 を保持できること。
     note = Note(start_tick=0, duration_tick=1, pitch=60, lyric="は", velocity=127)
     assert note.velocity == 127
 

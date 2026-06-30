@@ -1,4 +1,4 @@
-"""疎化フィットの性能ガード(mmd_toolbox.md §6.4)。
+"""疎化フィットの性能ガード(vmd.md §6.4)。
 
 性能チューニングの実装はミスるとフィットが収束せず止まりうる。本テストは代表的な bezier 疎化
 ワークロード(曲線的＋微小ゆらぎの密ボーン動作=多数の小区間フィットを踏む)をサブプロセスで
@@ -67,6 +67,6 @@ def test_bezier_reduce_does_not_hang():
     except subprocess.TimeoutExpired:
         pytest.fail(
             f"bezier 疎化が {_TIMEOUT_SEC}s 以内に完了しなかった(ハング/破滅的な性能回帰の疑い)。"
-            " 曲線評価のベクトル化など棄却済み最適化を踏んでいないか mmd_toolbox.md §6 を確認。"
+            " 曲線評価のベクトル化など棄却済み最適化を踏んでいないか vmd.md §6 を確認。"
         )
     assert proc.returncode == 0, f"サブプロセスが異常終了: {proc.stderr}"

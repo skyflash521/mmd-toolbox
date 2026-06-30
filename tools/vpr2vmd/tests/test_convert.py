@@ -1,8 +1,8 @@
 """vpr→VMD 変換パイプライン(cli._build と main)の統合テスト(vpr2vmd.md §3〜§5)。
 
-cli._build は vpr_io 解析結果(合成フィクスチャ)を入口に、トラック選択→重なり解決→口形イベント
+cli._build は vpr 解析結果(合成フィクスチャ)を入口に、トラック選択→重なり解決→口形イベント
 確定→開き量→lipsync→モーフキー生成までを束ね、main が書き込み・診断表示・警告を担う。
-vpr_io.read と mmd_toolbox の write_file は monkeypatch で差し替え、配線と終了コードを決定論的に
+vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終了コードを決定論的に
 検証する。
 """
 
@@ -241,7 +241,7 @@ def test_convert_track_name_no_match_is_arg_error(monkeypatch, tmp_path):
 
 
 def test_convert_vpr_format_error_is_input_error(monkeypatch, tmp_path):
-    # vpr_io の読み込み/形式検証失敗(非vpr 等)→ 入力不正(コード1)。
+    # vpr の読み込み/形式検証失敗(非vpr 等)→ 入力不正(コード1)。
     src = tmp_path / "in.vpr"
     src.write_bytes(b"")
     out = tmp_path / "out.vmd"

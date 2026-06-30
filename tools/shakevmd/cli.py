@@ -268,7 +268,7 @@ def main(argv=None) -> int:
 
     # 入力読み込み(欠落・非VMD・カメラキーなし → 入力不正 §9 コード1)。
     # io.read は継続可能な問題(名前のデコード不可・トレーリングデータ等)を警告で返す。
-    # VMD I/O は mmd_toolbox へ委譲する設計なので、その警告もユーザーへ伝播する。
+    # VMD I/O は vmd へ委譲する設計なので、その警告もユーザーへ伝播する。
     try:
         doc, read_warnings = io.read(args.input)
     except Exception:

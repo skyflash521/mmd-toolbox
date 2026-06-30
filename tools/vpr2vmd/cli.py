@@ -212,7 +212,7 @@ class _Diagnostics:
 def _build(args):
     """vpr を読み口パク VMD ドキュメントと診断を組み立てる(書き込みはしない。vpr2vmd.md §3〜§5)。
 
-    vpr_io 解析 → 対象トラック選択 → 重なり解決 → 口形イベント確定 → 開き量 → lipsync →
+    vpr 解析 → 対象トラック選択 → 重なり解決 → 口形イベント確定 → 開き量 → lipsync →
     モーフキーまでを束ね、`(VmdDocument, _Diagnostics)` を返す。書き込みと診断表示・警告は
     呼び出し側(main)が担う(`--dry-run` でも処理は同じで、出力VMDだけ書かない)。入力不正
     (非vpr・対象トラック皆無)は終了コード 1、`--track` の不正値は 2 を返す(vpr2vmd.md §4.3)。

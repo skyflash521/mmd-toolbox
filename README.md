@@ -6,8 +6,8 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 
 | ツール | 概要 | バージョン | 詳しい使い方 |
 |---|---|---|---|
-| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.1 | [mocapvmd/README.md](mocapvmd/README.md) |
-| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.1 | [shakevmd/README.md](shakevmd/README.md) |
+| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.1 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
+| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.1 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
 
 ## 使い方
 
@@ -122,7 +122,7 @@ mocapvmd <入力ファイル名>.vmd --preset faster
 - 既定では足の接地中の横滑りを除去する。意図的に足を滑らせる動きでは、オプション `--foot-slide-suppression` を下げると横滑りが残る。
 - このツールは元の動きに手を加えるので、出力は元と完全に同じにはならない(とくに細部と接地中の足元の動きは変わる)。ただし大きなステップ・ジャンプ・ターン・手振りなどの動きのアクセントは保護し、全体のタイミングや重心移動の流れは保つようにしている。
 
-詳しい使い方とオプションは [mocapvmd/README.md](mocapvmd/README.md)
+詳しい使い方とオプションは [tools/mocapvmd/README.md](tools/mocapvmd/README.md)
 
 ## shakevmd: カメラに手ぶれ効果を追加する
 
@@ -153,7 +153,7 @@ shakevmd <入力ファイル名>.vmd
 - 手ぶれを足すのは、カメラの動きを作り終えた最後にする。先に焼き込むとキーが増えて、あとからの手直しが難しくなる。
 - 長い VMD では、処理に時間がかかることがある。
 
-詳しい使い方とオプションは [shakevmd/README.md](shakevmd/README.md)
+詳しい使い方とオプションは [tools/shakevmd/README.md](tools/shakevmd/README.md)
 
 ## 開発者向け
 
@@ -231,7 +231,7 @@ pytest <パッケージまたはツールのディレクトリ>
 例:
 
 ```sh
-pytest shakevmd
+pytest tools/shakevmd
 ```
 
 テストは外部サービス・ネットワーク・MMD本体を必要としない。
@@ -244,4 +244,4 @@ Windows でシンボリックリンク作成権限(開発者モードまたは�
 一部のテストはMMD本体で作成したVMDファイルを使用する。これらはリポジトリに
 コミット済みで、通常は作成・配置の必要はない(`pytest` をそのまま実行できる)。
 データを作り直す場合の手順(必要なファイルと条件)は
-[mmd_toolbox/tests/data/README.md](mmd_toolbox/tests/data/README.md) を参照。
+[libs/vmd/tests/data/README.md](libs/vmd/tests/data/README.md) を参照。

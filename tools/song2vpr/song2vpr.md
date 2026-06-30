@@ -11,12 +11,12 @@
 本機能は `song2vpr` という独立CLIツールとして提供する。
 
 `song2vpr` は、日本語の歌の音声ファイル(BGM込み可)を入力に、ボーカル抽出・音素認識(共有モジュール
-`vocal_analysis`)＋ F0ピッチ推定 ＋ 音符分割・歌詞/音素対応付けを経て、共有モジュール `vpr_io` で vpr を
+`vocal_analysis`)＋ F0ピッチ推定 ＋ 音符分割・歌詞/音素対応付けを経て、共有モジュール `vpr` で vpr を
 **1コマンド**で書き出す。
 
 ```text
 入力 音声ファイル(歌, mp3/wav 等)
-  -> song2vpr(vocal_analysis: 分離・音素認識 → F0ピッチ推定 → 音符分割・歌詞/音素対応付け → vpr_io 書き出し)
+  -> song2vpr(vocal_analysis: 分離・音素認識 → F0ピッチ推定 → 音符分割・歌詞/音素対応付け → vpr 書き出し)
   -> vpr
   -> VOCALOID で確認・編集
 ```
@@ -26,8 +26,8 @@
 CLAUDE.md の設計境界に従う。
 
 - **音声前段**(ボーカル抽出・音素認識・ボーカルWAV・RMS)は共有モジュール
-  [vocal_analysis](../vocal_analysis/vocal_analysis.md) に委譲する。
-- **vpr の書き出し**は共有の形式I/Oモジュール [vpr_io](../vpr_io/vpr_io.md) に委譲する。`song2vpr` は vpr の
+  [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する。
+- **vpr の書き出し**は共有の形式I/Oモジュール [vpr](../../libs/vpr/vpr.md) に委譲する。`song2vpr` は vpr の
   バイナリ/直列化構造を直接扱わない。
 - **`song2vpr` 固有**: F0ピッチ推定(ボーカルWAV→F0→音高)、音符分割、歌詞/音素対応付け、CLI引数。
 
@@ -64,7 +64,7 @@ CLAUDE.md の設計境界に従う。
   ├─ 音声前段          vocal_analysis(共有)→ ボーカルWAV・音素セグメント列(母音/子音/gap＋IPA)
   ├─ F0ピッチ推定      song2vpr側 → ボーカルWAVから時刻ごとの基本周波数(F0)・有声/無声
   ├─ 音符分割・対応付け song2vpr側 → F0＋音素セグメントから音符(ピッチ・開始/長さ・歌詞/音素・強弱)
-  └─ vpr 書き出し      vpr_io(共有)→ vpr
+  └─ vpr 書き出し      vpr(共有)→ vpr
 ```
 
 - **音声前段(vocal_analysis)**: ボーカル抽出・音素認識は `vocal_analysis` に委譲し、ボーカルWAVと音素セグメント
@@ -77,8 +77,8 @@ CLAUDE.md の設計境界に従う。
   (意味のある歌詞書き起こしは行わない)。`--lyrics` なし時は表示歌詞に**母音仮名**(あ/い/う/え/お)を入れ、音素は
   セグメント由来を入れる。`--lyrics` 指定時は歌詞テキストをモーラ単位で音符へ順次対応付ける。強弱は相対正規化RMSを
   ベロシティ(0–127)へ写像する(具体規則は実装計画 §4.1)。
-- **vpr 書き出し(vpr_io)**: 音符列・テンポを `vpr_io` のデータモデルへ載せ、vpr を書き出す(vpr_io.md §2・§4)。
-  `vpr_io` の書き出しは `song2vpr` 着手時に拡張する(vpr_io.md §4)。
+- **vpr 書き出し(vpr)**: 音符列・テンポを `vpr` のデータモデルへ載せ、vpr を書き出す(vpr.md §2・§4)。
+  `vpr` の書き出しは `song2vpr` 着手時に拡張する(vpr.md §4)。
 
 ---
 
@@ -112,7 +112,7 @@ song2vpr INPUT [options]
 
 ## 5. 入出力要件
 
-- 出力 vpr の書き出しは `vpr_io` に委譲する。`song2vpr` は vpr のバイナリ/直列化構造を直接扱わない。
+- 出力 vpr の書き出しは `vpr` に委譲する。`song2vpr` は vpr のバイナリ/直列化構造を直接扱わない。
 - 音声前段(分離・認識)は `vocal_analysis` の共有出力を使う。利用者は `song2vpr INPUT` の1コマンドだけを実行し、
   外部ツールは内部で呼ばれる。
 - 出力の再現性: 外部ツール(分離・認識・F0推定)が非決定的な場合があるため、可能な範囲で決定論を目指す
@@ -120,11 +120,11 @@ song2vpr INPUT [options]
 
 ---
 
-## 6. vocal_analysis・vpr_io との関係
+## 6. vocal_analysis・vpr との関係
 
-- 音声前段(分離・認識・ボーカルWAV)は `vocal_analysis`、vpr 書き出しは `vpr_io`。`song2vpr` は両者を束ね、
+- 音声前段(分離・認識・ボーカルWAV)は `vocal_analysis`、vpr 書き出しは `vpr`。`song2vpr` は両者を束ね、
   ピッチ推定・音符分割・歌詞/音素対応付けという `song2vpr` 固有処理を担う。
-- 時間軸: `vocal_analysis` の出力は秒。`vpr_io` は vpr のテンポに基づく時間表現(tick)を扱う。秒⇔tick の変換
+- 時間軸: `vocal_analysis` の出力は秒。`vpr` は vpr のテンポに基づく時間表現(tick)を扱う。秒⇔tick の変換
   (テンポは `--tempo` 指定または既定 120 BPM。自動推定は将来)は `song2vpr` 側で行う(実装計画 §4.2)。
-- 設計境界どおり、CLI は別CLIに依存しない(`song2vmd.md` を参照しない)。共有は `vocal_analysis`・`vpr_io` を
+- 設計境界どおり、CLI は別CLIに依存しない(`song2vmd.md` を参照しない)。共有は `vocal_analysis`・`vpr` を
   通じてのみ行う。

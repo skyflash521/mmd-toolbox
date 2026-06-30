@@ -15,7 +15,7 @@ from .phonemes import PhonemeCategory, categorize
 from .timing import tick_to_frame
 
 # 母音的口形(合成プロファイルを持ち開き量で保持値が決まる)。開き量はこれらのイベントのみ有意で、
-# 両唇閉鎖・無音は閉口なので開き量を持たない(0)([lipsync 仕様](../lipsync/lipsync.md) §2.2)。
+# 両唇閉鎖・無音は閉口なので開き量を持たない(0)([lipsync 仕様](../../libs/lipsync/lipsync.md) §2.2)。
 _VOWEL_LIKE = frozenset(
     {MouthShape.A, MouthShape.I, MouthShape.U, MouthShape.E, MouthShape.O, MouthShape.N}
 )
@@ -36,7 +36,7 @@ def _classify_gap(
     前後の実効口形がともに母音的(母音・撥音「ん」)で、間隙が `legato_max_frames` 以下のときだけ
     `LEGATO_GAP`(谷で繋ぐ)。非母音的な隣接(両唇閉鎖・促音閉口・直前が閉口の継続など)・長い間隙・
     曲頭(直前口形なし `left_shape is None`)は `SILENCE`(完全閉口)。判定は確定済みの口形だけに依り、
-    `lipsync` 側はこの分類結果を入力として受ける([lipsync 仕様](../lipsync/lipsync.md) §6・§4.12)。
+    `lipsync` 側はこの分類結果を入力として受ける([lipsync 仕様](../../libs/lipsync/lipsync.md) §6・§4.12)。
     """
     if left_shape not in _VOWEL_LIKE or right_shape not in _VOWEL_LIKE:
         return MouthShape.SILENCE

@@ -1,4 +1,4 @@
-"""雛形・データ型と mmd_toolbox 連携のテスト(lipsync.md §3/§4)。
+"""雛形・データ型と vmd 連携のテスト(lipsync.md §3/§4)。
 
 公開データ型(MouthShape / MouthEvent / GenerationParams)とコア関数
 generate_morph_keys の契約、および出力モーフキーが vmd の
