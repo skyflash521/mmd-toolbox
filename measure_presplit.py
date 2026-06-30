@@ -16,13 +16,15 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-# worktree を切り替えた before/after 比較で、必ずこのスクリプトと同じツリーの実装(mmd_toolbox /
-# mocapvmd)を読むよう、スクリプト自身のディレクトリを import より先に sys.path 先頭へ置く
-# (cwd 依存だと別ツリーを指しうる)。
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# worktree を切り替えた before/after 比較で、必ずこのスクリプトと同じツリーの実装(libs/vmd /
+# tools/mocapvmd)を読むよう、同じツリーの libs/・tools/ を import より先に sys.path 先頭へ置く
+# (editable install や cwd 依存だと別ツリーを指しうる)。
+_TREE_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(_TREE_ROOT / "tools"))
+sys.path.insert(0, str(_TREE_ROOT / "libs"))
 
-from mmd_toolbox.vmd import io  # noqa: E402
-from mmd_toolbox.vmd.reduce import build_bone_tolerances, reduce_bone_track  # noqa: E402
+from vmd import io  # noqa: E402
+from vmd.reduce import build_bone_tolerances, reduce_bone_track  # noqa: E402
 from mocapvmd import classify, presets  # noqa: E402
 
 CUT_THRESHOLDS = (1.0, 30.0)
@@ -61,7 +63,7 @@ def _is_constant_track(keys):
 def _worst_case_overhead():
     """最悪ケース回帰: 長大単一 span が「末尾でだけ逸脱」する合成トラック。is_constant が span 全体を
     走査してから False を返す純粋オーバーヘッドを測る(逸脱はカット閾値未満・定数しきい値超で隔離)。"""
-    from mmd_toolbox.vmd.types import BoneKey
+    from vmd.types import BoneKey
 
     name_raw = b"worst\x00".ljust(15, b"\x00")
     n = 2000

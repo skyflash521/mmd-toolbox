@@ -24,11 +24,12 @@ sparsevmd = "sparsevmd.cli:main"
 vpr2vmd = "vpr2vmd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*", "lipsync*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr2vmd*", "vpr_io*"]
+where = ["libs", "tools"]
+include = ["vmd*", "pmx*", "vpr*", "lipsync*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr2vmd*"]
 
 [tool.pytest.ini_options]
-testpaths = ["mmd_toolbox", "lipsync", "mocapvmd", "shakevmd", "sparsevmd", "vpr2vmd", "vpr_io"]
-pythonpath = ["."]
+testpaths = ["libs/vmd", "libs/pmx", "libs/vpr", "libs/lipsync", "tools/mocapvmd", "tools/shakevmd", "tools/sparsevmd", "tools/vpr2vmd"]
+pythonpath = ["libs", "tools"]
 # 各ツールの tests に同名テストファイル(test_cli.py 等)があるため、basename 衝突を
 # 避ける importlib インポートモードを使う(prepend 既定だと collection で衝突する)。
 addopts = "--import-mode=importlib"
