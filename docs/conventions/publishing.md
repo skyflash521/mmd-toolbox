@@ -15,7 +15,7 @@
 1. `<tool>/__init__.py` の `__version__` を更新する。初回は付与し(初期版の選び方は versioning.md §4)、以降のリリースでは該当桁を上げる(どの桁を上げるかは versioning.md §3)。
 2. CLI に `--version` を備える。初回はこのオプションを追加する(表示内容と番号源は versioning.md §1)。依存ライブラリ版の併記は「判断ポイント」を参照。
 3. ドキュメントに版番号を記載している箇所(トップ `README.md` のツール表のバージョン列など)を、現在の `__version__` に合わせて更新する(番号源は versioning.md §1 のとおり `__version__` 一本)。
-4. `pyproject.toml` の version をその日の CalVer へ更新する(値の付け方は versioning.md §1)。リリース日との一致は D で最終確認する。
+4. `pyproject.toml` の version をその日の CalVer へ更新する(値の付け方は versioning.md §1)。
 
 ## B. 利用者向けドキュメント
 
@@ -39,8 +39,7 @@
 
 ## D. リリース確定
 
-1. `pyproject.toml` の version がタグを切る当日(=リリース日)の CalVer か確認し、A 以降で日をまたいでいれば当日へ更新する(値の付け方は versioning.md §1)。
-2. すべて緑・収束後、リリースとしてタグを打つ(タグの形式・種別・版の一致は versioning.md §5)。タグ付けは明示指示で行う(自動で打たない)。
+1. すべて緑・収束後、リリースとしてタグを打つ(タグの形式・種別・版の一致は versioning.md §5)。タグ付けは明示指示で行う(自動で打たない)。
 
 ## 順序の目安
 
