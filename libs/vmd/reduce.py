@@ -57,7 +57,7 @@ class Tolerances:
 def build_bone_tolerances(bone_pos, bone_rot):
     """ボーンの位置・回転許容値だけから Tolerances を構築する(カメラ欄は 0.0 で埋める)。
 
-    ボーンのみを扱うツール(mocapvmd 等)がカメラ用許容値を指定せず疎化できるようにする。返した
+    ボーンのみを扱うツールがカメラ用許容値を指定せず疎化できるようにする。返した
     Tolerances はそのまま reduce_bone_track へ渡せる(reduce_bone_track は bone_pos / bone_rot のみ
     参照する)。値の有限性・非負などの検証は呼び出し側(プリセット解決層)が担う。
     """

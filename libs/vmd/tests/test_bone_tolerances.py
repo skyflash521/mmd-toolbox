@@ -1,7 +1,7 @@
 """ボーン専用トレランス構築ヘルパのテスト(vmd.md vmd.reduce)。
 
 build_bone_tolerances は bone_pos / bone_rot だけを受け取り、未使用のカメラフィールドを 0.0 で
-埋めた Tolerances を返す。ボーンのみを扱うツール(mocapvmd)がカメラ許容値を指定せずに済むようにする。
+埋めた Tolerances を返す。ボーンのみを扱うツールがカメラ許容値を指定せずに済むようにする。
 """
 
 from vmd import reduce

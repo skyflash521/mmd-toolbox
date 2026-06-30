@@ -46,7 +46,7 @@ def _bone_linear():
 
 
 BL = _bone_linear()
-# balanced プリセット相当の許容(sparsevmd.presets の balanced 値)。
+# balanced プリセット相当の許容値。
 TOLS = Tolerances(
     bone_pos=0.01,
     bone_rot=0.10,
