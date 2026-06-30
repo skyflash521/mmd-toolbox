@@ -51,12 +51,12 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
 | [vmd-io.md](vmd-io.md) | vmd.types, vmd.io | VMD読み書き・データモデル・正規化・ラウンドトリップ保証 |
 | [vmd-interp.md](vmd-interp.md) | vmd.interp | MMD互換の補間曲線評価・サンプリング |
 | [vmd-camera.md](vmd-camera.md) | vmd.camera | カメラモデルの座標変換・符号規約 |
+| [vmd-reduce.md](vmd-reduce.md) | vmd.reduce, vmd.cuts, vmd.fit, vmd.sample | キーフレーム疎化エンジン(区間分割・曲線フィット・不連続境界・誤差評価・出力後検証) |
 | [../pmx/pmx.md](../pmx/pmx.md) | pmx.types, pmx.io, pmx.pose | PMX読み取り・ボーン階層データモデル・FK評価(別フォーマット層 `pmx`) |
 
 キーフレーム疎化の共通機構 `vmd.reduce`(支援: `vmd.cuts`・`vmd.fit`・`vmd.sample`)は
 複数ツールが共有する。疎化アルゴリズム(区間分割・キー削減・
-継ぎ目処理・誤差検証・ベジェ採否)のフォーマット層側でのまとまった仕様化は未整備で、
-現行は `vmd.reduce`(支援モジュール含む)の実装と docstring を根拠とする。`reduce` は
+継ぎ目処理・誤差検証・ベジェ採否)の正本は [vmd-reduce.md](vmd-reduce.md)。`reduce` は
 カメラ枠を含む共通 `Tolerances` を扱うが、ボーンだけを扱うツール向けに、ボーンの位置・回転許容誤差だけを
 受け取り未使用のカメラ枠を内部で埋めて `Tolerances` を返すヘルパ `build_bone_tolerances` を提供する。
 
