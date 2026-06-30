@@ -163,10 +163,16 @@ shakevmd <入力ファイル名>.vmd
 |---|---|
 | [pyproject.toml](pyproject.toml) | 公開コマンド、依存関係、テスト対象の設定 |
 | `docs/specs/` | ツールに依存しない仕様・参照資料 |
-| `mmd_toolbox/` | VMD 入出力・補間・カメラ座標変換などの共通ライブラリ |
-| `mocapvmd/` | `mocapvmd` コマンド本体と仕様・テスト |
-| `shakevmd/` | `shakevmd` コマンド本体と仕様・テスト |
-| `sparsevmd/` | `sparsevmd` コマンド本体と仕様・テスト |
+| `docs/conventions/` | 層タクソノミー・バージョン付けなどツール横断の規約 |
+| `libs/vmd/` | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
+| `libs/pmx/` | PMX 読み取り・ボーン階層・FK 評価のライブラリ |
+| `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
+| `libs/lipsync/` | 口パク生成の共有ドメインライブラリ |
+| `libs/vocal_analysis/` | 音声解析の共有ドメインライブラリ |
+| `tools/mocapvmd/` | `mocapvmd` コマンド本体と仕様・テスト |
+| `tools/shakevmd/` | `shakevmd` コマンド本体と仕様・テスト |
+| `tools/sparsevmd/` | `sparsevmd` コマンド本体と仕様・テスト |
+| `tools/vpr2vmd/` | `vpr2vmd` コマンド本体と仕様・テスト |
 
 ### 開発環境
 

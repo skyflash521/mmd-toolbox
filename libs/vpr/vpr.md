@@ -1,7 +1,7 @@
-# vpr_io 要求仕様書
+# vpr 要求仕様書
 
-VOCALOID プロジェクトファイル(vpr)の読み書きを担う**形式I/Oモジュール**の要求仕様。
-vpr はMMD形式ではないため、MMD形式層(`mmd_toolbox`)とは別のモジュールとして置く。
+VOCALOID プロジェクトファイル(vpr)の読み書きと休符導出を担う **vpr 形式モジュール** の要求仕様。
+vpr は MMD 形式ではない独立フォーマットで、MMD 形式の `vmd`・`pmx` と同列のフォーマット層モジュールとして置く。
 
 ---
 
@@ -15,13 +15,15 @@ CLI間依存になる)。
 
 ### 1.2 設計境界
 
-CLAUDE.md の設計境界に従う。**MMDでない形式(VOCALOID vpr)の入出力を担う専用の形式I/Oモジュール**。
+[../../docs/conventions/layering.md](../../docs/conventions/layering.md) の層タクソノミーに従う。vpr は非 MMD 形式
+(VOCALOID vpr)の入出力を担うフォーマット層モジュールで、フォーマット層共通の設計原則(形式の事実のみを扱う・
+ロスレス・CLI非依存・無出力・構造化警告/エラー)は layering.md §3 を正本とする(本書では重複記述しない)。
 
-- vpr の解析・直列化(形式の事実)は `vpr_io` に置く。
-- **形式の事実のみを扱う**(`mmd_toolbox` と同じ原則): ツール固有の判断は持ち込まない。vpr から口形イベント列・
+- vpr の解析・直列化(形式の事実)は `vpr` に置く。
+- 上記の共通原則により、ツール固有の判断は持ち込まない。vpr から口形イベント列・
   開き量を作る、ピッチ推定、音符分割・歌詞/音素対応付けなどの生成・判断は各CLI(`vpr2vmd`/`song2vpr`)や
   共有ドメイン(`lipsync`)の責務。
-- VMD形式の入出力は `mmd_toolbox`、vpr形式の入出力は `vpr_io` が担う(形式ごとに別モジュール)。
+- MMD 形式の入出力は `vmd`・`pmx`、vpr 形式の入出力は `vpr` が担う(形式ごとに別モジュール)。
 
 ### 1.3 利用先
 
@@ -35,7 +37,7 @@ CLAUDE.md の設計境界に従う。**MMDでない形式(VOCALOID vpr)の入出
 
 ---
 
-## 2. データモデル(vpr_io が公開する抽象)
+## 2. データモデル(vpr が公開する抽象)
 
 vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特定のCLIに依らない正規化データモデルとして公開する。
 
@@ -45,7 +47,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
   強弱は**ベロシティ(0〜127 の生値)**とする(下記「確定事項」)。
 - **連続コントローラ曲線**: パートが持つ連続パラメータ自動化(声量 `dynamics`・表情 `s5Expression`・音色 等)を、
   名前と (絶対 tick, 生値) 列として**全コントローラ生値のまま**公開する。どれが声量かの選別・値域の正規化・他
-  パラメータへの写像は利用先の責務(設計境界 1.2)で、vpr_io は形式の事実だけを公開する(下記「確定事項」)。
+  パラメータへの写像は利用先の責務(設計境界 1.2)で、`vpr` は形式の事実だけを公開する(下記「確定事項」)。
 - **休符**: 音符間の空き(無音区間)として観測できる情報。
 
 利用先が使う部分集合は 1.3 のとおり。`vpr2vmd` とS-1ゲートは時刻・音素・(vpr2vmd は)強弱を使い、`song2vpr`
@@ -63,7 +65,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 - **強弱の表現**: 各音符の **ベロシティ(0〜127 の生値)** を持つ。加えて、パート単位の**連続コントローラ曲線**を
   生値のまま公開する(`dynamics` 等の声量曲線を含む)。曲線の時刻は音符と同じく**プロジェクト絶対 tick**で、値は
   ファイル格納の生値。声量コントローラの選別・値域正規化・開き量への写像は利用先(各CLI)が定める(設計境界 1.2)。
-  vpr_io はどのコントローラが何を意味するか・被覆外の値の扱いを解釈しない。
+  `vpr` はどのコントローラが何を意味するか・被覆外の値の扱いを解釈しない。
 - **休符**: 明示の型を持たせず、同一トラック内の**発音区間(各音符の [開始, 開始+長さ))の和集合の補集合**として
   観測する(隣接差分でなく和集合の補集合とすることで、万一区間が重なっても偽の休符を作らない)。先頭音符より
   前・解析範囲末尾までの無音を含み、解析範囲は呼び出し側が定める。歌唱トラックは単音想定(発音区間の重なりを
@@ -73,7 +75,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 
 ### 2.1 公開する具体型と関数
 
-型は Python の dataclass、公開関数はモジュール関数とし、`mmd_toolbox.vmd`(`types.py` / `io.py`)の作法に倣う。
+型は Python の dataclass、公開関数はモジュール関数とし、`vmd`(`types.py` / `io.py`)の作法に倣う。
 時刻は vpr ネイティブの **tick(整数)** で保持し、秒/フレーム/拍への変換は持たない(§6)。
 
 - `VprProject`: `resolution: int`(tick/四分音符)、`tempos: list[TempoEvent]`、
@@ -96,7 +98,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 - **休符**: 専用型を持たせない。同一 `Track` 内の発音区間 `[start_tick, start_tick+duration_tick)` の和集合の
   補集合を休符とする(上記「確定事項」)。
 - **警告/エラー**: `VprWarning`(`code: str`、`message: str`。続行可能事象の構造化報告)、
-  `VprFormatError`(構造異常の例外)。`mmd_toolbox.vmd.types` の `VmdWarning`/`VmdFormatError` に倣う。
+  `VprFormatError`(構造異常の例外)。`vmd.types` の `VmdWarning`/`VmdFormatError` に倣う。
   - `VprWarning` はロケータとして `track_index: int | None`、`part_index: int | None`、
     `note_index: int | None`、`related_note_index: int | None`、`tick: int | None` を持つ(既定 `None`)。
     `track_index`/`part_index`/`note_index` は `VprProject.tracks[]`/`Track.parts[]`/`Part.notes[]` の添字、
@@ -106,12 +108,12 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
   - `VprFormatError` は原因特定のため `message: str`、`path: str | None`、`key: str | None`、
     `value: object | None` を持つ。`path` は ZIP エントリ名または JSON パス(例 `tracks[2].parts[0].notes[4].pos`)、
     `key` は欠落・型不一致の対象キー、`value` は問題になった実値。詳細な範囲は §3。
-- **公開関数**(`mmd_toolbox.vmd.io` に倣う):
+- **公開関数**(`vmd.io` に倣う):
   - `read(src: str | Path | bytes) -> tuple[VprProject, list[VprWarning]]`(読み)。
   - `write(project: VprProject) -> bytes` / `write_file(project: VprProject, path: str | Path) -> None`
     (書き、`song2vpr` 着手時)。`write_file` は原子置換(同ディレクトリ一時ファイルへ書いて fsync し
     `os.replace`)で、書き込み途中の中断・ディスクフルでも既存の出力先を破損させない
-    (`mmd_toolbox.vmd.io.write_file` に倣う)。
+    (`vmd.io.write_file` に倣う)。
 - 未解釈データ(ロスレス保持)は `VprProject.raw_sequence` に `sequence.json` 全体を保持する範囲とする
   (保持範囲と往復保証の限界は §3・§5)。オブジェクト単位の未マップキー保持(`extras` 等)は必要が確認された
   時点で `song2vpr`(write)で検討する。
@@ -121,12 +123,11 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 ## 3. 読み込み(read)
 
 - vpr を読み、データモデル(2章)を返す。
-- **ロスレス原則**(`mmd_toolbox` に倣う): 解釈しないデータも可能な範囲で保持し、無加工なら書き戻せること
-  (読み→書きの再現性)を目標とする。保持の範囲は形式レイアウトの確定(5章)に依存する。
-- **CLI非依存・出力なし**: 形式の異常は構造化エラーで返し、続行可能な事象は構造化された警告で返す
-  (表示の判断は呼び出し側)。`print`/`logging` へ直接出力しない。
+- フォーマット層共通の設計原則(ロスレス・CLI非依存・無出力・構造化警告/エラー)は layering.md §3 に従う。
+  vpr 固有の保持範囲: 解釈しないデータは可能な範囲で保持し無加工なら書き戻せることを目標とし、保持の範囲は
+  形式レイアウトの確定(5章)に依存する(§3.3)。形式の異常は `VprFormatError`、続行可能な事象は `VprWarning` で返す。
 
-`read` は形式仕様([docs/specs/vpr/VPR_file_format.md](../docs/specs/vpr/VPR_file_format.md))の `sequence.json` を
+`read` は形式仕様([docs/specs/vpr/VPR_file_format.md](../../docs/specs/vpr/VPR_file_format.md))の `sequence.json` を
 次のとおりデータモデル(§2.1)へ写像する(フィールドのレイアウトは形式仕様を正とする):
 
 - `VprProject.resolution` = 480(形式仕様の固定分解能)。
@@ -191,18 +192,18 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 ## 5. 形式レイアウトの正本
 
 - vpr の具体的な直列化レイアウト(コンテナ構造・フィールド配置・バージョン差)は**形式仕様を正本**とし、
-  本書では重複定義しない。本書は `vpr_io` の責務とデータモデル(2章)を定める。
-- 形式仕様は [docs/specs/vpr/VPR_file_format.md](../docs/specs/vpr/VPR_file_format.md) を正本とする(MMD の VMD
-  レイアウトを `docs/specs/vmd/VMD_file_format.md` が正本とし、`mmd_toolbox` がそれを実装するのと同じ扱い)。
+  本書では重複定義しない。本書は `vpr` モジュールの責務とデータモデル(2章)を定める。
+- 形式仕様は [docs/specs/vpr/VPR_file_format.md](../../docs/specs/vpr/VPR_file_format.md) を正本とする(MMD の VMD
+  レイアウトを `../../docs/specs/vmd/VMD_file_format.md` が正本とし、`vmd` モジュールがそれを実装するのと同じ扱い)。
   ロスレスの保持範囲(未解釈データの保持表現)は §3.3 に定める(`VprProject.raw_sequence` に `sequence.json`
   全体を保持。往復検証と範囲拡張は `write` 実装時)。
 
 ---
 
-## 6. mmd_toolbox との関係・時間軸
+## 6. フォーマット層との関係・時間軸
 
-- vpr はMMD形式でないため `mmd_toolbox` とは別モジュールとする。VMD側の入出力は `mmd_toolbox`、vpr側は
-  `vpr_io`。
-- vpr はテンポ・拍子に基づく時間表現(tick/拍)を持つ。一方 VMD 側は30fps基準(`mmd_toolbox` 規約)。
-  時刻⇔フレーム/拍の変換は利用先(各CLI)が行い、`vpr_io` は vpr の時間表現とテンポ・拍子を正規化して
+- vpr は MMD 形式でないため `vmd`・`pmx` とは別のフォーマット層モジュールとする。MMD 形式(VMD)の入出力は
+  `vmd`、vpr 側は `vpr`。
+- vpr はテンポ・拍子に基づく時間表現(tick/拍)を持つ。一方 VMD 側は 30fps 基準(vmd.md §1.2 の規約)。
+  時刻⇔フレーム/拍の変換は利用先(各CLI)が行い、`vpr` は vpr の時間表現とテンポ・拍子を正規化して
   渡すまでを担う(変換ポリシーは持たない)。

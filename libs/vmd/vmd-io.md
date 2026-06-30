@@ -1,9 +1,9 @@
 # vmd-io 仕様書
 
-mmd_toolbox.vmd.types / mmd_toolbox.vmd.io — VMD読み書き・データモデル・正規化
+vmd.types / vmd.io — VMD読み書き・データモデル・正規化
 
-親仕様: [mmd_toolbox.md](mmd_toolbox.md)
-バイナリレイアウトの正: `docs/specs/vmd/VMD_file_format.md`(本書では重複記載しない)
+親仕様: [vmd.md](vmd.md)
+バイナリレイアウトの正: `../../docs/specs/vmd/VMD_file_format.md`(本書では重複記載しない)
 
 ---
 
@@ -139,4 +139,4 @@ mmd_toolbox.vmd.types / mmd_toolbox.vmd.io — VMD読み書き・データモデ
 6. フィールド単位assert: フォーマット仕様書のレイアウトからテストコード内に
    手書きしたバイト列フィクスチャを読み込み、各フィールドが期待値と一致すること。
    逆方向(データモデル→write→バイト列比較)も検証する
-   (reader/writerが対称に間違う解釈誤りの検出。mmd_toolbox.md §4.2)
+   (reader/writerが対称に間違う解釈誤りの検出。vmd.md §4.2)

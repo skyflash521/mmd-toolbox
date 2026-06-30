@@ -1,9 +1,9 @@
 # vmd-camera 仕様書
 
-mmd_toolbox.vmd.camera — MMDカメラモデルの座標変換・符号規約
+vmd.camera — MMDカメラモデルの座標変換・符号規約
 
-親仕様: [mmd_toolbox.md](mmd_toolbox.md)
-カメラキーのフィールド定義: `docs/specs/vmd/VMD_file_format.md`
+親仕様: [vmd.md](vmd.md)
+カメラキーのフィールド定義: `../../docs/specs/vmd/VMD_file_format.md`
 
 ---
 

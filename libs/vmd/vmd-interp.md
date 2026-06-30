@@ -1,9 +1,9 @@
 # vmd-interp 仕様書
 
-mmd_toolbox.vmd.interp — MMD互換の補間曲線評価・サンプリング
+vmd.interp — MMD互換の補間曲線評価・サンプリング
 
-親仕様: [mmd_toolbox.md](mmd_toolbox.md)
-補間ブロックのバイトレイアウト: `docs/specs/vmd/VMD_file_format.md`
+親仕様: [vmd.md](vmd.md)
+補間ブロックのバイトレイアウト: `../../docs/specs/vmd/VMD_file_format.md`
 
 ---
 
@@ -78,7 +78,7 @@ MMD本体には中間フレームの補間値を機械可読に出力する機�
 
 1. **数値クロスバリデーション(自動・pytest内)**:
    補間ベジェのアルゴリズム自体は複数の互換実装で確立している
-   (docs/specs/vmd/VMD_file_format.md の参照元)。リスクは数式の選択ではなく
+   (../../docs/specs/vmd/VMD_file_format.md の参照元)。リスクは数式の選択ではなく
    自前実装のミスにあるため、独立した実装(純Pythonのサードパーティ実装を
    テスト専用依存として利用するか、仕様から独立に書いた素朴な第2実装)との
    数値一致をテストする

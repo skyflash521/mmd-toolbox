@@ -1,6 +1,6 @@
-# mmd_toolbox 仕様書
+# vmd 仕様書
 
-mmd-toolbox 共通ライブラリ — MMDファイルフォーマットの読み書きとMMD互換評価
+VMD フォーマット層 — VMD ファイルの読み書き・補間曲線評価・カメラ座標変換・キーフレーム疎化
 
 実装言語: Python 3.11+
 依存: numpy, scipy
@@ -10,79 +10,70 @@ mmd-toolbox 共通ライブラリ — MMDファイルフォーマットの読み
 ## 1. 位置づけ
 
 ### 1.1 目的
-mmd-toolbox の各ツール(shakevmd ほか将来のツール)が共有する、
-MMDファイルフォーマット層の機能を提供する。
 
-### 1.2 設計原則
-- **フォーマットの事実のみを扱う**: ファイル構造の読み書き、MMD本体互換の評価・変換。
-  ツール固有の判断(ノイズ生成、検出閾値、プリセット等)は各ツールの領分であり持ち込まない
-- **MMD本体を正とする**: 仕様が曖昧な箇所は本体挙動に合わせる。
-  本体との実装差異が発見された場合は本体挙動を正として修正する
-- **ロスレス原則**: 解釈しないデータ(補間ブロックの生バイト、文字列のnull終端後の
-  残バイト、セクションの有無)も保持し、無加工ならバイト一致で書き戻せる
-- **CLI非依存・出力なし**: 警告は構造化オブジェクトとして返し、表示の判断は
-  呼び出し側(各ツール)に委ねる。printやloggingへの直接出力をしない
-- **時間軸は30fps基準**: VMD自体はfpsを保持しない(各キーはフレーム番号のみを持つ)。
-  本リポジトリの取り決めとして `frame=30` を1.0秒と解釈する。
-  この取り決めの定義は本仕様書を正とする
+VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に閉じた評価・変換
+(MMD 互換の補間曲線評価、カメラ座標変換、キーフレーム疎化)を提供する。各ツール
+(shakevmd・sparsevmd・mocapvmd ほか)が共有するフォーマット層。
+
+フォーマット層共通の設計原則(形式の事実のみを扱う・ロスレス・CLI非依存・無出力・構造化警告/エラー)は
+[../../docs/conventions/layering.md](../../docs/conventions/layering.md) §3 を正本とし、本書では重複記述しない。
+
+### 1.2 VMD 固有規約
+
+- **時間軸は30fps基準**: VMD 自体は fps を保持しない(各キーはフレーム番号のみを持つ)。
+  本リポジトリの取り決めとして `frame=30` を 1.0 秒と解釈する。この取り決めの定義は本書を正とする。
+
+その他の VMD 固有規約(例外 `VmdFormatError`・構造化警告の項目・文字列 cp932)は §3 に定める。
 
 ### 1.3 非目標
-- ツール固有ロジック(揺れ生成、カット検出の閾値判断など)
-- レンダリング・物理演算・IK解決
-- PMXの編集・書き出し(将来対応するのは読み込みのみの想定)
+
+- ツール固有ロジック(揺れ生成、カット検出の閾値判断など)。
+- レンダリング・物理演算・IK 解決。
 
 ---
 
 ## 2. パッケージ構成
 
-    mmd_toolbox/
-      __init__.py
-      vmd/
-        types.py    # データモデル(vmd-io.md §2)
-        io.py       # 読み書き・正規化(vmd-io.md)
-        interp.py   # 補間曲線評価・サンプリング(vmd-interp.md)
-        camera.py   # カメラ座標変換(vmd-camera.md)
-        reduce.py   # キーフレーム疎化の全体制御(区間分割・キー削減・継ぎ目処理・誤差検証・ベジェ採否)
-        cuts.py     # 不連続検出・必須境界の管理(reduce の支援)
-        fit.py      # 補間曲線フィット・チャンネル別誤差評価(reduce の支援)
-        sample.py   # サンプリング小ヘルパ(perspective の直近ホールド。reduce の支援)
-      pmx/
-        types.py    # データモデル(PmxModel/PmxBone/PmxWarning。pmx.md)
-        io.py       # PMX読み取り(read_pmx。pmx.md)
-        pose.py     # FK評価(ローカル姿勢サンプリング・前方運動学。pmx.md)
+    vmd/
+      types.py    # データモデル(vmd-io.md §2)
+      io.py       # 読み書き・正規化(vmd-io.md)
+      interp.py   # 補間曲線評価・サンプリング(vmd-interp.md)
+      camera.py   # カメラ座標変換(vmd-camera.md)
+      reduce.py   # キーフレーム疎化の全体制御(区間分割・キー削減・継ぎ目処理・誤差検証・ベジェ採否)
+      cuts.py     # 不連続検出・必須境界の管理(reduce の支援)
+      fit.py      # 補間曲線フィット・チャンネル別誤差評価(reduce の支援)
+      sample.py   # サンプリング小ヘルパ(perspective の直近ホールド。reduce の支援)
 
 機能別仕様書:
 
 | 仕様書 | 対応モジュール | 内容 |
 |---|---|---|
-| [vmd-io.md](vmd-io.md) | vmd/types, vmd/io | VMD読み書き・データモデル・正規化・ラウンドトリップ保証 |
-| [vmd-interp.md](vmd-interp.md) | vmd/interp | MMD互換の補間曲線評価・サンプリング |
-| [vmd-camera.md](vmd-camera.md) | vmd/camera | カメラモデルの座標変換・符号規約 |
-| [pmx.md](pmx.md) | pmx/types, pmx/io, pmx/pose | PMX読み取り・ボーン階層データモデル・FK評価 |
+| [vmd-io.md](vmd-io.md) | vmd.types, vmd.io | VMD読み書き・データモデル・正規化・ラウンドトリップ保証 |
+| [vmd-interp.md](vmd-interp.md) | vmd.interp | MMD互換の補間曲線評価・サンプリング |
+| [vmd-camera.md](vmd-camera.md) | vmd.camera | カメラモデルの座標変換・符号規約 |
+| [../pmx/pmx.md](../pmx/pmx.md) | pmx.types, pmx.io, pmx.pose | PMX読み取り・ボーン階層データモデル・FK評価(別フォーマット層 `pmx`) |
 
-キーフレーム疎化の共通機構 `vmd/reduce`(支援: `vmd/cuts`・`vmd/fit`・`vmd/sample`)は
+キーフレーム疎化の共通機構 `vmd.reduce`(支援: `vmd.cuts`・`vmd.fit`・`vmd.sample`)は
 複数ツール(shakevmd・sparsevmd・mocapvmd)が共有する。疎化アルゴリズム(区間分割・キー削減・
 継ぎ目処理・誤差検証・ベジェ採否)の現行の詳細記述は
-[../sparsevmd/sparsevmd.md](../sparsevmd/sparsevmd.md) にあり、`vmd/reduce` の docstring もそこを
-参照する(共通ライブラリ側での正式な仕様化は未整備で、当面この記述を参照先とする暫定状態)。`reduce` は
+[../../tools/sparsevmd/sparsevmd.md](../../tools/sparsevmd/sparsevmd.md) にあり、`vmd.reduce` の docstring も
+そこを参照する(フォーマット層側での正式な仕様化は未整備で、当面この記述を参照先とする暫定状態)。`reduce` は
 カメラ枠を含む共通 `Tolerances` を扱うが、ボーンだけを扱うツール向けに、ボーンの位置・回転許容誤差だけを
 受け取り未使用のカメラ枠を内部で埋めて `Tolerances` を返すヘルパ `build_bone_tolerances` を提供する。
 
-バイナリレイアウトの正は VMD は `docs/specs/vmd/VMD_file_format.md`、
-PMX は `docs/specs/pmx/PMX仕様.txt` とし、
-本ライブラリの仕様書ではバイトレイアウトを重複記載しない。
+バイナリレイアウトの正は `../../docs/specs/vmd/VMD_file_format.md` とし、本書ではバイトレイアウトを重複記載しない。
 
 ---
 
 ## 3. 共通規約
 
 - **例外**: ファイル構造の異常は `VmdFormatError`(位置情報を含む)。
-  OSレベルのI/O失敗は標準例外を透過する
+  OS レベルの I/O 失敗は標準例外を透過する。
 - **警告**: `{code, message, セクション, キーindex, フレーム番号}` を持つ
   構造化オブジェクトのリストとして返す。エラーにせず続行可能な事象
-  (重複キー、v1形式、正規化による並べ替え等)はすべて警告で報告する
+  (重複キー、v1形式、正規化による並べ替え等)はすべて警告で報告する。
 - **文字列**: Shift-JIS(cp932)。生バイトを常に保持し、表示用デコードは
-  不能バイトを置換文字で補う。比較・同一性判定は生バイトで行う
+  不能バイトを置換文字で補う。比較・同一性判定は生バイトで行う。
 
 ---
 
@@ -92,37 +83,37 @@ PMX は `docs/specs/pmx/PMX仕様.txt` とし、
 
 人間が迷わず実行できることをテスト自体の要件とする。
 
-- テストフレームワークは **pytest** を使用する
+- テストフレームワークは **pytest** を使用する。
 - テストのディレクトリ構造はコードをミラーする
-  (`vmd/io.py` ↔ `tests/vmd/test_io.py`)。
-  テスト共通資産(conftest、MMD産データ)は `tests/` 直下に置く
+  (`vmd/io.py` ↔ `libs/vmd/tests/test_io.py`)。
+  テスト共通資産(conftest、MMD産データ)は `libs/vmd/tests/` 直下に置く。
 - リポジトリルートに `pyproject.toml` を置き、セットアップは
-  `pip install -e ".[dev]"` の1コマンドで完了すること
-- リポジトリルートで `pytest` を実行するだけで全テスト(mmd_toolbox・各ツール)が
-  走ること。`pytest mmd_toolbox` / `pytest shakevmd` で対象を限定できること
-- テストは環境変数・外部サービス・ネットワーク・MMD本体・GUIを一切要求しない
-- MMD産の検証用VMDはリポジトリにコミットする。それ以外のテストデータは
+  `pip install -e ".[dev]"` の 1 コマンドで完了すること。
+- リポジトリルートで `pytest` を実行するだけで全テスト(フォーマット層・各ツール)が
+  走ること。対象ディレクトリを指定して限定できること。
+- テストは環境変数・外部サービス・ネットワーク・MMD本体・GUI を一切要求しない。
+- MMD産の検証用 VMD はリポジトリにコミットする。それ以外のテストデータは
   ファイルとして持たず、テストコード内のフィクスチャとして実行時に組み立てる。
-  いずれもテスト実行者に生成・手動配置を要求しない
-- 全テストは決定論的(乱数はシード固定)とする
+  いずれもテスト実行者に生成・手動配置を要求しない。
+- 全テストは決定論的(乱数はシード固定)とする。
 
 ### 4.2 検証内容
 
-- ラウンドトリップ(read→write のバイト一致)を全テストVMDで実施する
+- ラウンドトリップ(read→write のバイト一致)を全テスト VMD で実施する。
 - **フィールド単位assert**: フォーマット仕様書のレイアウトから独立に手書きした
   バイト列フィクスチャとの双方向比較(read後のフィールド値/writeしたバイト列)で
   検証する(ラウンドトリップでは検出できない「reader/writerが対称に間違う」
-  解釈誤りを検出するため。MMD産ファイルは使わない)
+  解釈誤りを検出するため。MMD産ファイルは使わない)。
 - MMD本体互換は、独立実装との数値クロスバリデーション(自動・pytest内)で
   担保する(vmd-interp.md §5、vmd-camera.md §4)。
-  人間がMMD本体で行う作業は、テストデータVMDの作成(モーションを作って保存)と
-  視覚A/Bスモーク(揺れ0ベイクが元と同じに見えることの確認)の2つのみとし、
+  人間が MMD 本体で行う作業は、テストデータ VMD の作成(モーションを作って保存)と
+  視覚 A/B スモーク(揺れ0ベイクが元と同じに見えることの確認)の 2 つのみとし、
   数値の目視転記を要求する手順は採用しない。
-  手順(MMDのバージョン・操作内容)は `mmd_toolbox/tests/data/README.md` に記録する
-- `mmd_toolbox/tests/data/` に置くのはMMD産ファイルのみ(内容と作成手順は
-  tests/data/README.md)。既知値が必要なデータ(カット入り・順不同・切り詰め・
+  手順(MMDのバージョン・操作内容)は `libs/vmd/tests/data/README.md` に記録する。
+- `libs/vmd/tests/data/` に置くのは MMD産ファイルのみ(内容と作成手順は
+  `libs/vmd/tests/data/README.md`)。既知値が必要なデータ(カット入り・順不同・切り詰め・
   v1形式・混在セクション・ベイク済み等)はテストコード内のフィクスチャとして
-  組み立てる
+  組み立てる。
 
 ---
 
@@ -130,9 +121,9 @@ PMX は `docs/specs/pmx/PMX仕様.txt` とし、
 
 | ツール | 利用機能 |
 |---|---|
-| shakevmd ([../shakevmd/shakevmd.md](../shakevmd/shakevmd.md)) | vmd/io, vmd/types, vmd/interp, vmd/camera, vmd/reduce |
-| sparsevmd ([../sparsevmd/sparsevmd.md](../sparsevmd/sparsevmd.md)) | vmd/io, vmd/interp, vmd/reduce(+cuts, fit, sample) |
-| mocapvmd ([../mocapvmd/mocapvmd.md](../mocapvmd/mocapvmd.md)) | vmd/io, vmd/types, vmd/reduce(+cuts) |
+| shakevmd ([../../tools/shakevmd/shakevmd.md](../../tools/shakevmd/shakevmd.md)) | vmd.io, vmd.types, vmd.interp, vmd.camera, vmd.reduce |
+| sparsevmd ([../../tools/sparsevmd/sparsevmd.md](../../tools/sparsevmd/sparsevmd.md)) | vmd.io, vmd.interp, vmd.reduce(+cuts, fit, sample) |
+| mocapvmd ([../../tools/mocapvmd/mocapvmd.md](../../tools/mocapvmd/mocapvmd.md)) | vmd.io, vmd.types, vmd.reduce(+cuts) |
 
 ---
 
@@ -233,7 +224,7 @@ sparsevmd / mocapvmd が共有する疎化エンジンで、疎化処理時間�
   では lsq を 16〜52% 削り wall も縮んだが、**前提が偽**: 3次ベジェ(`least_squares`)は線形・ease 候補が
   外れる曲線も許容内へ収められるので、フィット可能な回転区間を誤って分割する(単一区間で表せる回転が全
   フレーム分割される回帰をテストが検出)。共有エンジンの正しさを速度と引き換えにするため不採用。
-- **回転C1平滑化**: 位置C1(sparsevmd.md §7.4)の回転版として、slerp 係数の端点速度を端点間角度 Ω で
+- **回転C1平滑化**: 位置C1(../../tools/sparsevmd/sparsevmd.md §7.4)の回転版として、slerp 係数の端点速度を端点間角度 Ω で
   重み付けした角スピード連続へ寄せる案。理論は妥当だが、回転は角度誤差が係数曲線の形に敏感で、端点速度を
   強制すると許容を破って密化し、代表 mocap で出力キーが約13%増。効果は角スピード連続のみ(軸が変わるキー
   の方向不連続は残る)でキー増に見合わず不採用。
