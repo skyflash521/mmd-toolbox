@@ -161,7 +161,12 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--machine", action="store_true",
                    help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
                         "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
-    p.add_argument("input", help="入力カメラ VMD ファイル")
+    # 自己記述(§12.4)。VMD を読まず入力も要求しない独立メタ操作。input を nargs="?" にして
+    # `shakevmd --describe` 単独で成立させ、非 describe 実行では main() が input の欠落を検査する。
+    p.add_argument("--describe", action="store_true",
+                   help="オプション定義とプリセット一覧を JSON Lines の result で出力して終了する"
+                        "(VMD を読まない・入力不要の自己記述)")
+    p.add_argument("input", nargs="?", help="入力カメラ VMD ファイル")
     p.add_argument("-o", "--output", help="出力先(既定: <入力名>_shake.vmd)")
     p.add_argument("--overwrite", action="store_true",
                    help="入力と同一パスへの出力を許可する(未指定で同一パスならエラー)")
@@ -200,6 +205,97 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--quiet", dest="quiet", action="store_true",
                    help="進捗表示を抑制する(警告・統計・終了コードは抑制しない)")
     return p
+
+
+# --describe(§12.4)の型/制約表。dest → (type, constraint)。help と default は parser・定数から引く。
+# type 関数と1対1で対応するので制約の形は明示表で持ち、cli.py の引数定義と乖離しないよう順序は
+# parser の add_argument 順に従う(_describe_options が parser を走査する)。
+_D_NONNEG = {"min": 0, "max": None, "exclusive_min": False}     # _nonneg_float
+_D_POSITIVE = {"min": 0, "max": None, "exclusive_min": True}    # _positive_float
+
+
+def _cfield(name, type_, mn, mx, ex):
+    return {"name": name, "type": type_, "min": mn, "max": mx, "exclusive_min": ex}
+
+
+_D_COMPOUND = {
+    "ranges": {"format": "START:END", "fields": [
+        _cfield("START", "int", 0, None, False), _cfield("END", "int", 0, None, False)]},
+    "rot_weights": {"format": "P,Y,R", "fields": [
+        _cfield("P", "float", None, None, False), _cfield("Y", "float", None, None, False),
+        _cfield("R", "float", None, None, False)]},
+    "cut_threshold": {"format": "位置,角度", "fields": [
+        _cfield("位置", "float", 0, None, False), _cfield("角度", "float", 0, None, False)]},
+    "impulses": {"format": "F:S:D", "fields": [
+        _cfield("F", "int", 0, None, False), _cfield("S", "float", 0, None, False),
+        _cfield("D", "float", 0, None, True)]},
+}
+
+_D_TYPE = {
+    "input": ("str", None),
+    "output": ("str", None),
+    "overwrite": ("flag", None),
+    "ranges": ("compound", _D_COMPOUND["ranges"]),
+    "amp_rot": ("float", _D_NONNEG),
+    "amp_pos": ("float", _D_NONNEG),
+    "rot_weights": ("compound", _D_COMPOUND["rot_weights"]),
+    "freq": ("float", _D_POSITIVE),
+    "seed": ("int", None),          # 範囲制約の無い裸の int は constraint:null
+    "fade": ("float", _D_NONNEG),
+    "motion_damp": ("float", _D_NONNEG),
+    "settle": ("float", _D_NONNEG),
+    "cut_threshold": ("compound", _D_COMPOUND["cut_threshold"]),
+    "impulses": ("compound", _D_COMPOUND["impulses"]),
+    "preset": ("enum", {"choices": list(presets.PRESET_NAMES)}),
+    "dry_run": ("flag", None),
+    "verbose": ("flag", None),
+    "smooth": ("flag", None),
+    "quiet": ("flag", None),
+}
+
+
+def _describe_options(parser):
+    """--describe の options を parser 定義から機械導出する(§12.4)。順序は add_argument 順。
+
+    メタ/モード操作(--describe/--version/--help/--machine)は _D_TYPE に無いので除外される。
+    type/constraint は _D_TYPE(型関数と対応)、help は各 action、default は揺れパラメーターのみ
+    未指定センチネルを解決後の hard-default に置き換え、それ以外は action の既定をそのまま出す。
+    """
+    options = []
+    for action in parser._actions:
+        dest = action.dest
+        if dest not in _D_TYPE:
+            continue
+        type_, constraint = _D_TYPE[dest]
+        if dest == "input":
+            name = "input"
+        else:
+            # BooleanOptionalAction は ["--smooth","--no-smooth"] を持つので否定形を除いた長形式を採る。
+            name = next(s for s in action.option_strings
+                        if s.startswith("--") and not s.startswith("--no-"))
+        if dest in _HARD_DEFAULTS:
+            v = _HARD_DEFAULTS[dest]
+            default = list(v) if isinstance(v, tuple) else v
+        else:
+            default = action.default
+        options.append({
+            "name": name, "type": type_, "constraint": constraint,
+            "default": default, "help": action.help,
+        })
+    return options
+
+
+def _describe_presets():
+    """--describe の presets を presets モジュールから導出する(§12.4)。内蔵パラメーターは除外する。"""
+    out = []
+    for name in presets.PRESET_NAMES:
+        values = {
+            k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in presets.get_preset(name).items()
+            if k not in presets.INTERNAL_PARAM_NAMES
+        }
+        out.append({"name": name, "values": values})
+    return out
 
 
 def _default_output(input_path: str) -> str:
@@ -305,21 +401,26 @@ def main(argv=None) -> int:
         argv = sys.argv[1:]
 
     # 機械モード判定(§12)。解析前に argv で先取りする: 引数エラー時も出力チャネルを決めるため。
-    # emitter はバイナリ stdout へ UTF-8 で書く(ロケール符号化非依存)。非機械では None。
+    # emitter はバイナリ stdout へ UTF-8 で書く(ロケール符号化非依存)。--describe は --machine を
+    # 要さず構造化出力を起動するので、describe でも emitter を用意する。両方無ければ None(従来経路)。
     machine = "--machine" in argv
-    emitter = EventEmitter(sys.stdout.buffer) if machine else None
+    describe = "--describe" in argv
+    emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
 
     def fail(code, message, exit_code, *, field=None, path=None):
-        """失敗を報告して終了コードを返す(§12.5)。機械モードは error イベントでストリームを終端し、
-        非機械モードは理由を標準エラーへ1行出す(トレースバックは出さない)。"""
-        if machine:
+        """失敗を報告して終了コードを返す(§12.5)。構造化出力モード(機械モード・自己記述)は error
+        イベントでストリームを終端し、それ以外は理由を標準エラーへ1行出す(トレースバックは出さない)。
+        emitter の有無(= machine or describe)で分岐する。"""
+        if emitter is not None:
             emitter.error(**error_event(
                 code=code, message=message, exit_code=exit_code, field=field, path=path))
         else:
             print(f"error: {message}", file=sys.stderr)
         return exit_code
 
-    parser = _build_parser(machine)
+    # 構造化出力モード(--machine・--describe)は使用法エラーも error イベントへ振り替えるため
+    # MachineArgumentParser を使う。どちらでもなければ従来の argparse(SystemExit→終了コード)。
+    parser = _build_parser(machine or describe)
     try:
         args = parser.parse_args(argv)
     except ArgumentParseError as e:
@@ -330,6 +431,18 @@ def main(argv=None) -> int:
         # (メタ操作・code 0)。例外を握って終了コードへ変換する(§12.1)。
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
+
+    # 自己記述(§12.4)。VMD を読まず options/presets の result を出して終了する独立メタ操作。
+    if args.describe:
+        emitter.result(
+            mode="describe",
+            options=_describe_options(parser),
+            presets=_describe_presets(),
+        )
+        return 0
+    # input は nargs="?"(--describe を入力無しで成立させるため)。非 describe 実行では必須。
+    if args.input is None:
+        return fail("bad_argument", "入力カメラ VMD ファイル(input)が必要", 2, field="input")
 
     # 引数解析後の本体は想定外の内部エラーで畳む(§12.5)。トレースバックは漏らさず internal_error へ。
     # KeyboardInterrupt は BaseException なのでここでは捕まらず、中断(§12.6)として上位へ伝播する。

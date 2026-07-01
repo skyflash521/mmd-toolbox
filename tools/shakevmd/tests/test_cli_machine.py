@@ -12,7 +12,7 @@
 import json
 
 from shakevmd import bake as bake_mod
-from shakevmd import cli
+from shakevmd import cli, presets
 from vmd import io
 from vmd.types import BoneKey, CameraKey, MorphKey, VmdDocument
 
@@ -361,3 +361,103 @@ def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
     cap = capsys.readouterr()
     assert "error:" in cap.err.lower()
     assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
+
+
+# --- 自己記述 --describe(§12.4) ----------------------------------------
+
+
+def describe_result(capsysbinary):
+    """--describe の stdout を解析し、単一の result(mode:"describe")イベントを返す。"""
+    events = machine_events(capsysbinary)
+    assert len(events) == 1 and events[0]["type"] == "result" and events[0]["mode"] == "describe"
+    return events[0]
+
+
+def test_describe_emits_result_without_input(capsysbinary):
+    # --describe は入力を要求せず、VMD を読まずに options/presets の result を出して exit 0。
+    rc = cli.main(["--describe"])
+    assert rc == 0
+    r = describe_result(capsysbinary)
+    assert isinstance(r["options"], list) and r["options"]
+    assert isinstance(r["presets"], list)
+    # bake/inspect 統計キーは describe には載せない(§12.2)。
+    for k in ("output", "keys", "applied_ranges", "max_amplitude", "detected_cuts"):
+        assert k not in r
+
+
+def test_describe_works_without_machine_flag(capsysbinary):
+    # --describe は --machine を要さない独立メタ操作(--machine 無しでも構造化 result を出す)。
+    rc = cli.main(["--describe"])
+    assert rc == 0
+    assert describe_result(capsysbinary)["mode"] == "describe"
+
+
+def test_describe_options_shape_and_values(capsysbinary):
+    rc = cli.main(["--describe"])
+    assert rc == 0
+    r = describe_result(capsysbinary)
+    by_name = {o["name"]: o for o in r["options"]}
+    # メタ/モード操作は options に含めない(§12.4)。
+    for meta in ("--describe", "--version", "--help", "--machine"):
+        assert meta not in by_name
+    # 各要素は常に5キー、help は非空文字列。
+    for o in r["options"]:
+        assert set(o) == {"name", "type", "constraint", "default", "help"}
+        assert isinstance(o["help"], str) and o["help"]
+    # positional input。
+    assert by_name["input"]["type"] == "str" and by_name["input"]["constraint"] is None
+    # 揺れ float: 非負制約・解決後の hard-default。
+    assert by_name["--amp-rot"]["type"] == "float"
+    assert by_name["--amp-rot"]["constraint"] == {"min": 0, "max": None, "exclusive_min": False}
+    assert by_name["--amp-rot"]["default"] == 0.8
+    # --freq は正(exclusive_min=true)。
+    assert by_name["--freq"]["constraint"]["exclusive_min"] is True
+    # 裸の int(--seed)は constraint null・default 1。
+    assert by_name["--seed"]["type"] == "int" and by_name["--seed"]["constraint"] is None
+    assert by_name["--seed"]["default"] == 1
+    # enum(--preset)。
+    assert by_name["--preset"]["type"] == "enum"
+    assert set(by_name["--preset"]["constraint"]["choices"]) == set(presets.PRESET_NAMES)
+    assert by_name["--preset"]["default"] is None
+    # flag: --smooth は既定 on=true、store_true 系は false。名前は否定形でない長形式。
+    assert by_name["--smooth"]["type"] == "flag" and by_name["--smooth"]["default"] is True
+    assert by_name["--overwrite"]["type"] == "flag" and by_name["--overwrite"]["default"] is False
+    # compound(--rot-weights)。tuple の hard-default は配列化。
+    rw = by_name["--rot-weights"]
+    assert rw["type"] == "compound" and rw["constraint"]["format"] == "P,Y,R"
+    assert [f["name"] for f in rw["constraint"]["fields"]] == ["P", "Y", "R"]
+    assert rw["default"] == [1.0, 1.0, 0.3]
+    # --output/複数指定系は既定 null。
+    assert by_name["--output"]["default"] is None
+    assert by_name["--range"]["default"] is None and by_name["--impulse"]["default"] is None
+
+
+def test_describe_presets_shape(capsysbinary):
+    rc = cli.main(["--describe"])
+    assert rc == 0
+    r = describe_result(capsysbinary)
+    by_name = {p["name"]: p for p in r["presets"]}
+    assert set(by_name) == set(presets.PRESET_NAMES)
+    for p in r["presets"]:
+        assert set(p) == {"name", "values"} and isinstance(p["values"], dict)
+        # 内蔵パラメーターは values に出さない(§12.4)。
+        for internal in presets.INTERNAL_PARAM_NAMES:
+            assert internal not in p["values"]
+
+
+def test_describe_type_table_covers_non_meta_args():
+    # _D_TYPE はメタ/モード操作を除く全 parser 引数を覆う。parser に引数を足して _D_TYPE への
+    # 追加を忘れると describe から黙って抜けるため、その載せ忘れをここで検出する。
+    parser = cli._build_parser()
+    meta = {"help", "version", "machine", "describe"}
+    non_meta = {a.dest for a in parser._actions if a.dest not in meta}
+    assert non_meta <= set(cli._D_TYPE)
+
+
+def test_describe_mode_arg_error_is_error_event(capsysbinary):
+    # --describe(--machine 無し)も構造化出力モードなので、引数エラーは標準エラーでなく error
+    # イベントでストリームを終端する(規約 §3/§4・§12.5)。
+    rc = cli.main(["--describe", "--seed", "abc"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bad_argument" and e["field"] == "--seed" and e["exit_code"] == 2
