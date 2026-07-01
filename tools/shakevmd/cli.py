@@ -609,7 +609,25 @@ def _run(args, machine, emitter, fail) -> int:
             print(f"cuts: {detected_cuts}")
 
         # --dry-run は VMD を書かない。統計表示のみ(§2.7)。進捗行は finally の close で消える。
+        # 機械モードでは入力検査(§12.2 の mode:"inspect")として、書かずに入力メタ情報 + 揺れ
+        # プレビュー統計を result で出してストリームを終端する。keys は入力カメラキー数(正規化作業
+        # ビューの件数=ベイク後の密キー数ではない)、frame_range は入力キーの [最小, 最大]、
+        # duration_sec は最大フレーム÷30(ベイクは 30fps 固定、§4.1)、sections は camera と混在する
+        # 全セクション名。applied_ranges/max_amplitude/detected_cuts は bake の統計と同義。
         if args.dry_run:
+            if machine:
+                emitter.result(
+                    mode="inspect",
+                    output=None,
+                    input_kind="camera",
+                    keys=len(wv_frames),
+                    frame_range=[int(wv_frames[0]), int(wv_frames[-1])],
+                    duration_sec=wv_frames[-1] / 30.0,
+                    sections=["camera"] + list(sections),
+                    applied_ranges=[[int(a), int(b)] for a, b in applied],
+                    max_amplitude=float(max_amp),
+                    detected_cuts=[int(c) for c in detected_cuts],
+                )
             return 0
 
         # --smooth: ベイクした密キーをプロセス内でそのまま reduce へ渡し、疎ベジェへ変換する

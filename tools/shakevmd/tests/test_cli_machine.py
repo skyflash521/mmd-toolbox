@@ -461,3 +461,51 @@ def test_describe_mode_arg_error_is_error_event(capsysbinary):
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["field"] == "--seed" and e["exit_code"] == 2
+
+
+# --- 入力検査 --machine --dry-run(§12.2 mode:"inspect") -----------------
+
+
+def test_machine_dry_run_emits_inspect_result(tmp_path, capsysbinary):
+    # --machine --dry-run は VMD を書かず、入力メタ情報 + 揺れプレビュー統計の inspect result を出す。
+    inp = write_input(tmp_path / "in.vmd")
+    out = tmp_path / "out.vmd"
+    rc = cli.main([inp, "-o", str(out), "--machine", "--dry-run", "--no-smooth"])
+    assert rc == 0
+    events = machine_events(capsysbinary)
+    r = events[-1]
+    assert r["type"] == "result" and r["mode"] == "inspect"
+    assert sum(1 for e in events if e["type"] in ("result", "error")) == 1  # 終端はちょうど1つ
+    assert r["output"] is None and not out.exists()          # 書かない
+    assert r["input_kind"] == "camera"
+    assert r["keys"] == 3                                     # 入力カメラキー数(0/30/60)。密キーではない
+    assert r["frame_range"] == [0, 60]
+    assert r["duration_sec"] == 60 / 30.0
+    assert isinstance(r["sections"], list) and "camera" in r["sections"]
+    assert isinstance(r["applied_ranges"], list)
+    assert isinstance(r["max_amplitude"], float)
+    assert isinstance(r["detected_cuts"], list)
+
+
+def test_machine_dry_run_inspect_lists_non_camera_sections(tmp_path, capsysbinary):
+    # inspect の sections は camera と混在する非カメラセクションを載せる(§12.2)。
+    bone = [BoneKey(name_raw=b"bone".ljust(15, b"\x00"), frame=0,
+                    position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0),
+                    interpolation=bytes(64))]
+    inp = write_input(tmp_path / "in.vmd", bone=bone)
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--dry-run", "--no-smooth"])
+    assert rc == 0
+    r = machine_events(capsysbinary)[-1]
+    assert r["mode"] == "inspect"
+    assert set(r["sections"]) == {"camera", "bone"}
+
+
+def test_non_machine_dry_run_unchanged(tmp_path, capsys):
+    # 非機械の --dry-run は従来どおり VMD を書かず統計を表示し、stdout に JSON は出さない(後方互換)。
+    inp = write_input(tmp_path / "in.vmd")
+    out = tmp_path / "out.vmd"
+    rc = cli.main([inp, "-o", str(out), "--dry-run"])
+    assert rc == 0
+    assert not out.exists()
+    cap = capsys.readouterr()
+    assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
