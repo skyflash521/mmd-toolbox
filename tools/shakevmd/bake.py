@@ -19,6 +19,15 @@ from shakevmd import cuts, motion, noise
 from shakevmd.warn import ShakeWarning
 
 
+class RangeOverlapError(ValueError):
+    """揺れ適用範囲が重複/接触している(§5.2)。
+
+    ValueError の派生にするのは、範囲重複という意図的な引数エラーを、過大値でベイクが破綻して
+    生じる偶発的な ValueError(inf 回転による math domain error 等)と CLI 側で区別するため。
+    ValueError を捕捉する既存の呼び出し側とは互換のまま、専用型で捕捉できる。
+    """
+
+
 def round_half_up(x) -> int:
     """整数度への丸め(四捨五入)。視野角の丸め既定は四捨五入(vmd-interp.md §3/§5)。
 
@@ -207,7 +216,7 @@ def bake(
     resolved.sort()
     for i in range(1, len(resolved)):
         if resolved[i][0] <= resolved[i - 1][1]:
-            raise ValueError(
+            raise RangeOverlapError(
                 f"範囲が重複/接触している: {resolved[i - 1]} と {resolved[i]}(§5.2)"
             )
 

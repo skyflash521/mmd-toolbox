@@ -11,6 +11,7 @@
 
 import json
 
+from shakevmd import bake as bake_mod
 from shakevmd import cli
 from vmd import io
 from vmd.types import BoneKey, CameraKey, MorphKey, VmdDocument
@@ -39,6 +40,14 @@ def machine_events(capsysbinary):
     out = capsysbinary.readouterr().out
     text = out.decode("utf-8")  # UTF-8 固定(ロケール非依存)を前提に decode
     return [json.loads(ln) for ln in text.split("\n") if ln]
+
+
+def machine_error(capsysbinary):
+    """機械モードの stdout を解析し、終端の error イベントを返す(失敗は error で終端、§12.2)。"""
+    events = machine_events(capsysbinary)
+    assert events[-1]["type"] == "error"
+    assert sum(1 for e in events if e["type"] in ("result", "error")) == 1  # 終端はちょうど1つ
+    return events[-1]
 
 
 def test_machine_emits_result_event(tmp_path, capsysbinary):
@@ -209,3 +218,146 @@ def test_help_lists_machine_flag(capsys):
     assert rc == 0
     text = capsys.readouterr().out
     assert "--machine" in text
+
+
+# --- 構造化エラー(§12.5) -----------------------------------------------
+# 各失敗経路が機械モードで確定 code/field/exit_code の error イベントを出してストリームを終端し、
+# 終了コードを維持することを検証する。非機械モードは理由を標準エラーへ1行出す。
+
+
+def test_machine_error_bad_argument_unknown_option(tmp_path, capsysbinary):
+    # 未知オプション → argparse 検出の bad_argument(exit 2)。error で終端する。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--bogus"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bad_argument" and e["exit_code"] == 2
+    assert isinstance(e["message"], str) and e["message"]
+
+
+def test_machine_error_bad_argument_missing_input(capsysbinary):
+    # positional input 欠落 → bad_argument、field は input。
+    rc = cli.main(["--machine"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bad_argument" and e["field"] == "input"
+
+
+def test_machine_error_bad_argument_invalid_value_field(tmp_path, capsysbinary):
+    # 型エラー(--seed 非整数)→ bad_argument、field は該当オプションの長形式。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "--machine", "--seed", "abc"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bad_argument" and e["field"] == "--seed"
+
+
+def test_machine_error_not_vmd(tmp_path, capsysbinary):
+    # 非VMD/破損入力 → not_vmd(exit 1)、field は input。握り潰していた例外種別を message に載せる。
+    bad = tmp_path / "bad.vmd"
+    bad.write_bytes(b"not a vmd file")
+    rc = cli.main([str(bad), "--machine"])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "not_vmd" and e["field"] == "input" and e["exit_code"] == 1
+    assert isinstance(e["message"], str) and e["message"]
+
+
+def test_machine_error_no_camera_keys(tmp_path, capsysbinary):
+    # カメラキー0件 → no_camera_keys(exit 1)。
+    p = str(tmp_path / "nocam.vmd")
+    io.write_file(VmdDocument(camera=[]), p)
+    rc = cli.main([p, "--machine"])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "no_camera_keys" and e["field"] == "input" and e["exit_code"] == 1
+
+
+def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
+    # 出力が入力と同一パス・--overwrite 未指定 → output_overwrites_input(exit 2)、field は --output。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", inp, "--machine"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "output_overwrites_input" and e["field"] == "--output"
+
+
+def test_machine_error_range_reversed(tmp_path, capsysbinary):
+    # 省略端の解決後に逆順(999: の END=末尾<999)→ range_reversed(exit 2)、field は --range。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--range", "999:"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "range_reversed" and e["field"] == "--range"
+
+
+def test_machine_error_range_overlap(tmp_path, capsysbinary):
+    # 範囲の重複/接触 → bake の ValueError → range_overlap(exit 2)、field は --range。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine",
+                   "--range", "0:30", "--range", "30:60"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "range_overlap" and e["field"] == "--range"
+
+
+def test_machine_error_value_overflow(tmp_path, capsysbinary):
+    # 過大値がベイク中に float32 で溢れる(--fade 1e308)→ value_overflow(exit 2)、field は null。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--fade", "1e308"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "value_overflow" and e["field"] is None and e["exit_code"] == 2
+
+
+def test_machine_error_non_finite_output(tmp_path, capsysbinary, monkeypatch):
+    # ベイクが非有限(inf/nan)の出力を返した場合 → non_finite_output(exit 2)、field は null。
+    # 通常の CLI 引数(有限)ではベイクが例外側に倒れて到達しにくい防御経路なので、bake を差し替えて
+    # 有限性検査(_all_finite)の分岐を直接検証する。
+    inf_key = CameraKey(0, -30.0, (float("inf"), 0.0, 0.0), (0.0, 0.0, 0.0), LINEAR, 30, 0)
+
+    def bad_bake(camera_keys, *a, **k):
+        return bake_mod.BakeResult(camera_keys=[inf_key], warnings=[], resolved=[(0, 0)])
+
+    monkeypatch.setattr(cli, "bake", bad_bake)
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "non_finite_output" and e["field"] is None
+
+
+def test_machine_error_write_failed(tmp_path, capsysbinary):
+    # 出力の I/O 失敗(親がファイル)→ write_failed(exit 3)、field は --output、path 付き。
+    inp = write_input(tmp_path / "in.vmd")
+    clash = tmp_path / "afile"
+    clash.write_bytes(b"x")
+    out = str(clash / "out.vmd")
+    rc = cli.main([inp, "-o", out, "--machine", "--no-smooth"])
+    assert rc == 3
+    e = machine_error(capsysbinary)
+    assert e["code"] == "write_failed" and e["field"] == "--output" and e["exit_code"] == 3
+    assert e["path"] == out
+
+
+def test_machine_error_internal_error(tmp_path, capsysbinary, monkeypatch):
+    # 想定外の内部例外(bake が RuntimeError)→ internal_error(exit 1)。安全網。
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(cli, "bake", boom)
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "internal_error" and e["exit_code"] == 1
+
+
+def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
+    # 非機械モードでも失敗理由を標準エラーへ1行出す(§12.5)。終了コードは維持し、stdout に JSON は出さない。
+    bad = tmp_path / "bad.vmd"
+    bad.write_bytes(b"not a vmd file")
+    rc = cli.main([str(bad)])
+    assert rc == 1
+    cap = capsys.readouterr()
+    assert "error:" in cap.err.lower()
+    assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")

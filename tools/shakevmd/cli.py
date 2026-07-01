@@ -13,11 +13,16 @@ import os
 import sys
 import time
 
-from cli_events import EventEmitter
+from cli_events import (
+    ArgumentParseError,
+    EventEmitter,
+    MachineArgumentParser,
+    error_event,
+)
 from vmd import interp, io
 from vmd.reduce import Tolerances, reduce_camera_track
 from shakevmd import __version__, cuts, presets, progress
-from shakevmd.bake import bake
+from shakevmd.bake import RangeOverlapError, bake
 from shakevmd.warn import ShakeWarning
 
 # 公開引数の hard-default(§2.3-2.6)。プリセット/個別引数が未指定の項目に使う。
@@ -142,10 +147,14 @@ def _parse_impulse(text):
     return (f, s, d)
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     # allow_abbrev=False: 仕様外の前置き省略形(--over→--overwrite 等)を受理しない。
     # 未知/省略形は exit 2(§8/§2.7 の非公開・繰延フラグ拒否とも整合)。
-    p = argparse.ArgumentParser(prog="shakevmd", allow_abbrev=False)
+    # 機械モードは使用法エラーを error イベントへ振り替えるため、SystemExit の代わりに
+    # ArgumentParseError を送出する MachineArgumentParser を使う(--help/--version は error() を
+    # 経由しないので影響を受けず、従来どおり SystemExit で短絡する、§12.1/§12.5)。
+    cls = MachineArgumentParser if machine else argparse.ArgumentParser
+    p = cls(prog="shakevmd", allow_abbrev=False)
     p.add_argument("--version", action="version", version=f"shakevmd {__version__}",
                    help="バージョンを表示して終了する")
     # 機械モード(§2.8/§12)。出力を JSON Lines のイベントストリームにし、stdout をイベント専用へ固定する。
@@ -271,34 +280,87 @@ def _shake_stats(orig_camera, baked_keys, applied, cut_pos, cut_rot):
     return max_amp, detected_cuts
 
 
+def _argparse_field(message: str):
+    """argparse の使用法エラーメッセージから対象引数名を取り出す(bad_argument の field、§12.5)。
+
+    argparse は起因引数を構造化して渡さないので、標準の文言形からベストエフォートで抽出する。
+    文言に依存するため未知の形は None(field なし)へ退避し、詳細は message 側に残す。
+    """
+    if message.startswith("argument "):
+        name = message[len("argument "):].split(":", 1)[0].strip()
+        # 複数のオプション文字列は "-o/--output" のように連結される。長形式(最後)を採る。
+        return name.split("/")[-1] if name.startswith("-") else name
+    if message.startswith("unrecognized arguments:"):
+        rest = message[len("unrecognized arguments:"):].split()
+        return rest[0] if rest else None
+    if message.startswith("the following arguments are required:"):
+        rest = message[len("the following arguments are required:"):].strip()
+        return rest.split(",")[0].strip() or None
+    return None
+
+
 def main(argv=None) -> int:
-    """CLI エントリポイント。終了コードを返す(§9: 0/1/2/3)。"""
+    """CLI エントリポイント。終了コードを返す(§9: 0/1/2/3、中断 130)。"""
     if argv is None:
         argv = sys.argv[1:]
 
-    parser = _build_parser()
+    # 機械モード判定(§12)。解析前に argv で先取りする: 引数エラー時も出力チャネルを決めるため。
+    # emitter はバイナリ stdout へ UTF-8 で書く(ロケール符号化非依存)。非機械では None。
+    machine = "--machine" in argv
+    emitter = EventEmitter(sys.stdout.buffer) if machine else None
+
+    def fail(code, message, exit_code, *, field=None, path=None):
+        """失敗を報告して終了コードを返す(§12.5)。機械モードは error イベントでストリームを終端し、
+        非機械モードは理由を標準エラーへ1行出す(トレースバックは出さない)。"""
+        if machine:
+            emitter.error(**error_event(
+                code=code, message=message, exit_code=exit_code, field=field, path=path))
+        else:
+            print(f"error: {message}", file=sys.stderr)
+        return exit_code
+
+    parser = _build_parser(machine)
     try:
         args = parser.parse_args(argv)
+    except ArgumentParseError as e:
+        # 機械モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
+        return fail("bad_argument", e.message, 2, field=_argparse_field(e.message))
     except SystemExit as e:
-        # argparse はエラー時 code 2 で sys.exit(--help は 0)。例外を握って終了コードに変換。
+        # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
+        # (メタ操作・code 0)。例外を握って終了コードへ変換する(§12.1)。
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
 
+    # 引数解析後の本体は想定外の内部エラーで畳む(§12.5)。トレースバックは漏らさず internal_error へ。
+    # KeyboardInterrupt は BaseException なのでここでは捕まらず、中断(§12.6)として上位へ伝播する。
+    try:
+        return _run(args, machine, emitter, fail)
+    except Exception as e:
+        return fail("internal_error", f"{type(e).__name__}: {e}", 1)
+
+
+def _run(args, machine, emitter, fail) -> int:
+    """引数解析済みの本体処理(ベイク→平滑化→書き込み)。失敗は fail() 経由で終了コードを返す。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
     # 上書きガード: 入力と同一パスへの出力は --overwrite 必須(§2.2)。未許可なら書かずにエラー。
     if not args.overwrite and _same_path(output, args.input):
-        return 2
+        return fail(
+            "output_overwrites_input",
+            f"出力先が入力と同一パス。上書きには --overwrite が必要: {output}",
+            2, field="--output",
+        )
 
     # 入力読み込み(欠落・非VMD・カメラキーなし → 入力不正 §9 コード1)。
     # io.read は継続可能な問題(名前のデコード不可・トレーリングデータ等)を警告で返す。
     # VMD I/O は vmd へ委譲する設計なので、その警告もユーザーへ伝播する。
     try:
         doc, read_warnings = io.read(args.input)
-    except Exception:
-        return 1
+    except Exception as e:
+        return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}",
+                    1, field="input")
     if not doc.camera:
-        return 1
+        return fail("no_camera_keys", "入力にカメラキーがない", 1, field="input")
 
     # 範囲の省略側を先頭/末尾キーへ解決(端のスナップ・重複検出は bake() が担う)。
     ranges = None
@@ -313,7 +375,8 @@ def main(argv=None) -> int:
         # 例: `999:` は END=末尾60 に解決され 999>60。bake は端をスナップ後に swap するため
         # ここで弾かないと [60,60] として黙って焼かれてしまう。
         if any(s > e for (s, e) in ranges):
-            return 2
+            return fail("range_reversed",
+                        "範囲の開始が終了より後(省略端の解決後に START>END)", 2, field="--range")
 
     # 公開揺れパラメーターを解決(明示 > --preset > hard-default、§2.7)。
     preset = presets.get_preset(args.preset) if args.preset else {}
@@ -329,11 +392,6 @@ def main(argv=None) -> int:
     # 例: walking の歩調成分 gait_freq/gait_amp。bake 既定(無効)を上書きする。
     internal = {k: preset[k] for k in presets.INTERNAL_PARAM_NAMES if k in preset}
 
-    # 機械モード(§12)。stdout をイベント専用にし、進捗・結果を JSON Lines で出す。emitter は
-    # バイナリ stdout へ UTF-8 で書く(ロケール符号化非依存)。非機械モードでは None のまま従来経路。
-    machine = args.machine
-    emitter = EventEmitter(sys.stdout.buffer) if machine else None
-
     # 進捗のライブ表示(§2.7.1)。重いベイク・平滑化の進行を端末へ出す(--quiet で無効、既定は
     # stderr が端末のときだけ)。機械モードでは進捗をイベントで出すのでライブ行は無効化する。副作用専用=
     # 出力VMD・終了コード・統計・警告を変えない。最初の stage 以降は捕捉例外で終了コードを返す経路・
@@ -343,9 +401,7 @@ def main(argv=None) -> int:
         sys.stderr, enabled=False if (args.quiet or machine) else None
     )
     try:
-        # ベイク。引数由来の異常は §9 コード2 に集約する:
-        # - ValueError: 範囲の重複/接触(空カメラは上で弾き済み)。
-        # - OverflowError: 有限だが過大な値(例 --fade 1e308 → int(round(fade*FPS)) が inf 変換で失敗)。
+        # ベイク。引数由来の異常は下の except で code 別に分ける(range_overlap / value_overflow、§12.5)。
         # 機械モードはベイク進捗をイベントで出す(TTY 非依存)。段開始で done=0,total=null を1本、
         # 以降は bake() のフレーム進捗コールバックで done/total を出す。非機械は従来どおりライブ行の段開始のみ。
         bake_cb = None
@@ -376,15 +432,22 @@ def main(argv=None) -> int:
                 progress=bake_cb,
                 **internal,
             )
-        except (ValueError, OverflowError):
-            return 2
+        except RangeOverlapError as e:
+            # 範囲の重複/接触(§5.2)。意図的な引数エラーなので range_overlap に対応付ける。
+            return fail("range_overlap", str(e), 2, field="--range")
+        except (ValueError, OverflowError) as e:
+            # 過大値でベイクが破綻(例 --fade 1e308 → int(inf) の OverflowError、inf 回転による
+            # math domain error の ValueError)。単一引数へ帰属させられないので field は null(§12.5)。
+            return fail("value_overflow", f"値が過大でベイクが破綻した: {type(e).__name__}: {e}", 2)
         # 進捗行を解放してから warning(stderr)・統計を出す(行の混線を防ぐ、§2.7.1)。
         reporter.close()
 
-        # 焼き出力が非有限(inf/nan)なら引数起因の異常 → 引数エラー(§9 コード2)。
-        # bake 内の乗算で有限引数が inf 化しても float32 は inf を素通しするため明示検査する。
+        # 焼き出力が非有限(inf/nan)なら引数起因の異常として弾く(§12.5 non_finite_output)。
+        # 通常の有限引数では過大値でベイクが例外側に倒れるため到達しにくいが、float32 は inf/nan を
+        # 例外なく素通しするので、書き出し前の防御的検査として残す。
         if not _all_finite(result.camera_keys):
-            return 2
+            return fail("non_finite_output",
+                        "焼き出力が非有限(inf/nan)になった。振幅・重みが過大", 2)
 
         # 警告(§3.1/§12.3): io.read のライブラリ警告(コードはハイフン形式のまま透過)+ bake の
         # 構造化警告 + 非カメラセクション透過。機械モードは stdout へ warning イベント、非機械は stderr へ1行。
@@ -494,9 +557,10 @@ def main(argv=None) -> int:
         try:
             io.write_file(doc, output)
         except OverflowError:
-            return 2
-        except Exception:
-            return 3
+            return fail("value_overflow", "値が大きすぎて書き込み時に float32 で溢れた", 2)
+        except Exception as e:
+            return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}",
+                        3, field="--output", path=output)
 
         # 書き込み成功後に終端イベント/完了行を1回出す(進捗行は close で消えている)。
         # 機械モードは result(mode:"bake")でストリームを終端する(§12.2)。applied_ranges/detected_cuts は
