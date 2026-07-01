@@ -1,25 +1,21 @@
 """shakevmd CLI 機械モードのテスト(shakevmd.md §2.8, §12)。
 
-機械モード(--machine)の成功パスを検証する: stdout を JSON Lines のイベント専用にし、result/
-warning/progress イベントを出す。終端は result または error のちょうど 1 つ(本ステップは成功=result。
-error イベントは構造化エラーのステップで扱う)。非機械モードの既定挙動は不変であること(後方互換)。
+機械モード(--machine)を検証する: stdout を JSON Lines のイベント専用にし、result/warning/progress
+イベントを出す。ストリームは result または error のちょうど 1 つで終端する(本モジュールは成功=result
+終端を対象にし、error イベントは構造化エラーのテストで扱う)。非機械モードの既定挙動が不変であること
+(後方互換)も併せて検証する。
 
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。
-本ステップ未実装の機械モード挙動は xfail(reason="impl pending: Step2 machine-mode events")で印を付け、
-実装ステップで印を外す。テスト方針は ../../../libs/vmd/vmd.md §4 に準ずる。
+機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テスト方針は
+../../../libs/vmd/vmd.md §4 に準ずる。
 """
 
 import json
-
-import pytest
 
 from shakevmd import cli
 from vmd import io
 from vmd.types import BoneKey, CameraKey, MorphKey, VmdDocument
 
 LINEAR = bytes([20, 107, 20, 107]) * 6
-
-_MACHINE_PENDING = "impl pending: Step2 machine-mode events"
 
 
 def cam(frame, dist=-30.0, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0), fov=30, persp=0):
@@ -90,7 +86,6 @@ def test_machine_no_human_text_on_stdout(tmp_path, capsysbinary):
         json.loads(ln)  # すべて JSON、人間向けテキスト行は混入しない
 
 
-@pytest.mark.xfail(reason=_MACHINE_PENDING, strict=True)
 def test_machine_emits_warning_event_for_non_camera_sections(tmp_path, capsysbinary):
     # カメラ以外のセクションを含む入力 → non_camera_sections_passthrough の warning イベント。
     # 非カメラセクションを 2 種(bone と morph)含め、section 配列が全セクション名を載せることを確認。
@@ -111,6 +106,48 @@ def test_machine_emits_warning_event_for_non_camera_sections(tmp_path, capsysbin
     assert isinstance(w["section"], list)
     assert set(w["section"]) == {"bone", "morph"}
     assert isinstance(w["message"], str) and w["message"]  # 自由文字列の文言を message に保持(§12.3)
+
+
+def test_machine_emits_warning_event_for_duplicate_frame(tmp_path, capsysbinary):
+    # 同一フレーム重複の後勝ち破棄 → bake_normalize_duplicate の warning イベント(section=["camera"]、§12.3)。
+    dup = [cam(0), cam(30), cam(30, center=(9.0, 9.0, 9.0)), cam(60)]
+    inp = write_input(tmp_path / "in.vmd", keys=dup)
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"])
+    assert rc == 0
+    events = machine_events(capsysbinary)
+    assert events[-1]["type"] == "result" and events[-1]["mode"] == "bake"  # 成功終端
+    warns = [e for e in events if e["type"] == "warning"]
+    w = next(w for w in warns if w["code"] == "bake_normalize_duplicate")
+    assert w["section"] == ["camera"]
+    assert isinstance(w["message"], str) and w["message"]
+
+
+def test_machine_emits_warning_event_for_octave_clamp(tmp_path, capsysbinary):
+    # 実効周波数が帯域上限を超えるオクターブのクランプ → octave_clamped の warning イベント
+    # (section=null、§12.3)。内蔵 octaves=3 では freq×4>8(=freq>2)でクランプが起きる。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth", "--freq", "3.0"])
+    assert rc == 0
+    events = machine_events(capsysbinary)
+    assert events[-1]["type"] == "result" and events[-1]["mode"] == "bake"  # 成功終端
+    warns = [e for e in events if e["type"] == "warning"]
+    w = next(w for w in warns if w["code"] == "octave_clamped")
+    assert w["section"] is None
+    assert isinstance(w["message"], str) and w["message"]
+
+
+def test_machine_emits_warning_event_for_fade_shortened(tmp_path, capsysbinary):
+    # 範囲長が 2×fade 未満でのフェード自動短縮 → fade_shortened の warning イベント(section=null、§12.3)。
+    # 既定 fade=0.7 → 2×fade=42 フレーム。範囲[0,30]=31 フレーム<42 で短縮が起きる。
+    inp = write_input(tmp_path / "in.vmd")
+    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth", "--range", "0:30"])
+    assert rc == 0
+    events = machine_events(capsysbinary)
+    assert events[-1]["type"] == "result" and events[-1]["mode"] == "bake"  # 成功終端
+    warns = [e for e in events if e["type"] == "warning"]
+    w = next(w for w in warns if w["code"] == "fade_shortened")
+    assert w["section"] is None
+    assert isinstance(w["message"], str) and w["message"]
 
 
 def test_machine_emits_progress_events(tmp_path, capsysbinary):

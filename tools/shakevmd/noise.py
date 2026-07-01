@@ -53,6 +53,11 @@ def effective_octaves(
     return n
 
 
+def _clamp_message(octaves: int, n: int, bandlimit_hz: float) -> str:
+    """帯域制限クランプの警告文言(§6.1)。疑似コード接頭は付けず記述のみ(コードは呼び出し側が付番)。"""
+    return f"オクターブを {octaves}→{n} にクランプした(実効周波数が {bandlimit_hz}Hz を超過)"
+
+
 def _fade(t: np.ndarray) -> np.ndarray:
     """quintic fade 6t^5-15t^4+10t^3(C2 → 合成ノイズはC1連続)。"""
     return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
@@ -115,9 +120,7 @@ def octave_components(
     n = effective_octaves(freq, octaves, bandlimit_hz)
     warns: list[str] = []
     if n < octaves:
-        warns.append(
-            f"octave-clamped: {octaves}->{n} (effective freq > {bandlimit_hz}Hz)"
-        )
+        warns.append(_clamp_message(octaves, n, bandlimit_hz))
     comps = []
     for i in range(n):
         f_i = freq * (2.0**i)
@@ -142,9 +145,7 @@ def band_limited_noise(
     n = effective_octaves(freq, octaves, bandlimit_hz)
     warns: list[str] = []
     if n < octaves:
-        warns.append(
-            f"octave-clamped: {octaves}->{n} (effective freq > {bandlimit_hz}Hz)"
-        )
+        warns.append(_clamp_message(octaves, n, bandlimit_hz))
 
     out = np.zeros_like(t)
     for i in range(n):

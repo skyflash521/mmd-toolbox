@@ -16,6 +16,7 @@ import numpy as np
 from vmd import camera, interp
 from vmd.types import CameraKey
 from shakevmd import cuts, motion, noise
+from shakevmd.warn import ShakeWarning
 
 
 def round_half_up(x) -> int:
@@ -185,7 +186,11 @@ def bake(
     warnings: list = []
     wv, dropped = _working_view(camera_keys)
     if dropped:
-        warnings.append(f"正規化: 同一フレーム重複 {dropped} 件を後勝ちで破棄した(§3.1)")
+        warnings.append(ShakeWarning(
+            "bake_normalize_duplicate",
+            f"正規化: 同一フレーム重複 {dropped} 件を後勝ちで破棄した(§3.1)",
+            ("camera",),
+        ))
     wv_frames = [k.frame for k in wv]
     first, last = wv_frames[0], wv_frames[-1]
 
@@ -238,10 +243,11 @@ def bake(
         n = b - a + 1
         fade = motion.fade_envelope(n, fade_sec, FPS)  # 範囲レベル(端で0)
         if n < 2 * fade_frames:
-            warnings.append(
+            warnings.append(ShakeWarning(
+                "fade_shortened",
                 f"範囲[{a},{b}](長さ{n}f)が 2×fade({2 * fade_frames}f)未満。"
-                f"フェードを自動短縮した(§5.1)"
-            )
+                f"フェードを自動短縮した(§5.1)",
+            ))
         for si, seg in enumerate(cuts.segment_bounds(a, b, cut_frames)):
             sframes = list(range(seg.start, seg.end + 1))
             if all(f in fov_ramp_frames for f in sframes):
@@ -272,12 +278,12 @@ def bake(
             for ch in _ROT_CHANNELS:
                 vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights, octaves)
                 rot_n.append(vals)
-                warnings.extend(warns)
+                warnings.extend(ShakeWarning("octave_clamped", w) for w in warns)
             pos_n = []
             for ch in _POS_CHANNELS:
                 vals, warns = _crossfaded_channel(seed, si, ch, t, freq, weights, octaves)
                 pos_n.append(vals)
-                warnings.extend(warns)
+                warnings.extend(ShakeWarning("octave_clamped", w) for w in warns)
 
             # 呼吸ドリフト(§6.2「完全静止区間: 長周期ドリフト 0.3Hz 相当」)。位置のみに、
             # フレーム毎の (1-speed) スケールで加算する(回転=向きには載せない)。軸ごとに独立位相。
@@ -340,7 +346,7 @@ def bake(
                     noise.derive_seed(seed, "impulse_osc", F), t, noise.BANDLIMIT_HZ,
                     octaves=1,
                 )
-                warnings.extend(owarns)
+                warnings.extend(ShakeWarning("octave_clamped", w) for w in owarns)
                 for j, f in enumerate(sframes):
                     if f < F:
                         continue

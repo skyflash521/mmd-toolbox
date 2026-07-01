@@ -18,6 +18,7 @@ from vmd import interp, io
 from vmd.reduce import Tolerances, reduce_camera_track
 from shakevmd import __version__, cuts, presets, progress
 from shakevmd.bake import bake
+from shakevmd.warn import ShakeWarning
 
 # 公開引数の hard-default(§2.3-2.6)。プリセット/個別引数が未指定の項目に使う。
 # fade はプリセット対象外(プリセットは7引数)だが、None センチネル解決のため hard-default を持つ。
@@ -385,13 +386,33 @@ def main(argv=None) -> int:
         if not _all_finite(result.camera_keys):
             return 2
 
-        # 警告表示(§3.1): io.read の警告 + bake の警告 + 非カメラセクション透過。常に表示する。
-        warnings = [f"{w.code}: {w.message}" for w in read_warnings]
+        # 警告(§3.1/§12.3): io.read のライブラリ警告(コードはハイフン形式のまま透過)+ bake の
+        # 構造化警告 + 非カメラセクション透過。機械モードは stdout へ warning イベント、非機械は stderr へ1行。
+        warnings = [
+            ShakeWarning(w.code, w.message, (w.section,) if w.section else None)
+            for w in read_warnings
+        ]
         warnings += list(result.warnings)
-        if doc.bone or doc.morph or doc.light or doc.self_shadow or doc.ik_property:
-            warnings.append("カメラ以外のセクションは無加工で透過した(§3.1)")
+        sections = [
+            name for name, present in (
+                ("bone", doc.bone), ("morph", doc.morph), ("light", doc.light),
+                ("self_shadow", doc.self_shadow), ("ik_property", doc.ik_property),
+            ) if present
+        ]
+        if sections:
+            warnings.append(ShakeWarning(
+                "non_camera_sections_passthrough",
+                "カメラ以外のセクションは無加工で透過した(§3.1)",
+                tuple(sections),
+            ))
         for w in warnings:
-            print(f"warning: {w}", file=sys.stderr)
+            if machine:
+                emitter.warning(
+                    code=w.code, message=w.message,
+                    section=list(w.section) if w.section is not None else None,
+                )
+            else:
+                print(f"warning: {w.code}: {w.message}", file=sys.stderr)
 
         # 適用範囲(スナップ後)・統計を算出(dry-run/verbose 用)。bake は不変のまま、
         # 出力と cuts/interp から求める。範囲端は最近接キーへスナップ(§5.2)。
