@@ -509,3 +509,35 @@ def test_non_machine_dry_run_unchanged(tmp_path, capsys):
     assert not out.exists()
     cap = capsys.readouterr()
     assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
+
+
+# --- 中断 §12.6 -----------------------------------------------------------
+
+
+def _raise_keyboard_interrupt(*a, **k):
+    raise KeyboardInterrupt()
+
+
+def test_machine_cancelled_on_keyboard_interrupt(tmp_path, capsysbinary, monkeypatch):
+    # 計算中の KeyboardInterrupt → cancelled の error イベント・exit 130。出力は書かれない(原子性)。
+    monkeypatch.setattr(cli, "bake", _raise_keyboard_interrupt)
+    inp = write_input(tmp_path / "in.vmd")
+    out = tmp_path / "out.vmd"
+    rc = cli.main([inp, "-o", str(out), "--machine", "--no-smooth"])
+    assert rc == 130
+    e = machine_error(capsysbinary)
+    assert e["code"] == "cancelled" and e["exit_code"] == 130 and e["field"] is None
+    assert not out.exists()
+
+
+def test_non_machine_cancelled_on_keyboard_interrupt(tmp_path, capsys, monkeypatch):
+    # 非機械モードの中断は stdout に JSON を出さず理由を標準エラーへ1行、exit 130。出力は書かれない。
+    monkeypatch.setattr(cli, "bake", _raise_keyboard_interrupt)
+    inp = write_input(tmp_path / "in.vmd")
+    out = tmp_path / "out.vmd"
+    rc = cli.main([inp, "-o", str(out), "--no-smooth"])
+    assert rc == 130
+    cap = capsys.readouterr()
+    assert "error:" in cap.err.lower()
+    assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
+    assert not out.exists()

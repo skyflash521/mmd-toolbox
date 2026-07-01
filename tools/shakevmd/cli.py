@@ -444,10 +444,14 @@ def main(argv=None) -> int:
     if args.input is None:
         return fail("bad_argument", "入力カメラ VMD ファイル(input)が必要", 2, field="input")
 
-    # 引数解析後の本体は想定外の内部エラーで畳む(§12.5)。トレースバックは漏らさず internal_error へ。
-    # KeyboardInterrupt は BaseException なのでここでは捕まらず、中断(§12.6)として上位へ伝播する。
+    # 引数解析後の本体を畳む。KeyboardInterrupt(BaseException)は中断(§12.6)として cancelled へ、
+    # それ以外の想定外例外は internal_error(§12.5)へ。どちらもトレースバックは漏らさない。
     try:
         return _run(args, machine, emitter, fail)
+    except KeyboardInterrupt:
+        # 協調的な中断(Ctrl-C / 親プロセスの中断)。書き込みは全計算後に1回だけで原子的なので、
+        # ここに来た時点で出力は未書き込みか原子置換済みのいずれかで、中途半端な出力は残らない。
+        return fail("cancelled", "中断された(Ctrl-C 等)", 130)
     except Exception as e:
         return fail("internal_error", f"{type(e).__name__}: {e}", 1)
 
