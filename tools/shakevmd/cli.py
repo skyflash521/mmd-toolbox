@@ -11,7 +11,9 @@ import argparse
 import math
 import os
 import sys
+import time
 
+from cli_events import EventEmitter
 from vmd import interp, io
 from vmd.reduce import Tolerances, reduce_camera_track
 from shakevmd import __version__, cuts, presets, progress
@@ -143,32 +145,50 @@ def _build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: 仕様外の前置き省略形(--over→--overwrite 等)を受理しない。
     # 未知/省略形は exit 2(§8/§2.7 の非公開・繰延フラグ拒否とも整合)。
     p = argparse.ArgumentParser(prog="shakevmd", allow_abbrev=False)
-    p.add_argument("--version", action="version", version=f"shakevmd {__version__}")
-    p.add_argument("input")
-    p.add_argument("-o", "--output")
-    p.add_argument("--overwrite", action="store_true")
-    p.add_argument("--range", dest="ranges", action="append", type=_parse_range)
+    p.add_argument("--version", action="version", version=f"shakevmd {__version__}",
+                   help="バージョンを表示して終了する")
+    # 機械モード(§2.8/§12)。出力を JSON Lines のイベントストリームにし、stdout をイベント専用へ固定する。
+    p.add_argument("--machine", action="store_true",
+                   help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
+                        "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
+    p.add_argument("input", help="入力カメラ VMD ファイル")
+    p.add_argument("-o", "--output", help="出力先(既定: <入力名>_shake.vmd)")
+    p.add_argument("--overwrite", action="store_true",
+                   help="入力と同一パスへの出力を許可する(未指定で同一パスならエラー)")
+    p.add_argument("--range", dest="ranges", action="append", type=_parse_range,
+                   metavar="START:END",
+                   help="揺れ適用範囲。START/END は各々省略可。複数指定可(既定は全範囲)")
     # 公開揺れパラメーターは default=None(未指定センチネル)。--preset と個別引数の優先を
     # main() で解決する(明示 > preset > hard-default)。型検証は明示値にのみ適用される。
-    p.add_argument("--amp-rot", type=_nonneg_float)        # 振幅 ≥0
-    p.add_argument("--amp-pos", type=_nonneg_float)        # 振幅 ≥0
-    p.add_argument("--rot-weights", type=_parse_rot_weights)
-    p.add_argument("--freq", type=_positive_float)         # 周波数 >0
-    p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--fade", type=_nonneg_float)           # 秒 ≥0
-    p.add_argument("--motion-damp", type=_nonneg_float)    # 減衰係数 ≥0(0で無効)
-    p.add_argument("--settle", type=_nonneg_float)         # 度(振幅)≥0(0で無効)
-    p.add_argument("--cut-threshold", type=_parse_cut_threshold)
-    p.add_argument("--impulse", dest="impulses", action="append", type=_parse_impulse)
+    p.add_argument("--amp-rot", type=_nonneg_float, help="回転振幅の基準値(度)")        # 振幅 ≥0
+    p.add_argument("--amp-pos", type=_nonneg_float, help="位置振幅(MMD距離単位)")       # 振幅 ≥0
+    p.add_argument("--rot-weights", type=_parse_rot_weights, metavar="P,Y,R",
+                   help="Pitch/Yaw/Roll 個別重み")
+    p.add_argument("--freq", type=_positive_float, help="ノイズ基本周波数(Hz)")         # 周波数 >0
+    p.add_argument("--seed", type=int, default=1, help="ノイズシード(既定 1・再現性)")
+    p.add_argument("--fade", type=_nonneg_float, help="範囲端の自動フェード時間(秒)")   # 秒 ≥0
+    p.add_argument("--motion-damp", type=_nonneg_float,
+                   help="元モーション速度に応じた振幅減衰係数(0 で無効)")               # 係数 ≥0
+    p.add_argument("--settle", type=_nonneg_float,
+                   help="停止検出時の減衰振動の初期振幅(度・0 で無効)")                 # 度 ≥0
+    p.add_argument("--cut-threshold", type=_parse_cut_threshold, metavar="位置,角度",
+                   help="カット自動検出の感度(位置ジャンプ,角度ジャンプ)")
+    p.add_argument("--impulse", dest="impulses", action="append", type=_parse_impulse,
+                   metavar="F:S:D",
+                   help="フレーム F に強さ S・減衰 D 秒の衝撃を加算(複数指定可)")
     # §2.7 運用/プリセット系。
-    p.add_argument("--preset", choices=presets.PRESET_NAMES)   # 未知名は argparse が exit 2
-    p.add_argument("--dry-run", dest="dry_run", action="store_true")
-    p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("--preset", choices=presets.PRESET_NAMES,   # 未知名は argparse が exit 2
+                   help="公開引数を一括設定するプリセット(個別引数の明示指定が優先)")
+    p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                   help="出力せず統計を表示する(引数検証は実施する)")
+    p.add_argument("-v", "--verbose", action="store_true", help="詳細ログを出す")
     # 既定 on: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを低減する。
     # --no-smooth で無効化(密キー＋線形のまま出力する)。
-    p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction)
+    p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction,
+                   help="ベイク後の密キーを疎ベジェへ削減する(既定 on。--no-smooth で密キー+線形)")
     # 進捗表示の抑制(§2.7.1)。抑制するのは進捗表示だけで、警告・統計・終了コードは変えない。
-    p.add_argument("--quiet", dest="quiet", action="store_true")
+    p.add_argument("--quiet", dest="quiet", action="store_true",
+                   help="進捗表示を抑制する(警告・統計・終了コードは抑制しない)")
     return p
 
 
@@ -308,16 +328,35 @@ def main(argv=None) -> int:
     # 例: walking の歩調成分 gait_freq/gait_amp。bake 既定(無効)を上書きする。
     internal = {k: preset[k] for k in presets.INTERNAL_PARAM_NAMES if k in preset}
 
+    # 機械モード(§12)。stdout をイベント専用にし、進捗・結果を JSON Lines で出す。emitter は
+    # バイナリ stdout へ UTF-8 で書く(ロケール符号化非依存)。非機械モードでは None のまま従来経路。
+    machine = args.machine
+    emitter = EventEmitter(sys.stdout.buffer) if machine else None
+
     # 進捗のライブ表示(§2.7.1)。重いベイク・平滑化の進行を端末へ出す(--quiet で無効、既定は
-    # stderr が端末のときだけ)。副作用専用=出力VMD・終了コード・統計・警告を変えない。最初の stage 以降は
-    # 捕捉例外で終了コードを返す経路・dry-run の早期 return・想定外例外のいずれでも heartbeat を止め行を
-    # 消すため try/finally で囲む(§2.7.1)。close は二重呼び出しに耐えるので明示 close と finally が重なって安全。
-    reporter = progress.ProgressReporter(sys.stderr, enabled=False if args.quiet else None)
+    # stderr が端末のときだけ)。機械モードでは進捗をイベントで出すのでライブ行は無効化する。副作用専用=
+    # 出力VMD・終了コード・統計・警告を変えない。最初の stage 以降は捕捉例外で終了コードを返す経路・
+    # dry-run の早期 return・想定外例外のいずれでも heartbeat を止め行を消すため try/finally で囲む
+    # (§2.7.1)。close は二重呼び出しに耐えるので明示 close と finally が重なって安全。
+    reporter = progress.ProgressReporter(
+        sys.stderr, enabled=False if (args.quiet or machine) else None
+    )
     try:
         # ベイク。引数由来の異常は §9 コード2 に集約する:
         # - ValueError: 範囲の重複/接触(空カメラは上で弾き済み)。
         # - OverflowError: 有限だが過大な値(例 --fade 1e308 → int(round(fade*FPS)) が inf 変換で失敗)。
-        reporter.stage("ベイク")
+        # 機械モードはベイク進捗をイベントで出す(TTY 非依存)。段開始で done=0,total=null を1本、
+        # 以降は bake() のフレーム進捗コールバックで done/total を出す。非機械は従来どおりライブ行の段開始のみ。
+        bake_cb = None
+        if machine:
+            bake_start = time.monotonic()
+            emitter.progress(stage="bake", done=0, total=None, note="", elapsed=0.0)
+            bake_cb = lambda done, total: emitter.progress(
+                stage="bake", done=done, total=total, note="",
+                elapsed=time.monotonic() - bake_start,
+            )
+        else:
+            reporter.stage("ベイク")
         try:
             result = bake(
                 doc.camera,
@@ -333,6 +372,7 @@ def main(argv=None) -> int:
                 cut_pos_threshold=cut_threshold[0],
                 cut_rot_threshold=cut_threshold[1],
                 impulses=tuple(args.impulses or ()),
+                progress=bake_cb,
                 **internal,
             )
         except (ValueError, OverflowError):
@@ -364,7 +404,8 @@ def main(argv=None) -> int:
             doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
 
         # 詳細統計は --dry-run と --verbose のみで表示(通常実行は出さない、§5.2/§5.3)。
-        if args.dry_run or args.verbose:
+        # 機械モードは stdout をイベント専用にするので人間向け統計 print を抑止する(統計は result イベントへ)。
+        if not machine and (args.dry_run or args.verbose):
             print(f"range: {applied}")
             print(f"keys: {len(result.camera_keys)}")
             print(f"max amplitude: {max_amp:.6g}")
@@ -385,7 +426,19 @@ def main(argv=None) -> int:
         # 誤判定する余地も無くす。
         camera_out = result.camera_keys
         if args.smooth:
-            reporter.stage("平滑化")
+            # 機械モードは平滑化進捗をイベントで出す。段開始で done=0,total=null を1本、以降は
+            # reduce_camera_track の progress(done, total, note) をそのままイベント化する。非機械は
+            # 従来どおりライブ行の段開始 + reporter.update を渡す。
+            if machine:
+                smooth_start = time.monotonic()
+                emitter.progress(stage="smooth", done=0, total=None, note="", elapsed=0.0)
+                smooth_cb = lambda done, total, note="": emitter.progress(
+                    stage="smooth", done=done, total=total, note=note,
+                    elapsed=time.monotonic() - smooth_start,
+                )
+            else:
+                reporter.stage("平滑化")
+                smooth_cb = reporter.update
             # 機械的 grid: 各範囲を max_seg 間隔のキーで区切る。sliding max_seg は「線形でも許容内に収まる」
             # 長区間を作り、手ぶれを疎キー＋線形補間=キー境界のコーナーで返すため 30fps 超でカクつき、
             # サブフレームでは揺れを取りこぼす。grid を keep に与えて区間長を max_seg 以下に抑えると、各区間は
@@ -393,9 +446,9 @@ def main(argv=None) -> int:
             # でも揺れを許容内に保つ。区間が短く bounded なので least_squares 回数も抑えられ高速。
             grid = {f for f0, f1 in result.resolved for f in range(int(f0), int(f1) + 1, _SMOOTH_MAX_SEG)}
             keep = sorted({f for c in detected_cuts for f in (c - 1, c) if f >= 0} | grid)
-            # progress=reporter.update: reduce は progress(処理済みフレーム, 全フレーム総数, note) を
-            # 3 引数で呼び、出力後検証区間では note="出力後検証" を添える。reporter.update のシグネチャと
-            # 一致するので中継 lambda を挟まず直接渡す(§2.7.1)。
+            # progress=smooth_cb: reduce は progress(処理済みフレーム, 全フレーム総数, note) を 3 引数で
+            # 呼び、出力後検証区間では note="出力後検証" を添える。非機械では smooth_cb=reporter.update で
+            # シグネチャが一致し、機械では note を載せる smooth イベントに中継する(§2.7.1/§12.2)。
             camera_out = reduce_camera_track(
                 result.camera_keys,
                 result.resolved,
@@ -408,7 +461,7 @@ def main(argv=None) -> int:
                 strict=False,
                 curve_mode="bezier",
                 force_bezier=True,
-                progress=reporter.update,
+                progress=smooth_cb,
             )
             reporter.close()
 
@@ -424,8 +477,20 @@ def main(argv=None) -> int:
         except Exception:
             return 3
 
-        # 書き込み成功後に完了行を1回残す(進捗行は close で消えている)。
-        reporter.summary(f"完了 {output}")
+        # 書き込み成功後に終端イベント/完了行を1回出す(進捗行は close で消えている)。
+        # 機械モードは result(mode:"bake")でストリームを終端する(§12.2)。applied_ranges/detected_cuts は
+        # numpy int が混じると json.dumps が失敗するため素の int/float へ変換する。
+        if machine:
+            emitter.result(
+                mode="bake",
+                output=output,
+                keys=len(camera_out),
+                applied_ranges=[[int(a), int(b)] for a, b in applied],
+                max_amplitude=float(max_amp),
+                detected_cuts=[int(c) for c in detected_cuts],
+            )
+        else:
+            reporter.summary(f"完了 {output}")
         return 0
     finally:
         reporter.close()

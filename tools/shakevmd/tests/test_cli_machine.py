@@ -45,7 +45,6 @@ def machine_events(capsysbinary):
     return [json.loads(ln) for ln in text.split("\n") if ln]
 
 
-@pytest.mark.xfail(reason=_MACHINE_PENDING, strict=True)
 def test_machine_emits_result_event(tmp_path, capsysbinary):
     inp = write_input(tmp_path / "in.vmd")
     out = tmp_path / "out.vmd"
@@ -64,7 +63,6 @@ def test_machine_emits_result_event(tmp_path, capsysbinary):
     assert isinstance(result["detected_cuts"], list)
 
 
-@pytest.mark.xfail(reason=_MACHINE_PENDING, strict=True)
 def test_machine_stdout_is_valid_json_lines(tmp_path, capsysbinary):
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"])
@@ -81,7 +79,6 @@ def test_machine_stdout_is_valid_json_lines(tmp_path, capsysbinary):
     assert objs[-1]["type"] == "result" and objs[-1]["mode"] == "bake"  # 成功は result(bake)で終端
 
 
-@pytest.mark.xfail(reason=_MACHINE_PENDING, strict=True)
 def test_machine_no_human_text_on_stdout(tmp_path, capsysbinary):
     # 機械モードの stdout は人間向けテキスト(range:/keys:/warning: 等)を含まない(チャネル固定)。
     inp = write_input(tmp_path / "in.vmd")
@@ -116,7 +113,6 @@ def test_machine_emits_warning_event_for_non_camera_sections(tmp_path, capsysbin
     assert isinstance(w["message"], str) and w["message"]  # 自由文字列の文言を message に保持(§12.3)
 
 
-@pytest.mark.xfail(reason=_MACHINE_PENDING, strict=True)
 def test_machine_emits_progress_events(tmp_path, capsysbinary):
     # 機械モードでは進捗をイベントとして出す(TTY 判定に依存しない)。ベイク段の progress を含む。
     inp = write_input(tmp_path / "in.vmd")
@@ -132,7 +128,6 @@ def test_machine_emits_progress_events(tmp_path, capsysbinary):
         assert set(p) >= {"type", "stage", "done", "total", "note", "elapsed"}
 
 
-@pytest.mark.xfail(reason=_MACHINE_PENDING, strict=True)
 def test_machine_smooth_emits_smooth_progress(tmp_path, capsysbinary):
     # 既定 on の平滑化段も機械モードで progress イベントを出す。
     inp = write_input(tmp_path / "in.vmd")
@@ -170,7 +165,6 @@ def test_machine_version_help_stay_human(capsys):
     assert out.strip() and not out.lstrip().startswith("{")
 
 
-@pytest.mark.xfail(reason="impl pending: Step2 help text", strict=True)
 def test_help_lists_machine_flag(capsys):
     # --help は人間向けテキストを出して exit 0(main は argparse の SystemExit を握って 0 を返す)。
     # 新設の --machine がヘルプに現れること(規約 §6 の人間向けヘルプ)を確認する。

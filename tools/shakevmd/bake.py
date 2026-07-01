@@ -161,6 +161,7 @@ def bake(
     manual_cuts_add=(),
     manual_cuts_remove=(),
     impulses=(),                 # (F,S,D) の並び。フレームFに強さS度・減衰D秒の衝撃(§6.3)
+    progress=None,               # progress(done, total) を各ベイクフレームで呼ぶ(機械モード進捗。None で無効)
 ) -> BakeResult:
     """ベイクループ本体(§3, §4, §5)。
 
@@ -223,6 +224,12 @@ def bake(
             fov_ramp_frames.update(range(wv[i].frame, wv[i + 1].frame + 1))
             ramp_boundary.add(wv[i].frame)
             ramp_boundary.add(wv[i + 1].frame)
+
+    # 機械モード進捗用: 密ベイクする総フレーム数(FOV 変化区間は密ベイクしないので除く)。
+    total_baked = sum(
+        1 for a, b in resolved for f in range(a, b + 1) if f not in fov_ramp_frames
+    )
+    done_baked = 0
 
     fade_frames = int(round(fade_sec * FPS))
     baked: list = []
@@ -373,6 +380,9 @@ def bake(
                     f, s["distance"], shaken["position"], shaken["rotation"],
                     LINEAR_CAMERA_INTERP, fov, persp,
                 ))
+                if progress is not None:
+                    done_baked += 1
+                    progress(done_baked, total_baked)
 
     # --- 範囲外は原本レコードをそのまま透過(バイト保持。§3.2) ---
     # 原本キーはそのまま(同一オブジェクト=バイト同一)。出力はフレーム昇順に整列して、
