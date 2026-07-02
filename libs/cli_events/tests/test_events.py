@@ -109,6 +109,21 @@ def test_no_raw_newline_in_line():
     assert json.loads(text)["message"] == "line1\nline2"
 
 
+def test_line_separator_is_lf_only():
+    # 行区切りは LF(\n)固定で \r を含まない(規約 §10。バイト列で検証)。バイナリストリームへ
+    # 書くのでプラットフォームの改行変換(Windows の CRLF 変換)は起きない。
+    buf = io.BytesIO()
+    em = EventEmitter(buf)
+    em.progress(stage="bake", done=0, total=None)
+    em.warning(code="octave_clamped", message="日本語メッセージ", section=None)
+    em.result(mode="bake", output="out.vmd")
+    raw = buf.getvalue()
+    assert b"\r\n" not in raw          # CRLF を混入させない
+    assert b"\r" not in raw            # CR を一切含まない
+    assert raw.endswith(b"\n")
+    assert raw.count(b"\n") == 3       # 3イベント=3行、各行 LF 終端
+
+
 def test_error_event_builder():
     ev = error_event(code="bad_argument", message="unknown", exit_code=2, field="--foo")
     assert ev == {
