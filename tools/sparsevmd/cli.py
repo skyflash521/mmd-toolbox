@@ -357,12 +357,12 @@ def main(argv=None):
 
     # 引数解析後の本体を畳む。想定外の内部エラーは internal_error(§12.4)へ(トレースバックを漏らさない)。
     try:
-        return _run(args, machine, emitter, fail)
+        return _run(args, emitter, fail)
     except Exception as e:
         return fail("internal_error", f"{type(e).__name__}: {e}", 1)
 
 
-def _run(args, machine, emitter, fail):
+def _run(args, emitter, fail):
     """引数解析済みの本体処理(検証 → 読み込み → 選択・範囲解決 → 削減 → 書き込み)。
 
     失敗は fail() 経由で終了コードを返す(§12.4)。検証の位置・順序は現行のまま(§1)。
@@ -444,7 +444,7 @@ def _run(args, machine, emitter, fail):
 
     # --list-bones: ボーン名・キー数・選択状態を表示して終了(§2.7)。
     if args.list_bones:
-        return _list_bones(doc, includes, excludes, machine=machine)
+        return _list_bones(doc, includes, excludes, emitter=emitter)
 
     cut_kw = dict(
         keep_frames=args.keep_frames,
@@ -511,8 +511,10 @@ def _run(args, machine, emitter, fail):
     bone_errors = None
     camera_diag = None
     bone_diag = None
-    # 削減中の処理経過を stderr に表示する(対話端末時のみ。§2.7)。
-    reporter = _Progress(enabled=sys.stderr.isatty())
+    # 削減中の処理経過を stderr に上書き表示する(§2.7)。対話端末時のみ、かつ人間向け経路
+    # (構造化出力モードでない)で --quiet 未指定のときだけ有効。機械モードはライブ表示せず
+    # 同じ進捗を progress イベントで出す(§12.1)。emitter が非 None なら構造化出力(機械/自己記述)。
+    reporter = _Progress(enabled=sys.stderr.isatty() and not args.quiet and emitter is None)
     did_reduce = False
     try:
         if do_camera:
@@ -568,7 +570,7 @@ def _run(args, machine, emitter, fail):
             bone_diag=bone_diag,
             reduced=did_reduce,
         )
-        if args.dry_run and not machine:
+        if args.dry_run and emitter is None:
             print(report.format_dry_run(rep))
 
     if args.dry_run:
@@ -662,7 +664,7 @@ def _measure_bone_errors(in_bone, out_bone, selected, global_ranges):
     return errors
 
 
-def _list_bones(doc, includes, excludes, machine=False):
+def _list_bones(doc, includes, excludes, emitter=None):
     """ボーン名・キー数・選択状態を表示して 0 を返す(§2.7)。"""
     names = _bone_names_in_order(doc.bone)
     counts = {}
@@ -684,8 +686,9 @@ def _list_bones(doc, includes, excludes, machine=False):
             print("警告: " + w, file=sys.stderr)
         print("警告: " + str(e), file=sys.stderr)
 
-    # 機械モードの標準出力はイベント専用(§12.1)。人間向け一覧は非機械時のみ標準出力へ出す。
-    if not machine:
+    # 構造化出力モード(機械/自己記述)の標準出力はイベント専用(§12.1)。人間向け一覧は
+    # emitter が None(人間向け経路)のときだけ標準出力へ出す。
+    if emitter is None:
         for name in names:
             state = "selected" if name in selected else "excluded"
             print(f"{name}\tkeys={counts[name]}\t{state}")
