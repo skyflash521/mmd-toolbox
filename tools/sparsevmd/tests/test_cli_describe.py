@@ -12,11 +12,7 @@ options に載せない。
 
 import json
 
-import pytest
-
 from sparsevmd import cli, presets
-
-pytestmark = pytest.mark.xfail(reason="impl pending: describe self-description", strict=False)
 
 _GROUPS = ["core", "arms", "legs", "fingers", "ik", "mocap"]
 _NN = {"min": 0, "max": None, "exclusive_min": False}

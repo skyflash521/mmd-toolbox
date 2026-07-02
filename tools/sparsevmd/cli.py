@@ -54,6 +54,58 @@ _TOL_HELP = {
     "camera_fov_tol": "視野角の最大許容誤差(度)。整数度保存のため 0.5 以上。明示値はプリセットに優先",
 }
 
+# --describe(§12.3)の型/制約表。dest → (type, constraint)。help/default/repeat は parser の
+# 各 action から機械導出する。メタ/モード操作(describe/version/help/machine)は _D_TYPE に無いので
+# describe の options から除外される。type 関数と1対1で対応しないので型と制約の形は明示表で持つ。
+_D_NN = {"min": 0, "max": None, "exclusive_min": False}      # 非負・上限なし
+_D_FOV = {"min": 0.5, "max": None, "exclusive_min": False}   # 視野角(整数度保存のため 0.5 以上)
+_D_INT1 = {"min": 1, "max": None, "exclusive_min": False}    # 1 以上の整数
+_D_GROUPS = {"choices": ["core", "arms", "legs", "fingers", "ik", "mocap"]}
+
+
+def _compound(fmt, *fields):
+    """compound 型の constraint を組む(§12.3)。fields は (name, type, min) の並び。"""
+    return {"format": fmt,
+            "fields": [{"name": n, "type": t, "min": m, "max": None, "exclusive_min": False}
+                       for n, t, m in fields]}
+
+
+_D_TYPE = {
+    "input": ("str", None),
+    "output": ("str", None),
+    "overwrite": ("flag", None),
+    "target": ("enum", {"choices": ["camera", "bone", "all"]}),
+    "bone": ("str", None),
+    "bone_glob": ("str", None),
+    "bone_group": ("enum", _D_GROUPS),
+    "bone_file": ("str", None),
+    "exclude_bone": ("str", None),
+    "exclude_bone_glob": ("str", None),
+    "exclude_bone_group": ("enum", _D_GROUPS),
+    "list_bones": ("flag", None),
+    "ranges": ("compound", _compound("START:END", ("START", "int", 0), ("END", "int", 0))),
+    "preset": ("enum", {"choices": list(presets.PRESET_NAMES)}),
+    "bone_pos_tol": ("float", _D_NN),
+    "bone_rot_tol": ("float", _D_NN),
+    "camera_pos_tol": ("float", _D_NN),
+    "camera_rot_tol": ("float", _D_NN),
+    "camera_distance_tol": ("float", _D_NN),
+    "camera_fov_tol": ("float", _D_FOV),
+    "max_segment_frames": ("int", _D_INT1),
+    "min_segment_frames": ("int", _D_INT1),
+    "curve_mode": ("enum", {"choices": ["bezier", "linear"]}),
+    "strict": ("flag", None),
+    "cut_threshold_camera": ("compound", _compound(
+        "POS,ROT,DIST", ("POS", "float", 0), ("ROT", "float", 0), ("DIST", "float", 0))),
+    "cut_threshold_bone": ("compound", _compound(
+        "POS,ROT", ("POS", "float", 0), ("ROT", "float", 0))),
+    "cut_detect": ("flag", None),
+    "keep_frames": ("int", _D_NN),
+    "dry_run": ("flag", None),
+    "verbose": ("flag", None),
+    "quiet": ("flag", None),
+}
+
 
 class _Progress:
     """削減処理の経過を stderr の1行に上書き表示する(§2.7)。
@@ -308,6 +360,54 @@ def _log_diagnostics(camera_diag, bone_diag):
         emit(f"bone {name}", d)
 
 
+def _describe_options(parser):
+    """--describe の options を parser 定義から機械導出する(§12.3)。順序は add_argument 順。
+
+    メタ/モード操作(--describe/--version/--help/--machine)は _D_TYPE に無いので除外される。真偽フラグの
+    否定形(--no-cut-detect)は肯定形の長形式で既に載るのでスキップする(重複列挙しない)。type/constraint は
+    _D_TYPE、help は各 action、repeat は append アクションか否か。default は反復オプションなら null(argparse の
+    累積器 [] は起動時の意味的既定でない)・それ以外は action.default(tuple は JSON 配列へ落ちる)。
+    """
+    options = []
+    for action in parser._actions:
+        dest = action.dest
+        if dest not in _D_TYPE:
+            continue
+        type_, constraint = _D_TYPE[dest]
+        if dest == "input":
+            name = "input"
+        else:
+            # 肯定形の長形式を採る。--no-* だけの否定形 action はスキップ(肯定形で既に載る)。
+            pos = [s for s in action.option_strings if s.startswith("--") and not s.startswith("--no-")]
+            if not pos:
+                continue
+            name = pos[0]
+        repeat = isinstance(action, argparse._AppendAction)
+        options.append({
+            "name": name,
+            "type": type_,
+            "constraint": constraint,
+            "default": None if repeat else action.default,
+            "help": action.help,
+            "repeat": repeat,
+        })
+    return options
+
+
+def _describe_presets():
+    """--describe の presets を presets モジュールから導出する(§12.3)。
+
+    各要素は {name, values}。values は §2.4 の許容誤差(個別オプション名 → 値)。プリセット既定の
+    Tolerances を公開 API で解決し、_TOL_ARGS の対応で個別許容誤差オプション名へ写す。
+    """
+    out = []
+    for name in presets.PRESET_NAMES:
+        tols = presets.resolve_tolerances(name)
+        values = {opt: getattr(tols, field) for opt, field in _TOL_ARGS.items()}
+        out.append({"name": name, "values": values})
+    return out
+
+
 def main(argv=None):
     """CLI エントリポイント。終了コードを返す(§9: 0/1/2/3/4、中断 130)。"""
     # 人間向け標準エラーはロケール符号化(cp932 等)で表せない文字を含んでも UnicodeEncodeError で
@@ -351,6 +451,11 @@ def main(argv=None):
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
 
+    # 自己記述(§12.3)。VMD を読まず options/presets の result を出して終了する独立メタ操作。
+    if args.describe:
+        emitter.result(mode="describe", options=_describe_options(parser),
+                       presets=_describe_presets())
+        return 0
     # input は nargs="?"(--describe を入力無しで成立させるため)。describe 以外の実行では必須。
     if args.input is None:
         return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
