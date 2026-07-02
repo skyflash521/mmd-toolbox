@@ -1,21 +1,31 @@
-"""vpr2vmd CLI(vpr2vmd.md §4)。
+"""vpr2vmd CLI(vpr2vmd.md §4・§7)。
 
 vpr を入力に、口形イベント列と開き量を作って lipsync に渡し、口パク VMD を 1 コマンドで
 出力する薄いラッパー。引数解析・検証・出力先解決を担い、vpr 読み込みから口パク VMD
 ドキュメント生成までの変換パイプライン(vpr 読み込み → 口形イベント確定 → 開き量 → lipsync)は
 _build() が束ねる。--dry-run は出力VMDを書かず、処理計画と診断を表示する。
 
-終了コード(既存ツール shakevmd 等の規約に倣う):
-0 正常 / 1 入力不正(入力 vpr の欠落・非vpr 等) / 2 引数エラー(未知オプション・範囲不正・
-上書きガード) / 3 出力書き込み失敗。
+終了コード(vpr2vmd.md §4.3): 0 正常 / 1 入力不正(入力 vpr の欠落・非vpr 等) /
+2 引数エラー(未知オプション・範囲不正・上書きガード) / 3 出力書き込み失敗。
+
+--machine / --describe は構造化出力モード(vpr2vmd.md §7)。標準出力を JSON Lines のイベント
+ストリーム専用にし、失敗も error イベントで理由を返す。既定(非機械)の表示・終了コードは変えない。
 """
 
 import argparse
+import inspect
 import math
 import os
 import sys
 from dataclasses import dataclass, replace
 
+from cli_events import (
+    ArgumentParseError,
+    EventEmitter,
+    MachineArgumentParser,
+    argparse_error_field,
+    error_event,
+)
 from lipsync import generate_morph_keys
 from vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
 from vpr import VprFormatError, read
@@ -35,6 +45,12 @@ STYLE_NAMES = ("pop", "ballad", "powerful", "whisper", "rap")
 
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS(vpr2vmd.md §4.2・§5)。
 _MODEL_NAME_MAX_BYTES = 20
+
+# CLI 未指定時に効く固定既定を、実際に使う呼び出し先の関数シグネチャから 1 か所で取る
+# (--describe / --machine の inspect が報告する既定を実挙動と一致させ、値の二重管理を避ける。§7.3)。
+_DEFAULT_LEGATO_MAX = inspect.signature(build_mouth_events).parameters["legato_max_frames"].default
+_DEFAULT_REF_BPM = inspect.signature(apply_tempo_correction).parameters["ref_bpm"].default
+_DEFAULT_TEMPO_SCALE_MIN = inspect.signature(apply_tempo_correction).parameters["s_min"].default
 
 
 def _model_name(text: str) -> str:
@@ -123,11 +139,16 @@ def _positive_int(text: str) -> int:
     return v
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
+    # 構造化出力モード(--machine / --describe)は使用法エラーを error イベントへ振り替えるため、
+    # SystemExit の代わりに ArgumentParseError を送出する MachineArgumentParser を使う(--help/--version は
+    # error() を経由しないので影響を受けず、従来どおり SystemExit で短絡する。§7.1)。
     # allow_abbrev=False: 仕様外の前置き省略形を受理しない(未知/省略形は exit 2)。
     # help= は各オプションの人間向け説明(vpr2vmd.md §4.2・規約 §6)。
-    p = argparse.ArgumentParser(prog="vpr2vmd", allow_abbrev=False)
-    p.add_argument("input", help="入力 vpr ファイル")
+    cls = MachineArgumentParser if machine else argparse.ArgumentParser
+    p = cls(prog="vpr2vmd", allow_abbrev=False)
+    # input は nargs="?"(--describe を入力無しで成立させるため)。describe 以外の実行では main() が欠落を検査する。
+    p.add_argument("input", nargs="?", help="入力 vpr ファイル")
     p.add_argument("-o", "--output", help="出力 VMD(既定: <入力名>.vmd)")
     p.add_argument("--overwrite", action="store_true",
                    help="出力先が入力と同一パスになる指定を許可する(別パスの既存ファイルは常に上書き)")
@@ -172,6 +193,12 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="出力せず処理計画と診断を表示する")
     p.add_argument("-v", "--verbose", dest="verbose", action="store_true",
                    help="通常実行でも処理計画と診断を標準出力へ表示する(出力 VMD は書く)")
+    p.add_argument("--machine", action="store_true",
+                   help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
+                        "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
+    p.add_argument("--describe", action="store_true",
+                   help="オプション定義とスタイルプリセット一覧の result を出して終了する"
+                        "(vpr を読まない・入力不要の自己記述)")
     p.add_argument("--version", action="version", version=f"vpr2vmd {__version__}",
                    help="バージョンを表示して終了する")
     return p
@@ -191,6 +218,100 @@ def _same_path(a: str, b: str) -> bool:
         return os.path.samefile(a, b)
     except OSError:
         return os.path.realpath(a) == os.path.realpath(b)
+
+
+# --describe(§7.3)の型/制約表。dest → (type, constraint)。help/default は parser の各 action から取り、
+# 固定既定(legato_max/ref_bpm/tempo_scale_min)だけ _DESCRIBE_DEFAULT で上書きする。メタ/モード操作
+# (describe/version/help/machine)は _D_TYPE に無いので options から除外される。
+_D_UNIT = {"min": 0, "max": 1, "exclusive_min": False}       # 0〜1(開き量・谷係数)
+_D_POS = {"min": 0, "max": None, "exclusive_min": True}      # 0 超(--legato-max・--ref-bpm)
+_D_NONNEG = {"min": 0, "max": None, "exclusive_min": False}  # 0 以上(--valley-slope・--anticipation)
+_D_INT1 = {"min": 1, "max": None, "exclusive_min": False}    # 1 以上(--coartic-overlap)
+_D_UNIT_EXCL = {"min": 0, "max": 1, "exclusive_min": True}   # 0 超〜1(--tempo-scale-min)
+
+_D_TYPE = {
+    "input": ("str", None),
+    "output": ("str", None),
+    "overwrite": ("flag", None),
+    "track": ("str", None),
+    "model_name": ("str", None),
+    "style": ("enum", {"choices": list(STYLE_NAMES)}),
+    "n_morph": ("flag", None),
+    "open_max": ("float", _D_UNIT),
+    "default_open": ("float", _D_UNIT),
+    "legato_max": ("float", _D_POS),
+    "valley_shallow": ("float", _D_UNIT),
+    "valley_deep": ("float", _D_UNIT),
+    "valley_slope": ("float", _D_NONNEG),
+    "coartic_overlap": ("int", _D_INT1),
+    "anticipation": ("int", _D_NONNEG),
+    "ref_bpm": ("float", _D_POS),
+    "tempo_scale_min": ("float", _D_UNIT_EXCL),
+    "dry_run": ("flag", None),
+    "verbose": ("flag", None),
+}
+
+# 固定既定を持つオプションの default(argparse は None センチネルなので、実効既定を呼び出し先から取る。§7.3)。
+_DESCRIBE_DEFAULT = {
+    "legato_max": _DEFAULT_LEGATO_MAX,
+    "ref_bpm": _DEFAULT_REF_BPM,
+    "tempo_scale_min": _DEFAULT_TEMPO_SCALE_MIN,
+}
+
+
+def _describe_options(parser):
+    """--describe の options を parser 定義から機械導出する(§7.3)。順序は add_argument 順。
+
+    各要素は {name, type, constraint, default, help}(キー 5 つ)。メタ/モード操作(--describe/--version/
+    --help/--machine)は _D_TYPE に無いので除外。真偽フラグの否定形(--no-n-morph)は肯定形の長形式で
+    既に載るのでスキップする。default は固定既定を持つものは _DESCRIBE_DEFAULT、それ以外は action.default。
+    """
+    options = []
+    for action in parser._actions:
+        dest = action.dest
+        if dest not in _D_TYPE:
+            continue
+        type_, constraint = _D_TYPE[dest]
+        if dest == "input":
+            name = "input"
+        else:
+            # 肯定形の長形式を採る。--no-* だけの否定形 action はスキップ(肯定形で既に載る)。
+            pos = [s for s in action.option_strings if s.startswith("--") and not s.startswith("--no-")]
+            if not pos:
+                continue
+            name = pos[0]
+        options.append({
+            "name": name,
+            "type": type_,
+            "constraint": constraint,
+            "default": _DESCRIBE_DEFAULT.get(dest, action.default),
+            "help": action.help,
+        })
+    return options
+
+
+def _describe_presets():
+    """--describe の presets を presets モジュールから導出する(§7.3)。
+
+    各要素は {name, values}。name はスタイル名、values は CLI で上書き可能なパラメータの
+    プリセット解決値(開き量上限・既定開き量・谷係数・協調調音重なり・先行準備)。
+    """
+    out = []
+    for name in STYLE_NAMES:
+        openness_p, gen = presets.resolve(name)
+        out.append({
+            "name": name,
+            "values": {
+                "open_max": openness_p.open_max,
+                "default_open": openness_p.default_open,
+                "valley_shallow": gen.legato_valley_shallow,
+                "valley_deep": gen.legato_valley_deep,
+                "valley_slope": gen.legato_valley_slope,
+                "coartic_overlap": gen.coartic_overlap_max,
+                "anticipation": gen.anticipation_frames,
+            },
+        })
+    return out
 
 
 def _print_plan(args, output: str) -> None:
@@ -233,37 +354,45 @@ class _Diagnostics:
     event: EventDiagnostics  # 母音未確定件数・自前イベントを作らない記号
 
 
-def _build(args):
-    """vpr を読み口パク VMD ドキュメントと診断を組み立てる(書き込みはしない。vpr2vmd.md §3〜§5)。
+@dataclass
+class _Built:
+    """_build() の成果。書き込み・診断表示・イベント送出は呼び出し側(_run)が担う。"""
 
-    vpr 解析 → 対象トラック選択 → 重なり解決 → 口形イベント確定 → 開き量 → lipsync →
-    モーフキーまでを束ね、`(VmdDocument, _Diagnostics)` を返す。書き込みと診断表示・警告は
-    呼び出し側(main)が担う(`--dry-run` でも処理は同じで、出力VMDだけ書かない)。入力不正
-    (非vpr・対象トラック皆無)は終了コード 1、`--track` の不正値は 2 を返す(vpr2vmd.md §4.3)。
+    document: VmdDocument
+    diagnostics: _Diagnostics
+    track_index: int  # 解決した対象トラックの 0-based INDEX
+    track_name: str  # 解決した対象トラック名
+    resolved: dict  # inspect の params(スタイル解決→テンポ補正→CLI 上書き適用後の最終値。§7.2)
+
+
+def _build(args, emitter, fail):
+    """vpr を読み口パク VMD ドキュメントと診断・解決値を組み立てる(書き込みはしない。§3〜§5)。
+
+    vpr 解析 → 対象トラック選択 → 重なり解決 → 口形イベント確定 → 開き量 → lipsync → モーフキーまでを
+    束ね、`_Built` を返す。読み込み警告は surface し、失敗は fail() で終端して終了コードを返す
+    (非vpr・対象トラック皆無は 1、`--track` の不正値は 2。§7.4)。
     """
     try:
         project, warnings = read(args.input)
     except VprFormatError as e:
-        return _fail(f"入力を vpr として読めません: {e}", 1)  # 非vpr=入力不正
-    _surface_warnings(warnings)  # 重なり音符などの構造化警告を標準エラーへ出す(§4.4)
+        return fail("not_vpr", f"入力を vpr として読めません: {e}", 1, field="input")
+    _surface_warnings(warnings, emitter)  # 重なり音符などの構造化警告を surface する(§4.4・§7.2)
     if not project.tracks:
-        return _fail("入力 vpr にトラックがありません", 1)  # 対象トラック皆無=入力不正
+        return fail("no_tracks", "入力 vpr にトラックがありません", 1, field="input")
     try:
         track = select_track(project, args.track)
     except TrackSelectionError as e:
-        return _fail(f"--track: {e}", 2)  # 当該入力で有効な選択にならない=引数エラー
+        return fail("bad_track", f"--track: {e}", 2, field="--track")
+    track_index = next(i for i, t in enumerate(project.tracks) if t is track)
 
     adopted, overlap_diag = resolve_overlaps(collect_notes(track))
     openness_params, gen_params = presets.resolve(args.style, args.open_max, args.default_open)
-    # 曲の代表BPMから保持・アタック・リリースを縮める(高速テンポでの短母音消失を防ぐ)。
-    # --ref-bpm/--tempo-scale-min はテンポ補正の入力なので未指定なら補正関数の既定に委ねる。
+    # 曲の代表BPMから保持・アタック・リリースを縮める(高速テンポでの短母音消失を防ぐ)。未指定の
+    # --ref-bpm/--tempo-scale-min は補正関数の既定を明示適用する(inspect が報告する既定と一致させる)。
     rep_bpm = timing.representative_bpm(adopted, project.tempos, project.resolution)
-    tempo_kwargs = {}
-    if args.ref_bpm is not None:
-        tempo_kwargs["ref_bpm"] = args.ref_bpm
-    if args.tempo_scale_min is not None:
-        tempo_kwargs["s_min"] = args.tempo_scale_min
-    gen_params = apply_tempo_correction(gen_params, rep_bpm, **tempo_kwargs)
+    ref_bpm = args.ref_bpm if args.ref_bpm is not None else _DEFAULT_REF_BPM
+    tempo_scale_min = args.tempo_scale_min if args.tempo_scale_min is not None else _DEFAULT_TEMPO_SCALE_MIN
+    gen_params = apply_tempo_correction(gen_params, rep_bpm, ref_bpm=ref_bpm, s_min=tempo_scale_min)
     # CLI 調整(指定された値だけを最終値として上書き。テンポ補正後に効く=適用順 A)。これらは
     # テンポでスケールしないパラメータなので、上書き値がそのまま生成に渡る(vpr2vmd.md §3・§4.2)。
     overrides = {}
@@ -298,15 +427,15 @@ def _build(args):
             default_open=openness_params.default_open,
             gamma=openness_params.gamma,
         )
-    # --legato-max は GenerationParams 外(口形イベント確定段の引数)。未指定なら build_mouth_events の既定。
-    legato_kwargs = {} if args.legato_max is None else {"legato_max_frames": args.legato_max}
+    # --legato-max は GenerationParams 外(口形イベント確定段の引数)。未指定なら固定既定を明示適用する。
+    legato_max = args.legato_max if args.legato_max is not None else _DEFAULT_LEGATO_MAX
     mouth_events, event_diag = build_mouth_events(
         adopted,
         project.tempos,
         project.resolution,
         use_n_morph=args.n_morph,
         open_by_note=open_by_note,
-        **legato_kwargs,
+        legato_max_frames=legato_max,
     )
     morph_keys = generate_morph_keys(mouth_events, gen_params)
 
@@ -326,7 +455,20 @@ def _build(args):
         overlap=overlap_diag,
         event=event_diag,
     )
-    return document, diagnostics
+    resolved = {
+        "open_max": openness_params.open_max,
+        "default_open": openness_params.default_open,
+        "legato_max": legato_max,
+        "valley_shallow": gen_params.legato_valley_shallow,
+        "valley_deep": gen_params.legato_valley_deep,
+        "valley_slope": gen_params.legato_valley_slope,
+        "coartic_overlap": gen_params.coartic_overlap_max,
+        "anticipation": gen_params.anticipation_frames,
+        "ref_bpm": ref_bpm,
+        "tempo_scale_min": tempo_scale_min,
+        "representative_bpm": rep_bpm,
+    }
+    return _Built(document, diagnostics, track_index, track.name, resolved)
 
 
 def _print_diagnostics(diag: _Diagnostics) -> None:
@@ -348,6 +490,36 @@ def _print_diagnostics(diag: _Diagnostics) -> None:
         print(f"イベント外記号: {listed}")
 
 
+def _open_amounts_stats(amounts):
+    """採用音符別開き量の {min, max, mean}(採用 0 件なら None。inspect 用。§7.2)。"""
+    if not amounts:
+        return None
+    return {"min": min(amounts), "max": max(amounts), "mean": sum(amounts) / len(amounts)}
+
+
+def _build_inspect(args, built: _Built) -> dict:
+    """`--machine --dry-run` の inspect result ペイロードを組む(§7.2)。VMD は書かない。"""
+    diag = built.diagnostics
+    return {
+        "output": None,
+        "input_kind": "vpr",
+        "track_index": built.track_index,
+        "track_name": built.track_name,
+        "style": args.style,
+        "n_morph": args.n_morph,
+        "model_name": args.model_name,
+        "params": built.resolved,
+        "adopted_notes": diag.adopted,
+        "mouth_events": diag.events,
+        "morph_keys": diag.morph_keys,
+        "open_amounts": _open_amounts_stats(diag.open_amounts),
+        "vowel_undetermined": diag.event.vowel_undetermined,
+        "overlap_excluded": diag.overlap.excluded,
+        "overlap_truncated": diag.overlap.truncated,
+        "non_event_symbols": diag.event.non_event_symbols,
+    }
+
+
 def _valley_bounds_inverted(args) -> bool:
     """解決後の谷係数が下限(deep)>上限(shallow)で退化するか。
 
@@ -361,14 +533,20 @@ def _valley_bounds_inverted(args) -> bool:
     return deep > shallow
 
 
-def _fail(message: str, exit_code: int) -> int:
-    """失敗理由を標準エラーへ 1 行出して終了コードを返す(vpr2vmd.md §6・§7.4)。"""
-    print(f"error: {message}", file=sys.stderr)
-    return exit_code
+def _surface_warnings(warnings, emitter) -> None:
+    """vpr 読み込みが返す構造化警告を surface する(§4.4・§7.2)。
 
-
-def _surface_warnings(warnings) -> None:
-    """vpr 読み込みが返す構造化警告を標準エラーへ出す(同一 code・message は 1 行に集約。§4.4)。"""
+    機械モードは 1 警告 1 イベント(vpr 内の位置キー付き・section は null)、非機械は code・message の
+    同一組を 1 行に集約して標準エラーへ出す。
+    """
+    if emitter is not None:
+        for w in warnings:
+            emitter.warning(
+                code=w.code, message=w.message, section=None,
+                track_index=w.track_index, part_index=w.part_index, note_index=w.note_index,
+                related_note_index=w.related_note_index, tick=w.tick,
+            )
+        return
     seen = set()
     for w in warnings:
         key = (w.code, w.message)
@@ -379,7 +557,7 @@ def _surface_warnings(warnings) -> None:
 
 
 def main(argv=None) -> int:
-    """CLI エントリポイント。終了コードを返す(0/1/2/3。vpr2vmd.md §4.3)。"""
+    """CLI エントリポイント。終了コードを返す(0/1/2/3。vpr2vmd.md §4.3・§7)。"""
     # 人間向け標準エラーはロケール符号化で表せない文字でも UnicodeEncodeError で落とさない(規約 §10)。
     if hasattr(sys.stderr, "reconfigure"):
         try:
@@ -389,58 +567,110 @@ def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    parser = _build_parser()
+    # 構造化出力モード判定(§7.1)。解析前に argv で先取り(引数エラー時も出力チャネルを決めるため)。
+    # --describe は --machine を要さない独立メタ操作。どちらかがあれば emitter を用意し、
+    # MachineArgumentParser で使用法エラーも error イベントへ振り替える。emitter はバイナリ stdout へ
+    # UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None(従来の人間向け経路)。
+    machine = "--machine" in argv
+    describe = "--describe" in argv
+    emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
+
+    def fail(code, message, exit_code, *, field=None, path=None):
+        """失敗を報告して終了コードを返す(§7.4)。構造化出力モードは error イベントでストリームを終端し、
+        それ以外は理由を標準エラーへ 1 行出す(トレースバックは出さない)。"""
+        if emitter is not None:
+            emitter.error(**error_event(
+                code=code, message=message, exit_code=exit_code, field=field, path=path))
+        else:
+            print(f"error: {message}", file=sys.stderr)
+        return exit_code
+
+    parser = _build_parser(machine or describe)
     try:
         args = parser.parse_args(argv)
+    except ArgumentParseError as e:
+        # 構造化出力モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
+        return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
     except SystemExit as e:
-        # argparse はエラー時 code 2 で sys.exit(--help/--version は 0)。終了コードへ変換する。
+        # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
+        # (メタ操作・code 0)。例外を握って終了コードへ変換する(§7.1)。
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
 
-    # 引数解析後の本体。想定外例外はトレースバックを漏らさず理由 1 行 + 終了コード 1 へ畳む(規約 §5)。
+    # 自己記述(§7.3)。vpr を読まず options/presets の result を出して終了する独立メタ操作。
+    if args.describe:
+        emitter.result(mode="describe", options=_describe_options(parser),
+                       presets=_describe_presets())
+        return 0
+    # input は nargs="?"(--describe を入力無しで成立させるため)。describe 以外の実行では必須。
+    if args.input is None:
+        return fail("bad_argument", "入力 vpr(input)が必要です", 2, field="input")
+
+    # 引数解析後の本体。想定外例外はトレースバックを漏らさず internal_error(理由 1 行 + 終了コード 1)へ
+    # 畳む(§7.4)。
     try:
-        return _run(args)
+        return _run(args, emitter, fail)
     except Exception as e:
-        return _fail(f"{type(e).__name__}: {e}", 1)
+        return fail("internal_error", f"{type(e).__name__}: {e}", 1)
 
 
-def _run(args) -> int:
-    """引数解析済みの本体(検証 → 読み込み → 変換 → 書き込み)。失敗は _fail で理由 1 行 + 終了コードを返す。"""
+def _run(args, emitter, fail) -> int:
+    """引数解析済みの本体(検証 → 読み込み → 変換 → 書き込み)。失敗は fail() で終端する(§7.4)。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
     # 上書きガード(vpr2vmd.md §4.2): 出力先が入力と同一パスになる指定だけを --overwrite 無しで拒否する。
     # 別パスの既存出力ファイルは対象にしない。同一パス判定を存在確認より先に置く(未存在でも入力上書きは弾く)。
     if not args.overwrite and _same_path(output, args.input):
-        return _fail(f"出力先が入力と同一パスです(--overwrite が必要): {output}", 2)
+        return fail("output_overwrites_input",
+                    f"出力先が入力と同一パスです(--overwrite が必要): {output}", 2, field="--output")
 
     # 谷係数の不変条件(下限≤上限)は vpr 内容に依らない引数レベルの検証。引数エラー(2)を入力不正(1)より
     # 先に評価する規約に従い、存在確認の前に弾く(dry-run でも弾く)。
     if _valley_bounds_inverted(args):
-        return _fail("谷係数の下限が上限を超えています(--valley-deep > --valley-shallow)", 2)
+        return fail("valley_bounds_inverted",
+                    "谷係数の下限が上限を超えています(--valley-deep > --valley-shallow)", 2)
 
     # 入力 vpr の存在確認(欠落は入力不正)。読み込み・形式検証は _build が行う。
     if not os.path.isfile(args.input):
-        return _fail(f"入力 vpr が見つかりません: {args.input}", 1)
+        return fail("input_not_found", f"入力 vpr が見つかりません: {args.input}", 1, field="input")
 
     # --dry-run でも読み込み・処理は同じく行い(出力VMDだけ書かない)、診断・警告を出せるようにする。
-    built = _build(args)
+    built = _build(args, emitter, fail)
     if isinstance(built, int):
-        return built  # 入力不正(1)・--track の不正値(2)は _build が _fail 済み
-    document, diagnostics = built
+        return built  # not_vpr(1)・no_tracks(1)・bad_track(2)は _build が fail 済み
+    diag = built.diagnostics
 
     # 対象トラックに有効な発音が無い(採用音符列が空)→ 警告して正常終了(vpr2vmd.md §4.3・§4.4)。
-    if diagnostics.adopted == 0:
-        print("警告: 対象トラックに有効な発音がありません", file=sys.stderr)
+    if diag.adopted == 0:
+        if emitter is not None:
+            emitter.warning(
+                code="no_adopted_notes", message="対象トラックに有効な発音がありません", section=None,
+                track_index=None, part_index=None, note_index=None, related_note_index=None, tick=None,
+            )
+        else:
+            print("警告: 対象トラックに有効な発音がありません", file=sys.stderr)
 
-    # --dry-run / --verbose は処理計画と診断を標準出力へ出す。--dry-run は書かず、--verbose は書く。
-    if args.dry_run or args.verbose:
+    # --dry-run / --verbose は処理計画と診断を標準出力へ出す。機械モードは標準出力をイベント専用に保つ
+    # ため人間向け表示は出さない(§7.1)。
+    if (args.dry_run or args.verbose) and emitter is None:
         _print_plan(args, output)
-        _print_diagnostics(diagnostics)
+        _print_diagnostics(diag)
+
+    # --dry-run は出力を書かずに終える。機械モードは入力検査(inspect)の result で終端する(§7.2)。
     if args.dry_run:
+        if emitter is not None:
+            emitter.result(mode="inspect", **_build_inspect(args, built))
         return 0
 
     try:
-        write_file(document, output)
+        write_file(built.document, output)
     except OSError as e:
-        return _fail(f"出力の書き込みに失敗: {e}", 3)  # 出力VMDの書き込み失敗
+        return fail("write_failed", f"出力の書き込みに失敗: {e}", 3, field="--output", path=output)
+
+    # 書き込み成功後に convert result でストリームを終端する(§7.2)。
+    if emitter is not None:
+        emitter.result(
+            mode="convert", output=output, track_index=built.track_index, track_name=built.track_name,
+            morph_keys=diag.morph_keys, adopted_notes=diag.adopted, mouth_events=diag.events,
+        )
     return 0
