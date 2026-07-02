@@ -204,7 +204,6 @@ def test_help_and_version_not_converted_to_parse_error():
         p.parse_args(["--version"])
 
 
-@pytest.mark.xfail(reason="impl pending: cli_events argparse_error_field")
 def test_argparse_error_field_extraction_rules():
     # argparse の標準文言から bad_argument の field をベストエフォート抽出する規則(cli_events.md §4)。
     from cli_events import argparse_error_field
@@ -222,12 +221,14 @@ def test_argparse_error_field_extraction_rules():
     assert argparse_error_field(
         "the following arguments are required: input, --other"
     ) == "input"
+    # 「argument 」で始まってもコロンが無ければ「argument <名前>: 」形でない → None。
+    assert argparse_error_field("argument --foo invalid") is None
+    assert argparse_error_field("argument ") is None
     # いずれにも当たらない文言 → None(詳細は message 側に残す)。
     assert argparse_error_field("some other unexpected message") is None
     assert argparse_error_field("") is None
 
 
-@pytest.mark.xfail(reason="impl pending: cli_events argparse_error_field")
 def test_argparse_error_field_from_real_parser():
     # MachineArgumentParser の実エラー文言に対して end-to-end で抽出できること(cli_events.md §4)。
     from cli_events import argparse_error_field
