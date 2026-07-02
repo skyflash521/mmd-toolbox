@@ -108,8 +108,10 @@ def test_no_summary_on_dry_run(tmp_path, monkeypatch):
     assert not any(e[0] == "summary" for e in rep.events)
 
 
+@pytest.mark.xfail(reason="impl pending: Step 3 cli 機械モード")
 def test_close_called_and_no_summary_when_pipeline_raises(tmp_path, monkeypatch):
-    # try/finally 保証: 疎化で例外が起きても、例外を伝播する前に finally で close される。書き込みに
+    # try/finally 保証 + internal_error 畳み: 疎化で想定外例外が起きても、finally で close され、
+    # 例外はトレースバックを漏らさず internal_error(exit 1)へ畳まれる(伝播しない)。書き込みに
     # 至らないので完了行(summary)は出さない。
     _RecordingReporter.instances = []
     monkeypatch.setattr(cli.progress, "ProgressReporter", _RecordingReporter)
@@ -121,8 +123,8 @@ def test_close_called_and_no_summary_when_pipeline_raises(tmp_path, monkeypatch)
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _curve_doc(src)
-    with pytest.raises(RuntimeError):
-        cli.main([str(src), "-o", str(out)])
+    rc = cli.main([str(src), "-o", str(out)])
+    assert rc == 1  # internal_error（トレースバックを漏らさず畳む）
     rep = _RecordingReporter.instances[-1]
     assert ("close",) in rep.events
     assert not any(e[0] == "summary" for e in rep.events)
