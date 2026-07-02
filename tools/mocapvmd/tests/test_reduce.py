@@ -467,3 +467,31 @@ def test_parallel_progress_values_match_serial():
     assert par == ser
     total = mreduce._MIN_PARALLEL_TRACKS + 1
     assert ser[0] == (0, total) and ser[-1] == (total, total)  # (0,total) → (total,total)
+
+
+def test_parallel_keyboard_interrupt_terminates_pool(monkeypatch):
+    # 並列疎化ループ中の KeyboardInterrupt でプールが畳まれ(with ブロックの __exit__ が呼ばれ、実プールは
+    # terminate)、中断が親へ伝播する(main が cancelled/130 へ畳む前提。§10.6)。with を外して pool を
+    # 畳まない誤実装を弾く。
+    exits = []
+
+    class _InterruptingPool:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, *rest):
+            exits.append(exc_type)
+            return False  # 例外は握り潰さず伝播させる
+
+        def imap_unordered(self, func, items, chunksize=1):
+            # 呼び出し時でなく反復中に中断する: with 内で iterator を作り反復を with 外へ出す誤実装も
+            # 弾けるよう、yield を持つジェネレータにして最初の next() で投げる(反復=for ループ中の中断)。
+            if False:
+                yield None
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(mreduce, "_make_pool", lambda workers: _InterruptingPool())
+    keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)  # 閾値超で並列経路を確実に通す
+    with pytest.raises(KeyboardInterrupt):
+        mreduce.reduce_bones(keys, "medium", workers=2)
+    assert exits == [KeyboardInterrupt]  # with __exit__ が中断で呼ばれた(= 実プールなら terminate)
