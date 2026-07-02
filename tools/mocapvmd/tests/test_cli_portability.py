@@ -9,8 +9,6 @@ import io
 import sys
 import types
 
-import pytest
-
 from vmd import io as vmd_io
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey, VmdDocument
@@ -30,7 +28,6 @@ def _ramp(path):
 # --- 機械モード標準出力: UTF-8 + 改行 LF 固定(規約 §10) ---------------------
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3 cli 機械モード")
 def test_machine_stdout_uses_lf_only(tmp_path, capsysbinary):
     # 機械モードの各行は LF(\n)終端で \r を一切含まない(CRLF 変換なし。バイト列で検証)。
     src = tmp_path / "in.vmd"
@@ -44,7 +41,6 @@ def test_machine_stdout_uses_lf_only(tmp_path, capsysbinary):
         assert line and not line.endswith(b"\r")
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3 cli 機械モード")
 def test_machine_stdout_non_ascii_is_utf8(tmp_path, capsysbinary):
     # 非ASCII(日本語の出力パス)を UTF-8 のまま出す(ロケール符号化に依存しない・\uXXXX へエスケープしない)。
     src = tmp_path / "入力.vmd"
@@ -86,7 +82,6 @@ def _cp932_stderr(monkeypatch):
     return wrapper
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3 cli 機械モード")
 def test_stderr_safe_argparse_usage_error(monkeypatch):
     # argparse 使用法エラー経路: 表せない文字を含む不正引数値。使用法エラーが符号化に失敗せず、
     # 引数エラー(2)で終える(例外を漏らさない)。
@@ -95,7 +90,6 @@ def test_stderr_safe_argparse_usage_error(monkeypatch):
     assert rc == 2
 
 
-@pytest.mark.xfail(reason="impl pending: Step 3 cli 機械モード")
 def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
     # 警告ループ経路: 表せない文字を含む警告文でも本体は正常終了(0)する(符号化失敗で落とさない)。
     # io.read を差し替え、非ASCIIメッセージの警告を人間向け stderr へ流す経路を突く。

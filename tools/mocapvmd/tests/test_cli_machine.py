@@ -20,10 +20,6 @@ from mocapvmd.model_profile import STANDARD_BONE_NAMES
 
 from .helpers import bone, build_standard_pmx, write_vmd
 
-# 機械モード・構造化エラー・新設の非機械理由出力・中断はまだ未実装のため、本モジュールを xfail で
-# 印付ける(実装コミットで印を外す)。impl pending: Step 3 cli 機械モード
-pytestmark = pytest.mark.xfail(reason="impl pending: Step 3 cli 機械モード")
-
 
 def machine_events(capsysbinary):
     """capsysbinary で捕捉した stdout を JSON Lines として解析しイベント配列で返す。"""
@@ -151,7 +147,7 @@ def test_machine_emits_decode_error_warning(tmp_path, capsysbinary):
     # 不正な cp932 シーケンスを名前フィールドに埋めた密トラックを書く。
     from vmd.types import BoneKey, VmdDocument
     from vmd.reduce import BONE_LINEAR_INTERP
-    bad_name = b"\xff\xfe\x80name".ljust(15, b"\x00")  # cp932 で復号できないバイト列
+    bad_name = b"\x81\x20name".ljust(15, b"\x00")  # cp932 で復号できないバイト列
     keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
             for f in range(4)]
     io.write_file(VmdDocument(bone=keys), str(tmp_path / "in.vmd"))
@@ -169,7 +165,7 @@ def test_machine_warning_dedup_matches_human(tmp_path, capsysbinary):
     # 同一(code, section, message)の警告は 1 件へ集約する(人間向け経路と同じ基準)。
     from vmd.types import BoneKey, VmdDocument
     from vmd.reduce import BONE_LINEAR_INTERP
-    bad_name = b"\xff\xfe\x80name".ljust(15, b"\x00")
+    bad_name = b"\x81\x20name".ljust(15, b"\x00")
     # 同名のデコード不能キーを複数フレーム持たせても decode-error は 1 件へ集約される。
     keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
             for f in range(6)]
@@ -473,7 +469,6 @@ def _raise_keyboard_interrupt(*a, **k):
     raise KeyboardInterrupt()
 
 
-@pytest.mark.skip(reason="impl pending: Step 3 cli 機械モード(未実装では KeyboardInterrupt が pytest を中断するため skip)")
 def test_machine_cancelled_on_keyboard_interrupt(tmp_path, capsysbinary, monkeypatch):
     # 計算中の KeyboardInterrupt → cancelled の error イベント・exit 130。出力は書かれない(原子性)。
     monkeypatch.setattr(cli.reduce, "reduce_bones", _raise_keyboard_interrupt)
@@ -487,7 +482,6 @@ def test_machine_cancelled_on_keyboard_interrupt(tmp_path, capsysbinary, monkeyp
     assert not out.exists()
 
 
-@pytest.mark.skip(reason="impl pending: Step 3 cli 機械モード(未実装では KeyboardInterrupt が pytest を中断するため skip)")
 def test_non_machine_cancelled_on_keyboard_interrupt(tmp_path, capsys, monkeypatch):
     # 非機械モードの中断は stdout に JSON を出さず理由を標準エラーへ 1 行、exit 130。出力は書かれない。
     monkeypatch.setattr(cli.reduce, "reduce_bones", _raise_keyboard_interrupt)
