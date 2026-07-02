@@ -543,9 +543,14 @@ def main(argv=None):
     if args.input is None:
         return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
 
-    # 引数解析後の本体を畳む。想定外の内部エラーは internal_error(§12.4)へ(トレースバックを漏らさない)。
+    # 引数解析後の本体を畳む。KeyboardInterrupt は中断(§12.5)として cancelled/130 へ、それ以外の
+    # 想定外例外は internal_error(§12.4)へ。どちらもトレースバックを漏らさない。
     try:
         return _run(args, emitter, fail)
+    except KeyboardInterrupt:
+        # 協調的な中断(Ctrl-C / 親プロセスの中断)。書き込みは全計算後に 1 回だけで原子的なので、
+        # ここに来た時点で出力は未書き込みか原子置換済みのいずれかで、中途半端な出力は残らない(§12.5)。
+        return fail("cancelled", "中断された(Ctrl-C 等)", 130)
     except Exception as e:
         return fail("internal_error", f"{type(e).__name__}: {e}", 1)
 
@@ -751,7 +756,13 @@ def _run(args, emitter, fail):
             if want_report:
                 bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
     except StrictError:
+        # エラー理由を出す前にライブ表示の行を閉じる(fail の error 行が進捗行へ連結されないように。§12.5)。
+        reporter.finish()
         return fail("strict_tolerance_unmet", "--strict 指定で許容誤差を満たせない", 4)
+    finally:
+        # 中断(KeyboardInterrupt)・その他の例外が _run 外へ伝播する経路でもライブ表示の行を閉じてから
+        # 抜ける(§12.5)。finish は冪等(既に閉じていれば何もしない)で、機械モードでは reporter 自体が無効。
+        reporter.finish()
 
     # verbose: 不連続検出位置・分割理由・継ぎ目書き換えを stderr に出す(§2.7/§6.3)。
     if args.verbose:
