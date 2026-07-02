@@ -9,9 +9,16 @@ vpr 読み込み・口形イベント確定・VMD 生成の統合は test_conver
 """
 
 import pytest
-from vpr import Note, Part, TempoEvent, Track, VprProject
+from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
 
 from vpr2vmd import cli
+
+
+def _assert_error_line(err):
+    """非機械の失敗理由が『error: <理由>』の行(理由は非空)で出て、トレースバックを含まないこと(§6・§7.4)。"""
+    lines = [ln for ln in err.splitlines() if ln.strip()]
+    assert any(ln.startswith("error: ") and ln[len("error: "):].strip() for ln in lines), err
+    assert "Traceback" not in err, err
 
 
 def _touch(path):
@@ -131,11 +138,21 @@ def test_missing_input_file_is_input_error(tmp_path):
     assert cli.main([missing]) == 1
 
 
-def test_existing_output_requires_overwrite(tmp_path):
-    """既存の出力 VMD は --overwrite 無しでは上書きしない(vpr2vmd.md §4.2)。"""
+def test_existing_other_path_output_allowed_without_overwrite(tmp_path):
+    """別パスの既存出力は --overwrite 無しでも上書きを許す(上書きガードを入力同一パスのみへ統一)。"""
     src = _touch(tmp_path / "in.vpr")
     out = _touch(tmp_path / "out.vmd")  # 既存出力(入力とは別パス)
-    assert cli.main([src, "-o", out]) == 2
+    assert cli.main([src, "-o", out, "--dry-run"]) == 0
+
+
+def test_existing_other_path_output_overwritten_on_normal_run(tmp_path):
+    """別パスの既存出力を通常実行(--overwrite 無し)で実際に上書きし、終了コード 0 で書き込むこと。"""
+    src = _touch(tmp_path / "in.vpr")
+    out = tmp_path / "out.vmd"
+    out.write_bytes(b"stale")  # 既存の別パス出力(入力とは別パス)
+    rc = cli.main([src, "-o", str(out)])
+    assert rc == 0
+    assert out.read_bytes() != b"stale"  # ガードに阻まれず上書きされた
 
 
 def test_overwrite_allows_existing_output(tmp_path):
@@ -210,11 +227,11 @@ def test_model_name_at_20_byte_limit_is_accepted(tmp_path):
     assert cli.main([src, "--model-name", "x" * 20, "--dry-run"]) == 0
 
 
-def test_existing_default_output_requires_overwrite(tmp_path):
-    """既定出力 <入力名>.vmd が既存なら、-o 無し・--overwrite 無しでも拒否する。"""
+def test_existing_default_output_allowed_without_overwrite(tmp_path):
+    """既定出力 <入力名>.vmd が既存でも、別パス扱いで -o 無し・--overwrite 無しで上書きを許す。"""
     src = _touch(tmp_path / "song.vpr")
-    _touch(tmp_path / "song.vmd")  # 既定出力が既に存在
-    assert cli.main([src]) == 2
+    _touch(tmp_path / "song.vmd")  # 既定出力が既に存在(入力とは別パス)
+    assert cli.main([src, "--dry-run"]) == 0
 
 
 def test_default_output_is_vmd_alongside_input(tmp_path):
@@ -317,3 +334,169 @@ def test_dry_run_plan_shows_tuning_overrides(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "legato-max: 12" in out
     assert "anticipation: 9" in out
+
+
+# --- 版・--version/--n-morph/--verbose・上書きガード統一・非機械の失敗理由(vpr2vmd.md §2・§4・§6・§7.4) ---
+
+
+def _project_with_notes(notes):
+    """指定音符列を持つ単一トラック `Vocal` の合成プロジェクト。"""
+    return VprProject(
+        resolution=480,
+        tempos=[TempoEvent(0, 120.0)],
+        tracks=[Track(name="Vocal", parts=[Part(name="p", start_tick=0, notes=notes)])],
+    )
+
+
+def test_version_attr_exposed():
+    """パッケージが版属性 __version__(非空の文字列)を公開すること(--version が表示する版の源)。"""
+    import vpr2vmd
+
+    assert isinstance(vpr2vmd.__version__, str) and vpr2vmd.__version__
+
+
+def test_version_flag_prints_and_exits_zero(capsys):
+    """--version は版(__version__)を表示して終了コード 0 で終わる。"""
+    import vpr2vmd
+
+    rc = cli.main(["--version"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "vpr2vmd" in out
+    assert vpr2vmd.__version__ in out
+
+
+def test_n_morph_positive_flag_accepted(tmp_path):
+    """--n-morph(肯定形)を受理し --dry-run で 0(--no-n-morph の対)。"""
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--n-morph", "--dry-run"]) == 0
+
+
+def test_verbose_prints_plan_on_normal_run(tmp_path, capsys):
+    """--verbose は通常実行でも処理計画・診断を標準出力へ出し、出力 VMD を書く。"""
+    src = _touch(tmp_path / "in.vpr")
+    out = tmp_path / "out.vmd"
+    rc = cli.main([src, "-o", str(out), "--verbose"])
+    captured = capsys.readouterr().out
+    assert rc == 0
+    assert out.exists()
+    assert "採用音符数" in captured
+
+
+def test_missing_input_reports_reason(tmp_path, capsys):
+    """存在しない入力 vpr は理由 1 行 + 終了コード 1(§7.4 input_not_found)。"""
+    missing = str(tmp_path / "nope.vpr")
+    rc = cli.main([missing])
+    assert rc == 1
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_missing_positional_reports_reason(capsys):
+    """input 欠落は理由 1 行 + 終了コード 2(§7.4 bad_argument)。
+
+    非機械では argparse 自身が使用法エラーを標準エラーへ出す(理由 1 行を満たす)。
+    """
+    rc = cli.main([])
+    assert rc == 2
+    assert capsys.readouterr().err.strip()
+
+
+def test_not_vpr_reports_reason(tmp_path, capsys, monkeypatch):
+    """非 vpr(VprFormatError)は理由 1 行 + 終了コード 1(§7.4 not_vpr)。"""
+    src = _touch(tmp_path / "in.vpr")
+
+    def _raise(_src):
+        raise VprFormatError("壊れた vpr")
+
+    monkeypatch.setattr(cli, "read", _raise)
+    rc = cli.main([src])
+    assert rc == 1
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_no_tracks_reports_reason(tmp_path, capsys, monkeypatch):
+    """トラックが 1 件も無い入力は理由 1 行 + 終了コード 1(§7.4 no_tracks)。"""
+    src = _touch(tmp_path / "in.vpr")
+    empty = VprProject(resolution=480, tempos=[TempoEvent(0, 120.0)], tracks=[])
+    monkeypatch.setattr(cli, "read", lambda _src: (empty, []))
+    rc = cli.main([src])
+    assert rc == 1
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_bad_track_reports_reason(tmp_path, capsys):
+    """--track の INDEX 範囲外は理由 1 行 + 終了コード 2(§7.4 bad_track)。"""
+    src = _touch(tmp_path / "in.vpr")
+    rc = cli.main([src, "--track", "5"])
+    assert rc == 2
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_valley_inverted_reports_reason(tmp_path, capsys):
+    """谷係数の逆転は理由 1 行 + 終了コード 2(§7.4 valley_bounds_inverted)。"""
+    src = _touch(tmp_path / "in.vpr")
+    rc = cli.main([src, "--valley-deep", "0.6", "--dry-run"])
+    assert rc == 2
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_output_overwrites_input_reports_reason(tmp_path, capsys):
+    """出力先が入力と同一パスは理由 1 行 + 終了コード 2(§7.4 output_overwrites_input)。"""
+    src = _touch(tmp_path / "in.vpr")
+    rc = cli.main([src, "-o", src, "--dry-run"])
+    assert rc == 2
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_write_failure_reports_reason(tmp_path, capsys, monkeypatch):
+    """出力書き込み失敗(OSError)は理由 1 行 + 終了コード 3(§7.4 write_failed)。"""
+    src = _touch(tmp_path / "in.vpr")
+    out = tmp_path / "out.vmd"
+
+    def _raise(_doc, _path):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cli, "write_file", _raise)
+    rc = cli.main([src, "-o", str(out)])
+    assert rc == 3
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_internal_error_reports_reason_without_traceback(tmp_path, capsys, monkeypatch):
+    """想定外例外はトレースバックを漏らさず理由 1 行 + 終了コード 1(§7.4 internal_error)。"""
+    src = _touch(tmp_path / "in.vpr")
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("想定外")
+
+    monkeypatch.setattr(cli, "generate_morph_keys", _boom)
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
+    assert rc == 1
+    _assert_error_line(capsys.readouterr().err)
+
+
+def test_vpr_read_warning_surfaced_to_stderr(tmp_path, capsys, monkeypatch):
+    """vpr 読み込みが返す構造化警告(重なり音符)を標準エラーへ出す(§4.4・§7.2)。"""
+    src = _touch(tmp_path / "in.vpr")
+    project = _project_with_notes(
+        [Note(start_tick=0, duration_tick=480, pitch=60, lyric="x", velocity=64, phonemes=["a"])]
+    )
+    warning = VprWarning(
+        code="overlapping_notes", message="重なり音符", track_index=0, part_index=0,
+        note_index=1, related_note_index=0, tick=0,
+    )
+    monkeypatch.setattr(cli, "read", lambda _src: (project, [warning]))
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "重なり音符" in err or "overlapping_notes" in err
+
+
+def test_no_adopted_notes_warns_and_succeeds(tmp_path, capsys, monkeypatch):
+    """採用音符が空でもエラーにせず正常終了し、標準エラーへ警告を出す(§4.3・§4.4)。"""
+    src = _touch(tmp_path / "in.vpr")
+    empty_track = _project_with_notes([])  # 発音の無いトラック
+    monkeypatch.setattr(cli, "read", lambda _src: (empty_track, []))
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
+    assert rc == 0
+    assert "発音" in capsys.readouterr().err

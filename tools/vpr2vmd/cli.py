@@ -20,7 +20,7 @@ from lipsync import generate_morph_keys
 from vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
 from vpr import VprFormatError, read
 
-from . import loudness, openness, presets, timing
+from . import __version__, loudness, openness, presets, timing
 from .events import (
     EventDiagnostics,
     OverlapDiagnostics,
@@ -125,31 +125,55 @@ def _positive_int(text: str) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: 仕様外の前置き省略形を受理しない(未知/省略形は exit 2)。
+    # help= は各オプションの人間向け説明(vpr2vmd.md §4.2・規約 §6)。
     p = argparse.ArgumentParser(prog="vpr2vmd", allow_abbrev=False)
-    p.add_argument("input")
-    p.add_argument("-o", "--output")
-    p.add_argument("--overwrite", action="store_true")
+    p.add_argument("input", help="入力 vpr ファイル")
+    p.add_argument("-o", "--output", help="出力 VMD(既定: <入力名>.vmd)")
+    p.add_argument("--overwrite", action="store_true",
+                   help="出力先が入力と同一パスになる指定を許可する(別パスの既存ファイルは常に上書き)")
     # --track は整数なら 0-based INDEX、非整数なら Track.name(vpr2vmd.md §4.2)。解釈・解決は
     # io.select_track が行うため、ここでは生文字列のまま保持する(type=str)。
-    p.add_argument("--track")
-    p.add_argument("--model-name", dest="model_name", type=_model_name, default="")
-    p.add_argument("--style", choices=STYLE_NAMES, default="pop")
-    # 既定は「ん」モーフを使う。指定時は撥音「ん」を無音(閉口)へ倒す(vpr2vmd.md §4.2)。
-    p.add_argument("--no-n-morph", dest="no_n_morph", action="store_true")
+    p.add_argument("--track",
+                   help="口パク対象の歌唱トラック。整数は 0-based の INDEX、非整数は Track 名"
+                        "(既定: 先頭トラック)")
+    p.add_argument("--model-name", dest="model_name", type=_model_name, default="",
+                   help="VMD に格納するモデル名(最大 20 バイト・Shift-JIS)")
+    p.add_argument("--style", choices=STYLE_NAMES, default="pop",
+                   help="口パクスタイルプリセット(開き量レンジ・タイミング・誇張を切り替える)")
+    # --n-morph / --no-n-morph は既定 on の対(vpr2vmd.md §4.2)。dest=n_morph を共有する。
+    p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
+                   help="撥音「ん」に「ん」モーフを使う(既定 on)。--no-n-morph の対の明示形")
+    p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
+                   help="撥音「ん」に「ん」モーフを使わず無音(閉口)に倒す。--n-morph の対")
     # 既定はプリセット値。未指定センチネル(None)は presets.resolve がプリセットから解決する。
-    p.add_argument("--open-max", dest="open_max", type=_open_amount)
-    p.add_argument("--default-open", dest="default_open", type=_open_amount)
+    p.add_argument("--open-max", dest="open_max", type=_open_amount,
+                   help="口の開き量の上限(0.0〜1.0。既定: プリセット値)")
+    p.add_argument("--default-open", dest="default_open", type=_open_amount,
+                   help="ベロシティが一様なときの既定開き量(0.0〜1.0。既定: 開き量レンジ中央)")
     # 視覚で詰める調整パラメータ(未指定 None はプリセット/既定値を使う)。プリセット解決とテンポ補正の
     # 後に最終値として上書きする(vpr2vmd.md §3・§4.2)。lipsync の各パラメータの意味は lipsync.md が正本。
-    p.add_argument("--legato-max", dest="legato_max", type=_positive_float)
-    p.add_argument("--valley-shallow", dest="valley_shallow", type=_unit_float)
-    p.add_argument("--valley-deep", dest="valley_deep", type=_unit_float)
-    p.add_argument("--valley-slope", dest="valley_slope", type=_nonneg_float)
-    p.add_argument("--coartic-overlap", dest="coartic_overlap", type=_positive_int)
-    p.add_argument("--anticipation", dest="anticipation", type=_nonneg_int)
-    p.add_argument("--ref-bpm", dest="ref_bpm", type=_positive_float)
-    p.add_argument("--tempo-scale-min", dest="tempo_scale_min", type=_scale_min)
-    p.add_argument("--dry-run", dest="dry_run", action="store_true")
+    p.add_argument("--legato-max", dest="legato_max", type=_positive_float,
+                   help="レガート間隙とみなす間隙長の上限(フレーム・正値。既定: 8.0)")
+    p.add_argument("--valley-shallow", dest="valley_shallow", type=_unit_float,
+                   help="レガート谷の谷係数の上限(浅い側・0.0〜1.0。既定: プリセット値)")
+    p.add_argument("--valley-deep", dest="valley_deep", type=_unit_float,
+                   help="レガート谷の谷係数の下限(深い側・0.0〜1.0。既定: プリセット値)")
+    p.add_argument("--valley-slope", dest="valley_slope", type=_nonneg_float,
+                   help="間隙長 1 フレームあたりの谷係数の減少(0 以上。既定: プリセット値)")
+    p.add_argument("--coartic-overlap", dest="coartic_overlap", type=_positive_int,
+                   help="協調調音の重なり上限(=基準長・1 以上。既定: プリセット値)")
+    p.add_argument("--anticipation", dest="anticipation", type=_nonneg_int,
+                   help="母音口形の先行準備フレーム数(0 以上・0 で無効。既定: プリセット値)")
+    p.add_argument("--ref-bpm", dest="ref_bpm", type=_positive_float,
+                   help="テンポ補正の基準テンポ(正値。既定: 120)")
+    p.add_argument("--tempo-scale-min", dest="tempo_scale_min", type=_scale_min,
+                   help="テンポ補正の下げ止まり係数(0 超〜1.0。既定: 0.5)")
+    p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                   help="出力せず処理計画と診断を表示する")
+    p.add_argument("-v", "--verbose", dest="verbose", action="store_true",
+                   help="通常実行でも処理計画と診断を標準出力へ表示する(出力 VMD は書く)")
+    p.add_argument("--version", action="version", version=f"vpr2vmd {__version__}",
+                   help="バージョンを表示して終了する")
     return p
 
 
@@ -176,7 +200,7 @@ def _print_plan(args, output: str) -> None:
     print(f"track: {args.track if args.track is not None else '(先頭トラック)'}")
     print(f"style: {args.style}")
     # 既定は撥音「ん」に「ん」モーフを使う(on)。--no-n-morph 指定時は無音へ倒す(off)。
-    print(f"n-morph: {'off (撥音→無音)' if args.no_n_morph else 'on (撥音→ん)'}")
+    print(f"n-morph: {'on (撥音→ん)' if args.n_morph else 'off (撥音→無音)'}")
     print(f"model-name: {args.model_name!r}")
     print(f"open-max: {args.open_max if args.open_max is not None else '(プリセット値)'}")
     print(
@@ -218,15 +242,16 @@ def _build(args):
     (非vpr・対象トラック皆無)は終了コード 1、`--track` の不正値は 2 を返す(vpr2vmd.md §4.3)。
     """
     try:
-        project, _warnings = read(args.input)
-    except VprFormatError:
-        return 1  # 読み込み・形式検証の失敗(非vpr など)=入力不正
+        project, warnings = read(args.input)
+    except VprFormatError as e:
+        return _fail(f"入力を vpr として読めません: {e}", 1)  # 非vpr=入力不正
+    _surface_warnings(warnings)  # 重なり音符などの構造化警告を標準エラーへ出す(§4.4)
     if not project.tracks:
-        return 1  # 対象トラックが1件も無い=入力不正
+        return _fail("入力 vpr にトラックがありません", 1)  # 対象トラック皆無=入力不正
     try:
         track = select_track(project, args.track)
-    except TrackSelectionError:
-        return 2  # --track の値が当該入力で有効な選択にならない=引数エラー
+    except TrackSelectionError as e:
+        return _fail(f"--track: {e}", 2)  # 当該入力で有効な選択にならない=引数エラー
 
     adopted, overlap_diag = resolve_overlaps(collect_notes(track))
     openness_params, gen_params = presets.resolve(args.style, args.open_max, args.default_open)
@@ -279,7 +304,7 @@ def _build(args):
         adopted,
         project.tempos,
         project.resolution,
-        use_n_morph=not args.no_n_morph,
+        use_n_morph=args.n_morph,
         open_by_note=open_by_note,
         **legato_kwargs,
     )
@@ -336,8 +361,31 @@ def _valley_bounds_inverted(args) -> bool:
     return deep > shallow
 
 
+def _fail(message: str, exit_code: int) -> int:
+    """失敗理由を標準エラーへ 1 行出して終了コードを返す(vpr2vmd.md §6・§7.4)。"""
+    print(f"error: {message}", file=sys.stderr)
+    return exit_code
+
+
+def _surface_warnings(warnings) -> None:
+    """vpr 読み込みが返す構造化警告を標準エラーへ出す(同一 code・message は 1 行に集約。§4.4)。"""
+    seen = set()
+    for w in warnings:
+        key = (w.code, w.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"警告: {w.message} ({w.code})", file=sys.stderr)
+
+
 def main(argv=None) -> int:
-    """CLI エントリポイント。終了コードを返す(0/1/2/3)。"""
+    """CLI エントリポイント。終了コードを返す(0/1/2/3。vpr2vmd.md §4.3)。"""
+    # 人間向け標準エラーはロケール符号化で表せない文字でも UnicodeEncodeError で落とさない(規約 §10)。
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(errors="backslashreplace")
+        except Exception:
+            pass
     if argv is None:
         argv = sys.argv[1:]
 
@@ -345,45 +393,54 @@ def main(argv=None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:
-        # argparse はエラー時 code 2 で sys.exit(--help は 0)。例外を握って終了コードに変換。
+        # argparse はエラー時 code 2 で sys.exit(--help/--version は 0)。終了コードへ変換する。
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
 
+    # 引数解析後の本体。想定外例外はトレースバックを漏らさず理由 1 行 + 終了コード 1 へ畳む(規約 §5)。
+    try:
+        return _run(args)
+    except Exception as e:
+        return _fail(f"{type(e).__name__}: {e}", 1)
+
+
+def _run(args) -> int:
+    """引数解析済みの本体(検証 → 読み込み → 変換 → 書き込み)。失敗は _fail で理由 1 行 + 終了コードを返す。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
-    # 上書きガード(vpr2vmd.md §4.2): --overwrite なしでは既存出力を上書きしない。出力先が
-    # 入力と同一パスのときは、出力がまだ無くても(=入力を上書きする指定なので)同様に弾く。
-    # 同一パス判定を存在確認より先に置くことで、未存在でも入力上書き指定は引数エラーになる。
-    if not args.overwrite and (_same_path(output, args.input) or os.path.exists(output)):
-        return 2
+    # 上書きガード(vpr2vmd.md §4.2): 出力先が入力と同一パスになる指定だけを --overwrite 無しで拒否する。
+    # 別パスの既存出力ファイルは対象にしない。同一パス判定を存在確認より先に置く(未存在でも入力上書きは弾く)。
+    if not args.overwrite and _same_path(output, args.input):
+        return _fail(f"出力先が入力と同一パスです(--overwrite が必要): {output}", 2)
 
-    # 谷係数の不変条件(下限≤上限)は vpr 内容に依らない引数レベルの検証。引数エラー(コード2)を
-    # 入力不正(コード1)より先に評価する規約に従い、存在確認の前に弾く(dry-run でも弾く)。
+    # 谷係数の不変条件(下限≤上限)は vpr 内容に依らない引数レベルの検証。引数エラー(2)を入力不正(1)より
+    # 先に評価する規約に従い、存在確認の前に弾く(dry-run でも弾く)。
     if _valley_bounds_inverted(args):
-        return 2
+        return _fail("谷係数の下限が上限を超えています(--valley-deep > --valley-shallow)", 2)
 
     # 入力 vpr の存在確認(欠落は入力不正)。読み込み・形式検証は _build が行う。
     if not os.path.isfile(args.input):
-        return 1
+        return _fail(f"入力 vpr が見つかりません: {args.input}", 1)
 
     # --dry-run でも読み込み・処理は同じく行い(出力VMDだけ書かない)、診断・警告を出せるようにする。
     built = _build(args)
     if isinstance(built, int):
-        return built  # 入力不正(1)・--track の不正値(2)
+        return built  # 入力不正(1)・--track の不正値(2)は _build が _fail 済み
     document, diagnostics = built
 
-    # 対象トラックに有効な発音が無い(採用音符列が空)→ 標準エラーへ警告(エラーではなく正常終了。
-    # vpr2vmd.md §4.3・§4.4)。--dry-run の有無に依らず出す。
+    # 対象トラックに有効な発音が無い(採用音符列が空)→ 警告して正常終了(vpr2vmd.md §4.3・§4.4)。
     if diagnostics.adopted == 0:
         print("警告: 対象トラックに有効な発音がありません", file=sys.stderr)
 
-    if args.dry_run:
+    # --dry-run / --verbose は処理計画と診断を標準出力へ出す。--dry-run は書かず、--verbose は書く。
+    if args.dry_run or args.verbose:
         _print_plan(args, output)
         _print_diagnostics(diagnostics)
+    if args.dry_run:
         return 0
 
     try:
         write_file(document, output)
-    except OSError:
-        return 3  # 出力VMDの書き込み失敗
+    except OSError as e:
+        return _fail(f"出力の書き込みに失敗: {e}", 3)  # 出力VMDの書き込み失敗
     return 0
