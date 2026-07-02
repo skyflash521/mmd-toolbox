@@ -202,3 +202,48 @@ def test_help_and_version_not_converted_to_parse_error():
         p.parse_args(["--help"])
     with pytest.raises(SystemExit):
         p.parse_args(["--version"])
+
+
+@pytest.mark.xfail(reason="impl pending: cli_events argparse_error_field")
+def test_argparse_error_field_extraction_rules():
+    # argparse の標準文言から bad_argument の field をベストエフォート抽出する規則(cli_events.md §4)。
+    from cli_events import argparse_error_field
+
+    # 「argument <引数名>: 」→ コロン前の引数名。
+    assert argparse_error_field("argument --foo: invalid int value: 'x'") == "--foo"
+    # 複数のオプション文字列が「/」で連結されるときは最後(長形式)を採る。
+    assert argparse_error_field("argument -o/--output: expected one argument") == "--output"
+    # 先頭が「-」でない positional 名はそのまま返す。
+    assert argparse_error_field("argument input: invalid choice: 'z'") == "input"
+    # 「unrecognized arguments: 」→ 続くトークン列の最初の 1 語。
+    assert argparse_error_field("unrecognized arguments: --bar baz") == "--bar"
+    # 「the following arguments are required: 」→ 続く名前列の先頭(カンマ区切りの最初)。
+    assert argparse_error_field("the following arguments are required: input") == "input"
+    assert argparse_error_field(
+        "the following arguments are required: input, --other"
+    ) == "input"
+    # いずれにも当たらない文言 → None(詳細は message 側に残す)。
+    assert argparse_error_field("some other unexpected message") is None
+    assert argparse_error_field("") is None
+
+
+@pytest.mark.xfail(reason="impl pending: cli_events argparse_error_field")
+def test_argparse_error_field_from_real_parser():
+    # MachineArgumentParser の実エラー文言に対して end-to-end で抽出できること(cli_events.md §4)。
+    from cli_events import argparse_error_field
+
+    p = MachineArgumentParser(prog="x", allow_abbrev=False)
+    p.add_argument("input")
+    p.add_argument("--n", type=int)
+
+    with pytest.raises(ArgumentParseError) as exc:
+        p.parse_args([])  # positional 欠落
+    assert argparse_error_field(exc.value.message) == "input"
+
+    with pytest.raises(ArgumentParseError) as exc:
+        p.parse_args(["in", "--n", "notint"])  # 型エラー
+    assert argparse_error_field(exc.value.message) == "--n"
+
+    with pytest.raises(ArgumentParseError) as exc:
+        p.parse_args(["in", "--nope"])  # 未知オプション
+    assert argparse_error_field(exc.value.message) == "--nope"
