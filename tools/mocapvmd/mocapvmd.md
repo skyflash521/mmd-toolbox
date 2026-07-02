@@ -95,13 +95,17 @@ mocapvmd <入力ファイル名>.vmd [オプション]
 | `--reduce-error-bone-pos U` | プリセット値 | 疎化の位置許容誤差の基準値(MMD単位)。明示値はプリセットに優先。種別スケールを掛ける |
 | `--reduce-error-bone-rot DEG` | プリセット値 | 疎化の回転許容誤差の基準値(度)。明示値はプリセットに優先。種別スケールを掛ける |
 | `--curve-mode MODE` | `bezier` | 出力補間曲線 `bezier` / `linear` |
-| `--no-reduce` | off | 疎化せずクリーニング後の密キーを出力(診断・比較用) |
+| `--reduce` | on | 疎化を有効化(既定 on)。クリーニング後の信号を疎なキー+ベジェ補間で出力する。`--no-reduce` の対の明示形 |
+| `--no-reduce` | off | 疎化せずクリーニング後の密キー(線形補間)を出力(診断・比較用)。`--reduce` の対 |
 | `--list-bones` | off | ボーン一覧と分類結果を表示して終了 |
 | `--dry-run` | off | 出力せず処理計画と診断を表示 |
 | `--quiet` | off | 進捗表示を抑制する |
+| `-v, --verbose` | off | 通常実行でも 4.4 のレポートを標準出力へ表示する(dry-run と同内容。出力VMDは書く)。機械モードでは標準出力をイベント専用に保つため、この人間向け表示は出さない(イベント内容も変えない) |
+| `--machine` | off | 出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない(10) |
+| `--describe` | off | VMD を読まずにオプション定義とプリセット一覧の result イベントを出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作(10.3) |
 | `--version` | — | バージョンを表示して終了 |
 
-処理が重い(とくに疎化)ため、既定では処理の進捗を標準エラー出力へ1本の行でライブ表示する。段(クリーニング・足IK安定化・疎化)が進んでも改行せず同じ行を上書きし、終わった段の行は画面に残さない。疎化では完了したボーン数・総数・経過時間を、クリーニングや足IK安定化の段では少なくとも経過時間を、重い処理の待ち時間でも止まらずに更新する。処理を終えると進捗行を消し、出力を書き終えたら `完了 <出力パス>` を1行だけ残す。段ラベルは厳密な仕様用語でなく利用者向けの平易な文言にし、「平滑化」(クリーニング §4.2)・「足IK最適化」(足IK安定化 §4.3)・「キーフレーム圧縮」(疎化 §5.3)と表示する。表示するのは標準エラー出力が端末のときだけで、リダイレクト・パイプ時や `--quiet` 指定時は表示しない(完了行も含めて出さない)。進捗表示は副作用専用であり、出力VMD・終了コード・`--dry-run` の標準出力レポート・警告は変えない。`--quiet` が抑制するのは進捗表示だけで、機能出力や診断は抑制しない。
+処理が重い(とくに疎化)ため、既定では処理の進捗を標準エラー出力へ1本の行でライブ表示する。段(クリーニング・足IK安定化・疎化)が進んでも改行せず同じ行を上書きし、終わった段の行は画面に残さない。疎化では完了したボーン数・総数・経過時間を、クリーニングや足IK安定化の段では少なくとも経過時間を、重い処理の待ち時間でも止まらずに更新する。処理を終えると進捗行を消し、出力を書き終えたら `完了 <出力パス>` を1行だけ残す。段ラベルは厳密な仕様用語でなく利用者向けの平易な文言にし、「平滑化」(クリーニング §4.2)・「足IK最適化」(足IK安定化 §4.3)・「キーフレーム圧縮」(疎化 §5.3)と表示する。表示するのは標準エラー出力が端末のときだけで、リダイレクト・パイプ時や `--quiet` 指定時は表示しない(完了行も含めて出さない)。進捗表示は副作用専用であり、出力VMD・終了コード・`--dry-run` の標準出力レポート・警告は変えない。`--quiet` が抑制するのは進捗表示だけで、機能出力や診断は抑制しない。機械モード(`--machine`。10)ではライブ表示を無効化し、同じ進捗を progress イベントとして発行する(端末判定に依存しない)。`--quiet` が抑制するのはライブ表示だけで、機械モードの progress イベントには影響しない。
 
 名前付きプリセットは疎化の許容誤差 `--preset` 1つに集約する。`--preset` は疎化後の再生誤差上限(=出力キー数・処理時間)を決める。クリーニング(ノイズ軽減・足IK安定化)の効き量は名前付きプリセットを持たず、数値の倍率 `--clean-strength`(既定 1.0)で指定する。疎化の許容誤差を名前でなく数値で詰めたいときは `--reduce-error-bone-pos` / `--reduce-error-bone-rot` で基準値を上書きする。`--preset` と `--clean-strength` は別系統で、前者は疎化後の再生誤差上限、後者はクリーニングの効き量を決める。疎化の区間分割・継ぎ目処理・カット検出・誤差検証は `vmd.reduce` の共通機構をそのまま用いる。疎化プリセットの名称・値は mocapvmd 独自の運用ポリシーとして持ち、`sparsevmd` とは共有しない。mocapvmd はボーンのみを扱うため、許容誤差はボーンの位置・回転だけで指定し、カメラ用の許容誤差は持たない。
 
@@ -242,6 +246,8 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 - 足IKロックを適用した区間、見送った区間、見送り理由。
 - 疎化のキー削減率、適用した許容誤差、検出カット数、最大再生誤差。
 - `pose` モード(4.2)では、表現空間ノイズ除去の診断を `pose_denoise` 要約として表示する。PMX使用有無(または既定モデルプロファイル使用)・有効マーカー数・必須標準ボーン検証・平滑化前後のマーカー変位(最大/平均)・姿勢フィットの誤差改善(補正前後)・フォールバック数を含む。
+
+`-v, --verbose` は通常実行(出力VMDを書く)でも上記と同じレポートを標準出力へ表示する。診断素データの収集は `--dry-run` / `--verbose` のときだけ行い、通常実行のオーバーヘッドを増やさない。機械モード(`--machine`)では標準出力をイベント専用に保つため、この人間向けレポート表示は出さない(入力検査は `--machine --dry-run` の inspect result で得る。10.2)。
 
 ### 4.5 チューニング支援
 
@@ -399,3 +405,110 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 - 接地判定に足IKだけでなく足首・つま先ボーンを併用するか。
 - プリセット値の定量的な合否基準(許容する最大変位・残ノイズ量などの数値しきい値)をどう定義するか。定性的な調整観点・手順は `TUNING.md` で定義済み。
 - 種別別パラメータをCLIオプションにするか、外部チューニングファイル(`--tuning-file`)にするか(4.5。初期実装では必須としない)。
+
+---
+
+## 9. 終了コード
+
+| コード | 意味 |
+|---|---|
+| 0 | 正常終了 |
+| 1 | 入力不正(VMD でない・ボーン値が非有限等・PMX 形式不正・モデルプロファイル不正) |
+| 2 | 引数エラー(不正な値・入力/PMX パス不在・上書き未許可・未知オプション等) |
+| 3 | 出力書き込み失敗 |
+| 130 | 協調的な中断(Ctrl-C 等。全ツール共通予約) |
+
+0〜3 は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)(以下「規約」)§5 の基底と同じ意味。130 は規約 §5 の全ツール共通予約(中断。10.5)。想定外の内部エラーは最も近い基底へ寄せて 1 で終え、機械モードでは error イベントの `code` = `internal_error` で識別できる(10.4)。
+
+---
+
+## 10. 機械モード(機械可読インターフェース)
+
+機械モードは、他のソフトウェアが mocapvmd を子プロセスとして呼ぶための構造化出力を提供する。共通契約(イベント種別の語彙・終端規則・チャネル固定・stdout の UTF-8/LF 固定・終了コードの基底)は規約 §3〜§6・§8・§10 と、共有基盤 [cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は mocapvmd 固有のイベントペイロードと `code` 値だけを定める。イベント送出は cli_events の `EventEmitter` を用いる。
+
+### 10.1 チャネルと終端
+
+- **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 §3。`--describe` は人間向け既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定してエミッタと `MachineArgumentParser`(10.4)を使い、使用法エラー・想定外エラーも error イベントで終端する(例: `--describe` と未知オプションの併用も `bad_argument` イベント+終了コード 2)。
+- 構造化出力モードの標準出力は 10.2 のイベントのみ。エミッタ(`cli_events.EventEmitter`)はバイナリ標準出力(`sys.stdout.buffer`)へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない(規約 §10)。
+- 人間向け標準エラーは `sys.stderr.reconfigure(errors="backslashreplace")` で符号化失敗時もプロセスを落とさない(規約 §10。機械モードに限らず常に適用する)。
+- ストリームは result または error のちょうど 1 つで終端する。終端は `main()` の単一経路で送出し、終端後の送出はしない(cli_events が `StreamTerminatedError` で拒否する)。
+- `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベントストリームには載せない(規約 §3 のメタ操作の例外)。
+- イベント契約の進化は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。受信側は未知要素を無視できる前提)。
+
+### 10.2 イベントペイロード
+
+- **progress**: `{type:"progress", stage, done, total, note, elapsed}`。`stage` は安定 id `"denoise"`(平滑化)/ `"foot_ik"`(足IK最適化)/ `"reduce"`(キーフレーム圧縮)。各段は開始時に `done=0, total=null, note:"", elapsed:0.0` を 1 本出す。`reduce` 段はさらに疎化対象ボーンの完了数を `done`/`total` で出す(`total`=多キートラック数。値列はワーカ数・完了順に依らない)。`denoise` / `foot_ik` 段は開始 1 本のみ。`elapsed` は段開始からの経過秒(float)。無効化した段(`--no-denoise` 等)はイベント自体を出さない。
+- **warning**: `{type:"warning", code, message, section}`。`section` は対象セクション名の配列(該当が無ければ `null`)。`vmd.io.read` の警告は `VmdWarning.code`(ハイフン区切り。`decode-error`・`sections-missing` など)をそのまま透過し、`section` は単一要素配列にする。人間向け経路と同じ基準(code・section・message の同一組は 1 件)で重複をまとめる。
+- **result**: 正常終了の終端イベント。`mode` で形が決まる:
+  - `mode:"process"`(通常実行): `{type:"result", mode:"process", output, input_keys, output_keys}`。`output` は書き出しパス(文字列)、`input_keys` / `output_keys` は入力/出力のボーンキー総数。
+  - `mode:"inspect"`(入力検査 `--machine --dry-run`): VMD を書かず `{type:"result", mode:"inspect", output:null, input_kind:"bone", keys, frame_range, duration_sec, sections, preset, clean_strength, denoise, denoise_mode, foot_ik_stabilize, foot_slide_suppression, curve_mode, reduce, bones, reduction, pose_denoise}` を出す。`keys` は入力ボーンキー総数、`frame_range` は全ボーンキーの `[最小フレーム, 最大フレーム]`(キー 0 件なら `null`)、`duration_sec` は最大フレーム÷30(キー 0 件なら `null`)、`sections` は入力に存在するセクション名の配列。`preset`〜`reduce` は解決済みの実行計画(引数値)。`bones` は初出順の `{name, category, keys, frame_range:[first,last]}` の配列。`reduction` は疎化診断(`--no-reduce` 時は `null`)で、トラック名→ `{input_keys, output_keys, tol_pos, tol_rot, cuts, errors:{pos_x,pos_y,pos_z,rot_deg}}` のオブジェクト。`pose_denoise` は `--denoise-mode pose` かつノイズ軽減有効のときの診断 `{pmx, frames, markers:{available, required_bones_ok}, marker_displacement:{max, mean}, fit:{mean_error_before, mean_error_after, fallback_frames, max_bone_delta_deg, max_center_delta}}`(それ以外は `null`)。クリーニング診断の詳細(スパイク・保護・接地区間)は人間向け dry-run テキストに残し、inspect には載せない(必要になれば規約 §4.1 の後方互換追加で拡張する)。
+  - `mode:"list_bones"`(`--machine --list-bones`): `{type:"result", mode:"list_bones", bones}`。`bones` は初出順の `{name, category}` の配列。VMD は書かない。非機械の `--list-bones` は人間向けテキストを出す。`--list-bones` と `--dry-run` の併用は `--list-bones` を優先する。
+  - `mode:"describe"`(自己記述 `--describe`): `{type:"result", mode:"describe", options, presets}`(10.3)。VMD を読まないので他 mode のキーは載せない。
+- **error**: `{type:"error", code, exit_code, field, path, message}`。`field` / `path` は対象が無ければ `null`。失敗の終端イベント(10.4)。
+
+### 10.3 `--describe` の中身
+
+`options` は処理を駆動する引数の配列(メタ/モード操作 `--describe` / `--version` / `--help` / `--machine` は含めない)。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、該当しない値は `null`)。`type` は固定語彙 `"float"` / `"int"` / `"str"` / `"flag"` / `"enum"`。数値の `constraint` は `{min, max, exclusive_min}` の 3 キー常設(上限が無ければ `max:null`)、`enum` は `{choices:[...]}`、`flag` / `str` は `null`。`help` は 3.2 の説明文。真偽フラグの対(`--denoise` / `--no-denoise`・`--foot-ik-stabilize` / `--no-foot-ik-stabilize`・`--reduce` / `--no-reduce`)は**肯定形の長形式 1 要素だけ**を載せる(型 `flag`。無効化の起動形は名前に `--no-` を前置した否定形。規約 §6 の `--x/--no-x` 様式。呼び出し側は `default` が `true` のフラグを無効化するとき否定形を発行する)。否定形を別要素として重複列挙しない。全 18 要素:
+
+| name | type | constraint | default |
+|---|---|---|---|
+| `input` | str | null | null |
+| `--output` | str | null | null(既定は入力名由来 `<入力名>_mocap.vmd` の算出値。規則は help に記す) |
+| `--overwrite` | flag | null | false |
+| `--preset` | enum | `{choices:["slower","slow","medium","fast","faster"]}` | `"medium"` |
+| `--clean-strength` | float | `{min:0, max:null, exclusive_min:false}` | 1.0 |
+| `--denoise` | flag | null | true |
+| `--denoise-mode` | enum | `{choices:["bone","pose"]}` | `"bone"` |
+| `--pmx` | str | null | null |
+| `--foot-ik-stabilize` | flag | null | true |
+| `--foot-slide-suppression` | float | `{min:0, max:1, exclusive_min:false}` | 1.0 |
+| `--reduce-error-bone-pos` | float | `{min:0, max:null, exclusive_min:false}` | null(プリセット値) |
+| `--reduce-error-bone-rot` | float | `{min:0, max:null, exclusive_min:false}` | null(プリセット値) |
+| `--curve-mode` | enum | `{choices:["bezier","linear"]}` | `"bezier"` |
+| `--reduce` | flag | null | true |
+| `--list-bones` | flag | null | false |
+| `--dry-run` | flag | null | false |
+| `--quiet` | flag | null | false |
+| `--verbose` | flag | null | false |
+
+`presets` は各要素 `{name, values}` の配列。`name` は疎化プリセット名(`slower`〜`faster`)、`values` は `{reduce_error_bone_pos, reduce_error_bone_rot}`(5.3 の基準位置許容・基準回転許容)。種別スケール・クリーニング基準・接地ロック係数は CLI 非公開の内蔵パラメータなので載せない。
+
+### 10.4 構造化エラー
+
+失敗は終了コードに加え、構造化出力モード(`--machine`・`--describe`。10.1)では error イベントで「どのフィールド/パスが・なぜ」を返す。それ以外では理由を標準エラーへ最低 1 行出す(書式 `error: <message>`。トレースバックは出さない)。
+
+| 事象 | `code` | `field` | `exit_code` |
+|---|---|---|---|
+| argparse 検出(未知オプション・型エラー・choices 外・positional 欠落)、および解析後の値検証(`--clean-strength` の非有限/負・`--foot-slide-suppression` の範囲外/非有限・`--reduce-error-bone-pos`/`--reduce-error-bone-rot` の非有限/負) | `bad_argument` | argparse が示す引数名、値検証は該当オプション名 | 2 |
+| 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 2 |
+| `--pmx` パスが不在・通常ファイルでない(pose 方式時) | `pmx_not_file` | `"--pmx"` | 2 |
+| 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
+| 入力が VMD でない・破損 | `not_vmd` | `"input"` | 1 |
+| ボーン値の非有限・ゼロノルム quaternion | `invalid_bone_values` | `"input"` | 1 |
+| PMX 形式不正(`PmxFormatError`) | `not_pmx` | `"--pmx"` | 1 |
+| モデルプロファイル不正(必須標準ボーン欠落等。`MocapModelProfileError`) | `model_profile_invalid` | `--pmx` 指定時 `"--pmx"`、内蔵プロファイル時 `null` | 1 |
+| 出力書き込み失敗 | `write_failed` | `"--output"`(+ `path`) | 3 |
+| 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
+| 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
+
+- `not_vmd` は読み込み例外の種別・文言を `message` に載せる。
+- 構造化出力モードの argparse エラーは `cli_events.MachineArgumentParser` で `ArgumentParseError` に振り替え、`argparse_error_event` で `bad_argument` イベントにする。`field` の抽出は共有ヘルパ `cli_events.argparse_error_field(message)` を使う(抽出規則は [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正)。
+- `internal_error` は引数解析後の本体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーでなく中断(`cancelled`/130)として手前で分岐する(10.5)。
+- `--list-bones` は書き込み・疎化をしない診断モードとして、処理固有の検証(上書きガード・疎化許容値・ボーン値検証)に阻まれない(`--machine --list-bones` でも同じ)。機械モードではボーン値の非有限等をこの短絡位置では弾かず、読み込み失敗のみ `not_vmd` にする。
+
+### 10.5 中断と出力の原子性
+
+- VMD 出力は `vmd.io.write_file` の一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ起きるため、途中終了で中途半端な出力ファイルは残らない。
+- `main()` は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130 で終える。POSIX シグナル API には依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む。
+- 進捗のライブ表示(ハートビートスレッド)は try/finally の `reporter.close()` で中断時も止まり、行を消す。機械モードではライブ表示自体を無効化する。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §8 の唯一の例外)。このとき並列ワーカ子プロセスも残りうるため、強制終了する呼び出し側はプロセスツリーごと終了する。出力の原子性により、その場合も中途半端な出力ファイルは残らない(ワーカはファイルを書かない)。
+
+### 10.6 並列疎化と中断・イベントストリームの整合
+
+疎化はプロセス並列(spawn)で走る(7)。中断・機械モードと衝突しないよう次を守る。
+
+- **イベントの単一送出者**: イベントを送出するのは親プロセスだけ。progress イベントは親の疎化完了ループ(および逐次経路)から出す。ワーカ関数はキー列と診断を返すだけで、標準出力・標準エラーへ書かず、ファイルも書かない。
+- **ワーカは SIGINT を無視する**: プール生成時に initializer で `signal.signal(signal.SIGINT, signal.SIG_IGN)` を設定する(module-level 関数。spawn で pickle 可能にする)。Windows の Ctrl-C(CTRL_C_EVENT)は同一コンソールの全プロセスへ配送されるため、無視しないとワーカが任意の位置で `KeyboardInterrupt` 死し、トレースバックが標準エラーへ漏れるうえ、失われたタスク結果を親が待ち続ける余地が生まれる。ワーカに SIGINT を無視させ、中断の畳み込みを親プロセスに一元化する。
+- **親の中断でプールを畳む**: 並列ループは `with` ブロック内にあり、`KeyboardInterrupt` で抜けるとコンテキストマネージャがプールを terminate してワーカを止める。その後 `main()` の捕捉が `cancelled` イベントを送出する(ワーカ停止後に終端するため、終端後の出力混入は起きない)。
+- **決定論**: 各ボーンの疎化は決定論的で実行順非依存、再結合は first-seen 順で行う。progress の `(done, total)` 値列と result・診断はワーカ数・完了順に依らず逐次実行と一致する(`elapsed` のみ実時間依存)。
+- 生成スクリプト等から `main()` を直接呼ぶ利用でも、spawn の子プロセスはワーカ関数だけを実行し `main()` を再実行しない(ワーカ関数を module-level に置く構造による)。
