@@ -259,7 +259,7 @@ song2vmd INPUT [options]
 
 [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の音素セグメント列(母音/子音/gap＋IPAラベル)と RMS から、
 `song2vmd` 入口で口形イベント列(母音・両唇閉鎖・無音)を確定する。母音認識そのもの・IPA→5母音写像規則・
-認識器の採用と実現可能性ゲートは vocal_analysis.md(§5・§7・§9)を正本とする。確定処理は次のとおり(確定した
+認識器の採用と S-1 認識ゲートは vocal_analysis.md(§5・§7・§9)を正本とする。確定処理は次のとおり(確定した
 口形イベント列からの口パク生成は lipsync。6.5):
 
 - **あいうえお写像の適用**: vocal_analysis の IPA→5母音写像規則(vocal_analysis.md §7)を母音セグメントへ適用し、
@@ -376,7 +376,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
 ## 7. 外部ツール連携(vocal_analysis への委譲)
 
 音声前段(S0–S3)の外部ツール連携機構——内部呼び出し方針(利用者にコマンドを叩かせない)、アダプタ
-interface(Separator / Recognizer)、正規化中間形式、段階方針、初期採用ツールと将来の代替、S2 実現可能性
+interface(Separator / Recognizer)、正規化中間形式、アダプタの登録と選択、採用ツールと代替候補、S-1 認識
 ゲート——は共有モジュール
 [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md)(§2・§8・§9)を正本とし、候補比較は
 [vocal_analysis/external-tools.md](../../libs/vocal_analysis/external-tools.md) を補助資料とする。本書では重複定義しない。
