@@ -421,3 +421,51 @@ def test_progress_contract_parallel(monkeypatch):
     for i in range(multi):
         expected += [("yield", i), ("progress", i + 1, multi)]
     assert events == expected
+
+
+# --- 並列ワーカの SIGINT 無視 initializer(mocapvmd.md §10.6) ---
+#
+# Windows の Ctrl-C(CTRL_C_EVENT)は同一コンソールの全プロセスへ配送されるため、ワーカが SIGINT で
+# 任意位置で死ぬとトレースバックが漏れ、失われたタスクを親が待ち続けうる。ワーカに SIGINT を無視させ、
+# 中断の畳み込みを親プロセスへ一元化する。中断→cancelled/130 の CLI 側の畳み込みは test_cli_machine が固定する。
+
+
+@pytest.mark.xfail(reason="impl pending: 並列ワーカ SIGINT 無視 initializer")
+def test_reduce_worker_init_ignores_sigint():
+    # ワーカ initializer は SIGINT を SIG_IGN に設定する。親プロセスで直接呼び、getsignal で検証して復元する。
+    import signal
+
+    prev = signal.getsignal(signal.SIGINT)
+    try:
+        mreduce._reduce_worker_init()
+        assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGINT, prev)
+
+
+@pytest.mark.xfail(reason="impl pending: 並列ワーカ SIGINT 無視 initializer")
+def test_make_pool_wires_sigint_initializer(monkeypatch):
+    # _make_pool は initializer=_reduce_worker_init でプールを生成する(ワーカへ SIGINT 無視を配線)。
+    captured = {}
+
+    class _Ctx:
+        def Pool(self, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    monkeypatch.setattr(mreduce, "get_context", lambda method: _Ctx())
+    mreduce._make_pool(3)
+    assert captured["processes"] == 3
+    assert captured["initializer"] is mreduce._reduce_worker_init
+
+
+def test_parallel_progress_values_match_serial():
+    # progress の (done, total) 値列が並列(workers=2)と逐次(workers=1)で一致する(完了順=並列では
+    # 非決定だが done は 0→total で値列は不変。§10.6 の決定論)。
+    keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
+    par, ser = [], []
+    mreduce.reduce_bones(keys, "medium", workers=2, progress=lambda d, t: par.append((d, t)))
+    mreduce.reduce_bones(keys, "medium", workers=1, progress=lambda d, t: ser.append((d, t)))
+    assert par == ser
+    total = mreduce._MIN_PARALLEL_TRACKS + 1
+    assert ser[0] == (0, total) and ser[-1] == (total, total)  # (0,total) → (total,total)
