@@ -75,8 +75,8 @@
 - **音符分割・歌詞/音素対応付け(`song2vpr` 固有)**: F0 の安定区間と音素セグメントの境界から音符を切り、各音符に
   音高・開始時刻・長さ・歌詞/音素・強弱(ベロシティ)を割り当てる(規則は7章)。歌詞/音素の対応付けは音素
   セグメントを基にする(意味のある歌詞書き起こしは行わない)。`--lyrics` なし時は表示歌詞に**母音仮名**
-  (あ/い/う/え/お)を入れ、音素はセグメント由来を入れる。`--lyrics` 指定時は歌詞テキストをモーラ単位で音符へ
-  順次対応付ける。強弱は相対正規化RMSをベロシティ(0–127)へ写像する(7.2)。
+  (あ/い/う/え/お)、撥音「ん」(音節末の鼻音)の音符には「ん」を入れ、音素はセグメント由来を入れる。`--lyrics`
+  指定時は歌詞テキストをモーラ単位で音符へ順次対応付ける。強弱は相対正規化RMSをベロシティ(0–127)へ写像する(7.2)。
 - **vpr 書き出し(vpr)**: 音符列・テンポを `vpr` のデータモデルへ載せ、vpr を書き出す(vpr.md §2・§4)。
   `vpr` の書き出しは `song2vpr` 着手時に拡張する(vpr.md §4)。
 
@@ -207,8 +207,9 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
   許容する。IPA→VOCALOID 日本語音素アルファベットの具体対応表は `vpr` の音素表現の確定に従う
   (vpr.md §4。「`None`・gap を除く音素セグメントを時間順に採る」という規則自体は記号集合に依らない)。
 - **`lyric`(`--lyrics` なし)**: 音符区間で最も長い vowel セグメントの IPA を IPA→5母音写像
-  (vocal_analysis.md §7)で5母音へ落とし、対応する母音仮名(あ/い/う/え/お)を入れる。母音が得られない音符
-  (vowel セグメント無し)は「あ」を入れ、診断に記録する。
+  (vocal_analysis.md §7)で5母音へ落とし、対応する母音仮名(あ/い/う/え/お)を入れる。vowel セグメントが無く
+  鼻音子音セグメント(IPA の m/n/ŋ/ɲ/ɴ 等)が主体の音符は撥音「ん」(音節末=後続母音を持たない有声の鼻音)として
+  歌詞「ん」を入れる。母音も鼻音も得られない音符は「あ」を入れ、診断に記録する。
 - **`lyric`(`--lyrics` あり)**: 歌詞テキストを**モーラ単位**に分割し、先頭から1音符=1モーラで対応付ける
   (`phonemes` はセグメント由来を優先)。入力は**かな(ひらがな/カタカナ)表記**を前提とし、カタカナは
   ひらがなへ正規化する。空白・改行・句読点・記号はモーラ区切りとして読み飛ばす。漢字等の非かな文字は警告して
@@ -289,11 +290,12 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
   (追加は後方互換。規約 §4.1)。
 - **result**: 正常終了の終端イベント。`mode` で形が決まる:
   - `mode:"run"`(通常実行): `{type:"result", mode:"run", output, notes, tempo_bpm, resolution, duration_sec,
-    separated, recognizer, vowel_undetermined_notes, fallback_lyric_notes, dropped_morae,
+    separated, recognizer, vowel_undetermined_notes, moraic_nasal_notes, fallback_lyric_notes, dropped_morae,
     isolated_short_notes}`。`output` は書き出しパス(文字列)、`notes` は音符数、`tempo_bpm` は採用テンポ、
     `resolution` は tick/四分音符、`duration_sec` は入力音声の尺(秒)、`separated` は分離を実施したか(bool)、
-    `recognizer` は採用した認識バックエンドの id、`vowel_undetermined_notes` は母音未確定で「あ」を入れた
-    音符数(7.2)、`fallback_lyric_notes` は母音仮名フォールバックにした余剰音符数(7.2)、`dropped_morae` は
+    `recognizer` は採用した認識バックエンドの id、`vowel_undetermined_notes` は母音も撥音も未確定で「あ」を入れた
+    音符数(7.2)、`moraic_nasal_notes` は撥音「ん」として歌詞「ん」を入れた音符数(7.2)、
+    `fallback_lyric_notes` は母音仮名フォールバックにした余剰音符数(7.2)、`dropped_morae` は
     破棄した余剰モーラ数(7.2)、`isolated_short_notes` は吸収先が無く単独で残した孤立短音符数(7.1)。
   - `mode:"inspect"`(入力検査 `--machine --dry-run`): `mode:"run"` と同じ診断統計キーに加えて
     `input_kind, sample_rate, channels` を持ち、vpr を書かないので `output` は `null`。`input_kind` は常に
