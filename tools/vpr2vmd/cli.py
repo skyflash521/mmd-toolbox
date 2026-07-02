@@ -6,7 +6,7 @@ vpr を入力に、口形イベント列と開き量を作って lipsync に渡�
 _build() が束ねる。--dry-run は出力VMDを書かず、処理計画と診断を表示する。
 
 終了コード(vpr2vmd.md §4.3): 0 正常 / 1 入力不正(入力 vpr の欠落・非vpr 等) /
-2 引数エラー(未知オプション・範囲不正・上書きガード) / 3 出力書き込み失敗。
+2 引数エラー(未知オプション・範囲不正・上書きガード) / 3 出力書き込み失敗 / 130 協調的な中断(Ctrl-C 等)。
 
 --machine / --describe は構造化出力モード(vpr2vmd.md §7)。標準出力を JSON Lines のイベント
 ストリーム専用にし、失敗も error イベントで理由を返す。既定(非機械)の表示・終了コードは変えない。
@@ -557,7 +557,7 @@ def _surface_warnings(warnings, emitter) -> None:
 
 
 def main(argv=None) -> int:
-    """CLI エントリポイント。終了コードを返す(0/1/2/3。vpr2vmd.md §4.3・§7)。"""
+    """CLI エントリポイント。終了コードを返す(0/1/2/3/130。vpr2vmd.md §4.3・§7)。"""
     # 人間向け標準エラーはロケール符号化で表せない文字でも UnicodeEncodeError で落とさない(規約 §10)。
     if hasattr(sys.stderr, "reconfigure"):
         try:
@@ -606,10 +606,13 @@ def main(argv=None) -> int:
     if args.input is None:
         return fail("bad_argument", "入力 vpr(input)が必要です", 2, field="input")
 
-    # 引数解析後の本体。想定外例外はトレースバックを漏らさず internal_error(理由 1 行 + 終了コード 1)へ
-    # 畳む(§7.4)。
+    # 引数解析後の本体。KeyboardInterrupt(Ctrl-C 等)は協調的な中断(cancelled/130)として畳み、それ以外の
+    # 想定外例外はトレースバックを漏らさず internal_error(理由 1 行 + 終了コード 1)へ畳む(§7.4・§7.5)。
+    # 書き込みは全計算後に 1 回だけ起きるため、中断でも中途半端な出力ファイルは残らない(§7.5)。
     try:
         return _run(args, emitter, fail)
+    except KeyboardInterrupt:
+        return fail("cancelled", "中断された(Ctrl-C 等)", 130)
     except Exception as e:
         return fail("internal_error", f"{type(e).__name__}: {e}", 1)
 
