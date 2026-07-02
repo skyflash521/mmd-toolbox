@@ -12,6 +12,7 @@
 """
 
 import os
+import signal
 from multiprocessing import get_context
 
 from vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
@@ -72,11 +73,23 @@ def _reduce_one(item):
     return name, reduced, payload
 
 
+def _reduce_worker_init():
+    """プロセスプールのワーカ initializer(mocapvmd.md §10.6)。ワーカに SIGINT を無視させ、中断の
+    畳み込みを親プロセスへ一元化する。
+
+    Windows の Ctrl-C(CTRL_C_EVENT)は同一コンソールの全プロセスへ配送されるため、無視しないとワーカが
+    任意の位置で KeyboardInterrupt 死し、トレースバックが標準エラーへ漏れるうえ、失われたタスク結果を
+    親が待ち続ける余地が生まれる。spawn で pickle 可能にするため module-level 関数にする。
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
 def _make_pool(workers):
     """ワーカ数 workers のプロセスプールを生成する。OS 既定に依らず spawn を明示し(Windows と同条件で
-    pickle 可能性を担保)、プール生成を1か所に閉じ込める。
+    pickle 可能性を担保)、ワーカに SIGINT を無視させる initializer(§10.6)を配線し、プール生成を1か所に
+    閉じ込める。
     """
-    return get_context("spawn").Pool(processes=workers)
+    return get_context("spawn").Pool(processes=workers, initializer=_reduce_worker_init)
 
 
 def _resolve_workers(workers):

@@ -430,7 +430,6 @@ def test_progress_contract_parallel(monkeypatch):
 # 中断の畳み込みを親プロセスへ一元化する。中断→cancelled/130 の CLI 側の畳み込みは test_cli_machine が固定する。
 
 
-@pytest.mark.xfail(reason="impl pending: 並列ワーカ SIGINT 無視 initializer")
 def test_reduce_worker_init_ignores_sigint():
     # ワーカ initializer は SIGINT を SIG_IGN に設定する。親プロセスで直接呼び、getsignal で検証して復元する。
     import signal
@@ -443,7 +442,6 @@ def test_reduce_worker_init_ignores_sigint():
         signal.signal(signal.SIGINT, prev)
 
 
-@pytest.mark.xfail(reason="impl pending: 並列ワーカ SIGINT 無視 initializer")
 def test_make_pool_wires_sigint_initializer(monkeypatch):
     # _make_pool は initializer=_reduce_worker_init でプールを生成する(ワーカへ SIGINT 無視を配線)。
     captured = {}
