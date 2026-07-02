@@ -165,3 +165,13 @@ def resolve_reduction_tolerances(preset, category, override_pos=None, override_r
 
     scale_pos, scale_rot = _REDUCTION_SCALE[category]
     return {"bone_pos": base_pos * scale_pos, "bone_rot": base_rot * scale_rot}
+
+
+def reduction_base(name):
+    """疎化プリセット名の基準位置許容・基準回転許容 (pos, rot) を返す(§5.3。--describe の自己記述用)。
+
+    種別スケールを掛ける前のプリセット基準値。未知の疎化プリセット名は ValueError。
+    """
+    if name not in _REDUCTION_BASE:
+        raise ValueError(f"未知の疎化プリセット: {name!r}(有効: {', '.join(PRESET_NAMES)})")
+    return _REDUCTION_BASE[name]

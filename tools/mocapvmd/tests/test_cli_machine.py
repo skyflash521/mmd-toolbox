@@ -506,7 +506,6 @@ def describe_result(capsysbinary):
     return events[0]
 
 
-@pytest.mark.xfail(reason="impl pending: --describe 自己記述")
 def test_describe_emits_result_without_input(capsysbinary):
     # --describe は入力を要求せず、VMD を読まずに options/presets の result を出して exit 0。
     rc = cli.main(["--describe"])
@@ -519,7 +518,6 @@ def test_describe_emits_result_without_input(capsysbinary):
         assert k not in r
 
 
-@pytest.mark.xfail(reason="impl pending: --describe 自己記述")
 def test_describe_works_without_machine_flag(capsysbinary):
     # --describe は --machine を要さない独立メタ操作(--machine 無しでも構造化 result を出す)。
     rc = cli.main(["--describe"])
@@ -527,7 +525,6 @@ def test_describe_works_without_machine_flag(capsysbinary):
     assert describe_result(capsysbinary)["mode"] == "describe"
 
 
-@pytest.mark.xfail(reason="impl pending: --describe 自己記述")
 def test_describe_options_shape_and_values(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0
@@ -574,7 +571,6 @@ def test_describe_options_shape_and_values(capsysbinary):
         assert o["default"] == default, name
 
 
-@pytest.mark.xfail(reason="impl pending: --describe 自己記述")
 def test_describe_presets_shape_and_values(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0
@@ -593,7 +589,6 @@ def test_describe_presets_shape_and_values(capsysbinary):
     assert {p["name"]: p["values"] for p in r["presets"]} == expected
 
 
-@pytest.mark.xfail(reason="impl pending: --describe 自己記述")
 def test_describe_type_table_covers_non_meta_args():
     # _D_TYPE はメタ/モード操作を除く全 parser 引数を覆う。parser に引数を足して _D_TYPE への追加を
     # 忘れると describe から黙って抜けるため、その載せ忘れをここで検出する。
@@ -603,7 +598,6 @@ def test_describe_type_table_covers_non_meta_args():
     assert non_meta <= set(cli._D_TYPE)
 
 
-@pytest.mark.xfail(reason="impl pending: --describe 自己記述")
 def test_describe_mode_arg_error_is_error_event(capsysbinary):
     # --describe(--machine 無し)も構造化出力モードなので、引数エラーは標準エラーでなく error
     # イベントでストリームを終端する(§10.1)。

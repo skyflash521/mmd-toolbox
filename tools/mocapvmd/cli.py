@@ -8,6 +8,7 @@
 
 --machine 指定時は標準出力を JSON Lines のイベントストリーム(progress / warning / result / error)に
 切り替える(mocapvmd.md §10)。既定(非機械)の人間向け表示・出力ファイル・終了コードは変えない。
+--describe は VMD を読まずにオプション定義とプリセット一覧の result を出す独立メタ操作(§10.3)。
 
 終了コード(§9): 0 正常 / 1 入力不正(VMDでない・値が非有限・PMX形式不正・モデルプロファイル不正)/
 2 引数エラー / 3 出力書き込み失敗 / 130 協調的な中断(Ctrl-C 等)。
@@ -48,7 +49,10 @@ def _build_parser(machine=False):
     p.add_argument("--machine", action="store_true",
                    help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
                         "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
-    p.add_argument("input", help="入力VMDファイル")
+    p.add_argument("--describe", action="store_true",
+                   help="オプション定義とプリセット一覧を JSON Lines の result で出力して終了する"
+                        "(VMD を読まない・入力不要の自己記述)")
+    p.add_argument("input", nargs="?", help="入力VMDファイル")
     p.add_argument("-o", "--output", help="出力先(既定: <入力名>_mocap.vmd)")
     p.add_argument("--overwrite", action="store_true",
                    help="入力と同一パスへの出力を許可する(未指定で同一パスならエラー)")
@@ -89,6 +93,78 @@ def _build_parser(machine=False):
     p.add_argument("-v", "--verbose", dest="verbose", action="store_true",
                    help="通常実行でも 4.4 のレポートを標準出力へ表示する(出力VMDは書く)")
     return p
+
+
+# --describe(§10.3)の型/制約表。dest → (type, constraint)。help/default は parser の各 action から引く。
+# メタ/モード操作(describe/version/help/machine)は _D_TYPE に無いので describe の options から除外される。
+# type 関数と1対1で対応するので制約の形は明示表で持つ。順序は parser の add_argument 順に従う。
+_D_NONNEG = {"min": 0, "max": None, "exclusive_min": False}
+_D_01 = {"min": 0, "max": 1, "exclusive_min": False}
+_D_TYPE = {
+    "input": ("str", None),
+    "output": ("str", None),
+    "overwrite": ("flag", None),
+    "preset": ("enum", {"choices": list(presets.PRESET_NAMES)}),
+    "clean_strength": ("float", _D_NONNEG),
+    "denoise": ("flag", None),
+    "denoise_mode": ("enum", {"choices": ["bone", "pose"]}),
+    "pmx": ("str", None),
+    "foot_ik_stabilize": ("flag", None),
+    "foot_slide_suppression": ("float", _D_01),
+    "reduce_error_bone_pos": ("float", _D_NONNEG),
+    "reduce_error_bone_rot": ("float", _D_NONNEG),
+    "curve_mode": ("enum", {"choices": ["bezier", "linear"]}),
+    "reduce": ("flag", None),
+    "list_bones": ("flag", None),
+    "dry_run": ("flag", None),
+    "quiet": ("flag", None),
+    "verbose": ("flag", None),
+}
+
+
+def _describe_options(parser):
+    """--describe の options を parser 定義から機械導出する(§10.3)。順序は add_argument 順。
+
+    メタ/モード操作(--describe/--version/--help/--machine)は _D_TYPE に無いので除外される。真偽フラグの
+    否定形(--no-* だけの action)は肯定形の長形式で既に載るのでスキップする(重複列挙しない)。
+    type/constraint は _D_TYPE、help/default は各 action から引く。
+    """
+    options = []
+    for action in parser._actions:
+        dest = action.dest
+        if dest not in _D_TYPE:
+            continue
+        type_, constraint = _D_TYPE[dest]
+        if dest == "input":
+            name = "input"
+        else:
+            # 肯定形の長形式を採る。--no-* だけの否定形 action はスキップ(肯定形で既に載る)。
+            pos = [s for s in action.option_strings if s.startswith("--") and not s.startswith("--no-")]
+            if not pos:
+                continue
+            name = pos[0]
+        options.append({
+            "name": name,
+            "type": type_,
+            "constraint": constraint,
+            "default": action.default,
+            "help": action.help,
+        })
+    return options
+
+
+def _describe_presets():
+    """--describe の presets を presets モジュールから導出する(§10.3)。
+
+    各要素は {name, values}。values は基準位置許容・基準回転許容のみ(種別スケール・クリーニング基準・
+    接地ロック係数は CLI 非公開の内蔵パラメータなので載せない)。
+    """
+    out = []
+    for name in presets.PRESET_NAMES:
+        pos, rot = presets.reduction_base(name)
+        out.append({"name": name,
+                    "values": {"reduce_error_bone_pos": pos, "reduce_error_bone_rot": rot}})
+    return out
 
 
 def _default_output(input_path):
@@ -314,13 +390,16 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
 
-    # 機械モード判定(§10)。解析前に argv で先取りする: 引数エラー時も出力チャネルを決めるため。
-    # emitter はバイナリ stdout へ UTF-8 で書く(ロケール符号化非依存)。非機械では None(従来経路)。
+    # 構造化出力モード判定(§10)。解析前に argv で先取りする: 引数エラー時も出力チャネルを決めるため。
+    # --describe は --machine を要さない独立メタ操作(§10.3)。どちらかがあれば emitter を用意し、
+    # MachineArgumentParser で使用法エラーも error イベントへ振り替える。emitter はバイナリ stdout へ
+    # UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None(従来の人間向け経路)。
     machine = "--machine" in argv
-    emitter = EventEmitter(sys.stdout.buffer) if machine else None
+    describe = "--describe" in argv
+    emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
 
     def fail(code, message, exit_code, *, field=None, path=None):
-        """失敗を報告して終了コードを返す(§10.4)。機械モードは error イベントでストリームを終端し、
+        """失敗を報告して終了コードを返す(§10.4)。構造化出力モードは error イベントでストリームを終端し、
         それ以外は理由を標準エラーへ 1 行出す(トレースバックは出さない)。"""
         if emitter is not None:
             emitter.error(**error_event(
@@ -329,17 +408,25 @@ def main(argv=None):
             print(f"error: {message}", file=sys.stderr)
         return exit_code
 
-    parser = _build_parser(machine)
+    parser = _build_parser(machine or describe)
     try:
         args = parser.parse_args(argv)
     except ArgumentParseError as e:
-        # 機械モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
+        # 構造化出力モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
         return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
     except SystemExit as e:
         # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
         # (メタ操作・code 0)。例外を握って終了コードへ変換する(§10.1)。
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
+
+    # 自己記述(§10.3)。VMD を読まず options/presets の result を出して終了する独立メタ操作。
+    if args.describe:
+        emitter.result(mode="describe", options=_describe_options(parser), presets=_describe_presets())
+        return 0
+    # input は nargs="?"(--describe を入力無しで成立させるため)。非 describe 実行では必須。
+    if args.input is None:
+        return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
 
     # 引数解析後の本体を畳む。KeyboardInterrupt は中断(§10.5)として cancelled へ、それ以外の想定外例外は
     # internal_error(§10.4)へ。どちらもトレースバックを漏らさない。
