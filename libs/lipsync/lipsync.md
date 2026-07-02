@@ -19,7 +19,7 @@
 
 ### 1.2 設計境界
 
-[../../docs/conventions/layering.md](../../docs/conventions/layering.md) の設計境界に従う**共有モジュール**(形式層でも単一ツール固有でもない第3カテゴリ)。
+[../../docs/conventions/layering.md](../../docs/conventions/layering.md) §1 の**共有ドメイン層**に属する共有モジュール(形式層でも単一ツール固有でもない、複数ツールが共有するドメインロジック)。
 
 - VMD形式の入出力(モーフキーの書き出し)は `vmd.io` に委譲する。`lipsync` はVMDの
   バイナリ構造を直接扱わない。モーフキーがキー間で線形評価される事実は `../vmd/vmd-interp.md`
