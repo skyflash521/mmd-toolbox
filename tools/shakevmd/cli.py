@@ -397,6 +397,15 @@ def _argparse_field(message: str):
 
 def main(argv=None) -> int:
     """CLI エントリポイント。終了コードを返す(§9: 0/1/2/3、中断 130)。"""
+    # 人間向け標準エラーはロケール符号化(cp932 等)で表せない文字を含んでも UnicodeEncodeError で
+    # プロセスを落とさない(規約 §10)。エラーハンドラを緩め、表せない文字は退避表記へ置換して出す。
+    # argparse の使用法エラー・fail() の error 行・警告ループの warning 行の人間向け stderr を一様に覆う
+    # (機械モードの stdout はバイナリ + UTF-8 の別経路 cli_events なので影響しない)。
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(errors="backslashreplace")
+        except Exception:
+            pass
     if argv is None:
         argv = sys.argv[1:]
 

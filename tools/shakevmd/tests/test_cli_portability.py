@@ -8,8 +8,6 @@
 import io
 import sys
 
-import pytest
-
 from shakevmd import bake as bake_mod
 from shakevmd import cli
 from shakevmd.warn import ShakeWarning
@@ -100,7 +98,6 @@ def _cp932_stderr(monkeypatch):
     return wrapper
 
 
-@pytest.mark.xfail(reason="impl pending: stderr符号化安全化", strict=True)
 def test_stderr_safe_argparse_usage_error(monkeypatch):
     # (a) argparse 使用法エラー経路: 表せない文字を含む不正引数値。argparse が標準エラーへ書く
     # 使用法エラーが符号化に失敗せず、引数エラー(2)で終える(例外を漏らさない)。
@@ -109,7 +106,6 @@ def test_stderr_safe_argparse_usage_error(monkeypatch):
     assert rc == 2
 
 
-@pytest.mark.xfail(reason="impl pending: stderr符号化安全化", strict=True)
 def test_stderr_safe_fail_path(tmp_path, monkeypatch):
     # (b) fail() 経路: 表せない文字を含むパス。上書きガードの fail() メッセージが符号化に失敗せず、
     # 引数エラー(2)で終える(符号化失敗を internal_error(1)へ落とさない)。
@@ -119,7 +115,6 @@ def test_stderr_safe_fail_path(tmp_path, monkeypatch):
     assert rc == 2
 
 
-@pytest.mark.xfail(reason="impl pending: stderr符号化安全化", strict=True)
 def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
     # (c) 警告ループ経路: 表せない文字を含む警告文。warning 行が符号化に失敗せず本体は正常終了(0)
     # する(符号化失敗を internal_error(1)へ落とさない)。emitter 非経由の人間向け stderr を突く。
