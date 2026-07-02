@@ -21,8 +21,6 @@ from vmd import io
 from vmd.types import BoneKey, CameraKey, VmdDocument
 from sparsevmd import cli
 
-pytestmark = pytest.mark.xfail(reason="impl pending: machine mode skeleton", strict=False)
-
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 
 
