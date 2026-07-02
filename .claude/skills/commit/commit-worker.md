@@ -131,26 +131,29 @@ Co-Authored-By: <実際のモデル表示名> <noreply@anthropic.com>'
 
 ## 許可される git コマンド形
 
-git 書込ガードフックが、次の2つの正規形以外の add/commit を決定論的に deny する。**deny されたら
-許可を求めず、正規形へ直して再実行する。**
+git 書込ガードフックが、次の2つの正規形以外の add/commit を決定論的に deny する。**禁止形を覚える
+必要はなくフックが弾く。deny されたら許可を求めず、正規形へ直して再実行する。**
 
-- `git add -- <明示ファイル...>`
+- `git add -- <明示ファイル...>` — `--` を付け、リポジトリ内の個別ファイルだけを列挙する
+  (ディレクトリ・`-A`・`.`・絶対パス・リポジトリ外・glob は deny。追跡済みファイルの削除は
+  個別ファイル名の完全一致なら可)
 - `git commit -m '<メッセージ>'`
 
-**1 Bash 呼び出し = 1 コマンド**とし、各確認(`git status` / `git diff --staged`)と書き込みを
-別々に実行する。**コマンドは必ず Bash ツールで実行する(PowerShell ツールを使わない)。** 次はすべて
-フックが deny するか許可外プロンプトになるため使わない:
+フックが deny する主な形(参考。網羅でなくフックが正): git add/commit に対する連結・前置(`;` `&&`
+`||` `|`・環境変数接頭・`env`/`time`/`xargs` 等のラッパー)、`-C`/`--git-dir`/`--work-tree`、`--amend`、
+`git reset`。`push`/`rebase`/`git restore`/`git checkout -- <path>`/`git clean`/`git stash`/`git rm`/
+指定外ファイルのステージも行わない(作業ツリー・履歴を壊す)。
 
-- 子シェル・スクリプト経由の間接実行(`bash -c` / `sh -c` / `pwsh -Command` / `source` / スクリプト実行)
-- ディレクトリ変更(`cd` / `Set-Location` / `pushd` / `popd` 等。cwd は既にリポジトリルート)
-- リポジトリ位置を変える git オプション(`-C <path>` / `--git-dir` / `--work-tree`)
-- 連結・前置(`;` `&&` `||` `|`、環境変数接頭、`env`/`time`/`xargs` 等の実行ラッパー)
-- add の非正規形(ディレクトリ、`git add -A`、`git add .`、絶対パス、リポジトリ外パス、glob、
-  不存在パス)。add には `--` を必ず付け、リポジトリ内の個別ファイルだけを列挙する。追跡済み
-  ファイルの削除は個別ファイル名の完全一致なら許可される。
-- **禁止**: `--amend` / `push` / `rebase` / 指定外ファイルのステージ / `rm -rf` /
-  作業ツリー・履歴を壊す操作(`git reset` / `git restore` / `git checkout -- <path>` /
-  `git clean` / `git stash` / `git rm`)。
+**フックの範囲外なので必ず自分で守る**(deny されず許可プロンプトになる、または気づけないため):
+
+- **各コマンドは単独のプレーンな形で発行**し、確認(`git status` / `git diff --staged`)と書き込みを
+  別々の呼び出しにする(1 Bash 呼び出し = 1 コマンド)。
+- **コマンドは必ず Bash ツールで実行する(PowerShell ツールを使わない)。** PowerShell 経由や
+  `bash -c` / `sh -c` / `source` 等の子シェル・間接実行は Bash ツール専用の git 書込ガードを迂回し、
+  deny でなく許可プロンプトを誘発する(フックは `bash -c` 内の git を認識せず fall through する)。
+- **`cd`(ディレクトリ変更)を使わない。** cwd は既にリポジトリルートで、`git add -- <相対パス>` は
+  そこ基準で解決される。単独の `cd` はこの git 書込ガードでは弾かれない(`cd ... && git add` のように
+  git 操作と連結した形だけ deny される)ので、自分で避ける。
 
 ## コミット後の検証と報告
 
