@@ -9,13 +9,9 @@
 
 import json
 
-import pytest
-
 from vmd import io
 from vmd.types import BoneKey, CameraKey, VmdDocument
 from sparsevmd import cli
-
-pytestmark = pytest.mark.xfail(reason="impl pending: machine success events", strict=False)
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 
@@ -176,6 +172,20 @@ def test_machine_emits_progress_camera_and_bone(tmp_path, capsysbinary):
     assert cam_progress and all(isinstance(p["total"], int) and p["total"] > 0 for p in cam_progress)
     # camera 段は出力後検証区間で補足文字列(note)を付ける(§12.2 / §9 項目15)。note が落ちていないこと。
     assert any(p["note"] for p in progress if p["stage"] == "camera")
+
+
+def test_machine_camera_one_key_still_emits_camera_start(tmp_path, capsysbinary):
+    # カメラ1キー(削減不能)でも --target camera なら camera 段は処理対象なので start イベントを 1 本出す(§12.2)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=[cam(7, center=(3.0, 0.0, 0.0))])
+    rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera", "--machine"])
+    assert rc == 0
+    events = machine_events(capsysbinary)
+    r = terminal(events)
+    assert r["mode"] == "reduce" and r["camera"] == {"input_keys": 1, "output_keys": 1}
+    camera_starts = [e for e in events if e["type"] == "progress" and e["stage"] == "camera"
+                     and e["done"] == 0 and e["total"] is None]
+    assert len(camera_starts) == 1
 
 
 def test_machine_progress_only_processed_stages(tmp_path, capsysbinary):

@@ -13,6 +13,7 @@ import argparse
 import dataclasses
 import os
 import sys
+import time
 from collections import Counter
 
 from cli_events import (
@@ -408,6 +409,88 @@ def _describe_presets():
     return out
 
 
+def _machine_progress(emitter, stage):
+    """機械モードの段別 progress コールバックを返す(§12.2)。
+
+    開始時に `done=0, total=null, note:"", elapsed:0.0` を 1 本出し、以後の呼び出しを progress イベントへ
+    写す(`elapsed` は段開始からの経過秒)。返り値は (done, total, note) を受けるコールバック。
+    """
+    start = time.monotonic()
+    emitter.progress(stage=stage, done=0, total=None, note="", elapsed=0.0)
+
+    def cb(done, total, note=""):
+        emitter.progress(stage=stage, done=done, total=total, note=note,
+                         elapsed=time.monotonic() - start)
+
+    return cb
+
+
+def _emit_selector_unmatched(emitter, message):
+    """ボーン選択の不一致警告を surface する(§12.2)。機械=warning イベント(section null)、人間=stderr 1 行。"""
+    if emitter is not None:
+        emitter.warning(code="selector_unmatched", message=message, section=None)
+    else:
+        print("警告: " + message, file=sys.stderr)
+
+
+def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
+                   new_camera, new_bone, camera_errors, bone_errors, camera_diag, bone_diag, reduced):
+    """`--machine --dry-run` の inspect result ペイロードを組む(§12.2)。VMD は書かない。
+
+    camera は処理したとき `{input_keys, output_keys, errors, cuts}`、それ以外 null。bones は処理したとき
+    初出順の `{name, selected, input_keys, output_keys, errors, cuts}` 配列で、非選択・削減不能(1 キー)
+    トラックは errors/cuts を null にする。errors/cuts の素データは dry-run 時に集めた measure/diagnostics。
+    """
+    sections = [name for name, present in (
+        ("camera", doc.camera), ("bone", doc.bone), ("morph", doc.morph),
+        ("light", doc.light), ("self_shadow", doc.self_shadow), ("ik_property", doc.ik_property),
+    ) if present]
+    frames = []
+    if do_camera:
+        frames += [k.frame for k in doc.camera]
+    if do_bone:
+        frames += [k.frame for k in doc.bone]
+    frame_range = [min(frames), max(frames)] if frames else None
+    duration = (max(frames) / 30.0) if frames else None
+
+    camera = None
+    if do_camera:
+        camera = {
+            "input_keys": len(doc.camera),
+            "output_keys": len(new_camera),
+            "errors": camera_errors,
+            "cuts": (camera_diag or {}).get("cuts") or [],
+        }
+    bones = None
+    if do_bone:
+        io_counts = _bone_io_counts(doc.bone, new_bone)
+        bones = []
+        for name in _bone_names_in_order(doc.bone):
+            inp, out = io_counts.get(name, (0, 0))
+            reducible = name in selected and inp >= 2  # 選択かつ 2 キー以上のみ削減対象(§3.1)
+            bones.append({
+                "name": name,
+                "selected": name in selected,
+                "input_keys": inp,
+                "output_keys": out,
+                "errors": (bone_errors or {}).get(name) if reducible else None,
+                "cuts": (((bone_diag or {}).get(name)) or {}).get("cuts", []) if reducible else None,
+            })
+    return {
+        "output": None,
+        "target": args.target,
+        "sections": sections,
+        "keys": {"camera": len(doc.camera), "bone": len(doc.bone)},
+        "frame_range": frame_range,
+        "duration_sec": duration,
+        "ranges": [[s, e] for s, e in global_ranges],
+        "keep_frames": sorted(set(args.keep_frames)),
+        "reduced": reduced,
+        "camera": camera,
+        "bones": bones,
+    }
+
+
 def main(argv=None):
     """CLI エントリポイント。終了コードを返す(§9: 0/1/2/3/4、中断 130)。"""
     # 人間向け標準エラーはロケール符号化(cp932 等)で表せない文字を含んでも UnicodeEncodeError で
@@ -520,16 +603,21 @@ def _run(args, emitter, fail):
     except Exception as e:
         return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
 
-    # 読み込み時の警告(デコード不能な名前フィールド等)を surface する(§2.2)。
-    # 同一(コード・セクション・メッセージ)はキー毎の重複を避けて1行にまとめる。
+    # 読み込み時の警告(デコード不能な名前フィールド等)を surface する(§2.2/§12.2)。
+    # 同一(コード・セクション・メッセージ)はキー毎の重複を避けて1件にまとめる。機械=warning
+    # イベント(section は単一要素配列 or null)、人間=stderr 1 行。
     seen_warn = set()
     for w in read_warnings:
         key = (w.code, w.section, w.message)
         if key in seen_warn:
             continue
         seen_warn.add(key)
-        where = f"({w.section})" if w.section else ""
-        print(f"警告: {w.message}{where}", file=sys.stderr)
+        if emitter is not None:
+            emitter.warning(code=w.code, message=w.message,
+                            section=[w.section] if w.section else None)
+        else:
+            where = f"({w.section})" if w.section else ""
+            print(f"警告: {w.message}{where}", file=sys.stderr)
 
     # 対象セクションを内部作業ビューで正規化する(フレーム順ソート・同一キー後勝ち。§3.1)。
     # 対象外セクションは無加工で保持される。
@@ -571,12 +659,12 @@ def _run(args, emitter, fail):
                 bone_names, includes, excludes, undecodable=undecodable
             )
         except selection.SelectionError as e:
-            # エラーで終了する前に、蓄積済みの不一致警告を出力する(§2.2)。
+            # エラーで終了する前に、蓄積済みの不一致警告を出力する(§2.2/§12.2)。
             for w in e.warnings:
-                print("警告: " + w, file=sys.stderr)
+                _emit_selector_unmatched(emitter, w)
             return fail("bone_selection_invalid", str(e), 2)
         for w in sel.warnings:
-            print("警告: " + w, file=sys.stderr)
+            _emit_selector_unmatched(emitter, w)
         selected = set(sel.selected)
     else:
         selected = set(bone_names)
@@ -603,10 +691,14 @@ def _run(args, emitter, fail):
     except ranges.RangeError as e:
         return fail("range_invalid", f"--range: {e}", 2, field="--range")
 
-    # 全削減範囲外の keep-frame は警告して無視する(§2.6)。
+    # 全削減範囲外の keep-frame は警告して無視する(§2.6/§12.2)。機械=keep_frame_ignored イベント。
     for f in args.keep_frames:
         if not any(lo <= f <= hi for lo, hi in global_ranges):
-            print(f"警告: keep-frame {f} は削減範囲外のため無視します", file=sys.stderr)
+            msg = f"keep-frame {f} は削減範囲外のため無視します"
+            if emitter is not None:
+                emitter.warning(code="keep_frame_ignored", message=msg, section=None)
+            else:
+                print(f"警告: {msg}", file=sys.stderr)
 
     want_report = args.dry_run
     want_diag = want_report or args.verbose  # verbose は診断を stderr ログに出す(§2.7/§6.3)
@@ -625,28 +717,34 @@ def _run(args, emitter, fail):
         if do_camera:
             cam = _sorted_camera(doc.camera)
             cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
+            # 機械モードは camera 段の開始イベントを、処理対象なら len に依らず必ず 1 本出す
+            # (bone 段と同様。§12.2)。人間モードのライブ表示は削減が走る len>=2 のときのみ。
+            cam_cb = _machine_progress(emitter, "camera") if emitter is not None else None
             if len(cam) >= 2:
                 if cam_ranges:  # 有効範囲が空なら実際には削減されない(§2.2/§3.1)
                     did_reduce = True
                 camera_diag = {} if want_diag else None
                 cam_total = sum(f1 - f0 for f0, f1 in cam_ranges)
-                reporter.start("カメラ削減", cam_total)
+                if emitter is None:
+                    reporter.start("カメラ削減", cam_total)
+                    cam_cb = lambda done, total, note="": reporter.update(done, note)  # noqa: E731
                 new_camera = reduce_camera_track(
                     cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
-                    diagnostics=camera_diag,
-                    progress=lambda done, total, note="": reporter.update(done, note),
-                    **cut_kw
+                    diagnostics=camera_diag, progress=cam_cb, **cut_kw
                 )
-                reporter.finish()
+                if emitter is None:
+                    reporter.finish()
             else:
                 new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持(§3.1/§3.2)
             if want_report:
                 camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
         if do_bone:
             bone_diag = {} if want_diag else None
+            # 機械モードは bone 段の開始イベントを出し、完了ごとの progress を on_progress で写す(§12.2)。
+            bone_cb = _machine_progress(emitter, "bone") if emitter is not None else None
             new_bone = _reduce_bones(
                 doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
-                diagnostics_out=bone_diag, reporter=reporter,
+                diagnostics_out=bone_diag, reporter=reporter, on_progress=bone_cb,
             )
             if _bone_reduced(doc.bone, selected, global_ranges):
                 did_reduce = True
@@ -678,7 +776,12 @@ def _run(args, emitter, fail):
         if args.dry_run and emitter is None:
             print(report.format_dry_run(rep))
 
+    # dry-run は出力を書かずに終える。機械モードは入力検査(inspect)の result でストリームを終端する(§12.2)。
     if args.dry_run:
+        if emitter is not None:
+            emitter.result(mode="inspect", **_build_inspect(
+                args, doc, do_camera, do_bone, selected, global_ranges, new_camera, new_bone,
+                camera_errors, bone_errors, camera_diag, bone_diag, did_reduce))
         return 0
 
     out_doc = dataclasses.replace(doc, camera=new_camera, bone=new_bone)
@@ -687,6 +790,14 @@ def _run(args, emitter, fail):
     except Exception as e:
         return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}", 3,
                     field="--output", path=output)
+
+    # 書き込み成功後に reduce result でストリームを終端する(§12.2)。
+    if emitter is not None:
+        emitter.result(
+            mode="reduce", output=output, target=args.target,
+            camera={"input_keys": len(doc.camera), "output_keys": len(new_camera)} if do_camera else None,
+            bone={"input_keys": len(doc.bone), "output_keys": len(new_bone)} if do_bone else None,
+            reduced=did_reduce)
     return 0
 
 
@@ -715,12 +826,13 @@ def _global_ranges(parsed_ranges, target_frames):
 
 
 def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_kw,
-                  diagnostics_out=None, reporter=None):
+                  diagnostics_out=None, reporter=None, on_progress=None):
     """選択ボーンを削減し非選択ボーンは保持して、全ボーンキー列を返す(§3.2)。
 
     各トラックの実処理範囲はグローバル範囲とトラック区間の積集合(§2.2)。diagnostics_out に
     dict を渡すと、選択ボーンごとに {name: 診断dict} を埋める(§2.7/§6.3)。reporter を渡すと
-    削減対象ボーン1件ごとに処理経過を表示する(§2.7)。
+    削減対象ボーン1件ごとに処理経過を表示する(§2.7)。on_progress(done, total, name) を渡すと
+    削減対象ボーン1件の完了ごとに呼ぶ(機械モードの progress イベント用。§12.2)。
     """
     groups = _bone_keys_by_name(bone_keys)
     total = sum(1 for name, keys in groups.items() if name in selected and len(keys) >= 2)
@@ -744,6 +856,8 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
             done += 1
             if reporter is not None:
                 reporter.update(done, name)
+            if on_progress is not None:
+                on_progress(done, total, name)
         else:
             # 非選択トラック、および選択でもキー1件以下(削減不能)は逐語保持(§3.1/§3.2)。
             out.extend(ks)
@@ -784,16 +898,23 @@ def _list_bones(doc, includes, excludes, emitter=None):
         )
         selected = set(result.selected)
         for w in result.warnings:
-            print("警告: " + w, file=sys.stderr)
+            _emit_selector_unmatched(emitter, w)
     except selection.SelectionError as e:
-        # 選択不能でも一覧表示は行う(検査モード)。蓄積済みの不一致警告と理由を出す。
+        # 選択不能でも一覧表示は行う(検査モード)。蓄積済みの不一致警告(selector_unmatched)の後に
+        # 理由(selection_unresolved)を出す。検査モードは終了コード 0 のまま warning とする(§12.2)。
         for w in e.warnings:
-            print("警告: " + w, file=sys.stderr)
-        print("警告: " + str(e), file=sys.stderr)
+            _emit_selector_unmatched(emitter, w)
+        if emitter is not None:
+            emitter.warning(code="selection_unresolved", message=str(e), section=None)
+        else:
+            print("警告: " + str(e), file=sys.stderr)
 
-    # 構造化出力モード(機械/自己記述)の標準出力はイベント専用(§12.1)。人間向け一覧は
-    # emitter が None(人間向け経路)のときだけ標準出力へ出す。
-    if emitter is None:
+    # 構造化出力モード(機械/自己記述)は list_bones result で終端(§12.2)。人間向けは一覧テキスト。
+    if emitter is not None:
+        emitter.result(mode="list_bones", bones=[
+            {"name": name, "keys": counts[name], "selected": name in selected} for name in names
+        ])
+    else:
         for name in names:
             state = "selected" if name in selected else "excluded"
             print(f"{name}\tkeys={counts[name]}\t{state}")
