@@ -10,10 +10,6 @@ import math
 import numpy as np
 import pytest
 
-# vocal_analysis.rms が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis.rms", strict=True)
-
 
 def test_frame_rms_center_times_and_count():
     from vocal_analysis.rms import _frame_rms
