@@ -15,10 +15,6 @@ import soundfile as sf
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-# vocal_analysis.io が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis.io", strict=True)
-
 
 def test_reads_wav_without_ffmpeg(monkeypatch):
     from vocal_analysis.io import load_audio
