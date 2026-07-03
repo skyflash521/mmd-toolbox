@@ -9,10 +9,6 @@ import dataclasses
 
 import pytest
 
-# vocal_analysis の固定推論条件が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis config", strict=True)
-
 
 def test_recognizer_model_id_and_revision_are_pinned():
     from vocal_analysis import RECOGNIZER_CONFIG

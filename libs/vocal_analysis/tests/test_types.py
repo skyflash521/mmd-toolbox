@@ -10,11 +10,6 @@ import typing
 from pathlib import Path
 
 import numpy as np
-import pytest
-
-# vocal_analysis の公開型が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis public API", strict=True)
 
 
 def test_public_types_are_dataclasses():
