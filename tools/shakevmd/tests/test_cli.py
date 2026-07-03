@@ -1196,7 +1196,7 @@ class TestSmooth:
         # **--smooth の実設定**(curve_mode=bezier・aggressive 許容・max_seg=5・no_cut_detect・
         # 区間長を抑える max_seg grid の keep_frames)で直接呼んだ結果と整合することを担保する。
         # 別ツール(sparsevmd 等)を import せず密VMDを f32 で読み戻して同設定で再現することで、
-        # ツール間のコード依存を作らずに整合を確かめる。--smooth は手ぶれを線形へ平準化せず曲線で滑らかに
+        # ツール間のコード依存を作らずに整合を確かめる。--smooth は手ぶれを線形へ均さず曲線で滑らかに
         # するため grid を keep に渡すので、grid 無しの素の疎化とは一致しない。直接(プロセス内 f64 ソース)と
         # パイプライン(密VMDの f32 ソース)で reduction 入力の精度が違うためバイト一致は前提にせず、両者が
         # サブフレームで aggressive 許容内に一致することを基準とする。
@@ -1212,7 +1212,7 @@ class TestSmooth:
         )
         first, last = dk[0].frame, dk[-1].frame
         # --smooth は区間長を max_seg 以下に抑える機械的 grid を keep_frames で渡す(手ぶれを線形へ
-        # 平準化せず曲線で滑らかにするため)。パイプライン再現も同じ grid を渡して実設定に合わせる。
+        # 均さず曲線で滑らかにするため)。パイプライン再現も同じ grid を渡して実設定に合わせる。
         # この素材はカット無しなので keep は grid のみ(bake の keep_frames も空)。
         keep = tuple(range(first, last + 1, 5))
         pk = reduce_camera_track(

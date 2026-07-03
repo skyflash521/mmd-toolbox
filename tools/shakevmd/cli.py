@@ -200,7 +200,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     # 既定 on: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを低減する。
     # --no-smooth で無効化(密キー＋線形のまま出力する)。
     p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction,
-                   help="ベイク後の密キーを疎ベジェへ削減する(既定 on。--no-smooth で密キー+線形)")
+                   help="ベイク後の密なキーをベジェ補間でなめらかに整理する(平滑化。既定 on。--no-smooth で密キー+線形)")
     # 進捗表示の抑制(§2.7.1)。抑制するのは進捗表示だけで、警告・統計・終了コードは変えない。
     p.add_argument("--quiet", dest="quiet", action="store_true",
                    help="進捗表示を抑制する(警告・統計・終了コードは抑制しない)")
