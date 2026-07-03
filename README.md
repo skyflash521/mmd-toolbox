@@ -179,6 +179,7 @@ shakevmd <入力ファイル名>.vmd
 |---|---|---|
 | Python 3.11 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.11 未満のことがあるため `py -3` を使う |
 | Git | バージョン管理 | Windows は Git for Windows(Git Bash 同梱)を推奨 |
+| GitHub CLI(`gh`) | リリース作業(PR 作成・マージ・Release 確認)の実行 | 任意。ツールをリリースするときだけ必要。初回に `gh auth login` で認証する |
 
 `numpy`・`scipy`(実行時依存)と `pytest`(開発依存)は `pip install -e ".[dev]"` で導入される。
 
