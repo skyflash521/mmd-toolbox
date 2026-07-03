@@ -61,8 +61,8 @@
 
 タグの push をトリガに、CI が該当ツールの CHANGELOG から該当版の節を抽出して GitHub Release を
 作成する(workflow の実体は `.github/workflows/` 配下。リリース工程の中での位置づけは
-publishing.md が定める)。Release を作るのは公開CLIツールのタグだけで、それ以外の構成要素の
-タグでは作らない。
+publishing.md が定める)。Release を作るのは公開CLIツールのタグに対してだけ(タグは CLIツール
+ごとに打つ。versioning.md §5)。
 
 - 方向は CHANGELOG → Release の一方向。本文を直すときは CHANGELOG を直し、Release を作り直す。
 - 対象タグは versioning.md §5 の `<ツール>/v<MAJOR.MINOR.PATCH>`。
