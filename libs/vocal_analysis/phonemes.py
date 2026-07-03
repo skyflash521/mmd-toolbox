@@ -31,3 +31,24 @@ def espeak_ipa_to_vowel(symbol: str) -> str | None:
     テーブルに無い・判定不能な記号はいずれも gap として None を返す(最近接等の曖昧な距離判定はしない)。
     """
     return _ESPEAK_IPA_TO_VOWEL.get(symbol)
+
+
+# §7.2: VOCALOID 日本語の X-SAMPA 音素インベントリから確定した母音記号テーブル。長音記号 ":" 付き
+# (例 i:)は母音同一のまま扱う(長さはカテゴリでなく区間長の属性)。vpr を読む CLI(口形イベント確定)と
+# S-1ゲート(vpr由来ラベル生成)が同一規則で使う(写像表の二重管理を避ける)。
+_XSAMPA_VOWEL_LETTERS = {
+    "a": "a",
+    "i": "i",
+    "i:": "i",
+    "M": "u",  # X-SAMPA M は close back unrounded vowel で、日本語「う」の標準表記
+    "e": "e",
+    "o": "o",
+}
+
+
+def xsampa_vowel_letter(symbol: str) -> str | None:
+    """VOCALOID X-SAMPA の母音記号を5母音(a/i/u/e/o)へ写像する(§7.2)。
+
+    母音記号テーブルに無ければ None(子音・継続記号など、母音でないことを示す)。
+    """
+    return _XSAMPA_VOWEL_LETTERS.get(symbol)

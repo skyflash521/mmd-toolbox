@@ -44,12 +44,6 @@ def test_espeak_ipa_to_vowel_unmapped_symbol_is_gap(symbol):
     assert espeak_ipa_to_vowel(symbol) is None
 
 
-# vocal_analysis.phonemes が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark_xsampa = pytest.mark.xfail(reason="impl pending: vocal_analysis.phonemes.xsampa_vowel_letter", strict=True)
-
-
-@pytestmark_xsampa
 @pytest.mark.parametrize(
     "symbol,expected",
     [
@@ -69,7 +63,6 @@ def test_xsampa_vowel_letter_table_entries(symbol, expected):
     assert xsampa_vowel_letter(symbol) == expected
 
 
-@pytestmark_xsampa
 @pytest.mark.parametrize("symbol", ["m", "b", "N\\", "-", "t", "p\\", "k"])
 def test_xsampa_vowel_letter_non_vowel_is_none(symbol):
     from vocal_analysis.phonemes import xsampa_vowel_letter

@@ -9,6 +9,7 @@ VOCALOID 日本語の音素(X-SAMPA 表記)を、口形イベント確定で使�
 from enum import Enum
 
 from lipsync import ConsonantClass, MouthShape
+from vocal_analysis.phonemes import xsampa_vowel_letter
 
 
 class PhonemeCategory(Enum):
@@ -22,13 +23,11 @@ class PhonemeCategory(Enum):
     OTHER = "other"  # その他子音・未知。自前イベントを作らず協調調音/直前口形継続へ委ねる
 
 
-# 母音記号 → MouthShape。X-SAMPA の M は close back unrounded vowel で、日本語「う」の標準表記。
-# 長音記号 ":" 付き(例 i:)は母音同一のまま扱う(長さはカテゴリでなく区間長の属性)。
-_VOWEL_SHAPES = {
+# 母音文字(a/i/u/e/o。母音記号テーブル自体は vocal_analysis が持つ。下記 vowel_shape 参照)→ MouthShape。
+_VOWEL_LETTER_SHAPES = {
     "a": MouthShape.A,
     "i": MouthShape.I,
-    "i:": MouthShape.I,
-    "M": MouthShape.U,
+    "u": MouthShape.U,
     "e": MouthShape.E,
     "o": MouthShape.O,
 }
@@ -56,8 +55,15 @@ _SPREAD_CONSONANTS = {"S", "dZ", "tS", "j"}
 
 
 def vowel_shape(symbol: str) -> MouthShape | None:
-    """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。"""
-    return _VOWEL_SHAPES.get(symbol)
+    """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。
+
+    母音記号テーブル自体は vocal_analysis(共有ドメイン層)が持つ(vocal_analysis.md §7.2。vpr を読む
+    CLI と S-1ゲートが同一の写像表を使うため、二重管理を避ける)。
+    """
+    letter = xsampa_vowel_letter(symbol)
+    if letter is None:
+        return None
+    return _VOWEL_LETTER_SHAPES[letter]
 
 
 def categorize(symbol: str) -> PhonemeCategory:
@@ -67,7 +73,7 @@ def categorize(symbol: str) -> PhonemeCategory:
     以外の子音と同じく自前イベントを作らず協調調音/直前口形継続へ委ねるため、まとめて OTHER とする。
     未知音素の診断記録(その他子音との区別)は写像でなく診断側で扱う。
     """
-    if symbol in _VOWEL_SHAPES:
+    if xsampa_vowel_letter(symbol) is not None:
         return PhonemeCategory.VOWEL
     if symbol in _BILABIALS:
         return PhonemeCategory.BILABIAL
