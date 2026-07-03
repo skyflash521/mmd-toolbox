@@ -1,0 +1,399 @@
+# vpr2vmd 要求仕様書
+
+VOCALOID プロジェクトファイル(vpr)から、標準口モーフ(あ・い・う・え・お・ん)による口パクVMDを
+生成する独立CLIツールの要求仕様。
+
+---
+
+## 1. 位置づけ
+
+### 1.1 結論
+
+本機能は `vpr2vmd` という独立CLIツールとして提供する。
+
+`vpr2vmd` は、vpr を入力に、音符・音素・休符から口形イベント列と開き量を作って共有モジュール `lipsync`
+に渡し、口パクVMDを **1コマンド**で出力する。
+
+```text
+入力 vpr(VOCALOIDプロジェクト)
+  -> vpr2vmd(vpr 解析 → 口形イベント列＋開き量 → lipsync)
+  -> 口パクVMD
+  -> MMD/MMMで確認・編集
+```
+
+### 1.2 設計境界
+
+[../../docs/conventions/layering.md](../../docs/conventions/layering.md) の設計境界に従う。
+
+- **vpr の解析**は共有の形式I/Oモジュール [vpr](../../libs/vpr/vpr.md) に委譲する。`vpr2vmd` は vpr のバイナリ/
+  直列化構造を直接扱わない。
+- **アニメ的口パクのキーフレーム生成**は共有ドメインモジュール [lipsync](../../libs/lipsync/lipsync.md) に委譲する
+  (品質基準・母音合成・保持・協調調音・疎キー配置等)。
+- **`vpr2vmd` 固有**: vpr の音符・音素・休符から口形イベント列を確定すること、vpr のベロシティ(0–127)から
+  開き量を決めること、CLI引数・プリセットの具体値。
+
+### 1.3 独立ツールとする理由
+
+- 入力が vpr(VOCALOIDプロジェクト)で、音声を入力に取る他ツールとは系統が異なる。vpr の解析は `vpr`、
+  口パク生成は `lipsync` に委譲し、`vpr2vmd` 自体は両者を束ねて vpr 固有の入口処理(口形イベント確定・
+  開き量)を担う薄いCLIとする。
+- **音声認識を要さない**: vpr は母音・音素・時刻・休符が既知のため、認識誤差の無い口形イベント入力で
+  `lipsync` のモーフ品質を駆動できる。
+
+---
+
+## 2. 目的
+
+- vpr から、**認識誤差の無い口形イベント入力**でアニメ的(MMD的)な口パクを自動生成する。
+- 口パクに必要な「時刻ごとの口形(母音)と開き量」を vpr から決定論的に作る。vpr の音符・休符・音素から
+  母音・両唇閉鎖・無音を直接得るため、音声のRMSに基づく無音/閉口判定は不要(vpr では音符の有無で休符が
+  分かる)。
+- ピッチ(音高)は口パクに不要なため使わない。
+
+### 2.1 非目標
+
+- 口モーフ(あ・い・う・え・お・ん、必要に応じ閉口)以外の表情は生成しない。
+- vpr の歌唱表現(ピッチ・ビブラート等)の再現は対象外。口パク(口形と開き量)に限る。
+
+---
+
+## 3. 処理パイプライン
+
+```text
+入力 vpr
+  ├─ vpr 解析               vpr → 音符(時刻・ピッチ・歌詞・音素・ベロシティ)・休符・テンポ
+  ├─ 口形イベント列の確定   vpr2vmd側 → 音素→母音(a/i/u/e/o)・両唇閉鎖・撥音(ん)、促音→無音、間隙→休符/レガート間隙。時刻はテンポから秒/フレームへ
+  ├─ 開き量                 vpr2vmd側 → vpr のベロシティ(0–127)→開き量
+  ├─ 生成パラメータの解決   vpr2vmd側 → スタイルプリセット解決 → 代表BPMによるテンポ補正 → CLI 調整の上書き → lipsync の GenerationParams
+  └─ モーフ生成             lipsync(共有)+ vmd → あ・い・う・え・お・ん の口パクVMD
+```
+
+- **口形イベント列の確定(vpr2vmd 入口)**: `vpr` が返す音符の音素から母音(a/i/u/e/o)・両唇閉鎖・撥音(ん)を、
+  音符間の間隙から休符(`SILENCE`)/レガート間隙(`LEGATO_GAP`)を、決定論的に確定する(間隙の分類は後述)。
+  vpr の `resolution` とテンポから時刻⇔フレームを変換する(拍子は絶対
+  時間変換に用いない)。確定した口形イベント列(母音・両唇閉鎖・撥音「ん」・無音・レガート間隙)を `lipsync` の入力とする。口パクは単一の
+  口に対応するため**単一の歌唱トラック**を対象とし(複数時は既定で先頭、`--track` で選択)、解析範囲(全時間軸)は
+  先頭〜選択トラックの最後の発音区間終端とする。重なり音符は単音前提で非重複化し、休符はその採用音符列の発音
+  区間の補集合として再導出する。
+- **開き量(vpr2vmd 入口)**: 各モーラの開き量(強弱)を次の優先順で決め、`lipsync` の開き量入力とする。
+  1. **声量コントローラ曲線**(優先): vpr が公開する連続コントローラのうち声量に相当する `dynamics`
+     (VOCALOID の DYN。値域 0–127・中立 64)があれば、各採用音符の発音区間で曲線を**階段平均**し、その値域で
+     0〜1 へ正規化して、ベロシティと同じ写像(開き量レンジ `[lo,hi]` へ `lo+(hi−lo)·n^gamma`、`open_max` 上限)で
+     開き量にする。声量名のインベントリ・値域は形式仕様(../../docs/specs/vpr/VPR_file_format.md)で確定したものに従い、
+     未知名は採用しない。`s5Expression` 等の他の表情系曲線は中立値・被覆外の扱いが未確定のため初期実装では採用せず
+     velocity フォールバックへ回す(確定後にインベントリへ追加する)。
+  2. **ベロシティ**(フォールバック): 声量コントローラが無いときは vpr の音符のベロシティ(0–127、常在)を
+     開き量へ写像する。全ノートのベロシティが一様で強弱差が無いときは既定開き量(`--default-open`)を用いる。
+- **生成パラメータの解決とテンポ補正(vpr2vmd 入口)**: スタイルプリセットから生成パラメータ(`GenerationParams`)を
+  1組(変換全体に1回)解決し、採用音符列とテンポマップから求めた**代表BPM**に応じて保持・アタック・リリースの
+  フレーム数を縮める(テンポ補正)。代表BPMは各採用音符の**有効BPM**(発音長をテンポマップの区分積分で実発音秒へ
+  畳み、`60×拍数/秒`で一定テンポへ換算したBPM。音符全体を1サンプルとし可変テンポにも対応)を、その発音秒に比例する
+  重みで重み付けした中央値とする(長く鳴る音符ほど代表へ強く効く。発音長0の音符は除外、全除外なら 120)。テンポ補正は
+  基準テンポ `ref_bpm`(初期120)に対する比 `s=clamp(ref_bpm/代表BPM, s_min, 1.0)` を保持・アタック・リリースに掛け、
+  基準より遅い曲(比>1)は 1.0 にクランプして伸ばさない。下限は保持≥1・アタック/リリース≥2(縮めすぎて 0→全開が
+  1フレームになる onset 急変を避ける)。下限は補正による過小化を防ぐためのもので、プリセットが元から下限未満に
+  取った値(意図的に小さいアタック等)は増やさない(補正は縮小方向のみで値を増やさない)。これにより高速テンポでも
+  短い母音が吸収閾値を下回って消えるのを防ぐ。`lipsync` は
+  フレーム基準でテンポ概念を持たないため、テンポ→パラメータ補正は `vpr2vmd` が担う([../../docs/conventions/layering.md](../../docs/conventions/layering.md) の設計境界)。`ref_bpm`・
+  `s_min`・代表BPMの取り方の数値は視覚で詰める。補正対象は保持・アタック・リリースのみで、`legato_max` や先行準備・
+  協調調音重なり・谷係数・伸び表現は補正しない。
+- **モーフ生成**: `lipsync` が口形イベント列(各モーラの開き量を同梱)と生成パラメータからアニメ的口パクの
+  モーフキーを生成する。出力前に `vmd.io.ensure_frame0_neutral_keys`(使用モーフを 0F に中立登録する
+  MMD 互換規約)→ `normalize`(フレーム順)を適用してから `vmd.io` で VMD 出力する。
+
+音素→口形イベントの写像は `vpr2vmd` の固有処理として置く。**写像規則**(MMD の見た目を優先し、口を不自然に
+開けない):
+
+- **母音**: 音符の音素列の母音音素を母音イベント(あ/い/う/え/お)にする。音符語頭の両唇音は先頭に両唇閉鎖
+  イベントを作り、両唇閉鎖以外の子音は自前イベントを作らない。ただし**唇に影響する語頭子音は先頭母音(モーラ先頭)
+  に先頭子音種別 `ConsonantClass` を付けて** `lipsync` の母音合成を変調する(後続母音は `NONE`)。それ以外の子音
+  (舌/喉が主体で唇を動かさない子音)は純母音のまま `lipsync` の協調調音へ委ねる。
+- **音素→ConsonantClass 写像**(vpr2vmd 固有。先頭母音の前の子音から決める): 唇を丸める子音 ふ(`p\`)・わ(`w`)→
+  `ROUNDED`、い 方向へ寄せる子音 し(`S`)・じ(`dZ`)・ち(`tS`)・拗音のわたり(`j`)→ `SPREAD`、それ以外の子音および
+  未知記号 → `NEUTRAL`(純母音扱い)、語頭子音が無い → `NONE`。両唇音は両唇閉鎖イベントで表すので本写像の対象外
+  (語頭子音から除く)。複数の語頭子音があるときは優先順 `ROUNDED > SPREAD > NEUTRAL` で1つに決める。具体的な記号集合は
+  実 vpr と X-SAMPA・日本語音韻の標準で確定したインベントリに従い、`ROUNDED`/`SPREAD` の境界・ゲインは視覚で詰める。
+- **撥音「ん」**(後続母音を持たない単独の鼻音): 既定では「ん」イベントに、`--no-n-morph`(§4.2)指定時は
+  無音(閉口)イベントにする。撥音は閉じた鼻音なので口を開けた母音には倒さない。
+- **促音「っ」**: 無音(閉口)イベントにする(閉鎖・詰まりの見た目)。
+- **継続(伸ばし)記号、および母音を持たないその他の音符**(その他子音のみ・未知音素のみ・空など): 採用音符列を
+  時間順に組み立てる段階で**直前の口形を継続**し、直前の口形が無ければ無音(閉口)イベントにする。これにより
+  口が不自然に跳ねない。
+- **未知音素**: 診断に記録するが、それ自体では母音イベントを作らない(音素インベントリが未確定の間は
+  「自前イベントを作らないその他子音」と未知記号を区別せず、まとめて診断へ列挙する。§4.4)。
+- **間隙(休符/レガート間隙)**: 重複解決後の採用音符列の発音区間の補集合(本節冒頭で再導出)を、前後の
+  実効口形と間隙長から **レガート間隙(`LEGATO_GAP`、谷で繋ぐ)** か **休符(`SILENCE`、完全閉口)** へ分類する。
+  分類は隣り合う採用音符 i・i+1 の実効口形(継続「-」などで口形が直接定まらない音符は、組み立て段で直前の確定
+  口形へ解決した後の口形を用いる)と間隙長で決め、次の優先順位による:
+  1. 間隙が無い(隣接)→ 分類対象外(間隙イベントを置かない)。
+  2. 音符 i の実効終端口形 または 音符 i+1 の実効始端口形 が母音的(母音・撥音「ん」)でない(両唇閉鎖・促音閉口・
+     直前が閉口の継続など)→ `SILENCE`(閉口を優先)。
+  3. 間隙長 > `legato_max`(レガート間隙とみなす上限。初期は固定の 8.0 フレーム=8分音符相当の目安で、視覚で
+     詰める。テンポからの算出ではなく固定既定で、生成パラメータのテンポ補正の対象外)→ `SILENCE`。
+  4. それ以外(短く前後とも母音的)→ `LEGATO_GAP`。
+
+  曲頭(直前口形なし)は `SILENCE`。`lipsync` はこの確定済み分類結果を入力として受け、`LEGATO_GAP` を谷で描く
+  ([lipsync 仕様](../../libs/lipsync/lipsync.md) §4.12)。`vpr` には明示休符イベントが無いため、長さだけで分類せず前後の
+  口形も判定に用いる(レガートに歌う母音間の短い間隙を閉口で途切れさせない)。
+- **既定母音へのフォールバックは行わない**(母音が得られない音符を母音「あ」で開けない)。
+
+各音素記号がどのカテゴリ(母音/語頭両唇音/撥音/促音/継続/その他子音/未知)に属するかは、`vpr` の phoneme 表現に基づき
+実データと X-SAMPA・日本語音韻の標準で確定したインベントリに従い、実装者が独自判断しない。
+
+---
+
+## 4. コマンドライン仕様
+
+### 4.1 書式
+
+```text
+vpr2vmd INPUT [options]
+```
+
+`INPUT` は vpr ファイル。既定出力は `<入力名>.vmd`。
+
+### 4.2 主なオプション
+
+| 引数 | 既定 | 説明 |
+|---|---:|---|
+| `INPUT` | 必須 | 入力 vpr ファイル |
+| `-o, --output PATH` | `<入力名>.vmd` | 出力VMD |
+| `--overwrite` | off | 出力先が入力と同一パスになる指定を許可する。別パスの既存ファイルへの上書きは常に許すため、この指定は不要 |
+| `--track NAME\|INDEX` | 先頭トラック(`tracks[0]`) | 口パク対象の歌唱トラック。整数は 0-based の INDEX、非整数は `Track.name`。名前が複数一致・不一致・INDEX 範囲外はエラー |
+| `--model-name NAME` | 空 | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
+| `--style NAME` | `pop` | 口パクスタイルプリセット。`lipsync` の生成パラメータ(開き量レンジ・タイミング・誇張)を切り替える |
+| `--n-morph` | on | 撥音「ん」に「ん」モーフ(`MouthShape.N`)を使う(既定 on)。`--no-n-morph` の対の明示形 |
+| `--no-n-morph` | off(既定で「ん」モーフを使う) | 撥音「ん」に「ん」モーフを使わず、無音(閉口)に倒す。`--n-morph` の対 |
+| `--open-max V` | プリセット値 | 口の開き量の上限 |
+| `--default-open V` | プリセット値 | 全ノートのベロシティが一様で強弱差が無いときに全モーラへ用いる既定開き量(写像のアンカー) |
+| `--legato-max FRAMES` | 固定既定(8.0) | レガート間隙とみなす間隙長の上限(フレーム、正値) |
+| `--valley-shallow V` | プリセット値 | レガート谷の谷係数の上限(浅い側、0.0〜1.0) |
+| `--valley-deep V` | プリセット値 | レガート谷の谷係数の下限(深い側、0.0〜1.0)。下限>上限となる指定は引数エラー(コード2) |
+| `--valley-slope V` | プリセット値 | 間隙長1フレームあたりの谷係数の減少(0以上) |
+| `--coartic-overlap FRAMES` | プリセット値 | 協調調音の重なり上限(=基準長、1以上) |
+| `--anticipation FRAMES` | プリセット値 | 母音口形の先行準備フレーム数(0以上、0で無効) |
+| `--ref-bpm BPM` | 120 | テンポ補正の基準テンポ(正値) |
+| `--tempo-scale-min S` | 0.5 | テンポ補正の下げ止まり係数(0超〜1.0) |
+| `--dry-run` | off | 出力せず処理計画と診断を表示(§4.4) |
+| `-v, --verbose` | off | 通常実行でも処理計画と診断(§4.4 と同内容)を標準出力へ表示する(出力 VMD は書く)。機械モードでは標準出力をイベント専用に保つため、この人間向け表示は出さない |
+| `--machine` | off | 出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない(§7) |
+| `--describe` | off | vpr を読まずにオプション定義とスタイルプリセット一覧の result イベントを出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作(§7.3) |
+| `--version` | — | バージョン(`__init__.py` の `__version__`)を表示して終了する |
+
+CLIには口パクの「効かせ方」(プリセット選択と上限)と、視覚で詰める**調整パラメータの上書き**を置く。
+調整パラメータ(`--legato-max`・谷係数・`--coartic-overlap`・`--anticipation`・`--ref-bpm`・
+`--tempo-scale-min`)は未指定ならプリセット/固定既定を使う。適用順は**プリセット解決 → テンポ補正 →
+CLI 上書き**で、`--ref-bpm`/`--tempo-scale-min` はテンポ補正の入力、それ以外の生成パラメータ上書きは
+テンポ補正の後に最終値として効く(指定値がそのまま生成へ渡る)。`--legato-max` は生成パラメータでなく
+口形イベント確定段(間隙分類)の入力。`lipsync` の各生成パラメータの意味は
+[lipsync.md](../../libs/lipsync/lipsync.md) を正本とし、本書では重複定義しない。
+
+### 4.3 終了コード
+
+他CLIツールと同じ規約に従う。
+
+| コード | 意味 |
+|--:|---|
+| 0 | 正常終了(`--dry-run` の処理計画表示を含む) |
+| 1 | 入力不正(入力 vpr の欠落、または読み込み・形式検証の失敗(非vpr など)) |
+| 2 | 引数エラー(未知オプション、不正な値(`--style` の未知名・開き量レンジ外・`--model-name` の20バイト超過/Shift-JIS 非対応文字 など)、上書きガード(出力先が入力と同一パスになる指定を `--overwrite` 無しで指定)) |
+| 3 | 出力VMDの書き込み失敗 |
+| 130 | 協調的な中断(Ctrl-C 等。全ツール共通予約。§7.5) |
+
+非vpr 入力の判定は、内容(ZIPコンテナと `Project/sequence.json`)に基づく `vpr` の読み込み失敗を
+入力不正へ写すことで行い、拡張子では判定しない。
+
+判定順序は引数エラー(コード2)を入力不正(コード1)より先に評価する。上書きガードは出力先が入力と
+同一パスになる指定だけを拒否対象とし(別パスの既存出力ファイルは対象にせず上書きを許す)、入力の
+存在確認より先に行うため、入力と同一パスへの出力指定と入力 vpr の欠落が同時に起きる場合は、コード1
+ではなくコード2を返す。谷係数の下限>上限(プリセット既定と CLI 上書きの組み合わせを含む)も vpr
+内容に依らない引数エラーなので、存在確認・読み込みより先にコード2で弾く(`--dry-run` でも弾く)。
+
+対象トラック選択では、`--track` に指定された INDEX 範囲外・NAME 不一致・NAME 複数一致は、指定値が
+当該入力で有効な選択にならない引数エラー(コード2)へ写す。入力 vpr に対象トラックが1件も無い場合は、
+選ぶべきトラックが存在しない入力不正(コード1)へ写す。対象トラックを選択できた後に採用音符列が空に
+なる場合(選択トラックに発音が無い)はエラーにせず、正常終了(コード0)で空のモーフキー VMD を出力する。
+
+### 4.4 診断と警告
+
+`vpr2vmd` は変換の過程で得た統計と注意事項を診断として集約する。構造化レポート(json/csv 等)の
+ファイル出力は持たず、診断は次の経路で人間可読なテキストとして出す。
+
+- **`--dry-run`(標準出力)**: 出力VMDを書かず、処理計画(解決した入力・出力・対象トラック・スタイル・
+  調整パラメータの表示)に続けて診断要約を標準出力へ出す。
+  項目は次のとおり: 採用音符数・口形イベント数・モーフキー数・開き量統計(最小/最大/平均)・母音未確定
+  (母音が得られない音符)の件数・重複音符の除外件数および後続開始への切り詰め件数・自前の口形イベントを
+  作らない記号(その他子音・未知記号)の記号種と件数。
+- **`--verbose`(標準出力)**: 通常実行(出力VMDを書く)でも、上の `--dry-run` と同じ処理計画・診断要約を
+  標準出力へ出す。出力VMDの内容は `--verbose` の有無で変わらない。
+- **警告(標準エラー)**: 次を標準エラーへ出す(いずれもエラーではなく正常終了。コード0、§4.3)。
+  - `vpr` 読み込みが返す構造化警告(発音区間が重なる音符など)。同一(コード・メッセージ)の組は
+    1行に集約する。
+  - 対象トラックに有効な発音が無い(採用音符列が空)場合の警告。`--dry-run` の有無に依らず出す
+    (通常実行では空のモーフキー VMD を出力し、`--dry-run` では §4.2 のとおり出力VMDを書かない)。
+
+自前の口形イベントを作らない記号(§3 の「その他子音」と「未知音素」)は、各音素記号がどのカテゴリに
+属するかの確定が実 vpr のインベントリ確定に依る(§3 末尾)。インベントリが未確定の間は両者を区別せず、
+診断ではまとめて記号種・件数で列挙する(確定後は未知記号のみへ絞る)。
+
+---
+
+## 5. 入出力要件
+
+- 出力VMDの書き出しは `vmd.io` に委譲する。生成するのはモーフキーのみ。
+- 出力前に使用モーフを 0F に中立登録する(`ensure_frame0_neutral_keys`)→ フレーム順に正規化する(`normalize`)。
+  0F 中立キーの構築は形式層(`vmd`)の責務で、`vpr2vmd` は出力ポリシーとして出力前にこれを適用する。
+- ボーン・カメラ・照明・セルフ影セクションは空で出力する。
+- 文字列(モーフ名・モデル名)はShift-JIS(cp932)で格納する。
+- 時間軸は30fps基準(`vmd` 規約)。vpr のテンポに基づく時刻を30fpsフレームへ変換する。
+
+---
+
+## 6. vmd・lipsync・vpr との関係
+
+- vpr の解析は `vpr`、アニメ的口パクのキーフレーム生成は `lipsync`、VMDのモーフキー書き出しは
+  `vmd.io`。`vpr2vmd` はこれらを束ね、vpr 固有の入口処理(口形イベント確定・開き量)を担う。
+- モーフキーがキー間で線形評価される事実は [vmd-interp.md](../../libs/vmd/vmd-interp.md) が正本。
+- **時間軸の変換**: `vpr` は vpr の時間表現を tick(`resolution`=tick/四分音符)とテンポマップで渡す。
+  秒/30fpsフレームへの変換(`resolution` とテンポマップの積分。拍子は用いない)は `vpr2vmd` 入口で行う。
+
+---
+
+## 7. 機械モード(機械可読インターフェース)
+
+機械モードは、他のソフトウェアが `vpr2vmd` を子プロセスとして呼ぶための構造化出力を提供する。
+共通契約(イベント種別の語彙・終端規則・チャネル固定・stdout の UTF-8/LF 固定・終了コードの基底)は
+規約 [cli-interface.md](../../docs/conventions/cli-interface.md) §3〜§6・§8・§10 と、共有基盤
+[cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は `vpr2vmd` 固有のイベント
+ペイロードと `code` 値だけを定める。イベント送出は cli_events の `EventEmitter` を用いる。
+
+`vpr2vmd` は入力解析からモーフキー生成までが短時間で完了し、抑制対象の進捗表示を持たないため、
+progress イベント・`--quiet` は導入しない(将来重い段が生じたら規約 §4.1 の後方互換追加として
+導入できる)。
+
+### 7.1 チャネルと終端
+
+- **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 §3。`--describe` は人間向け
+  既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定してエミッタと
+  `MachineArgumentParser`(§7.4)を使い、使用法エラー・想定外エラーも error イベントで終端する
+  (例: `--describe` と未知オプションの併用も `bad_argument` イベント+終了コード 2)。
+- 構造化出力モードの標準出力は §7.2 のイベントのみ。エミッタ(`cli_events.EventEmitter`)はバイナリ
+  標準出力(`sys.stdout.buffer`)へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない
+  (規約 §10)。
+- 人間向け標準エラーは `sys.stderr.reconfigure(errors="backslashreplace")` で符号化失敗時もプロセスを
+  落とさない(規約 §10。機械モードに限らず常に適用する)。
+- ストリームは result または error のちょうど 1 つで終端する。終端は `main()` の単一経路で送出し、
+  終端後の送出はしない(cli_events が `StreamTerminatedError` で拒否する)。
+- `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベント
+  ストリームには載せない(規約 §3 のメタ操作の例外)。
+- イベント契約の進化は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
+  受信側は未知要素を無視できる前提)。
+
+### 7.2 イベントペイロード
+
+- **warning**: `{type:"warning", code, message, section, track_index, part_index, note_index,
+  related_note_index, tick}`。`section` は VMD セクション概念が vpr 入力に無いため常に `null`。
+  後半 5 キーは vpr 内の位置(該当が無ければ `null`)。割り当て:
+  - `vpr` 読み込みの警告は `VprWarning` の `code`(現行値 `overlapping_notes`)・`message`・位置
+    (`track_index`/`part_index`/`note_index`/`related_note_index`/`tick`)をそのまま透過する。機械
+    モードは 1 警告 1 イベント、非機械は code・message の同一組を 1 行に集約して標準エラーへ出す。
+  - 採用音符列が空(対象トラックに有効な発音が無い): `no_adopted_notes`、位置キーは全て `null`。
+    エラーにせず正常終了する(通常実行は空のモーフキー VMD を出力する)。
+- **result**: 正常終了の終端イベント。`mode` で形が決まる:
+  - `mode:"convert"`(通常実行): `{type:"result", mode:"convert", output, track_index, track_name,
+    morph_keys, adopted_notes, mouth_events}`。`output` は書き出しパス(文字列)、`track_index`/
+    `track_name` は解決した対象トラック(0-based と名前)、`morph_keys` は出力 VMD のモーフキー数
+    (0F 中立登録・正規化後)、`adopted_notes` は採用音符数、`mouth_events` は口形イベント数。
+  - `mode:"inspect"`(入力検査 `--machine --dry-run`): vpr を読み変換を行うが VMD を書かず
+    `{type:"result", mode:"inspect", output:null, input_kind:"vpr", track_index, track_name, style,
+    n_morph, model_name, params, adopted_notes, mouth_events, morph_keys, open_amounts,
+    vowel_undetermined, overlap_excluded, overlap_truncated, non_event_symbols}` を出す。
+    `params` は解決済みの最終値(スタイルプリセット解決 → テンポ補正 → CLI 上書き適用後)の
+    `{open_max, default_open, legato_max, valley_shallow, valley_deep, valley_slope, coartic_overlap,
+    anticipation, ref_bpm, tempo_scale_min, representative_bpm}`(`representative_bpm` は採用音符列と
+    テンポマップから求めた代表 BPM)。`open_amounts` は採用音符別開き量の `{min, max, mean}`
+    (採用 0 件なら `null`)。`vowel_undetermined` は母音未確定件数、`overlap_excluded`/
+    `overlap_truncated` は重複音符の除外・切り詰め件数、`non_event_symbols` は自前の口形イベントを
+    作らない記号の `{記号: 件数}` オブジェクト(§4.4 の診断と同じ素データ)。
+  - `mode:"describe"`(自己記述 `--describe`): `{type:"result", mode:"describe", options, presets}`
+    (§7.3)。vpr を読まないので他 mode のキーは載せない。
+- **error**: `{type:"error", code, exit_code, field, path, message}`。`field`/`path` は対象が無ければ
+  `null`。失敗の終端イベント(§7.4)。
+
+### 7.3 `--describe` の中身
+
+`options` は処理を駆動する引数の配列(メタ/モード操作 `--describe`/`--version`/`--help`/`--machine` は
+含めない)。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、該当しない値は
+`null`)。`type` は固定語彙 `"float"`/`"int"`/`"str"`/`"flag"`/`"enum"`。数値の `constraint` は
+`{min, max, exclusive_min}` の 3 キー常設(上限が無ければ `max:null`)、`enum` は `{choices:[...]}`、
+`flag`/`str` は `null`(`--model-name` の cp932・20 バイト制約と `--track` の INDEX/NAME 二義は
+文字列制約のため `help` に記す)。`help` は §4.2 のヘルプ文言。真偽フラグの対
+(`--n-morph`/`--no-n-morph`)は**肯定形の長形式 1 要素だけ**を載せる(型 `flag`。無効化の起動形は
+名前に `--no-` を前置した否定形。規約 §6 の `--x/--no-x` 様式。呼び出し側は `default` が `true` の
+フラグを無効化するとき否定形を発行する)。否定形を別要素として重複列挙しない。全 19 要素を確定する:
+
+| name | type | constraint | default |
+|---|---|---|---|
+| `input` | str | null | null |
+| `--output` | str | null | null(既定は入力名由来 `<入力名>.vmd` の算出値。規則は help に記す) |
+| `--overwrite` | flag | null | false |
+| `--track` | str | null | null(既定は先頭トラック) |
+| `--model-name` | str | null | `""` |
+| `--style` | enum | `{choices:["pop","ballad","powerful","whisper","rap"]}` | `"pop"` |
+| `--n-morph` | flag | null | true |
+| `--open-max` | float | `{min:0, max:1, exclusive_min:false}` | null(プリセット値) |
+| `--default-open` | float | `{min:0, max:1, exclusive_min:false}` | null(プリセット値由来の解決既定) |
+| `--legato-max` | float | `{min:0, max:null, exclusive_min:true}` | 8.0(固定既定) |
+| `--valley-shallow` | float | `{min:0, max:1, exclusive_min:false}` | null(プリセット値) |
+| `--valley-deep` | float | `{min:0, max:1, exclusive_min:false}` | null(プリセット値) |
+| `--valley-slope` | float | `{min:0, max:null, exclusive_min:false}` | null(プリセット値) |
+| `--coartic-overlap` | int | `{min:1, max:null, exclusive_min:false}` | null(プリセット値) |
+| `--anticipation` | int | `{min:0, max:null, exclusive_min:false}` | null(プリセット値) |
+| `--ref-bpm` | float | `{min:0, max:null, exclusive_min:true}` | 120 |
+| `--tempo-scale-min` | float | `{min:0, max:1, exclusive_min:true}` | 0.5 |
+| `--dry-run` | flag | null | false |
+| `--verbose` | flag | null | false |
+
+`presets` は各要素 `{name, values}` の配列。`name` はスタイル名(`pop`/`ballad`/`powerful`/`whisper`/
+`rap`)、`values` は CLI で上書き可能なパラメータのプリセット解決値
+`{open_max, default_open, valley_shallow, valley_deep, valley_slope, coartic_overlap, anticipation}`
+(presets モジュールの解決から機械導出する。`default_open` は未指定時の解決既定=開き量レンジ中央。
+開き量レンジ・タイミング・誇張など CLI 非公開の内蔵パラメータは載せない)。
+
+### 7.4 構造化エラー
+
+失敗は終了コードに加え、構造化出力モード(`--machine`・`--describe`。§7.1)では error イベントで
+「どのフィールド/パスが・なぜ」を返す。それ以外では理由を標準エラーへ最低 1 行出す(書式
+`error: <message>`。トレースバックは出さない)。判定順序は §4.3 のとおり。
+
+| 事象 | `code` | `field` | `exit_code` |
+|---|---|---|---|
+| argparse 検出(未知オプション・型/範囲エラー(開き量 0〜1・`--legato-max` 正値・谷係数 0〜1・`--valley-slope` 非負・`--coartic-overlap` 1 以上・`--anticipation` 非負・`--ref-bpm` 正値・`--tempo-scale-min` 0 超〜1・`--model-name` の cp932/20 バイト))、および describe 以外での `input` 欠落(`main()` 検査) | `bad_argument` | argparse が示す引数名、`input` 欠落は `"input"` | 2 |
+| 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
+| 解決後の谷係数が下限>上限(プリセット既定と CLI 上書きの組み合わせ) | `valley_bounds_inverted` | `null`(2 オプションとプリセットにまたがる。値は `message` に載る) | 2 |
+| `--track` の INDEX 範囲外・NAME 不一致・NAME 複数一致(`TrackSelectionError`) | `bad_track` | `"--track"` | 2 |
+| 入力パスが不在・通常ファイルでない | `input_not_found` | `"input"` | 1 |
+| 読み込み・形式検証の失敗(非 vpr。`VprFormatError`) | `not_vpr` | `"input"` | 1 |
+| 入力 vpr にトラックが 1 件も無い | `no_tracks` | `"input"` | 1 |
+| 出力書き込み失敗(`OSError`) | `write_failed` | `"--output"`(+ `path`) | 3 |
+| 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
+| 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
+
+- `not_vpr` は例外の文言を `message` に載せる。
+- 構造化出力モードの argparse エラーは `cli_events.MachineArgumentParser` で `ArgumentParseError` に
+  振り替え、`argparse_error_event` で `bad_argument` イベントにする。`field` の抽出は共有ヘルパ
+  `cli_events.argparse_error_field(message)` を使う(抽出規則は
+  [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正)。
+- `internal_error` は引数解析後の本体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
+  なく中断(`cancelled`/130)として手前で分岐する(§7.5)。
+
+### 7.5 中断と出力の原子性
+
+- VMD 出力は `vmd.io.write_file` の一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
+  起きるため、途中終了で中途半端な出力ファイルは残らない。
+- `main()` は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
+  error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130
+  で終える。POSIX シグナル API には依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む(`vpr2vmd` は
+  単一プロセスで走り、子プロセスは持たない)。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の終端保証の
+  唯一の例外。規約 §8)。出力の原子性により中途半端な出力ファイルは残らない。

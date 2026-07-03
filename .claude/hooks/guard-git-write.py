@@ -4,7 +4,11 @@
 Only these forms pass silently:
 
     git add -- <explicit-file>...
-    git commit -m <message>
+    git commit -m <message>          (subject line must contain a Japanese character)
+
+The commit subject (first line of the message) must hold at least one Hiragana/Katakana/Kanji:
+the repo's commit subjects are Japanese by convention, so an English-only (ASCII-only) subject is
+denied here and the worker redrafts in Japanese.
 
 Every recognized add/commit form other than these is denied, so the agent retries with the
 regular form instead of asking the user for permission. A form this hook does not recognize as
@@ -30,6 +34,10 @@ from pathlib import Path
 
 CONTROL_CHARS = ";&|<>\n"
 GLOB_CHARS = "*?[]{}"
+# A commit subject counts as Japanese if it holds one Hiragana (U+3040-309F), Katakana
+# (U+30A0-30FF), or Kanji (CJK Ext-A U+3400-4DBF and Unified U+4E00-9FFF). Japanese punctuation
+# alone does not qualify -- an English subject with a stray full-width comma should still be denied.
+JAPANESE_CHAR = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
 TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
 # Process wrappers that run the FOLLOWING command. Claude Code strips a documented set of these
 # before matching a command against the allow list, so e.g. `time git commit --amend` would
@@ -47,6 +55,8 @@ GIT_VALUE_OPTIONS = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace",
     "--super-prefix", "--exec-path", "--config-env",
 }
+# Global options that move git off the current repo/worktree (never needed: cwd is the repo root).
+REPOSITION_OPTIONS = {"-C", "--git-dir", "--work-tree"}
 
 
 def _has_shell_syntax(text):
@@ -150,6 +160,39 @@ def _mentions_reset(tokens):
     return False
 
 
+def _mentions_repositioned_git(tokens):
+    """True when a git invocation uses a global -C/--git-dir/--work-tree reposition.
+
+    Mirrors _mentions_target's prefix analysis. The settings `git -C *` deny only matches the
+    command start, so this closes the chained/prefixed form (`cd /f && git -C <abs> status`). A
+    subcommand-level -C (`git log -C`) sits after the subcommand, not in the global run, so it is
+    not matched.
+    """
+    for index, token in enumerate(tokens):
+        if not _is_git(token):
+            continue
+        repositioned = False
+        pos = index + 1
+        while pos < len(tokens) and tokens[pos].startswith("-"):
+            option = tokens[pos].split("=", 1)[0]
+            if option in REPOSITION_OPTIONS or option.startswith("-C"):
+                repositioned = True  # -C, --git-dir, --work-tree, and glued -C<path>
+            pos += 1
+            if option in GIT_VALUE_OPTIONS and "=" not in tokens[pos - 1]:
+                pos += 1
+        if not repositioned:
+            continue
+        prefix = tokens[:index]
+        if (
+            index == 0
+            or not _is_plain_git(token)
+            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
+            or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
+        ):
+            return True
+    return False
+
+
 def _tracked_file(root, path):
     """True only when path exactly names one tracked file, including a deletion."""
     relative = path.relative_to(root).as_posix()
@@ -212,6 +255,9 @@ def classify(command, root=None):
     if _mentions_reset(tokens):
         return "deny", "git reset is denied; ask the user to add an allow rule if truly needed"
 
+    if _mentions_repositioned_git(tokens):
+        return "deny", "Run git from the repository cwd; drop -C/--git-dir/--work-tree"
+
     plain_target = (
         len(tokens) >= 2
         and _is_plain_git(tokens[0])
@@ -226,13 +272,19 @@ def classify(command, root=None):
 
     args = tokens[2:]
     root = root or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    safe = _safe_add(args, root) if tokens[1] == "add" else _safe_commit(args)
-    if safe:
+    if tokens[1] == "commit":
+        if not _safe_commit(args):
+            return "deny", "Retry with git commit -m <message>"
+        subject = args[1].split("\n", 1)[0]
+        if not JAPANESE_CHAR.search(subject):
+            return "deny", (
+                "Commit subject must be Japanese (repo convention): the first line has no "
+                "Japanese character. Redraft the subject in Japanese and retry."
+            )
         return "pass", None
-    return "deny", (
-        "Retry with git add -- <explicit-file>... or "
-        "git commit -m <message>"
-    )
+    if _safe_add(args, root):
+        return "pass", None
+    return "deny", "Retry with git add -- <explicit-file>..."
 
 
 def main():
@@ -265,7 +317,11 @@ def selftest():
         ("git add -- C:/outside.py", "deny"),
         ("git add -- missing-file.py", "deny"),
         ("git commit -m '件名\n\n本文 $5 `literal` > text'", "pass"),
-        ("git commit -m 'it'\\''s fixed'", "pass"),
+        ("git commit -m 'it'\\''s 修正済み'", "pass"),
+        ("git commit -m 'ガード追加\n\nadd english body'", "pass"),
+        ("git commit -m 'Add CHANGELOG validation'", "deny"),
+        ("git commit -m 'English subject\n\n日本語本文'", "deny"),
+        ("git commit -m 'v0.2.0'", "deny"),
         ("git add", "deny"),
         ("git add .", "deny"),
         ("git add -A", "deny"),
@@ -301,6 +357,15 @@ def selftest():
         ("cd repo && git reset --hard", "deny"),
         ("echo git reset", "pass"),
         ("echo 'git reset --hard'", "pass"),
+        ("cd /f && git -C /f/Repositories/Skyflash/mmd-toolbox status --short", "deny"),
+        ("git -C repo status", "deny"),
+        ("git -C. status", "deny"),
+        ("git --git-dir=.git --work-tree=. status", "deny"),
+        ("git --work-tree /x status", "deny"),
+        ("VAR=x git -C repo status", "deny"),
+        ("git log -C", "pass"),
+        ("git -c user.name=x status", "pass"),
+        ("echo git -C repo status", "pass"),
         ("git restore --staged a.py", "pass"),
         ("git status --short", "pass"),
         ("git diff --staged -- a.py", "pass"),

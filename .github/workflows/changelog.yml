@@ -1,0 +1,15 @@
+name: changelog
+
+on:
+  pull_request:
+
+jobs:
+  changelog-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate CHANGELOG
+        run: python3 .github/scripts/check_changelog.py --base "${{ github.base_ref }}"

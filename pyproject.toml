@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmd-toolbox"
-version = "0.0.1"
+version = "2026.7.3"
 description = "MikuMikuDance 向けユーティリティツール群"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,15 +18,18 @@ dev = [
 ]
 
 [project.scripts]
+mocapvmd = "mocapvmd.cli:main"
 shakevmd = "shakevmd.cli:main"
 sparsevmd = "sparsevmd.cli:main"
+vpr2vmd = "vpr2vmd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mmd_toolbox*", "shakevmd*", "sparsevmd*"]
+where = ["libs", "tools"]
+include = ["cli_events*", "lipsync*", "pmx*", "vmd*", "vpr*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr2vmd*"]
 
 [tool.pytest.ini_options]
-testpaths = ["mmd_toolbox", "shakevmd", "sparsevmd"]
-pythonpath = ["."]
+testpaths = ["libs/cli_events", "libs/lipsync", "libs/pmx", "libs/vmd", "libs/vpr", "tools/mocapvmd", "tools/shakevmd", "tools/sparsevmd", "tools/vpr2vmd"]
+pythonpath = ["libs", "tools"]
 # 各ツールの tests に同名テストファイル(test_cli.py 等)があるため、basename 衝突を
 # 避ける importlib インポートモードを使う(prepend 既定だと collection で衝突する)。
 addopts = "--import-mode=importlib"

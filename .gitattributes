@@ -1,6 +1,10 @@
 # テキストは改行コードを自動正規化(リポジトリ内はLF)
 * text=auto
 
+# git フックは必ず LF でチェックアウトする(core.autocrlf=true でも CRLF 化させない)。
+# CRLF だと shebang が python3\r 解決失敗となりフックが無言で起動しなくなる。
+.githooks/commit-msg text eol=lf
+
 # MMDバイナリファイル(テストデータ等)。
 # バイト一致のラウンドトリップ保証があるため、改行変換・diffの対象にしない
 *.vmd binary
