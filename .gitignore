@@ -62,3 +62,8 @@ venv/
 # 個人用設定。共有用の CLAUDE.md / .claude/settings.json はコミット対象
 CLAUDE.local.md
 .claude/settings.local.json
+
+### プロジェクト固有: 一時スクリプト置き場 ###
+# 使い捨ての計測・検証スクリプトの置き場(run-and-bench スキルが正)。
+# ここに置けば git add が物理的に失敗し、誤コミットを構造的に防げる。
+/.scratch/
