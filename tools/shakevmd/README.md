@@ -115,3 +115,7 @@ shakevmd <入力ファイル名>.vmd -o <出力ファイル名>.vmd --range 120:
 `--quiet` を付けても出さない。
 
 さらに細かい仕様を確認したい場合は [shakevmd.md](shakevmd.md) を参照。
+
+## 変更履歴
+
+リリースごとの変更点は [CHANGELOG.md](CHANGELOG.md) を参照。
