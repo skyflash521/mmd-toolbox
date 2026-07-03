@@ -20,9 +20,24 @@
   - S2: `transformers`(Apache-2.0)+ 音素モデル `facebook/wav2vec2-lv-60-espeak-cv-ft`(Apache-2.0)。
     `torch` は S1 と共有。
   - S3: `numpy/scipy`(外部ツールに依存しない)。
-- 音素→5母音写像(vocal_analysis.md §7)は**共有モジュール**として実装する。VOCALOID(X-SAMPA)系は `vpr2vmd`
-  が既に実装済み(`tools/vpr2vmd/phonemes.py`)のため、これを `libs/vocal_analysis` へ移して `vpr2vmd` とゲートが
-  共用する。
+- 音素→5母音写像(vocal_analysis.md §7)は**共有モジュール**として実装する。§7.2 の共有規則は、正規の
+  X-SAMPA音素記号(母音・子音)を母音(a/i/u/e/o)・子音(c)へ写像する関数として A-5 が完全に提供する
+  (母音表に一致すればその母音、しなければ子音 c。休符 sil は音素記号でなく vpr の休符導出から別途得る。
+  §9.2)。`tools/vpr2vmd/phonemes.py` の `vowel_shape()` が持つ母音記号テーブルがそのまま使える。
+  **vpr の「-」(継続。直前の音素を伸ばす印。`phonemes.py` の `PhonemeCategory.CONTINUATION`)はこの写像の
+  入力対象外**: 継続記号は音素記号そのものではなく「この音符には新しい音素が無い」という音符列レベルの
+  注記であり、どの音素を指すかは直前の音符の音素という文脈でしか決まらない。継続記号を実際の音素記号へ
+  解決する処理(直前音素の継承)はラベル生成側(§9.2・A-G)が音符列を辿って行い、解決済みの実音素記号を
+  A-5 の写像関数へ渡す(A-5 の写像関数自体は「-」を特別扱いしない)。
+  **`vpr2vmd/phonemes.py` を丸ごと移す訳ではない**: 同ファイルの `categorize()`/`consonant_class()`
+  (両唇閉鎖・撥音・促音・継続の判定、唇の丸め/広がりの判定。`lipsync.MouthShape`/`ConsonantClass` を
+  引数・戻り値に使う)は口形イベント確定そのもので、vocal_analysis.md §10 が利用先(口パク生成系の入口)の
+  責務と定める範囲であり、共有ドメイン層の `vocal_analysis` には持ち込まない。移すのは母音記号テーブル
+  (母音記号→母音文字 a/i/u/e/o。`lipsync` 型に依存しない形)だけとし、`vpr2vmd` は移した先の判定関数を
+  呼んで自身の `MouthShape` へ変換する(写像表の二重管理を避ける。§7.2)。`vpr2vmd` 側の `categorize()`/
+  `consonant_class()` のロジックと、それが使う `lipsync.MouthShape`/`ConsonantClass` への依存はそのまま
+  `vpr2vmd` に残る(`vpr2vmd` 自身が定義する `PhonemeCategory` も同様。`ConsonantClass` はもともと
+  `lipsync` 側の定義で、この移管の影響を受けない)。
 - S-1ゲートの vpr由来ラベル生成は [vpr](../vpr/vpr.md) を読む(tick→秒変換はラベル生成側の責務)。
 
 ---
@@ -40,7 +55,7 @@
 | A-2 | S1 ボーカル抽出(`demucs.api`、`shifts=0`、Separator 抽象、mode 解釈。§4・§8.1) | S0出力(正規化PCM・ステレオ)からボーカルWAVを出力。決定論 |
 | A-3 | S2 音素認識(Recognizer 抽象。16kHz monoへ変換 → 母音/子音/gap の全被覆セグメント列＋IPAラベル。CTC区間化 §5.1) | 全時間軸を重複・欠落なく被覆。母音/子音は音素ラベルと任意信頼度。CTC区間化済み |
 | A-4 | S3 強弱RMS(§6.1。相対正規化=パーセンタイル、入力ゲイン不変) | ミックス全体の一様ゲイン差でRMSが不変。相対強度へ正規化 |
-| A-5 | 音素→5母音写像(§7。共有モジュール) | 母音IPAを a/i/u/e/o へ完全一致テーブルで写像。表に無い・判定不能は gap(決定論的)。X-SAMPA系は vpr2vmd から移管した共有実装を使う |
+| A-5 | 音素→5母音写像(§7。共有モジュール) | **IPA写像(§7.1)**: 母音IPAを a/i/u/e/o へ完全一致テーブルで写像。表に無い・判定不能は gap(決定論的)。**X-SAMPA写像(§7.2)**: 正規の音素記号を母音(a/i/u/e/o)・子音(c)へ写像(gap は使わない。母音表に一致すればその母音、しなければ c)。母音記号テーブルは vpr2vmd の vowel_shape() から移した共有実装を使い、vpr2vmd はそれを呼んで自身の MouthShape へ変換する(categorize()/consonant_class() は口形イベント確定として vpr2vmd に残す) |
 | A-G | S-1 認識ゲート(§9)。代表データで母音正解率・境界ずれ等を測り受入基準を判定 | §9 の受入基準を満たす。満たさなければ Julius 等を評価して認識器を確定 |
 
 依存関係: A-2/A-3 は A-1 の出力に依存。A-4 は A-2 の出力(ボーカルWAV。§6)に、A-5 は A-3 の出力
@@ -78,8 +93,9 @@ A-5(写像)を用い、`vpr` の read(vpr由来ラベル生成)を使える。
   必要ディスク/RAM・CPU実行時間は実測でしか決められないため、A-3 で計測して確定する。
 - 決定論: 外部ツール(分離・認識)の非決定性。Demucs `shifts=0`、スレッド/シード固定で可能な範囲に収める。
 - Demucs 保守終了: adefossez fork を版固定。将来、保守活発な audio-separator への切り替え余地。
-- 共有モジュール化(写像): `vpr2vmd` の X-SAMPA→母音/カテゴリ実装を共有モジュールへ移す際、`vpr2vmd` の既存
-  テストが回帰しないこと(参照の置き換えのみで挙動を変えない)。
+- 共有モジュール化(写像): `vpr2vmd` の母音記号テーブル(`vowel_shape()`)を共有モジュールへ移す際、`vpr2vmd`
+  の既存テストが回帰しないこと(参照の置き換えのみで挙動を変えない)。`categorize()`/`consonant_class()`
+  (口形イベント確定)は移さず `vpr2vmd` に残すため、この移管の影響範囲外。
 
 ---
 
