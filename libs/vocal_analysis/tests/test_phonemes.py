@@ -6,10 +6,6 @@ espeak IPA(wav2vec2 が返す母音セグメントの音素記号)を5母音 a/i
 
 import pytest
 
-# vocal_analysis.phonemes が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis.phonemes", strict=True)
-
 
 @pytest.mark.parametrize(
     "symbol,expected",
