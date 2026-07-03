@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmd-toolbox"
-version = "2026.6.29"
+version = "2026.7.3"
 description = "MikuMikuDance 向けユーティリティツール群"
 requires-python = ">=3.11"
 dependencies = [
