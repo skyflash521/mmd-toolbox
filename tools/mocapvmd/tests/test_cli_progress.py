@@ -76,7 +76,7 @@ def test_stages_wired_reduce_update_and_completion(tmp_path, monkeypatch):
     _curve_doc(src)
     assert cli.main([str(src), "-o", str(out)]) == 0
     rep = _RecordingReporter.instances[-1]
-    assert [e[1] for e in rep.events if e[0] == "stage"] == ["平滑化", "足IK最適化", "キーフレーム圧縮"]
+    assert [e[1] for e in rep.events if e[0] == "stage"] == ["ノイズ軽減", "足IK接地安定化", "キーフレーム圧縮"]
     assert any(e[0] == "update" for e in rep.events)  # 疎化(キーフレーム圧縮)が update を呼ぶ
     assert ("close",) in rep.events
     assert rep.events[-1] == ("summary", f"完了 {out}")  # 書き込み後に完了行を出す

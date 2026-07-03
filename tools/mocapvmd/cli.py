@@ -57,15 +57,15 @@ def _build_parser(machine=False):
     p.add_argument("--overwrite", action="store_true",
                    help="入力と同一パスへの出力を許可する(未指定で同一パスならエラー)")
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="medium",
-                   help="疎化の許容誤差プリセット(速度観点): slower/slow/medium/fast/faster。種別スケールの基準値")
+                   help="キーフレーム圧縮の許容誤差プリセット(速度観点): slower/slow/medium/fast/faster。種別スケールの基準値")
     p.add_argument("--clean-strength", dest="clean_strength", type=float, default=1.0,
-                   help="クリーニング強度の倍率(ブレンド率に掛ける。0で無加工相当、上げるほど強く均す。窓幅は据え置き)")
+                   help="ノイズ軽減の効き量の倍率(ブレンド率に掛ける。0で無加工相当、上げるほど強く均す。窓幅は据え置き)")
     p.add_argument("--denoise", dest="denoise", action="store_true", default=True,
-                   help="一般ノイズ軽減を有効化(既定 on)")
+                   help="ノイズ軽減を有効化(既定 on)")
     p.add_argument("--no-denoise", dest="denoise", action="store_false",
-                   help="一般ノイズ軽減を無効化")
+                   help="ノイズ軽減を無効化")
     p.add_argument("--denoise-mode", dest="denoise_mode", choices=("bone", "pose"), default="bone",
-                   help="一般ノイズ軽減の方式: bone(ボーン単位)/ pose(表現空間)")
+                   help="ノイズ軽減の方式: bone(ボーン単位)/ pose(MMDで実際に見える動き=表現空間で評価)")
     p.add_argument("--pmx", dest="pmx", default=None,
                    help="pose 方式が参照するモデルPMX(未指定時は内蔵の既定モデルプロファイル)")
     p.add_argument("--foot-ik-stabilize", dest="foot_ik_stabilize", action="store_true", default=True,
@@ -75,15 +75,15 @@ def _build_parser(machine=False):
     p.add_argument("--foot-slide-suppression", dest="foot_slide_suppression", type=float, default=1.0,
                    help="足IK接地中の横滑り抑制の強さ(0〜1)。既定1.0は接地中の横滑りを除去する")
     p.add_argument("--reduce-error-bone-pos", dest="reduce_error_bone_pos", type=float, default=None,
-                   help="疎化の位置許容誤差の基準値(MMD単位)。明示値はプリセットに優先。種別スケールを掛ける")
+                   help="キーフレーム圧縮の位置許容誤差の基準値(MMD単位)。明示値はプリセットに優先。種別スケールを掛ける")
     p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=float, default=None,
-                   help="疎化の回転許容誤差の基準値(度)。明示値はプリセットに優先。種別スケールを掛ける")
+                   help="キーフレーム圧縮の回転許容誤差の基準値(度)。明示値はプリセットに優先。種別スケールを掛ける")
     p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier",
                    help="出力補間曲線: bezier / linear")
     p.add_argument("--reduce", dest="reduce", action="store_true", default=True,
-                   help="疎化を有効化(既定 on)。クリーニング後の信号を疎なキー+ベジェ補間で出力する")
+                   help="キーフレーム圧縮を有効化(既定 on)。少ないキー+ベジェ補間で出力する")
     p.add_argument("--no-reduce", dest="reduce", action="store_false",
-                   help="疎化せずクリーニング後の密キー(線形補間)を出力する(診断・比較用)")
+                   help="キーフレームを圧縮せず、圧縮前の密キー(線形補間)を出力する(診断・比較用)")
     p.add_argument("--list-bones", dest="list_bones", action="store_true",
                    help="ボーン一覧と分類結果を表示して終了する")
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
@@ -513,9 +513,8 @@ def _run(args, machine, emitter, fail):
 
     # クリーニング → 足IK安定化 → 疎化のパイプライン。dry-run でも疎化レポート(§4.4)の素データを得るため
     # 実行し、出力の書き出しだけを dry-run で省く。進捗は機械モードで progress イベント(端末非依存)、
-    # 非機械は端末時のライブ表示(--quiet で無効)。段ラベルは利用者向けの平易な文言にする(平滑化=
-    # クリーニング、足IK最適化=足IK安定化、キーフレーム圧縮=疎化)。例外時もハートビートを止め行を消す
-    # ため try/finally で囲む。
+    # 非機械は端末時のライブ表示(--quiet で無効)。段ラベルは利用者向けの工程名を使う(§3.2。対応表は
+    # docs/conventions/terminology.md)。例外時もハートビートを止め行を消すため try/finally で囲む。
     reporter = progress.ProgressReporter(sys.stderr, enabled=False if (args.quiet or machine) else None)
     # dry-run / verbose のときだけ診断素データを集める(通常実行のオーバーヘッドを避ける)。
     want_report = args.dry_run or args.verbose
@@ -526,7 +525,7 @@ def _run(args, machine, emitter, fail):
             if machine:
                 emitter.progress(stage="denoise", done=0, total=None, note="", elapsed=0.0)
             else:
-                reporter.stage("平滑化")
+                reporter.stage("ノイズ軽減")
             if args.denoise_mode == "pose":
                 # 表現空間ノイズ除去。PMX形式不正・モデルプロファイル不正は入力不正(§10.4)。
                 try:
@@ -544,7 +543,7 @@ def _run(args, machine, emitter, fail):
             if machine:
                 emitter.progress(stage="foot_ik", done=0, total=None, note="", elapsed=0.0)
             else:
-                reporter.stage("足IK最適化")
+                reporter.stage("足IK接地安定化")
             new_bone = _stabilize_bones(new_bone, args.foot_slide_suppression)
         if args.reduce:
             if machine:
