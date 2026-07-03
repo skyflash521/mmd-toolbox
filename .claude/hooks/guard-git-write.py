@@ -4,7 +4,11 @@
 Only these forms pass silently:
 
     git add -- <explicit-file>...
-    git commit -m <message>
+    git commit -m <message>          (subject line must contain a Japanese character)
+
+The commit subject (first line of the message) must hold at least one Hiragana/Katakana/Kanji:
+the repo's commit subjects are Japanese by convention, so an English-only (ASCII-only) subject is
+denied here and the worker redrafts in Japanese.
 
 Every recognized add/commit form other than these is denied, so the agent retries with the
 regular form instead of asking the user for permission. A form this hook does not recognize as
@@ -30,6 +34,10 @@ from pathlib import Path
 
 CONTROL_CHARS = ";&|<>\n"
 GLOB_CHARS = "*?[]{}"
+# A commit subject counts as Japanese if it holds one Hiragana (U+3040-309F), Katakana
+# (U+30A0-30FF), or Kanji (CJK Ext-A U+3400-4DBF and Unified U+4E00-9FFF). Japanese punctuation
+# alone does not qualify -- an English subject with a stray full-width comma should still be denied.
+JAPANESE_CHAR = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
 TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
 # Process wrappers that run the FOLLOWING command. Claude Code strips a documented set of these
 # before matching a command against the allow list, so e.g. `time git commit --amend` would
@@ -264,13 +272,19 @@ def classify(command, root=None):
 
     args = tokens[2:]
     root = root or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    safe = _safe_add(args, root) if tokens[1] == "add" else _safe_commit(args)
-    if safe:
+    if tokens[1] == "commit":
+        if not _safe_commit(args):
+            return "deny", "Retry with git commit -m <message>"
+        subject = args[1].split("\n", 1)[0]
+        if not JAPANESE_CHAR.search(subject):
+            return "deny", (
+                "Commit subject must be Japanese (repo convention): the first line has no "
+                "Japanese character. Redraft the subject in Japanese and retry."
+            )
         return "pass", None
-    return "deny", (
-        "Retry with git add -- <explicit-file>... or "
-        "git commit -m <message>"
-    )
+    if _safe_add(args, root):
+        return "pass", None
+    return "deny", "Retry with git add -- <explicit-file>..."
 
 
 def main():
@@ -303,7 +317,11 @@ def selftest():
         ("git add -- C:/outside.py", "deny"),
         ("git add -- missing-file.py", "deny"),
         ("git commit -m '件名\n\n本文 $5 `literal` > text'", "pass"),
-        ("git commit -m 'it'\\''s fixed'", "pass"),
+        ("git commit -m 'it'\\''s 修正済み'", "pass"),
+        ("git commit -m 'ガード追加\n\nadd english body'", "pass"),
+        ("git commit -m 'Add CHANGELOG validation'", "deny"),
+        ("git commit -m 'English subject\n\n日本語本文'", "deny"),
+        ("git commit -m 'v0.2.0'", "deny"),
         ("git add", "deny"),
         ("git add .", "deny"),
         ("git add -A", "deny"),
