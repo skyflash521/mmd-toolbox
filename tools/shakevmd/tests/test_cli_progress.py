@@ -139,27 +139,27 @@ def test_quiet_does_not_change_exit_code(tmp_path):
 
 # --- 段構成の配線 --------------------------------------------------------
 def test_no_smooth_skips_smoothing_stage(tmp_path, monkeypatch):
-    # --no-smooth 時は平滑化段を出さない(ベイク段のみ)。
+    # --no-smooth 時はスムージング段を出さない(ベイク段のみ)。
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--no-smooth"]) == 0
     spy = _SpyReporter.instances[-1]
     assert "ベイク" in spy.stages
-    assert "平滑化" not in spy.stages
+    assert "スムージング" not in spy.stages
 
 
 def test_smooth_emits_smoothing_stage(tmp_path, monkeypatch):
-    # 既定(--smooth)では平滑化段を出す。
+    # 既定(--smooth)ではスムージング段を出す。
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     assert cli.main([inp, "-o", str(tmp_path / "a.vmd")]) == 0
     spy = _SpyReporter.instances[-1]
     assert "ベイク" in spy.stages
-    assert "平滑化" in spy.stages
+    assert "スムージング" in spy.stages
 
 
 def test_smooth_wires_progress_to_reduce(tmp_path, monkeypatch):
-    # 平滑化段は reduce へ progress=reporter.update を接続する。reduce 呼び出しを差し替えて
+    # スムージング段は reduce へ progress=reporter.update を接続する。reduce 呼び出しを差し替えて
     # progress kwarg を捕捉し、それが reporter.update そのものであること、かつ呼ぶと spy に届くことを
     # 直接検証する(CLI が手動で update を呼ぶだけの実装では通らない)。
     inp = write_input(tmp_path / "in.vmd")

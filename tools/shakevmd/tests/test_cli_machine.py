@@ -175,7 +175,7 @@ def test_machine_emits_progress_events(tmp_path, capsysbinary):
 
 
 def test_machine_smooth_emits_smooth_progress(tmp_path, capsysbinary):
-    # 既定 on の平滑化段も機械モードで progress イベントを出す。
+    # 既定 on のスムージング段も機械モードで progress イベントを出す。
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine"])
     assert rc == 0

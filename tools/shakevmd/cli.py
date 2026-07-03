@@ -200,7 +200,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     # 既定 on: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを低減する。
     # --no-smooth で無効化(密キー＋線形のまま出力する)。
     p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction,
-                   help="ベイク後の密なキーをベジェ補間でなめらかに整理する(平滑化。既定 on。--no-smooth で密キー+線形)")
+                   help="ベイク後の密なキーをベジェ補間でなめらかに整理する(スムージング。既定 on。--no-smooth で密キー+線形)")
     # 進捗表示の抑制(§2.7.1)。抑制するのは進捗表示だけで、警告・統計・終了コードは変えない。
     p.add_argument("--quiet", dest="quiet", action="store_true",
                    help="進捗表示を抑制する(警告・統計・終了コードは抑制しない)")
@@ -466,7 +466,7 @@ def main(argv=None) -> int:
 
 
 def _run(args, machine, emitter, fail) -> int:
-    """引数解析済みの本体処理(ベイク→平滑化→書き込み)。失敗は fail() 経由で終了コードを返す。"""
+    """引数解析済みの本体処理(ベイク→スムージング→書き込み)。失敗は fail() 経由で終了コードを返す。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
     # 上書きガード: 入力と同一パスへの出力は --overwrite 必須(§2.2)。未許可なら書かずにエラー。
@@ -518,7 +518,7 @@ def _run(args, machine, emitter, fail) -> int:
     # 例: walking の歩調成分 gait_freq/gait_amp。bake 既定(無効)を上書きする。
     internal = {k: preset[k] for k in presets.INTERNAL_PARAM_NAMES if k in preset}
 
-    # 進捗のライブ表示(§2.7.1)。重いベイク・平滑化の進行を端末へ出す(--quiet で無効、既定は
+    # 進捗のライブ表示(§2.7.1)。重いベイク・スムージングの進行を端末へ出す(--quiet で無効、既定は
     # stderr が端末のときだけ)。機械モードでは進捗をイベントで出すのでライブ行は無効化する。副作用専用=
     # 出力VMD・終了コード・統計・警告を変えない。最初の stage 以降は捕捉例外で終了コードを返す経路・
     # dry-run の早期 return・想定外例外のいずれでも heartbeat を止め行を消すため try/finally で囲む
@@ -654,7 +654,7 @@ def _run(args, machine, emitter, fail) -> int:
         # 誤判定する余地も無くす。
         camera_out = result.camera_keys
         if args.smooth:
-            # 機械モードは平滑化進捗をイベントで出す。段開始で done=0,total=null を1本、以降は
+            # 機械モードはスムージング進捗をイベントで出す。段開始で done=0,total=null を1本、以降は
             # reduce_camera_track の progress(done, total, note) をそのままイベント化する。非機械は
             # 従来どおりライブ行の段開始 + reporter.update を渡す。
             if machine:
@@ -665,7 +665,7 @@ def _run(args, machine, emitter, fail) -> int:
                     elapsed=time.monotonic() - smooth_start,
                 )
             else:
-                reporter.stage("平滑化")
+                reporter.stage("スムージング")
                 smooth_cb = reporter.update
             # 機械的 grid: 各範囲を max_seg 間隔のキーで区切る。sliding max_seg は「線形でも許容内に収まる」
             # 長区間を作り、手ぶれを疎キー＋線形補間=キー境界のコーナーで返すため 30fps 超でカクつき、

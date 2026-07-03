@@ -1,6 +1,6 @@
 """ProgressReporter(進捗のライブ表示)の単体テスト(shakevmd.md §2.7.1)。
 
-ProgressReporter は重い処理(ベイク・平滑化)の進行を stderr へ1本のライブ行で表示する(TTY時のみ)。
+ProgressReporter は重い処理(ベイク・スムージング)の進行を stderr へ1本のライブ行で表示する(TTY時のみ)。
 全段を通して同じ行を上書きし(段間で改行しない)、終わった段の行を画面に残さない。close で行を消し、
 summary で完了行を1行残す。完了イベント(update)と再描画(ハートビートスレッド)を分離し、update が
 来ない待ち時間でも経過時間(now() - 段開始)を進め続けることで、重い処理で表示が停滞して見えるのを防ぐ。
@@ -54,7 +54,7 @@ def _wait_until(pred, timeout=2.0):
 
 
 def test_format_line_shows_label_count_elapsed():
-    assert progress._format_line("平滑化", 5, 88, 73.0) == "[平滑化] 5/88 経過 1:13"
+    assert progress._format_line("スムージング", 5, 88, 73.0) == "[スムージング] 5/88 経過 1:13"
 
 
 def test_format_line_hides_count_when_total_unset():
@@ -64,12 +64,12 @@ def test_format_line_hides_count_when_total_unset():
 
 def test_format_line_appends_note_when_present():
     # note があれば行末へ併記する(進捗据え置き区間の注記、例: 出力後検証)。note 既定("")では併記しない。
-    assert progress._format_line("平滑化", 60, 60, 5.0, "出力後検証") == "[平滑化] 60/60 経過 0:05 出力後検証"
-    assert progress._format_line("平滑化", 60, 60, 5.0, "") == "[平滑化] 60/60 経過 0:05"
+    assert progress._format_line("スムージング", 60, 60, 5.0, "出力後検証") == "[スムージング] 60/60 経過 0:05 出力後検証"
+    assert progress._format_line("スムージング", 60, 60, 5.0, "") == "[スムージング] 60/60 経過 0:05"
 
 
 def test_display_width_counts_fullwidth_as_two():
-    assert progress._display_width("平滑化") == 6  # 全角3文字=6
+    assert progress._display_width("スムージング") == 12  # 全角6文字=12
     assert progress._display_width("[X] 0/5") == 7  # 半角はそのまま
 
 
@@ -98,7 +98,7 @@ def test_update_does_not_write_heartbeat_is_sole_writer():
     stream = io.StringIO()
     clock = [0.0]
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
-    r.stage("平滑化")
+    r.stage("スムージング")
     clock[0] = 5.0
     r.update(3, 10)
     assert stream.getvalue() == ""  # update 自身は描かない
@@ -113,13 +113,13 @@ def test_stages_share_one_line_without_newline():
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
     r.stage("ベイク")
     r._draw()
-    r.stage("平滑化")
+    r.stage("スムージング")
     r.update(3, 10)
     r._draw()
     out = stream.getvalue()
     assert "\n" not in out  # 段間で改行しない=1行に集約
     assert out.count("\r") == 2  # 各 draw は同じ行を CR で上書き
-    assert out.rsplit("\r", 1)[1].startswith("[平滑化] 3/10 経過 0:00")  # 行が後段(平滑化)へ切り替わる
+    assert out.rsplit("\r", 1)[1].startswith("[スムージング] 3/10 経過 0:00")  # 行が後段(スムージング)へ切り替わる
     r.close()
 
 
@@ -128,7 +128,7 @@ def test_update_note_appears_in_drawn_line():
     stream = io.StringIO()
     clock = [0.0]
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
-    r.stage("平滑化")
+    r.stage("スムージング")
     r.update(60, 60, note="出力後検証")
     r._draw()
     assert "出力後検証" in stream.getvalue().rsplit("\r", 1)[1]
@@ -145,7 +145,7 @@ def test_heartbeat_advances_elapsed_without_update():
     stream = io.StringIO()
     clock = [0.0]
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=0.01)
-    r.stage("平滑化")
+    r.stage("スムージング")
     r.update(2, 10)  # 完了通知はこの1回だけ
     clock[0] = 5.0
     _wait_until(lambda: "経過 0:05" in stream.getvalue())  # ハートビートが経過 0:05 で再描画
@@ -153,8 +153,8 @@ def test_heartbeat_advances_elapsed_without_update():
     _wait_until(lambda: "経過 1:00" in stream.getvalue())  # update 無しでも経過 1:00 へ進む
     r.close()
     out = stream.getvalue()
-    assert "\r[平滑化] 2/10 経過 0:05" in out
-    assert "[平滑化] 2/10 経過 1:00" in out
+    assert "\r[スムージング] 2/10 経過 0:05" in out
+    assert "[スムージング] 2/10 経過 1:00" in out
 
 
 def test_stage_uses_begin_time_and_resets_per_stage():
@@ -168,12 +168,12 @@ def test_stage_uses_begin_time_and_resets_per_stage():
     clock[0] = 108.0
     r._draw()
     clock[0] = 200.0
-    r.stage("平滑化")  # 段開始 200.0(前段を引きずらない)
+    r.stage("スムージング")  # 段開始 200.0(前段を引きずらない)
     clock[0] = 205.0
     r._draw()
     segments = stream.getvalue().split("\r")[1:]  # 先頭の空要素を除く
     assert segments[0].startswith("[ベイク] 経過 0:08")  # 108-100
-    assert segments[1].startswith("[平滑化] 経過 0:05")  # 205-200
+    assert segments[1].startswith("[スムージング] 経過 0:05")  # 205-200
     r.close()
 
 
@@ -183,11 +183,11 @@ def test_close_clears_line_leaves_nothing():
     stream = io.StringIO()
     clock = [0.0]
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
-    r.stage("平滑化")
+    r.stage("スムージング")
     r.update(2, 4)
     r._draw()
-    drawn = stream.getvalue()  # "\r[平滑化] 2/4 経過 0:00"
-    width = progress._display_width("[平滑化] 2/4 経過 0:00")
+    drawn = stream.getvalue()  # "\r[スムージング] 2/4 経過 0:00"
+    width = progress._display_width("[スムージング] 2/4 経過 0:00")
     r.close()
     assert stream.getvalue() == drawn + "\r" + " " * width + "\r"  # 空白で消して行頭へ
     assert "\n" not in stream.getvalue()
@@ -200,7 +200,7 @@ def test_close_stops_live_heartbeat_thread():
     stream = io.StringIO()
     clock = [0.0]
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=0.01)
-    r.stage("平滑化")
+    r.stage("スムージング")
     r.update(1, 2)
     clock[0] = 3.0
     _wait_until(lambda: "経過 0:03" in stream.getvalue())  # ハートビートが実際に動いている
@@ -230,7 +230,7 @@ def test_stage_while_active_stops_old_heartbeat():
     r.stage("ベイク")
     first = r._thread
     assert first is not None and first.is_alive()
-    r.stage("平滑化")
+    r.stage("スムージング")
     assert not first.is_alive()  # 旧ハートビートは停止・join された
     assert r._thread is not None and r._thread is not first and r._thread.is_alive()
     r.close()
@@ -260,7 +260,7 @@ def test_draw_write_failure_disables_without_raising_and_close_stops_thread(exc)
     stream = _RaisingStream(exc)
     clock = [0.0]
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
-    r.stage("平滑化")
+    r.stage("スムージング")
     live = r._thread
     assert live is not None and live.is_alive()
     r.update(1, 2)
@@ -291,7 +291,7 @@ def test_close_write_failure_swallowed(exc):
     stream = _TTYStream()
     clock = [0.0]
     r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
-    r.stage("平滑化")
+    r.stage("スムージング")
     r.update(2, 4)
     r._draw()  # 成功描画で _last_width を立てる
     live = r._thread
