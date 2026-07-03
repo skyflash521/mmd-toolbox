@@ -124,3 +124,7 @@ mocapvmd <入力ファイル名>.vmd -o <出力ファイル名>.vmd --preset med
 出力する JSON の形など、機械利用の詳しい仕様は [mocapvmd.md](mocapvmd.md) を参照。
 
 さらに細かい仕様を確認したい場合は [mocapvmd.md](mocapvmd.md) を参照。
+
+## 変更履歴
+
+リリースごとの変更点は [CHANGELOG.md](CHANGELOG.md) を参照。
