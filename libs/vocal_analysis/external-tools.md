@@ -17,9 +17,9 @@ S0 入力読み込みは固定の内部処理(soundfile/ffmpeg)で、差し替�
   `vocal_analysis` が内部で呼ぶ。呼び出しは **ライブラリAPI(Python)を優先**し、無いものだけ内部管理の
   サブプロセスで呼ぶ。依存は `vocal_analysis` 側に閉じ、本リポジトリ本体の必須依存は `numpy/scipy` のまま
   保つ。
-- **歌詞の書き起こし(意味のあるテキスト化)はしない**。後段に必要なのは「母音・音素の時刻」であり単語では
-  ない。歌唱の自動書き起こしは誤りが多く伝播するため、音声から母音・音素を直接認識する
-  ([vocal_analysis.md](vocal_analysis.md) §5)。
+- **書き起こしテキストを製品の入出力にしない**。後段に必要なのは「母音・音素の時刻」であり単語ではない。
+  書き起こしテキストは共有出力に含めず、歌詞テキストの入力も要求しない([vocal_analysis.md](vocal_analysis.md) §5)。
+  ただし認識構成が**内部で**内容認識(文字起こし)を音素列の情報源として使うことは、この方針に反しない(§2)。
 - 本リポジトリの導入手順は Windows/macOS を対象とする([README.md](../../README.md))。ライブラリで導入
   できること・Windows での導入容易性を重視する。
 
@@ -52,52 +52,56 @@ Separatorは出力に「ボーカルWAVのパス」だけを約束し、内部�
 
 ---
 
-## 2. S2 音素・母音認識(文字起こしを使わない)
+## 2. S2 音素・母音認識
 
-### 2.1 なぜ文字起こし(ASR)を使わないか
+### 2.1 認識方式の前提(実歌唱データでの測定に基づく)
 
-- **歌唱ASRは誤りが多い**。研究では同一歌詞で歌唱WER≈0.56 / 朗読0.14(約4倍悪化)。伴奏より歌い方の影響が
-  大きく、ハルシネーション(無発話区間の捏造)や非語彙発声(ラララ等)に弱い。
-- **そもそも単語は不要**。後段に必要なのは「時刻ごとの母音(口形)・音素」。日本語の5母音は音響的に明瞭で、
-  歌唱では母音スペクトルがむしろ安定し、音声から直接認識しやすい。
-- **フォースアライメントは正しい歌詞が前提**(与えた文字列に音声を合わせる)ため、歌唱では前提が崩れる。
-  一方 **wav2vec2-CTC は文字列なしで音素+時刻を出せる**。Julius も phone-loop(文法なし音素認識)を構成すれば
-  文字列なしで音素+時刻を出せる。
+- **単段の自由音素認識(CTC)は歌唱で不成立**。話し言葉では音素を出力する CTC 音素認識
+  (wav2vec2-espeak)が、歌唱では blank(未割当)が支配的になり(blank 事後確率が平均9割前後)、母音を
+  ほぼ出力しない(参照ラベル付き歌唱データでの実測。母音正解率が数%に落ちる)。デコード方式の変更
+  (argmax・カテゴリ確率集約)でも覆らず、モデルの限界である。
+- **内容認識(文字起こし)は歌唱でも実用水準**。大規模 ASR(Whisper 系)は歌唱の内容をほぼ正しく文字起こし
+  できる(軽微な単語誤りは残るが、母音粒度の利用では許容水準)。ただし日本語では単語レベルのタイムスタンプが
+  機能せず(文節単位の粗い区切りしか返らない)、時刻源としては使えない。
+- **強制アライメントは歌唱でも時刻が正確**。既知の音素列に CTC トレリスの経路を拘束する強制アライメント
+  (Viterbi)なら、blank が支配的な歌唱でも音素の開始時刻を正確に出せる(実測: 開始時刻ずれ中央値 20ms 前後)。
+  「正しい歌詞が前提」という強制アライメントの弱点は、歌詞を音声自身から内容認識で得ることで避ける。
+  ただし CTC の出力は音素位置のスパイクであり持続長を持たないため、母音の終端(閉じ側)は近似になる
+  (閉じ側の確定は利用先の入口処理の責務。[vocal_analysis.md](vocal_analysis.md) §9・§10)。
 
-→ 文字起こし+G2P+フォースアライメントの多段構成は採らず、**文字列なしの音素・母音認識1段**(S2)とする。
+→ この3点から、S2 の有望構成は**複合構成**とする: 内容認識(Whisper 系)で歌唱内容のテキストを得て、
+G2P(pyopenjtalk 系)で音素列へ変換し、CTC 音素モデルのロジット上の強制アライメントで時刻を確定する。
+書き起こしは共有出力に出さず、音素列の情報源としてアダプタ内部でだけ使う(§0 の方針と整合)。
 
 ### 2.2 候補
 
-| ツール | 呼び出し | 日本語/汎用 | 時刻精度 | 速度・要件 | ライセンス | 歌唱頑健性 |
-|---|---|---|---|---|---|---|
-| **wav2vec2 音素認識** | transformers(in-process) | 多言語/日本語 | CTC近似(補正で実用) | CPU可(GPUで速)。torchはDemucsと共有(transformers本体・モデル取得は新規) | transformers=Apache / torch=BSD + 許諾モデル | ◎ 自己教師ありで歌唱に汎化 |
-| **Julius 音素認識** | C実行ファイル(内部subprocess) | 日本語(無償音響モデル) | フレーム単位(高) | 軽い。別系統の追加 | エンジン=修正BSD(許諾的) | △ speech-HMMで歌唱は域外 |
-| ~~Allosaurus~~ | Python API | 汎用 | 近似 | 軽い | **GPL-3.0 → MIT本体と非互換で不可** | ◎ |
+| 構成 | 呼び出し | 時刻精度 | 歌唱での成立 | ライセンス |
+|---|---|---|---|---|
+| **複合構成: Whisper(内容)+ G2P + CTC強制アライメント(時刻)** | transformers + pyopenjtalk-plus(いずれも in-process) | 開始時刻ずれ中央値 20ms 前後(実測) | ◎(実測で有望) | Whisper モデル Apache-2.0 / pyopenjtalk-plus MIT(内包の OpenJTalk 系は修正BSD) |
+| wav2vec2 自由音素認識(単段) | transformers(in-process) | CTC近似 | ×(実測で不成立: blank支配で母音をほぼ出力しない) | transformers=Apache / torch=BSD + 許諾モデル |
+| Julius 音素認識(phone-loop) | C実行ファイル(内部subprocess) | フレーム単位(高) | 未評価(speech-HMM で歌唱は域外の懸念。phone-loop の構成も必要) | エンジン=修正BSD(音響モデルは個別確認) |
+| ~~Allosaurus~~ | Python API | 近似 | 未評価 | **GPL-3.0 → MIT本体と非互換で不可** |
 
-> 補足: CTC系の時刻はトークン単位の粗いオフセットで、音素境界そのものではない。母音区間の境界の精緻化
-> (近傍にRMSオンセットがあるときそれへ寄せる)は利用先(口パク生成系の入口)が行う
-> ([vocal_analysis.md](vocal_analysis.md) §5)。認識器は5母音と子音、未割当(gap)を区別できれば足り(無音/閉口の
+> 補足: 強制アライメントの時刻は音素の開始側が正確で、終端(閉じ側)は近似となる。母音区間の境界の精緻化
+> (近傍にRMSオンセットがあるときそれへ寄せる)と閉じ側の確定は利用先(口パク生成系の入口)が行う
+> ([vocal_analysis.md](vocal_analysis.md) §5・§10)。認識器は5母音と子音、未割当(gap)を区別できれば足り(無音/閉口の
 > 確定は利用先がRMS併用で行い、両唇閉鎖は音素から判定)、語彙認識より要件は緩い。
 
-**採用: wav2vec2 音素認識(transformers + 許諾モデル)**。決め手:
+**採用候補: 複合構成(Whisper 内容認識 + pyopenjtalk 系 G2P + wav2vec2 CTC 強制アライメント)**。決め手:
 
-1. **歌唱頑健性**(本方式の品質の要)で、自己教師あり(SSL)が speech-HMMの Julius に勝る。
-2. **純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に最も合う。
-3. **torch を Demucs と共有できる**(Julius は C/モデル/jconf の別系統を追加することになる)。ただし
-   transformers 本体とモデル取得(ダウンロード・キャッシュ・メモリ・初回ネットワーク)は新規に必要になる。
-   モデルの版固定・キャッシュ先・オフライン挙動は [vocal_analysis.md](vocal_analysis.md) §5.1・§8.3 が定める。
-4. ライセンスが清浄。transformers=Apache-2.0 / torch=BSD-3 に加え、音素モデル
-   `facebook/wav2vec2-lv-60-espeak-cv-ft` は **Apache-2.0(確認済み)**。多言語eSpeak音素を出力し、
-   IPA音素→あいうえお母音へ写像する。
+1. **歌唱で成立する唯一の実測済み構成**。内容(母音の種類)と開始時刻の双方が、参照ラベル付き歌唱データの
+   測定で実用水準を示した(単段の自由認識は不成立)。
+2. **すべて純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に合う。
+3. **torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる**。追加依存は
+   Whisper モデルの取得と pyopenjtalk 系のみ。
+4. ライセンスが清浄。Whisper モデル(Hugging Face 配布)= Apache-2.0、pyopenjtalk-plus = MIT(内包の
+   OpenJTalk 系コンポーネントは修正BSD)、アライメント用音素モデル
+   `facebook/wav2vec2-lv-60-espeak-cv-ft` = Apache-2.0。
 
-弱点の時刻の粗さは、トークン境界を一次情報とし利用先がRMSオンセットで精緻化して実用化する。**Julius は
-「高精度な時刻」の代替**として残す(ただし文字列なし運用には phone-loop の音響モデル・辞書・設定の構成が
-必要)。歌唱品質か速度が問題になれば評価する。**Allosaurus は GPL-3.0(LICENSE実物が GNU GPL v3)で
-MIT本体と非互換のため不採用**。
-
-S2はこの一段で後段の成否が決まるため、採用の確定は **S-1 認識ゲート**に従う: 代表となる日本語歌唱サンプルで
-母音正解率・境界時刻ずれを測り、あらかじめ定めた受入基準を満たすことを確認してから採用を確定する
-([vocal_analysis.md](vocal_analysis.md) §9)。
+採用の確定は、アダプタとして実装した上で **S-1 認識測定**(構成間の相対比較・破綻検出)と利用先の実装時
+調整・MMD 上の視聴確認に従う([vocal_analysis.md](vocal_analysis.md) §9)。アダプタ化の際は
+[vocal_analysis.md](vocal_analysis.md) §5・§8.3 を先に更新する。**Julius は代替**として残す(歌唱品質か速度が
+問題になれば評価する)。**Allosaurus は GPL-3.0(LICENSE実物が GNU GPL v3)で MIT 本体と非互換のため不採用**。
 
 ---
 
@@ -140,7 +144,7 @@ ffmpeg 自体が不要なことも多い。
 |---|---|---|---|---|
 | S0 入力読み込み | **soundfile 優先(mp3も可)+ 自動検出ffmpegにフォールバック**(リポジトリに同梱しない) | 内部ライブラリ/サブプロセス | soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等の同梱配布は不採用) |
 | S1 ボーカル抽出 | **Demucs v4 htdemucs_ft**(audio-separator 経由・`shifts=0`) | `audio_separator.separator.Separator`(in-process) | 高品質・MIT・ライブラリ呼び出し可・GPU不要でも動作。生 `demucs.api` は `torchaudio<2.2` 固定で新しい Python 向けビルドが無く不採用 | audio-separator の他モデル(Roformer系等。ライセンス個別確認要) / Spleeter / 分離なし |
-| S2 音素・母音認識 | **wav2vec2 音素認識**(transformers + 許諾モデル) | transformers(in-process) | 歌唱頑健性(SSL)・in-process・torchはDemucsと共有・ライセンス清浄。採用確定は S-1 認識ゲート(vocal_analysis.md §9) | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素・母音認識 | **複合構成(Whisper 内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用候補とする**(単段の wav2vec2 自由認識は歌唱で不成立と実測済み。§2) | transformers + pyopenjtalk-plus(in-process) | 歌唱で成立する唯一の実測済み構成・in-process・torch/transformersは既存と共有・ライセンス清浄。確定は S-1 認識測定と利用先の実装時調整(vocal_analysis.md §9) | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
 
 S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterface(Separator / Recognizer)を満たせば
 差し替え可能。S0 は固定の内部処理。外部ツールは `vocal_analysis` が内部で呼び、依存は `vocal_analysis` 側に
@@ -156,10 +160,11 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 |---|---|---|
 | ffmpeg(自動検出) | 復号したWAV | 復号PCM(チャンネル/サンプルレート保持)のパス。レベル正規化は S0 が施す([vocal_analysis.md](vocal_analysis.md) §3) |
 | audio-separator(`Separator.separate`) | API が返す出力ファイルパス(Demucs v4 htdemucs_ft の分離stem) | ボーカルWAVのパス(APIの戻り値を使い、命名を推測しない) |
-| wav2vec2 phoneme | フレームごとのCTC音素列(IPA) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル(IPA)+任意の信頼度。IPA→5母音写像は vocal_analysis が提供(RMS不要)、gap の無音/継続判定・無音/閉口の確定は利用先がS3のRMS併用で行い、両唇閉鎖判定は音素から利用先が行う) |
+| 複合構成(Whisper + G2P + CTC強制アライメント) | Whisper: テキスト / G2P: 音素列 / アライメント: 音素ごとの開始位置(CTCスパイク) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル+任意の信頼度)。テキストと音素列はアダプタ内部にとどめ、共有出力に含めない。母音の終端(閉じ側)はスパイク位置からの近似で、確定は利用先(S3のRMS併用) |
+| wav2vec2 phoneme(単段自由認識) | フレームごとのCTC音素列(IPA) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル(IPA)+任意の信頼度。IPA→5母音写像は vocal_analysis が提供(RMS不要)、gap の無音/継続判定・無音/閉口の確定は利用先がS3のRMS併用で行い、両唇閉鎖判定は音素から利用先が行う) |
 | Julius 音素認識 | アライメント(開始/終了フレーム・音素) | 全時間軸被覆のセグメント列 |
 
-音素→母音への写像規則(IPA→5母音)は `vocal_analysis` が提供し、S-1ゲート採点と利用先の口形イベント確定の
+音素→母音への写像規則(IPA→5母音)は `vocal_analysis` が提供し、S-1認識測定の採点と利用先の口形イベント確定の
 双方が同一規則で使う(写像自体はRMS不要)。音響イベント(連続母音区間・閉鎖・無音)の判断と gap の無音/継続
 判定(S3のRMS併用)は利用先(口パク生成系の入口)で行う。外部ツールの非決定性(モデル・スレッド)に注意し、可能な
 範囲の決定論を目指す。
@@ -170,7 +175,8 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 
 - 本体 MIT([../../LICENSE](../../LICENSE)) / soundfile BSD-3 / libsndfile LGPL-2.1(依存・両立) /
   audio-separator MIT(htdemucs_ft 重みは Demucs v4 由来・MIT)/ transformers Apache-2.0 / torch BSD-3 /
-  wav2vec2 モデル `facebook/wav2vec2-lv-60-espeak-cv-ft` Apache-2.0 / 代替候補: Spleeter MIT・
+  wav2vec2 モデル `facebook/wav2vec2-lv-60-espeak-cv-ft` Apache-2.0 / Whisper モデル(Hugging Face 配布)
+  Apache-2.0 / pyopenjtalk-plus MIT(内包の OpenJTalk・hts_engine は修正BSD系) / 代替候補: Spleeter MIT・
   Julius エンジン 修正BSD / **Allosaurus GPL-3.0=不採用**。
 - ffmpeg は同梱・再配布しない(§3)ため、そのビルドのライセンス(LGPL/GPL)による義務は生じない。
 - Julius を採用する場合のみ、その音響モデルの個別ライセンスを確認する。
@@ -184,6 +190,8 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 - Spleeter: <https://github.com/deezer/spleeter>
 - Allosaurus(universal phone recognizer): <https://github.com/xinjli/allosaurus>
 - wav2vec2 phoneme(transformers): <https://huggingface.co/docs/transformers/en/model_doc/wav2vec2_phoneme>
+- Whisper(transformers): <https://huggingface.co/docs/transformers/en/model_doc/whisper>
+- pyopenjtalk-plus(G2P): <https://github.com/tsukumijima/pyopenjtalk-plus>
 - Julius(音素認識): <https://github.com/julius-speech/julius>
 - imageio-ffmpeg: <https://github.com/imageio/imageio-ffmpeg>
 - soundfile: <https://github.com/bastibe/python-soundfile>
