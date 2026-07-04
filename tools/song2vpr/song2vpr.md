@@ -100,7 +100,7 @@ song2vpr INPUT [options]
 | `-o, --output PATH` | `<入力名>.vpr` | 出力 vpr |
 | `--overwrite` | off | 入力と同一パスへの出力を許可する(上書きガードの解除。5章) |
 | `--separate-vocals MODE` | `auto` | ボーカル分離 `auto` / `always` / `never`(vocal_analysis へ渡す) |
-| `--recognizer NAME` | `wav2vec2-espeak` | 音素認識バックエンドの選択(vocal_analysis へ渡す)。値は vocal_analysis の登録アダプタの安定 id(vocal_analysis.md §8。現行は `wav2vec2-espeak` のみ) |
+| `--recognizer NAME` | vocal_analysis の既定アダプタ | 音素認識バックエンドの選択(vocal_analysis へ渡す)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3。採用構成の確定も同節が正本) |
 | `--tempo BPM` | `120` | テンポ(BPM)。未指定時は既定 120 で仮置きし警告を出す(自動推定は将来。7.3) |
 | `--lyrics PATH` | なし | 任意の歌詞テキスト(かな表記前提。モーラ単位で音符へ対応。漢字の読み変換は将来。7.2) |
 | `--dry-run` | off | 出力せず処理計画と診断を表示。引数検証(上書きガード等)は dry-run でも実施する |
