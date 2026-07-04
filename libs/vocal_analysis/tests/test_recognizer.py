@@ -1,9 +1,11 @@
-"""S2 音素認識のテスト(vocal_analysis.md §5・§5.1)。
+"""S2 音素認識のテスト(vocal_analysis.md §5・§5.1・§5.2)。
 
-CTC出力をセグメント列へ正規化する純関数の核(母音/子音判定・フレーム区間化・60ms吸収)を合成フレーム
-列で決定論的に検証する。実モデル呼び出し(wav2vec2)を伴う統合部分(recognize 関数本体)は別途扱う。
+CTC出力をセグメント列へ正規化する純関数の核(母音/子音判定・フレーム区間化・60ms吸収)と、複合構成
+(内容認識+G2P+強制アライメント)の区間化を担う純関数の核を合成フィクスチャで決定論的に検証する。
+実モデル呼び出し(wav2vec2・Whisper)を伴う統合部分(recognize 関数本体)は別途扱う。
 """
 
+import numpy as np
 import pytest
 
 
@@ -280,3 +282,203 @@ def test_absorb_short_segments_all_short_gap_run_terminates():
     result = _absorb_short_segments(segments, min_duration_sec=0.06)
 
     assert result == [_seg("gap", 0.00, 0.06, None)]
+
+
+# --- §5.2 手順3: 音素列の結合(pau挿入) ---
+
+_XFAIL_COMPOSITE = pytest.mark.xfail(reason="impl pending: composite recognizer helpers", strict=True)
+
+
+@_XFAIL_COMPOSITE
+def test_assemble_phoneme_sequence_wraps_single_chunk_with_pau():
+    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+
+    result = _assemble_phoneme_sequence([["a", "i"]])
+
+    assert result == ["pau", "a", "i", "pau"]
+
+
+@_XFAIL_COMPOSITE
+def test_assemble_phoneme_sequence_inserts_pau_between_chunks():
+    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+
+    result = _assemble_phoneme_sequence([["a"], ["k", "i"]])
+
+    assert result == ["pau", "a", "pau", "k", "i", "pau"]
+
+
+@_XFAIL_COMPOSITE
+def test_assemble_phoneme_sequence_empty_chunk_still_gets_boundary_pau():
+    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+
+    # Whisperのチャンクがテキストを持たずG2P結果が空でも、チャンク境界のpau挿入は行う。
+    result = _assemble_phoneme_sequence([[], ["a"]])
+
+    assert result == ["pau", "pau", "a", "pau"]
+
+
+@_XFAIL_COMPOSITE
+def test_assemble_phoneme_sequence_no_chunks_is_leading_and_trailing_pau_only():
+    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+
+    result = _assemble_phoneme_sequence([])
+
+    assert result == ["pau", "pau"]
+
+
+# --- §5.2 手順4: G2P記号→音素モデル語彙のトークンID変換 ---
+
+
+@_XFAIL_COMPOSITE
+def test_g2p_symbols_to_token_ids_maps_known_symbols():
+    from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
+
+    vocab = {"<pad>": 0, "a": 5, "k": 7}
+
+    result = _g2p_symbols_to_token_ids(["a", "k"], vocab, blank_token_id=0)
+
+    assert result == [5, 7]
+
+
+@_XFAIL_COMPOSITE
+def test_g2p_symbols_to_token_ids_maps_pau_and_cl_to_blank():
+    from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
+
+    # §5.2: pau・cl は語彙記号への対応付けを持たず、blank トークンへ変換する。
+    vocab = {"<pad>": 0, "a": 5}
+
+    result = _g2p_symbols_to_token_ids(["pau", "cl"], vocab, blank_token_id=0)
+
+    assert result == [0, 0]
+
+
+@_XFAIL_COMPOSITE
+def test_g2p_symbols_to_token_ids_devoiced_vowels_collapse_to_voiced():
+    from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
+
+    # §5.2 写像表: 無声化母音 I/U は有声母音と同じ語彙記号(i/ɯ)へ収束する。
+    vocab = {"<pad>": 0, "i": 3, "ɯ": 4}
+
+    result = _g2p_symbols_to_token_ids(["I", "U"], vocab, blank_token_id=0)
+
+    assert result == [3, 4]
+
+
+@_XFAIL_COMPOSITE
+def test_g2p_symbols_to_token_ids_unmapped_symbol_raises_recognition_error():
+    from vocal_analysis.recognizer import RecognitionError, _g2p_symbols_to_token_ids
+
+    # §5.2 手順4: 写像表に無い記号が現れたら RecognitionError で停止する(黙って捨てない)。
+    with pytest.raises(RecognitionError):
+        _g2p_symbols_to_token_ids(["xx"], {"<pad>": 0}, blank_token_id=0)
+
+
+@_XFAIL_COMPOSITE
+def test_g2p_symbols_to_token_ids_missing_vocab_entry_raises_recognition_error():
+    from vocal_analysis.recognizer import RecognitionError, _g2p_symbols_to_token_ids
+
+    # 写像表上は既知の記号でも、実際のモデル語彙にその記号が無ければ RecognitionError。
+    with pytest.raises(RecognitionError):
+        _g2p_symbols_to_token_ids(["a"], {"<pad>": 0}, blank_token_id=0)
+
+
+# --- §5.2 手順5: 強制アライメント(Viterbi) ---
+
+
+@_XFAIL_COMPOSITE
+def test_forced_align_single_state_stays_for_all_frames():
+    from vocal_analysis.recognizer import _forced_align
+
+    log_probs = np.array([[0.1], [-1.0], [0.2]])
+
+    path = _forced_align(log_probs, token_ids=[0], blank_token_id=0)
+
+    assert path == [0, 0, 0]
+
+
+@_XFAIL_COMPOSITE
+def test_forced_align_follows_dominant_emission_monotonically():
+    from vocal_analysis.recognizer import _forced_align
+
+    # 状態0(blank)がフレーム0-1で優勢、状態1(母音)がフレーム2-3で優勢になるよう設計した
+    # 対数確率行列。最尤経路は手計算で [0,0,1,1] と確認済み(状態を飛ばさず単調に進む)。
+    log_probs = np.array(
+        [
+            [5.0, -5.0],
+            [5.0, -5.0],
+            [-5.0, 5.0],
+            [-5.0, 5.0],
+        ]
+    )
+
+    path = _forced_align(log_probs, token_ids=[0, 1], blank_token_id=0)
+
+    assert path == [0, 0, 1, 1]
+
+
+@_XFAIL_COMPOSITE
+def test_forced_align_raises_when_fewer_frames_than_tokens():
+    from vocal_analysis.recognizer import RecognitionError, _forced_align
+
+    # §5.2 手順5: フレーム数がトークン数未満だと末尾トークンへ理論上到達不能。RecognitionErrorで停止する。
+    log_probs = np.zeros((2, 1))
+
+    with pytest.raises(RecognitionError):
+        _forced_align(log_probs, token_ids=[0, 0, 0], blank_token_id=0)
+
+
+# --- §5.2 手順6・7: 区間の確定とSegment化 ---
+
+
+@_XFAIL_COMPOSITE
+def test_path_to_segments_builds_gap_and_vowel_segments():
+    from vocal_analysis.recognizer import _path_to_segments
+
+    segments = _path_to_segments([0, 0, 1, 1], ["pau", "a"], frame_duration_sec=0.02)
+
+    assert len(segments) == 2
+    assert segments[0].type == "gap"
+    assert segments[0].phoneme is None
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(0.04)
+    assert segments[1].type == "vowel"
+    assert segments[1].phoneme == "a"
+    assert segments[1].start_sec == pytest.approx(0.04)
+    assert segments[1].end_sec == pytest.approx(0.08)
+
+
+@_XFAIL_COMPOSITE
+def test_path_to_segments_merges_adjacent_states_with_same_output_symbol():
+    from vocal_analysis.recognizer import _path_to_segments
+
+    # 連続する2状態がともに母音"a"(長母音が2モーラに分かれた場合等)は1区間へ結合する(§5.2手順6)。
+    segments = _path_to_segments([0, 0, 1, 1], ["a", "a"], frame_duration_sec=0.02)
+
+    assert len(segments) == 1
+    assert segments[0].type == "vowel"
+    assert segments[0].phoneme == "a"
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(0.08)
+
+
+@_XFAIL_COMPOSITE
+def test_path_to_segments_merges_pau_and_cl_as_same_gap():
+    from vocal_analysis.recognizer import _path_to_segments
+
+    # pau由来とcl由来はいずれもblank扱いで同一視し、1つのgap区間へ結合する(§5.2手順6)。
+    segments = _path_to_segments([0, 0, 1, 1], ["pau", "cl"], frame_duration_sec=0.02)
+
+    assert len(segments) == 1
+    assert segments[0].type == "gap"
+    assert segments[0].phoneme is None
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(0.08)
+
+
+@_XFAIL_COMPOSITE
+def test_path_to_segments_last_token_extends_to_audio_end():
+    from vocal_analysis.recognizer import _path_to_segments
+
+    segments = _path_to_segments([0, 1, 1, 1, 1], ["pau", "a"], frame_duration_sec=0.02)
+
+    assert segments[-1].end_sec == pytest.approx(0.10)
