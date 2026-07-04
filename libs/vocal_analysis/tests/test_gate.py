@@ -686,7 +686,6 @@ def test_compute_over_opening_rate_ignores_vowel_reference_frames():
     assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_match_segments_matches_overlapping_same_vowel_pair():
     from vocal_analysis.gate import match_segments
 
@@ -700,7 +699,6 @@ def test_match_segments_matches_overlapping_same_vowel_pair():
     assert excess == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_match_segments_different_vowel_category_is_not_a_valid_pair():
     from vocal_analysis.gate import match_segments
 
@@ -715,7 +713,6 @@ def test_match_segments_different_vowel_category_is_not_a_valid_pair():
     assert excess == [predicted[0]]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_match_segments_no_time_overlap_is_not_a_valid_pair():
     from vocal_analysis.gate import match_segments
 
@@ -730,7 +727,6 @@ def test_match_segments_no_time_overlap_is_not_a_valid_pair():
     assert excess == [predicted[0]]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_match_segments_ignores_non_vowel_segments_entirely():
     from vocal_analysis.gate import match_segments
 
@@ -745,7 +741,6 @@ def test_match_segments_ignores_non_vowel_segments_entirely():
     assert excess == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_match_segments_finds_globally_optimal_total_overlap():
     from vocal_analysis.gate import match_segments
 
@@ -764,7 +759,6 @@ def test_match_segments_finds_globally_optimal_total_overlap():
     assert excess == [predicted[1]]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_match_segments_tie_break_prefers_lexicographically_smallest_assignment():
     from vocal_analysis.gate import match_segments
 
@@ -781,7 +775,6 @@ def test_match_segments_tie_break_prefers_lexicographically_smallest_assignment(
     assert excess == [predicted[1]]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_compute_boundary_deviation_single_pair():
     from vocal_analysis.gate import compute_boundary_deviation
 
@@ -793,7 +786,6 @@ def test_compute_boundary_deviation_single_pair():
     assert result == pytest.approx((50.0, 50.0))
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_compute_boundary_deviation_median_and_p95_over_multiple_pairs():
     from vocal_analysis.gate import compute_boundary_deviation
 
@@ -813,7 +805,6 @@ def test_compute_boundary_deviation_median_and_p95_over_multiple_pairs():
     assert result == pytest.approx((30.0, 48.0))
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
 def test_compute_boundary_deviation_no_matched_pairs_is_undefined():
     from vocal_analysis.gate import compute_boundary_deviation
 

@@ -8,6 +8,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from vpr.rests import rest_intervals
 from vpr.types import Part, TempoEvent
 
@@ -359,3 +361,89 @@ def compute_over_opening_rate(
     non_vowel_indices = [i for i, category in enumerate(ref_frames) if category in _NON_VOWEL_SCORED_CATEGORIES]
     bled = sum(1 for i in non_vowel_indices if pred_frames[i] in _VOWEL_SYMBOLS)
     return bled / len(non_vowel_indices)
+
+
+def _overlap_sec(a: CategorySegment, b: CategorySegment) -> float:
+    return max(0.0, min(a.end_sec, b.end_sec) - max(a.start_sec, b.start_sec))
+
+
+def _better_assignment(
+    a: tuple[float, tuple[tuple[int, int], ...]], b: tuple[float, tuple[tuple[int, int], ...]]
+) -> tuple[float, tuple[tuple[int, int], ...]]:
+    """総重なり時間の最大化を第一基準、対応ペア列(基準番号, 予測番号)の辞書式最小を第二基準として
+    2つの候補のうち優先する方を返す。"""
+    if a[0] != b[0]:
+        return a if a[0] > b[0] else b
+    return a if a[1] <= b[1] else b
+
+
+def match_segments(
+    predicted: list[CategorySegment], reference: list[CategorySegment]
+) -> tuple[list[tuple[CategorySegment, CategorySegment]], list[CategorySegment], list[CategorySegment]]:
+    """区間の対応付け(§9.4)。
+
+    母音カテゴリ(a/i/u/e/o)の基準区間と予測区間のうち、母音種別が一致し時間重なりが正(0より大)の
+    組に限り、総重なり時間を最大化する全体最適割当で1対1対応させる。子音・無音カテゴリの区間は
+    母音種別を持たないため対応付けの対象にしない(未検出・余剰にも数えない)。最適割当が複数ある
+    ときは、基準区間・予測区間をそれぞれ開始時刻昇順(同時刻なら終了時刻昇順)で番号付けし、割当を
+    (基準番号, 予測番号)の組の昇順リストとして辞書式比較した最小の割当を採る。
+
+    基準区間列・予測区間列はそれぞれ時間的に重複しない(remove_invalid_time_segments 適用後)前提
+    とする。この前提の下では、基準番号・予測番号を跨いだ対応付けが交差する(番号の大きい基準区間が
+    番号の小さい予測区間に、番号の小さい基準区間が番号の大きい予測区間に、同時に正の重なりを持つ)
+    ことはあり得ないため、2つの整列済み列を先頭から同時に走査する動的計画法で全体最適割当を厳密に
+    求められる。
+
+    戻り値: (対応した(基準区間, 予測区間)の組のリスト, 対応の無い基準区間=未検出のリスト,
+    対応の無い予測区間=余剰のリスト)。
+    """
+    ref_vowels = sorted(
+        (seg for seg in reference if seg.category in _VOWEL_SYMBOLS),
+        key=lambda seg: (seg.start_sec, seg.end_sec),
+    )
+    pred_vowels = sorted(
+        (seg for seg in predicted if seg.category in _VOWEL_SYMBOLS),
+        key=lambda seg: (seg.start_sec, seg.end_sec),
+    )
+    n, m = len(ref_vowels), len(pred_vowels)
+
+    dp: list[list[tuple[float, tuple[tuple[int, int], ...]]]] = [[(0.0, ())] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        dp[i][0] = dp[i - 1][0]
+    for j in range(1, m + 1):
+        dp[0][j] = dp[0][j - 1]
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            best = _better_assignment(dp[i - 1][j], dp[i][j - 1])
+            ref_seg, pred_seg = ref_vowels[i - 1], pred_vowels[j - 1]
+            overlap = _overlap_sec(ref_seg, pred_seg)
+            if ref_seg.category == pred_seg.category and overlap > 0:
+                prev_total, prev_pairs = dp[i - 1][j - 1]
+                candidate = (prev_total + overlap, prev_pairs + ((i - 1, j - 1),))
+                best = _better_assignment(best, candidate)
+            dp[i][j] = best
+
+    _, pairs = dp[n][m]
+    matched_ref_indices = {ref_idx for ref_idx, _ in pairs}
+    matched_pred_indices = {pred_idx for _, pred_idx in pairs}
+    matched = [(ref_vowels[ref_idx], pred_vowels[pred_idx]) for ref_idx, pred_idx in pairs]
+    undetected = [seg for idx, seg in enumerate(ref_vowels) if idx not in matched_ref_indices]
+    excess = [seg for idx, seg in enumerate(pred_vowels) if idx not in matched_pred_indices]
+    return matched, undetected, excess
+
+
+def compute_boundary_deviation(
+    matched_pairs: list[tuple[CategorySegment, CategorySegment]],
+) -> tuple[float, float] | None:
+    """境界時刻ずれ(§9.4): match_segments が返す対応済み(基準区間, 予測区間)の組ごとに開始時刻差
+    |予測-基準|(ミリ秒)を求め、その中央値と95パーセンタイル(線形補間)を返す。対応区間が無い場合は
+    未定義として None を返す(マクロ平均からの除外・ゲート不合格判定は集計処理=呼び出し側の責務)。
+    """
+    if not matched_pairs:
+        return None
+    deviations_ms = [
+        abs(predicted.start_sec - reference.start_sec) * 1000.0 for reference, predicted in matched_pairs
+    ]
+    median, p95 = np.percentile(deviations_ms, [50, 95], method="linear")
+    return float(median), float(p95)
