@@ -29,12 +29,13 @@ vocal-analysis = [
 [project.scripts]
 mocapvmd = "mocapvmd.cli:main"
 shakevmd = "shakevmd.cli:main"
+song2vmd = "song2vmd.cli:main"
 sparsevmd = "sparsevmd.cli:main"
 vpr2vmd = "vpr2vmd.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["libs", "tools"]
-include = ["cli_events*", "lipsync*", "pmx*", "vmd*", "vocal_analysis*", "vpr*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr2vmd*"]
+include = ["cli_events*", "lipsync*", "pmx*", "vmd*", "vocal_analysis*", "vpr*", "mocapvmd*", "shakevmd*", "song2vmd*", "sparsevmd*", "vpr2vmd*"]
 
 [tool.pytest.ini_options]
 testpaths = ["libs/cli_events", "libs/lipsync", "libs/pmx", "libs/vmd", "libs/vocal_analysis", "libs/vpr", "tools/mocapvmd", "tools/shakevmd", "tools/song2vmd", "tools/sparsevmd", "tools/vpr2vmd"]

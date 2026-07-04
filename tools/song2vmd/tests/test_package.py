@@ -1,23 +1,37 @@
 """song2vmd パッケージ土台のスモークテスト(song2vmd.md)。
 
-パッケージがインポート可能で、console script のエントリ(cli.main)が公開されていることを確認する。
+独立 CLI `song2vmd` として提供する契約を静的に確認する: パッケージがインポート可能で、
+console script のエントリ(cli.main)が公開・登録され、配布物に含まれること。
 """
 
-import pytest
+import tomllib
+from pathlib import Path
 
-pytest.importorskip("song2vmd.cli", reason="impl pending: song2vmd cli")
+import song2vmd
+from song2vmd import cli
 
 
 def test_package_imports():
-    import song2vmd
-
     # namespace package(__init__.py 不在)ではなく実パッケージであること。
     assert song2vmd.__file__ is not None
     assert song2vmd.__version__ == "0.0.1"
 
 
 def test_console_script_entry_point_callable():
-    # song2vmd.cli:main(pyproject の [project.scripts] へ登録する対象)が import 解決可能。
-    from song2vmd.cli import main
+    assert callable(cli.main)
 
-    assert callable(main)
+
+def _pyproject():
+    root = Path(__file__).resolve().parents[3]
+    return tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+
+
+def test_console_script_registered_in_pyproject():
+    # pyproject の [project.scripts] に song2vmd = "song2vmd.cli:main" が登録されていること。
+    assert _pyproject()["project"]["scripts"]["song2vmd"] == "song2vmd.cli:main"
+
+
+def test_package_included_in_setuptools_find():
+    # 配布物に song2vmd を含めるため packages.find の include に song2vmd* があること。
+    include = _pyproject()["tool"]["setuptools"]["packages"]["find"]["include"]
+    assert "song2vmd*" in include

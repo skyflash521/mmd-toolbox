@@ -14,10 +14,6 @@ emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と
 
 import json
 
-import pytest
-
-pytest.importorskip("song2vmd.cli", reason="impl pending: song2vmd cli")
-
 from song2vmd import cli
 
 

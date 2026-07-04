@@ -12,10 +12,6 @@ options に載せない。
 
 import json
 
-import pytest
-
-pytest.importorskip("song2vmd.cli", reason="impl pending: song2vmd cli")
-
 from song2vmd import cli
 
 _NONNEG_INT = {"min": 0, "max": None, "exclusive_min": False}

@@ -9,8 +9,6 @@
 
 import pytest
 
-pytest.importorskip("song2vmd.cli", reason="impl pending: song2vmd cli")
-
 from song2vmd import cli
 
 
