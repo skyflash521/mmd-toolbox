@@ -44,6 +44,17 @@ def test_separator_shifts_disabled_for_determinism():
     assert SEPARATOR_CONFIG.shifts == 0
 
 
+# SeparatorConfig の model_filename/output_single_stem が未実装の間は AttributeError になるため
+# xfail 印で緑を保つ。strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.config.SeparatorConfig fields", strict=True)
+def test_separator_model_and_stem_are_pinned():
+    from vocal_analysis import SEPARATOR_CONFIG
+
+    # §8.3後注: audio-separator 経由で実行する Demucs v4 htdemucs_ft と、書き出す単一stem(vocals)。
+    assert SEPARATOR_CONFIG.model_filename == "htdemucs_ft.yaml"
+    assert SEPARATOR_CONFIG.output_single_stem == "vocals"
+
+
 def test_configs_are_frozen():
     from vocal_analysis import RECOGNIZER_CONFIG, SEPARATOR_CONFIG
 
