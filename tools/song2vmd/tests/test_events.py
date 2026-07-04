@@ -12,8 +12,6 @@ vocal_analysis の音素セグメント列(母音/子音/gap)と相対正規化R
 import numpy as np
 import pytest
 
-pytest.importorskip("song2vmd.events", reason="impl pending: song2vmd events")
-
 from lipsync import ConsonantClass, MouthShape
 from vocal_analysis import RmsEnvelope, Segment
 
