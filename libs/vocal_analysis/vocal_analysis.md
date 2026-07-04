@@ -241,7 +241,8 @@ CTC系認識のフレーム列をセグメント列へ正規化する規則を�
 - 中核はアダプタinterface(8.1)と正規化中間形式(2章)だけに依存し、特定の外部ツールに依存しない。
   差し替えはアダプタの実装追加だけで行える構造とする。
 - 各アダプタは、利用先 CLI がバックエンド選択引数の値・既定値・選択肢(自己記述)に使う**安定 id**
-  (小文字・ハイフン区切り)を持つ。現行の id は 8.3 の表のとおり(S1 `demucs`・S2 `wav2vec2-espeak`)。
+  (小文字・ハイフン区切り)を持つ。現行の id は 8.3 の表のとおり(S1 `audio-separator-htdemucs-ft`・
+  S2 `wav2vec2-espeak`)。
 - 同一ステージに複数のアダプタがあるときは、引数で適用ツールを選択可能にする(選択肢の公開は利用先
   CLIが行う)。アダプタと id の追加・変更は本書(8.3)を先に更新する。
 
@@ -250,7 +251,7 @@ CTC系認識のフレーム列をセグメント列へ正規化する規則を�
 | ステージ | 採用ツール | 主な採用理由 | 代替候補 |
 |---|---|---|---|
 | S0 入力読み込み | soundfile(現行 libsndfile は mp3 も可)優先 + 自動検出ffmpegへフォールバック(リポジトリに同梱しない) | 標準入出力を内部処理。soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等は不採用) |
-| S1 ボーカル抽出 | Demucs v4(アダプタ id: `demucs`。`demucs.api`。元repo保守終了→限定bugfixの adefossez/demucs fork を版固定・`shifts=0`) | 高品質・MIT・ライブラリでin-process呼び出し可・GPU不要でも動作 | audio-separator(保守活発・Python API) / Spleeter / 分離なし(`never`) |
+| S1 ボーカル抽出 | Demucs v4 htdemucs_ft を audio-separator 経由で実行(アダプタ id: `audio-separator-htdemucs-ft`。`audio_separator.separator.Separator`。`demucs_params.shifts=0`) | 高品質・MIT・ライブラリでin-process呼び出し可・GPU不要でも動作。生 `demucs.api`(adefossez fork)は `torchaudio<2.2` 固定で新しい Python(3.13等)向けビルドが無く採用しない(§8.3後注) | audio-separator の他モデル(MDXC系Roformer等。ライセンス個別確認要) / Spleeter / 分離なし(`never`) |
 | S2 音素/母音認識 | wav2vec2 音素認識(アダプタ id: `wav2vec2-espeak`。transformers + 許諾モデル, in-process) | 歌唱頑健性(自己教師あり)・純Pythonでin-process・torchはDemucsと共有・ライセンス清浄(Apache/BSD+許諾モデル) | Julius 音素認識(phone-loop構成が必要・高精度時刻)。Allosaurusは GPL-3.0 で不可 |
 
 採用ツールは品質・導入性の評価で見直しうる(候補比較は [external-tools.md](external-tools.md)。見直す場合は
@@ -259,6 +260,16 @@ CTC系認識のフレーム列をセグメント列へ正規化する規則を�
 使い、専用のキャッシュ機構は設けない。モデルが未キャッシュでネットワークからも取得できない場合は、モデル取得が
 必要と分かるエラーで失敗する(黙って劣化させない)。S2 の採用モデルは `facebook/wav2vec2-lv-60-espeak-cv-ft`
 (revision `ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4`)に固定する(その他の推論条件の固定は 5.1)。
+
+**S1 実行ライブラリの補足**: 生 `demucs.api`(adefossez fork)は依存 `torchaudio` を `<2.2` に固定しており、
+この上限を満たす `torchaudio` のビルドが無い新しい Python(3.13等)では導入できないため採用しない。
+`audio-separator`(MIT。`audio_separator.separator.Separator`)経由で同じ Demucs v4 の重み(`htdemucs_ft`。
+ボーカル SDR≈10.8。`audio-separator` の `get_simplified_model_list()` が示すモデル一覧の値)を、この
+`torchaudio` 上限に縛られない形で in-process 実行する。`Separator.__init__` の
+`output_single_stem="vocals"` でボーカルstem以外を書き出させず(`separate()` の戻り値
+`output_files` がボーカルWAVパス1件のみになる。stem名の比較は大文字小文字を区別しない)、
+`demucs_params={"shifts": 0, ...}` で非決定要素(shift平均)を無効化し決定論を確定する(§8.3表の
+`shifts=0`と同じ意図)。
 
 ---
 

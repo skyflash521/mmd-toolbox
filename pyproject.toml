@@ -19,6 +19,8 @@ dev = [
 ]
 vocal-analysis = [
     "soundfile",
+    "audio-separator",
+    "onnxruntime",
 ]
 
 [project.scripts]

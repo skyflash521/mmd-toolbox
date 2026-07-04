@@ -16,7 +16,9 @@
 - 実装言語 Python 3.11+。重い依存は `vocal_analysis` 側に閉じ、`pyproject.toml` の
   `[project.optional-dependencies]`(extra)として宣言する。本リポジトリ本体の必須依存 `numpy`/`scipy` は保つ。
   - S0: `soundfile`(BSD-3)。読めない形式のみ ffmpeg(自動検出・非再配布。**オプション**。vocal_analysis.md §3)。
-  - S1: `demucs`(adefossez fork・MIT)を `demucs.api` で in-process。`torch`(BSD-3)。
+  - S1: `audio-separator`(MIT)を `audio_separator.separator.Separator` で in-process(Demucs v4
+    htdemucs_ft モデル。生 `demucs.api` は依存 `torchaudio<2.2` が新しい Python 向けに無く不採用。
+    vocal_analysis.md §8.3後注)。`torch`(BSD-3)・`onnxruntime`(MIT)。
   - S2: `transformers`(Apache-2.0)+ 音素モデル `facebook/wav2vec2-lv-60-espeak-cv-ft`(Apache-2.0)。
     `torch` は S1 と共有。
   - S3: `numpy/scipy`(外部ツールに依存しない)。
@@ -52,7 +54,7 @@
 |---|---|---|
 | A-0 | 雛形・公開データ型(§2.1)。**推論条件の固定**(§5.1。モデル id・revision は §8.3 の固定値を使う) | 公開型が定まり、モデル条件が固定され再現可能 |
 | A-1 | S0 入力読み込み(`soundfile` 優先/ffmpeg フォールバック。ch/SR 保持)＋**入力レベル正規化**(§3) | WAV/FLAC/OGG/mp3 を読み ch/SR 保持。ffmpeg 検出時のみ m4a/aac 等も読み、未検出時は分かるエラー。正の一様ゲイン違いで正規化後PCMが一致 |
-| A-2 | S1 ボーカル抽出(`demucs.api`、`shifts=0`、Separator 抽象、mode 解釈。§4・§8.1) | S0出力(正規化PCM・ステレオ)からボーカルWAVを出力。決定論 |
+| A-2 | S1 ボーカル抽出(`audio_separator.separator.Separator`。Demucs v4 htdemucs_ft、`demucs_params.shifts=0`、Separator 抽象、mode 解釈。§4・§8.1) | S0出力(正規化PCM・ステレオ)からボーカルWAVを出力。決定論 |
 | A-3 | S2 音素認識(Recognizer 抽象。16kHz monoへ変換 → 母音/子音/gap の全被覆セグメント列＋IPAラベル。CTC区間化 §5.1) | 全時間軸を重複・欠落なく被覆。母音/子音は音素ラベルと任意信頼度。CTC区間化済み |
 | A-4 | S3 強弱RMS(§6.1。相対正規化=パーセンタイル、入力ゲイン不変) | ミックス全体の一様ゲイン差でRMSが不変。相対強度へ正規化 |
 | A-5 | 音素→5母音写像(§7。共有モジュール) | **IPA写像(§7.1)**: 母音IPAを a/i/u/e/o へ完全一致テーブルで写像。表に無い・判定不能は gap(決定論的)。**X-SAMPA写像(§7.2)**: 正規の音素記号を母音(a/i/u/e/o)・子音(c)へ写像(gap は使わない。母音表に一致すればその母音、しなければ c)。母音記号テーブルは vpr2vmd の vowel_shape() から移した共有実装を使い、vpr2vmd はそれを呼んで自身の MouthShape へ変換する(categorize()/consonant_class() は口形イベント確定として vpr2vmd に残す) |
@@ -92,7 +94,9 @@ A-5(写像)を用い、`vpr` の read(vpr由来ラベル生成)を使える。
   標準キャッシュ・未キャッシュかつ取得不能なら分かるエラー)。
   必要ディスク/RAM・CPU実行時間は実測でしか決められないため、A-3 で計測して確定する。
 - 決定論: 外部ツール(分離・認識)の非決定性。Demucs `shifts=0`、スレッド/シード固定で可能な範囲に収める。
-- Demucs 保守終了: adefossez fork を版固定。将来、保守活発な audio-separator への切り替え余地。
+- Demucs 実行ライブラリ: 生 `demucs.api`(adefossez fork)は `torchaudio<2.2` 固定で新しい Python 向け
+  ビルドが無く導入不能なため、`audio-separator` 経由で同じ Demucs v4 htdemucs_ft を実行する(対処済み。
+  vocal_analysis.md §8.3後注)。
 - 共有モジュール化(写像): `vpr2vmd` の母音記号テーブル(`vowel_shape()`)を共有モジュールへ移す際、`vpr2vmd`
   の既存テストが回帰しないこと(参照の置き換えのみで挙動を変えない)。`categorize()`/`consonant_class()`
   (口形イベント確定)は移さず `vpr2vmd` に残すため、この移管の影響範囲外。

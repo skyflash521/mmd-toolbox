@@ -35,15 +35,17 @@ S2の母音認識精度に直結する。ライブラリAPIで in-process 呼び
 
 | ツール | Python API | 品質 | 速度・要件 | 導入 | ライセンス | 備考 |
 |---|---|---|---|---|---|---|
-| **Demucs v4 (htdemucs)** | `demucs.api.Separator` | 高(SDR≈9dB) | 中。CPU可/GPUで速い | pip。容易 | MIT | 元repoは保守終了(archive)。限定bugfix fork: adefossez/demucs |
-| **audio-separator** (UVR系) | `Separator` クラス | モデル次第で最高峰 | モデル次第。ONNX | pip。容易。クロスプラットフォーム | MIT | UVRのMDX-Net/VR/Demucs/MDXCを切替 |
+| **Demucs v4 (htdemucs)** 生API | `demucs.api.Separator` | 高(SDR≈9dB) | 中。CPU可/GPUで速い | pip。ただし依存 `torchaudio` が `<2.2` 固定で新しい Python(3.13等)向けビルドが無く導入不能 | MIT | 元repoは保守終了(archive)。限定bugfix fork: adefossez/demucs |
+| **audio-separator** (UVR系) | `Separator` クラス | モデル次第で最高峰(同梱 Demucs v4 htdemucs_ft はモデル一覧上のボーカルSDR≈10.8) | モデル次第。ONNX/torch | pip。容易。クロスプラットフォーム。`torchaudio` 上限に縛られない | MIT | UVRのMDX-Net/VR/Demucs/MDXCを切替。Demucs系モデルも `demucs_params.shifts` で非決定要素を制御可 |
 | **Spleeter** | あり(TF) | 中(やや古い) | 高速・軽量 | pip(TensorFlow依存) | MIT | 速いが品質は上2者に劣る |
 
-**採用: Demucs v4(`demucs.api`)**。理由: 品質・MIT・Python APIでin-process呼び出し可・GPU不要でも動作。
-ただし元リポジトリは保守終了(archive)のため、**限定的なbugfix対応の fork(adefossez/demucs)を版固定で使う**。
-再現性のため `shifts=0` 等の非決定要素を固定する。代替候補に **audio-separator(保守活発・UVRの高品質モデル
-を切替)**、軽量・高速の Spleeter。分離不要なボーカル単体入力は Separator 抽象の `mode=never` で扱う
-([vocal_analysis.md](vocal_analysis.md) §8.1)。
+**採用: audio-separator 経由の Demucs v4 htdemucs_ft**(`audio_separator.separator.Separator`)。理由:
+品質・MIT・Python APIでin-process呼び出し可・GPU不要でも動作という Demucs の採用理由をそのまま満たし、
+かつモデル実体(Demucs v4 の重み)も変えない。生 `demucs.api`(adefossez fork)は依存 `torchaudio` を
+`<2.2` に固定しており、この上限を満たす `torchaudio` ビルドが無い新しい Python では導入できないため
+採用しない。同じ Demucs v4 の重みを audio-separator 経由で実行する。再現性のため
+`demucs_params={"shifts": 0, ...}` で非決定要素を固定する。分離不要なボーカル単体入力は Separator 抽象の
+`mode=never` で扱う([vocal_analysis.md](vocal_analysis.md) §8.1)。
 
 ボーカル抽出ツールの切り替えは [vocal_analysis.md](vocal_analysis.md) §8.1 の **Separator 抽象**の背後で行う。
 Separatorは出力に「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・トラック構成は各実装に閉じる。
@@ -137,7 +139,7 @@ ffmpeg 自体が不要なことも多い。
 | ステージ | 採用ツール | 呼び出し方 | 選定理由 | 代替候補 |
 |---|---|---|---|---|
 | S0 入力読み込み | **soundfile 優先(mp3も可)+ 自動検出ffmpegにフォールバック**(リポジトリに同梱しない) | 内部ライブラリ/サブプロセス | soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等の同梱配布は不採用) |
-| S1 ボーカル抽出 | **Demucs v4**(adefossez fork・版固定・`shifts=0`) | `demucs.api`(in-process) | 高品質・MIT・ライブラリ呼び出し可・GPU不要でも動作 | audio-separator(保守活発) / Spleeter / 分離なし |
+| S1 ボーカル抽出 | **Demucs v4 htdemucs_ft**(audio-separator 経由・`shifts=0`) | `audio_separator.separator.Separator`(in-process) | 高品質・MIT・ライブラリ呼び出し可・GPU不要でも動作。生 `demucs.api` は `torchaudio<2.2` 固定で新しい Python 向けビルドが無く不採用 | audio-separator の他モデル(Roformer系等。ライセンス個別確認要) / Spleeter / 分離なし |
 | S2 音素・母音認識 | **wav2vec2 音素認識**(transformers + 許諾モデル) | transformers(in-process) | 歌唱頑健性(SSL)・in-process・torchはDemucsと共有・ライセンス清浄。採用確定は S-1 認識ゲート(vocal_analysis.md §9) | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
 
 S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterface(Separator / Recognizer)を満たせば
@@ -153,8 +155,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 | ツール | ネイティブ出力 | アダプタが取り出すもの |
 |---|---|---|
 | ffmpeg(自動検出) | 復号したWAV | 復号PCM(チャンネル/サンプルレート保持)のパス。レベル正規化は S0 が施す([vocal_analysis.md](vocal_analysis.md) §3) |
-| Demucs (`demucs.api`) | 分離stem(配列/ファイル) | ボーカルWAVのパス(分離器出力) |
-| audio-separator | API が返す出力ファイルパス | ボーカルWAVのパス(APIの戻り値を使い、命名を推測しない) |
+| audio-separator(`Separator.separate`) | API が返す出力ファイルパス(Demucs v4 htdemucs_ft の分離stem) | ボーカルWAVのパス(APIの戻り値を使い、命名を推測しない) |
 | wav2vec2 phoneme | フレームごとのCTC音素列(IPA) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル(IPA)+任意の信頼度。IPA→5母音写像は vocal_analysis が提供(RMS不要)、gap の無音/継続判定・無音/閉口の確定は利用先がS3のRMS併用で行い、両唇閉鎖判定は音素から利用先が行う) |
 | Julius 音素認識 | アライメント(開始/終了フレーム・音素) | 全時間軸被覆のセグメント列 |
 
@@ -168,9 +169,9 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 ## 6. ライセンスまとめ
 
 - 本体 MIT([../../LICENSE](../../LICENSE)) / soundfile BSD-3 / libsndfile LGPL-2.1(依存・両立) /
-  Demucs(adefossez fork・htdemucs 重み)MIT / transformers Apache-2.0 / torch BSD-3 /
-  wav2vec2 モデル `facebook/wav2vec2-lv-60-espeak-cv-ft` Apache-2.0 / 代替候補: audio-separator MIT・
-  Spleeter MIT・Julius エンジン 修正BSD / **Allosaurus GPL-3.0=不採用**。
+  audio-separator MIT(htdemucs_ft 重みは Demucs v4 由来・MIT)/ transformers Apache-2.0 / torch BSD-3 /
+  wav2vec2 モデル `facebook/wav2vec2-lv-60-espeak-cv-ft` Apache-2.0 / 代替候補: Spleeter MIT・
+  Julius エンジン 修正BSD / **Allosaurus GPL-3.0=不採用**。
 - ffmpeg は同梱・再配布しない(§3)ため、そのビルドのライセンス(LGPL/GPL)による義務は生じない。
 - Julius を採用する場合のみ、その音響モデルの個別ライセンスを確認する。
 
