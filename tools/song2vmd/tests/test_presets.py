@@ -7,8 +7,6 @@
 
 import pytest
 
-pytest.importorskip("song2vmd.presets", reason="impl pending: song2vmd presets")
-
 from song2vmd import presets
 
 # song2vmd.md §8.1 の表(プリセット名 → 開き量レンジ弱・強・アタック・リリース・協調調音重なり・

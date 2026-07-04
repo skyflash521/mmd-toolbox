@@ -1,0 +1,98 @@
+"""song2vmd 歌い方スタイルプリセット(song2vmd.md §8.1)。
+
+--style が選ぶプリセットの具体値(開き量レンジ・アタック/リリース・協調調音の重なり上限・先行・
+最小保持・合成誇張係数・開き量上限)を確定する。開き量上限・協調調音・先行・最小保持はCLIで明示
+指定(--open-max・--coarticulation・--anticipation・--min-hold)があればプリセット値より優先する。
+アタック・リリース・合成誇張係数に対応するCLIオプションは無く、プリセット値に固定される。
+"""
+
+from dataclasses import dataclass
+
+# song2vmd.md §8.1 の表。プリセット名 → 開き量レンジ弱・強、アタック、リリース、協調調音の重なり
+# 上限、先行、最小保持、合成誇張係数、開き量上限。
+_PRESETS = {
+    "pop": {
+        "open_lo": 0.30, "open_hi": 0.75, "attack": 2, "release": 2,
+        "coarticulation": 2, "anticipation": 1, "min_hold": 3, "exaggeration": 1.0, "open_max": 0.90,
+    },
+    "ballad": {
+        "open_lo": 0.20, "open_hi": 0.55, "attack": 3, "release": 3,
+        "coarticulation": 3, "anticipation": 1, "min_hold": 4, "exaggeration": 0.8, "open_max": 0.70,
+    },
+    "powerful": {
+        "open_lo": 0.40, "open_hi": 0.95, "attack": 1, "release": 1,
+        "coarticulation": 2, "anticipation": 2, "min_hold": 3, "exaggeration": 1.3, "open_max": 0.97,
+    },
+    "whisper": {
+        "open_lo": 0.10, "open_hi": 0.35, "attack": 2, "release": 2,
+        "coarticulation": 2, "anticipation": 1, "min_hold": 3, "exaggeration": 0.7, "open_max": 0.50,
+    },
+    "rap": {
+        "open_lo": 0.30, "open_hi": 0.70, "attack": 1, "release": 1,
+        "coarticulation": 1, "anticipation": 1, "min_hold": 2, "exaggeration": 1.0, "open_max": 0.85,
+    },
+}
+
+STYLE_NAMES = tuple(_PRESETS)
+
+
+@dataclass(frozen=True)
+class OpennessParams:
+    """RMS→開き量写像に使うパラメータ(song2vmd.md §6.5・8.1)。"""
+
+    open_lo: float
+    open_hi: float
+    open_max: float
+
+
+@dataclass(frozen=True)
+class StyleGenParams:
+    """lipsync へ渡す生成パラメータのうち song2vmd のスタイルプリセットが確定する部分
+    (song2vmd.md §8.1。母音合成プロファイル等の残りは lipsync 側が持つ)。"""
+
+    attack_frames: int
+    release_frames: int
+    coartic_overlap_max: int
+    anticipation_frames: int
+    min_hold_frames: int
+    exaggeration: float
+
+
+def resolve(style, *, open_max=None, coarticulation=None, anticipation=None, min_hold=None):
+    """style のプリセット値に、CLI明示指定(Noneでない引数)を上書きして確定する(song2vmd.md §8.1)。
+
+    戻り値は (OpennessParams, StyleGenParams)。開き量レンジ(open_lo/open_hi)・アタック・
+    リリース・合成誇張係数はプリセット値に固定される(対応するCLIオプションが無いため)。
+    """
+    preset = _PRESETS[style]
+    openness = OpennessParams(
+        open_lo=preset["open_lo"],
+        open_hi=preset["open_hi"],
+        open_max=open_max if open_max is not None else preset["open_max"],
+    )
+    gen = StyleGenParams(
+        attack_frames=preset["attack"],
+        release_frames=preset["release"],
+        coartic_overlap_max=coarticulation if coarticulation is not None else preset["coarticulation"],
+        anticipation_frames=anticipation if anticipation is not None else preset["anticipation"],
+        min_hold_frames=min_hold if min_hold is not None else preset["min_hold"],
+        exaggeration=preset["exaggeration"],
+    )
+    return openness, gen
+
+
+def describe_values():
+    """--describe の presets(song2vmd.md 12.2)用に、公開引数名→プリセット値の対応を返す。
+
+    公開されているのは open_max・coarticulation・anticipation・min_hold のみ(開き量レンジ・
+    アタック・リリース・合成誇張係数はCLIで公開しない内部パラメータ。song2vmd.md 8.1)。
+    """
+    return {
+        name: {
+            "open_max": preset["open_max"],
+            "coarticulation": preset["coarticulation"],
+            "anticipation": preset["anticipation"],
+            "min_hold": preset["min_hold"],
+        }
+        for name, preset in _PRESETS.items()
+    }

@@ -28,9 +28,10 @@ from cli_events import (
 )
 
 from . import __version__
+from . import presets as _presets
 
-# 歌い方スタイルプリセット名(song2vmd.md 8.1)。プリセット値の解決(CLI上書きの適用)は未実装。
-STYLE_NAMES = ("pop", "ballad", "powerful", "whisper", "rap")
+# 歌い方スタイルプリセット名(song2vmd.md 8.1)。具体値の解決は presets モジュールが持つ。
+STYLE_NAMES = _presets.STYLE_NAMES
 
 # --separate-vocals の実施方針(song2vmd.md 5.2)。
 SEPARATE_VOCALS_MODES = ("auto", "always", "never")
@@ -43,17 +44,6 @@ RECOGNIZER_NAMES = ("whisper-ctc-forcedalign",)
 
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS(song2vmd.md 5.2・9章)。
 _MODEL_NAME_MAX_BYTES = 20
-
-# 歌い方スタイルプリセットが与える CLI 既定値(song2vmd.md 8.1 の表)。プリセット未指定引数
-# (--open-max・--coarticulation・--anticipation・--min-hold)のプリセットからの解決は未実装。
-# ここでは --describe の presets 用に文書の値をそのまま持つ。
-_STYLE_PRESET_VALUES = {
-    "pop": {"open_max": 0.90, "coarticulation": 2, "anticipation": 1, "min_hold": 3},
-    "ballad": {"open_max": 0.70, "coarticulation": 3, "anticipation": 1, "min_hold": 4},
-    "powerful": {"open_max": 0.97, "coarticulation": 2, "anticipation": 2, "min_hold": 3},
-    "whisper": {"open_max": 0.50, "coarticulation": 2, "anticipation": 1, "min_hold": 3},
-    "rap": {"open_max": 0.85, "coarticulation": 1, "anticipation": 1, "min_hold": 2},
-}
 
 
 def _model_name(text: str) -> str:
@@ -186,7 +176,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    help="撥音「ん」に「ん」モーフを使わず無音(閉口)に倒す。--n-morphの対")
     p.add_argument("--vowel-gain", dest="vowel_gain", type=_vowel_gain, default=(1.0, 1.0, 1.0, 1.0, 1.0),
                    help="母音別(あ/い/う/え/お)の開き量倍率(a:i:u:e:o)")
-    # 既定はプリセット値。未指定センチネル(None)のプリセットからの解決は未実装。
+    # 既定はプリセット値。未指定センチネル(None)は presets.resolve がプリセットから解決する。
     p.add_argument("--open-max", dest="open_max", type=_unit_float,
                    help="口の開き量の上限(0.0〜1.0。既定: プリセット値)")
     p.add_argument("--coarticulation", dest="coarticulation", type=_nonneg_int,
@@ -298,9 +288,9 @@ def _describe_presets():
     """--describe の presets を歌い方スタイルプリセットから導出する(12.2)。
 
     各要素は {name, values}。values は CLI で上書き可能な公開引数名(open_max・coarticulation・
-    anticipation・min_hold)→ そのプリセットが与える値のオブジェクト(song2vmd.md 8.1)。
+    anticipation・min_hold)→ そのプリセットが与える値のオブジェクト(song2vmd.md 8.1・presetsモジュール)。
     """
-    return [{"name": name, "values": dict(values)} for name, values in _STYLE_PRESET_VALUES.items()]
+    return [{"name": name, "values": dict(values)} for name, values in _presets.describe_values().items()]
 
 
 def _default_output(input_path: str) -> str:
