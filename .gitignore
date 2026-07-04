@@ -63,7 +63,8 @@ venv/
 CLAUDE.local.md
 .claude/settings.local.json
 
-### プロジェクト固有: 一時スクリプト置き場 ###
-# 使い捨ての計測・検証スクリプトの置き場(run-and-bench スキルが正)。
-# ここに置けば git add が物理的に失敗し、誤コミットを構造的に防げる。
-/.scratch/
+### プロジェクト固有: 一時成果物置き場 ###
+# 使い捨ての計測・検証スクリプト(run-and-bench スキルが正)、実装計画書等の一時ドキュメント
+# (docs/conventions/document-authoring.md が正)の置き場。場所を問わず .scratch/ を置けば
+# git add が物理的に失敗し、誤コミットを構造的に防げる。
+.scratch/
