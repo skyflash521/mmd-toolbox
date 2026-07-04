@@ -118,6 +118,8 @@
   - `auto`: 常に分離する(BGM有無の自動判定は持たず `always` と同義。自動判定を追加する場合は本書を先に
     更新してから実装する)。
 - 分離は外部ライブラリで内部実行し(必要時のみサブプロセス)、Separator 抽象の背後で差し替え可能とする(8章)。
+  公開関数は `separate(pcm: AudioPcm, mode: Literal["auto","always","never"]) -> Path`
+  (`vocal_analysis.separator`)。ライブラリ未導入時は `SeparationError` で失敗する。
 
 ---
 
