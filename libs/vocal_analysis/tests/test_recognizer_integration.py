@@ -1,9 +1,10 @@
 """S2 音素認識の統合テスト(vocal_analysis.md §5・§5.2・§8.1・§8.3)。
 
-外部呼び出し(Whisper書き起こし・G2P・音素モデル推論)はモック(_transcribe_with_timestamps・_g2p・
-_load_model_and_processor・_compute_log_probs を差し替え)して検証し、ネットワーク・実モデルを
-必須にしない。ダウンミックス・リサンプルは合成配列で決定論的に検証する。recognize() の統合テストは
-モックした書き起こし・G2P・推論結果から、複合構成の純関数群(_assemble_phoneme_sequence・
+無音検出による区間分割(§5.2手順1・2)は合成音声(実RMS)でそのまま検証し、外部呼び出し(Whisper
+書き起こし・G2P・音素モデル推論)はモック(_transcribe_segment・_g2p・_load_model_and_processor・
+_compute_log_probs を差し替え)して検証する(ネットワーク・実モデルを必須にしない)。ダウンミックス・
+リサンプルは合成配列で決定論的に検証する。recognize() の統合テストは、実RMSによる区間分割・無音判定と、
+モックした書き起こし・G2P・推論結果から複合構成の純関数群(_assemble_phoneme_sequence・
 _g2p_symbols_to_token_ids・_forced_align・_path_to_segments。各関数自体の網羅的な検証は
 test_recognizer.py)を経て正しくセグメント列が組み立てられることを確認する。
 """
@@ -75,14 +76,22 @@ def _write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> Path:
     return path
 
 
+def _loud_samples(num_samples: int, sample_rate: int = 16000, amplitude: float = 0.5) -> np.ndarray:
+    """無音判定のRMSしきい値を確実に上回る、振幅一定の正弦波(§5.2手順1・2の無音検出を通過させる)。"""
+    t = np.arange(num_samples) / sample_rate
+    return (amplitude * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32).reshape(-1, 1)
+
+
 def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+    # 0.12秒(モックする対数確率行列の6フレーム分ちょうど)・振幅一定の音声。内部に無音区間が
+    # 無いため単一の区間として扱われ、区間の終端が対数確率行列のフレーム数と一致する。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
-    # 1チャンク「あ」-> G2P「a」-> 音素列 ["pau","a","pau"]。語彙は blank=0・a=1 の2記号のみ。
+    # 区間のテキスト「あ」-> G2P「a」-> 音素列 ["pau","a","pau"]。語彙は blank=0・a=1 の2記号のみ。
     # 対数確率行列は状態0(pau)がフレーム0-1、状態1(a)がフレーム2-3、状態2(pau)がフレーム4-5で
-    # 優勢になるよう設計し、強制アライメントの経路が [0,0,1,1,2,2] に決まることを確認済み。
+    # 優勢になるよう設計しており、強制アライメントの経路は [0,0,1,1,2,2] になる。
     decoder = {0: "<pad>", 1: "a"}
     log_probs = np.array(
         [
@@ -95,7 +104,7 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
         ]
     )
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: ["あ"])
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
@@ -121,17 +130,107 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     assert segments[2].end_sec == pytest.approx(0.12)
 
 
+def test_recognize_skips_whisper_for_silent_segment(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 先頭2秒は大音量、続く3秒は完全な無音(RMS=0)。無音区間はWhisper呼び出し自体をスキップする
+    # (§5.2手順2)。分割点は無音区間[2.0,5.0)の中点3.5秒に立ち、区間[0,3.5)は大音量を含むため
+    # 無音でなく、区間[3.5,5.0)は完全に無音になる。
+    loud = _loud_samples(32000)
+    silence = np.zeros((48000, 1), dtype=np.float32)
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.concatenate([loud, silence], axis=0), 16000)
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+    call_count = {"transcribe": 0}
+
+    def fake_transcribe(samples):
+        call_count["transcribe"] += 1
+        return "あ"
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert call_count["transcribe"] == 1  # 無音区間ではWhisperを呼ばない
+    assert segments[-1].type == "gap"
+    assert segments[-1].phoneme is None
+    assert segments[-1].end_sec == pytest.approx(5.0)  # 音声全体の終端まで被覆する
+
+
+def test_recognize_fully_silent_input_never_loads_phoneme_model(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 音声全体が無音(RMS=0)の場合、§5.2手順2により全区間がWhisper呼び出し無しでgap確定され、
+    # 音素モデル(_load_model_and_processor)は一度も必要にならない(不要な依存失敗を避ける)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((32000, 1), dtype=np.float32), 16000)
+
+    def fail_if_called():
+        raise AssertionError("無音のみの入力で音素モデルをロードしてはならない")
+
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fail_if_called)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert len(segments) == 1
+    assert segments[0].type == "gap"
+    assert segments[0].phoneme is None
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(2.0)
+
+
+def test_recognize_last_local_segment_extends_exactly_to_segment_boundary(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 2秒(=100フレーム@20ms)の区間に対し、モックする対数確率行列はわざと6フレームしか無い
+    # (実モデルでも丸め等でフレーム数が区間の秒数からずれ得ることを模する)。区間の最後の区切りは
+    # フレーム数由来の終端ではなく、区間自身の終端(2.0秒)まで強制的に延ばされるべきである。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert segments[-1].type == "gap"
+    assert segments[-1].end_sec == pytest.approx(2.0)
+
+
 def test_recognize_whisper_missing_library_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = ImportError("no transformers")
+    decoder = {0: "<pad>"}
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
 
     def fake_transcribe(samples):
         raise original_error
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
 
     with pytest.raises(recognizer_module.RecognitionError, match="transformers") as excinfo:
         recognizer_module.recognize(wav_path)
@@ -147,14 +246,18 @@ def test_recognize_whisper_model_fetch_failure_raises_clear_error(tmp_path, monk
 
     # §4: モデルが未キャッシュでネットワークからも取得できない場合、モデル取得が必要と分かる
     # エラーで失敗させる(黙って劣化させない)。from_pretrained 系はこの場合 OSError を送出する。
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = OSError("model not found in cache and offline")
+    decoder = {0: "<pad>"}
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
 
     def fake_transcribe(samples):
         raise original_error
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
 
     with pytest.raises(recognizer_module.RecognitionError, match="内容認識モデル") as excinfo:
         recognizer_module.recognize(wav_path)
@@ -165,11 +268,14 @@ def test_recognize_whisper_model_fetch_failure_raises_clear_error(tmp_path, monk
 def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = ImportError("no pyopenjtalk")
-
-    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: ["あ"])
+    decoder = {0: "<pad>"}
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
 
     def fake_g2p(text):
         raise original_error
@@ -185,12 +291,13 @@ def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch)
 def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+    # 音素モデルは Whisper・G2P が両方成功した後(初回の非無音区間)に遅延ロードされるため、
+    # 実モデルを呼ばずにそこへ到達させるには _transcribe_segment・_g2p もモックする必要がある。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = ImportError("no transformers")
-
-    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: [])
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: [])
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
 
     def fake_load(*args, **kwargs):
         raise original_error
@@ -207,12 +314,11 @@ def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, mo
 def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = OSError("model not found in cache and offline")
-
-    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: [])
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: [])
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
 
     def fake_load(*args, **kwargs):
         raise original_error

@@ -1,7 +1,7 @@
 """S2 音素/母音認識(vocal_analysis.md §5・§5.1・§5.2・§8.1・§8.3)。
 
-内容認識(Whisper)・G2P(pyopenjtalk-plus)・音素モデルのCTC強制アライメント(§5.2)を組み合わせた
-複合構成で、母音/子音/gap を区別したセグメント列を生成する。公開関数
+無音検出による区間分割・内容認識(Whisper)・G2P(pyopenjtalk-plus)・音素モデルのCTC強制アライメント
+(§5.2)を組み合わせた複合構成で、母音/子音/gap を区別したセグメント列を生成する。公開関数
 recognize(vocal_wav_path) -> list[Segment] が唯一の公開面(Recognizer アダプタ契約。§8.1)。
 """
 
@@ -40,7 +40,115 @@ def _classify_symbol(symbol: str) -> Literal["vowel", "consonant"]:
     return "vowel" if base in _VOWEL_BASE_CHARACTERS else "consonant"
 
 
-# --- §5.2 複合構成(内容認識+G2P+強制アライメント)の区間化 ---
+# --- §5.2 手順1・2: 無音検出による区間分割 ---
+
+_SILENCE_FRAME_SEC = 0.1  # §5.2手順1: 無音検出用フレーム幅
+_SILENCE_THRESHOLD_DB_BELOW_PEAK = 30.0  # §5.2手順1: ピーク(95パーセンタイル)から下回るdB
+_SILENCE_MIN_RUN_SEC = 0.6  # §5.2手順1: 分割点とみなす無音区間の最小長
+_SEGMENT_MIN_SEC = 1.5  # §5.2手順1: 区間の最小長(未満は次の分割点まで結合)
+_SEGMENT_MAX_SEC = 25.0  # §5.2手順1: 区間の最大長(超過は均等分割)
+
+
+def _frame_rms(mono: np.ndarray, sample_rate: int, frame_sec: float) -> np.ndarray:
+    """一定幅の連続フレームに区切ってRMSを求める(§5.2手順1)。末尾の不完全フレームは切り捨てる。"""
+    frame_len = max(1, round(frame_sec * sample_rate))
+    num_frames = len(mono) // frame_len
+    if num_frames == 0:
+        return np.array([], dtype=np.float64)
+    trimmed = mono[: num_frames * frame_len].astype(np.float64).reshape(num_frames, frame_len)
+    return np.sqrt(np.mean(np.square(trimmed), axis=1))
+
+
+def _silence_threshold(frame_rms: np.ndarray) -> float:
+    """フレームRMS列から無音しきい値(95パーセンタイルのピークから30dB下)を求める(§5.2手順1)。
+
+    ピークが0(全フレームRMSが0)の場合はしきい値も0になり、RMSがしきい値"以下"かどうかで判定する
+    呼び出し側(手順1・2)がRMS0のフレーム・区間を過不足なく無音と判定する。
+    """
+    if frame_rms.size == 0:
+        return 0.0
+    peak = float(np.percentile(frame_rms, 95))
+    return peak * (10 ** (-_SILENCE_THRESHOLD_DB_BELOW_PEAK / 20.0))
+
+
+def _detect_silence_split_points(mono: np.ndarray, sample_rate: int) -> list[float]:
+    """無音区間(しきい値以下が0.6秒以上連続)の中点を分割点の時刻(秒)として返す(§5.2手順1)。"""
+    frame_rms = _frame_rms(mono, sample_rate, _SILENCE_FRAME_SEC)
+    if frame_rms.size == 0:
+        return []
+    threshold = _silence_threshold(frame_rms)
+    min_run_frames = max(1, round(_SILENCE_MIN_RUN_SEC / _SILENCE_FRAME_SEC))
+
+    split_points: list[float] = []
+    run_start: int | None = None
+    for i, value in enumerate(frame_rms):
+        is_silent = value <= threshold
+        if is_silent and run_start is None:
+            run_start = i
+        elif not is_silent and run_start is not None:
+            if i - run_start >= min_run_frames:
+                split_points.append((run_start + i) / 2 * _SILENCE_FRAME_SEC)
+            run_start = None
+    if run_start is not None and frame_rms.size - run_start >= min_run_frames:
+        split_points.append((run_start + frame_rms.size) / 2 * _SILENCE_FRAME_SEC)
+    return split_points
+
+
+def _build_segment_bounds(duration_sec: float, split_points: list[float]) -> list[tuple[float, float]]:
+    """分割点から、最小長・最大長の制約を満たす区間の(開始, 終了)秒の列を作る(§5.2手順1)。
+
+    分割点(0秒・音声終端を含む)で区切られた各区間を左から順に長さを累積し、1.5秒未満の区間は
+    次の分割点まで結合を続ける(音声終端まで結合しても1.5秒に満たない場合はそのまま採用する)。
+    結合後、25秒を超える区間は等分割して25秒以下の区間へ均等に分ける。
+    """
+    boundaries = [0.0, *sorted(split_points), duration_sec]
+    last_index = len(boundaries) - 1
+    merged: list[tuple[float, float]] = []
+    start = boundaries[0]
+    for index in range(1, len(boundaries)):
+        end = boundaries[index]
+        if end - start >= _SEGMENT_MIN_SEC or index == last_index:
+            merged.append((start, end))
+            start = end
+
+    result: list[tuple[float, float]] = []
+    for seg_start, seg_end in merged:
+        span = seg_end - seg_start
+        if span <= _SEGMENT_MAX_SEC:
+            result.append((seg_start, seg_end))
+            continue
+        piece_count = math.ceil(span / _SEGMENT_MAX_SEC)
+        piece_len = span / piece_count
+        result.extend(
+            (seg_start + i * piece_len, seg_start + (i + 1) * piece_len) for i in range(piece_count)
+        )
+    return result
+
+
+def _is_segment_silent(segment_samples: np.ndarray, threshold: float) -> bool:
+    """区間全体のRMSがしきい値以下かどうかを判定する(§5.2手順2)。"""
+    if segment_samples.size == 0:
+        return True
+    rms = float(np.sqrt(np.mean(np.square(segment_samples.astype(np.float64)))))
+    return rms <= threshold
+
+
+def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
+    """隣接する同一 type・phoneme の Segment を1つへ結合する(§5.2手順9。区間境界をまたぐ結合)。"""
+    merged: list[Segment] = []
+    for seg in segments:
+        if merged and merged[-1].type == seg.type and merged[-1].phoneme == seg.phoneme:
+            prev = merged[-1]
+            merged[-1] = Segment(
+                type=prev.type, start_sec=prev.start_sec, end_sec=seg.end_sec,
+                phoneme=prev.phoneme, confidence=None,
+            )
+        else:
+            merged.append(seg)
+    return merged
+
+
+# --- §5.2 手順4以降: 内容認識+G2P+強制アライメントの区間化 ---
 
 # §5.2 の写像表(確定): pyopenjtalk-plus の音素記号(無声化母音 I/U を含む)を音素モデルの語彙(espeak
 # 表記)へ対応付ける。pau・cl はここに含めず、blank トークン(呼び出し側が渡す blank_token_id)へ変換する。
@@ -59,9 +167,11 @@ _BLANK_G2P_SYMBOLS = frozenset({"pau", "cl"})
 
 
 def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
-    """チャンクごとのG2P音素記号列を pau を挟んで結合する(§5.2手順3)。
+    """チャンクごとのG2P音素記号列を pau を挟んで結合する(§5.2手順5)。
 
-    チャンク境界ごとに pau を1つ挟み、列の先頭と末尾にも pau を1つずつ補う。
+    チャンク境界ごとに pau を1つ挟み、列の先頭と末尾にも pau を1つずつ補う(区間ごとに独立して
+    Whisper呼び出しを行う現行パイプラインでは chunk_phonemes は常に1要素で呼ばれ、実質的に
+    その区間の音素記号列の先頭・末尾へ pau を補う処理になる)。
     """
     sequence = ["pau"]
     for i, phonemes in enumerate(chunk_phonemes):
@@ -73,7 +183,7 @@ def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
 
 
 def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_token_id: int) -> list[int]:
-    """G2P記号列を音素モデル語彙のトークンID列へ変換する(§5.2手順4)。
+    """G2P記号列を音素モデル語彙のトークンID列へ変換する(§5.2手順6)。
 
     pau・cl は blank_token_id へ変換する。写像表に無い記号、または写像先が実際のモデル語彙に
     無い場合は RecognitionError で停止する(黙って捨てない)。
@@ -93,16 +203,26 @@ def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_t
     return token_ids
 
 
+_FORCED_ALIGN_BAND_SEC = 1.0  # §5.2手順7: blank支配下での押し込み崩壊を防ぐ位置バンド幅
+
+
 def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
-    """既知のトークン列を対数確率行列へ単調に対応付ける(§5.2手順5。Viterbi)。
+    """既知のトークン列を対数確率行列へ単調に対応付ける(§5.2手順7。バンド制限Viterbi)。
 
     各トークンを1状態とし、フレームごとに「同一状態に留まる」「次のトークンの状態へ進む」の
     2種の遷移のみ許す(読み飛ばし禁止)。各状態の対数確率には token_ids が指すその状態自身の
     語彙IDの列を使う(pau・cl由来の状態のblank列選択は、呼び出し側の _g2p_symbols_to_token_ids が
     そこへ blank_token_id を書き込み済みであることに由来し、本関数はトークン種別を区別しない)。
+
+    **位置バンド制限**: 状態 l の期待フレーム位置を (l / (L-1)) * (T-1)(トークン列を区間内へ均等
+    割り当てした場合の位置。L=1 なら0)とし、フレーム t が状態 l に遷移できるのは
+    |t - 期待フレーム位置| <= バンド幅 を満たす場合に限る(バンド幅は1.0秒に相当するフレーム数で
+    固定)。blank 支配下でも均等割り当てから大きく外れた押し込み崩壊を構造的に防ぐ。
+
     フレーム0は状態0に固定し、最終フレームは状態 len(token_ids)-1 に到達している経路の中で
     最尤のものを採る。戻り値は各フレームが対応する状態(トークン列中のindex)。理論上到達不能
-    (フレーム数がトークン数未満等)な場合は RecognitionError で停止する。
+    (フレーム数がトークン数未満、またはバンド制限により到達不能な場合)は RecognitionError で
+    停止する。
     """
     num_frames = log_probs.shape[0]
     num_states = len(token_ids)
@@ -110,6 +230,17 @@ def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
         raise RecognitionError(
             f"強制アライメントが対応付け不能です(フレーム数{num_frames}、トークン数{num_states})"
         )
+
+    band_frames = max(1, round(_FORCED_ALIGN_BAND_SEC / FRAME_DURATION_SEC))
+
+    def expected_frame(state_index: int) -> float:
+        if num_states == 1:
+            return 0.0
+        return (state_index / (num_states - 1)) * (num_frames - 1)
+
+    out_of_band = np.array(
+        [[abs(t - expected_frame(l)) > band_frames for l in range(num_states)] for t in range(num_frames)]
+    )
 
     emission = log_probs[:, token_ids]  # (num_frames, num_states)
     neg_inf = float("-inf")
@@ -121,7 +252,9 @@ def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
         stay = dp[t - 1, :]
         advance = np.concatenate(([neg_inf], dp[t - 1, :-1]))
         take_advance = advance > stay
-        dp[t, :] = np.where(take_advance, advance, stay) + emission[t, :]
+        candidate = np.where(take_advance, advance, stay) + emission[t, :]
+        candidate[out_of_band[t]] = neg_inf
+        dp[t, :] = candidate
         backpointer[t, :] = take_advance.astype(np.int64)
 
     if dp[num_frames - 1, num_states - 1] == neg_inf:
@@ -137,10 +270,10 @@ def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
 
 
 def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: float) -> list[Segment]:
-    """強制アライメントの状態パスをSegment列へ変換する(§5.2手順6・7)。
+    """強制アライメントの状態パスをSegment列へ変換する(§5.2手順8・9)。
 
     各トークンの区間は、自身の状態が経路上に最初に現れるフレームから次のトークンの状態が最初に
-    現れるフレームまで(最後のトークンは音声終端まで)とする。隣接する区間が同一の出力(type・
+    現れるフレームまで(最後のトークンは区間終端まで)とする。隣接する区間が同一の出力(type・
     phoneme。pau・cl由来はいずれもgap/Noneで同一視される)を持つ場合は1区間へ結合する。
     """
     num_frames = len(path)
@@ -184,48 +317,91 @@ def recognize(vocal_wav_path: Path) -> list[Segment]:
     samples, sample_rate = sf.read(vocal_wav_path, dtype="float32", always_2d=True)
     mono = _downmix_to_mono(samples)
     resampled = _resample_to_target(mono, sample_rate, RECOGNIZER_CONFIG.sample_rate)
+    duration_sec = len(resampled) / RECOGNIZER_CONFIG.sample_rate
 
-    try:
-        chunk_texts = _transcribe_with_timestamps(resampled)
-    except ImportError as e:
-        raise RecognitionError(
-            "transformers または torch が見つかりません。導入してください"
-            "(vocal-analysis extra で両方導入されます)。"
-        ) from e
-    except OSError as e:
-        raise RecognitionError(
-            f"内容認識モデル({WHISPER_CONFIG.model_id}, revision={WHISPER_CONFIG.model_revision})を"
-            "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
-        ) from e
+    frame_rms = _frame_rms(resampled, RECOGNIZER_CONFIG.sample_rate, _SILENCE_FRAME_SEC)
+    threshold = _silence_threshold(frame_rms)
+    split_points = _detect_silence_split_points(resampled, RECOGNIZER_CONFIG.sample_rate)
+    segment_bounds = _build_segment_bounds(duration_sec, split_points)
 
-    try:
-        chunk_phonemes = [_g2p(text) for text in chunk_texts]
-    except ImportError as e:
-        raise RecognitionError(
-            "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
-        ) from e
-    phoneme_sequence = _assemble_phoneme_sequence(chunk_phonemes)
+    # 音素モデルは無音でない区間が実際に現れるまでロードしない(§5.2手順2: 全区間が無音なら
+    # モデルを一切必要としない。非無音区間でもWhisper・G2Pより先にロードして失敗境界を隠さない)。
+    processor = model = vocab = blank_token_id = None
 
-    try:
-        processor, model = _load_model_and_processor()
-    except ImportError as e:
-        raise RecognitionError(
-            "transformers または torch が見つかりません。導入してください"
-            "(vocal-analysis extra で両方導入されます)。"
-        ) from e
-    except OSError as e:
-        raise RecognitionError(
-            f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
-            "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
-        ) from e
+    all_segments: list[Segment] = []
+    for start_sec, end_sec in segment_bounds:
+        start_index = round(start_sec * RECOGNIZER_CONFIG.sample_rate)
+        end_index = round(end_sec * RECOGNIZER_CONFIG.sample_rate)
+        chunk_samples = resampled[start_index:end_index]
 
-    vocab = processor.tokenizer.get_vocab()
-    blank_token_id = processor.tokenizer.pad_token_id
-    token_ids = _g2p_symbols_to_token_ids(phoneme_sequence, vocab, blank_token_id)
+        if _is_segment_silent(chunk_samples, threshold):
+            all_segments.append(
+                Segment(type="gap", start_sec=start_sec, end_sec=end_sec, phoneme=None, confidence=None)
+            )
+            continue
 
-    log_probs = _compute_log_probs(processor, model, resampled)
-    path = _forced_align(log_probs, token_ids)
-    return _path_to_segments(path, phoneme_sequence, FRAME_DURATION_SEC)
+        try:
+            text = _transcribe_segment(chunk_samples)
+        except ImportError as e:
+            raise RecognitionError(
+                "transformers または torch が見つかりません。導入してください"
+                "(vocal-analysis extra で両方導入されます)。"
+            ) from e
+        except OSError as e:
+            raise RecognitionError(
+                f"内容認識モデル({WHISPER_CONFIG.model_id}, revision={WHISPER_CONFIG.model_revision})を"
+                "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
+            ) from e
+
+        try:
+            phonemes = _g2p(text)
+        except ImportError as e:
+            raise RecognitionError(
+                "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
+            ) from e
+
+        if processor is None:
+            try:
+                processor, model = _load_model_and_processor()
+            except ImportError as e:
+                raise RecognitionError(
+                    "transformers または torch が見つかりません。導入してください"
+                    "(vocal-analysis extra で両方導入されます)。"
+                ) from e
+            except OSError as e:
+                raise RecognitionError(
+                    f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
+                    "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
+                ) from e
+            vocab = processor.tokenizer.get_vocab()
+            blank_token_id = processor.tokenizer.pad_token_id
+
+        seq = _assemble_phoneme_sequence([phonemes])
+        token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
+        log_probs = _compute_log_probs(processor, model, chunk_samples)
+        path = _forced_align(log_probs, token_ids)
+        local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
+        # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
+        # 使わず、区間自身の真の終端(end_sec - start_sec)へ強制的に揃える(フレーム数計算の
+        # 丸め等で区間境界とわずかにずれ、隣接区間との欠落・重複を生むことを防ぐ)。
+        if local_segments:
+            last = local_segments[-1]
+            local_segments[-1] = Segment(
+                type=last.type, start_sec=last.start_sec, end_sec=end_sec - start_sec,
+                phoneme=last.phoneme, confidence=None,
+            )
+        for seg in local_segments:
+            all_segments.append(
+                Segment(
+                    type=seg.type,
+                    start_sec=seg.start_sec + start_sec,
+                    end_sec=seg.end_sec + start_sec,
+                    phoneme=seg.phoneme,
+                    confidence=None,
+                )
+            )
+
+    return _merge_adjacent_segments(all_segments)
 
 
 def _downmix_to_mono(samples: np.ndarray) -> np.ndarray:
@@ -244,18 +420,17 @@ def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: 
 
 
 def _g2p(text: str) -> list[str]:
-    """テキストをG2Pで音素記号列へ変換する(§5.2手順2。pyopenjtalk-plus、ルールベース)。"""
+    """テキストをG2Pで音素記号列へ変換する(§5.2手順4。pyopenjtalk-plus、ルールベース)。"""
     import pyopenjtalk
 
     return pyopenjtalk.g2p(text, kana=False, join=False)
 
 
-def _transcribe_with_timestamps(samples: np.ndarray) -> list[str]:
-    """Whisperでボーカル音声を書き起こし、チャンクごとのテキストを返す(§5.2手順1)。"""
+def _transcribe_segment(samples: np.ndarray) -> str:
+    """区間のボーカル音声をWhisperで書き起こす(§5.2手順3。区間ごとに独立呼び出し)。"""
     pipeline = _load_whisper_pipeline()
     result = pipeline(
         samples,
-        return_timestamps=True,
         generate_kwargs={
             "language": "japanese",
             "task": "transcribe",
@@ -263,7 +438,7 @@ def _transcribe_with_timestamps(samples: np.ndarray) -> list[str]:
             "do_sample": False,
         },
     )
-    return [chunk["text"] for chunk in result["chunks"]]
+    return result["text"]
 
 
 def _load_whisper_pipeline():
@@ -279,7 +454,7 @@ def _load_whisper_pipeline():
 
 
 def _compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:
-    """音素モデルで推論し、フレームごとの対数確率行列を返す(§5.2手順5の入力)。"""
+    """音素モデルで推論し、フレームごとの対数確率行列を返す(§5.2手順7の入力)。"""
     import torch
 
     inputs = processor(samples, sampling_rate=RECOGNIZER_CONFIG.sample_rate, return_tensors="pt")
