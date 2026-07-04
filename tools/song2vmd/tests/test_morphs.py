@@ -8,8 +8,6 @@ VmdDocument を組み立てる morphs.build_vmd_document を検証する。共�
 
 import pytest
 
-pytest.importorskip("song2vmd.morphs", reason="impl pending: song2vmd morphs")
-
 from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 from vmd import MorphKey, io
 
