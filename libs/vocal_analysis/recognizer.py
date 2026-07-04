@@ -1,15 +1,27 @@
-"""S2 音素/母音認識(vocal_analysis.md §5・§5.1)。
+"""S2 音素/母音認識(vocal_analysis.md §5・§5.1・§8.1・§8.3)。
 
-CTC系認識のフレーム列を、母音/子音/gap を区別したセグメント列へ正規化する。認識器自体の実行部
-(wav2vec2 呼び出し)は別モジュールが担い、本モジュールは言語非依存の音素分割ロジックの核を持つ。
+CTC系認識のフレーム列を、母音/子音/gap を区別したセグメント列へ正規化する。公開関数
+recognize(vocal_wav_path) -> list[Segment] が wav2vec2 の実行からセグメント列生成までを担う。
 """
 
+import math
 import unicodedata
+from pathlib import Path
 from typing import Literal
 
+import numpy as np
+import soundfile as sf
+from scipy.signal import resample_poly
+
+from .config import RECOGNIZER_CONFIG
 from .types import Segment
 
 FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
+MIN_SEGMENT_DURATION_SEC = 0.06  # §5.1: 60ms吸収の閾値
+
+
+class RecognitionError(Exception):
+    """S2 の認識失敗(transformers 未導入など、原因が分かるエラー)。"""
 
 # §5.1: IPA母音チャートの基本母音28記号 + R音性母音2記号(ɚ・ɝ) + 拡張母音記号1(ᵻ)。
 _VOWEL_BASE_CHARACTERS = frozenset("iyɨʉɯuɪʏʊeøɘɵɤoəɛœɜɞʌɔæɐaɶɑɒɚɝᵻ")
@@ -149,3 +161,86 @@ def _merge_adjacent_same_type(segments: list[Segment]) -> list[Segment]:
         else:
             result.append(seg)
     return result
+
+
+def recognize(vocal_wav_path: Path) -> list[Segment]:
+    """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約)。"""
+    samples, sample_rate = sf.read(vocal_wav_path, dtype="float32", always_2d=True)
+    mono = _downmix_to_mono(samples)
+    resampled = _resample_to_target(mono, sample_rate, RECOGNIZER_CONFIG.sample_rate)
+
+    try:
+        processor, model = _load_model_and_processor()
+    except ImportError as e:
+        raise RecognitionError(
+            "transformers または torch が見つかりません。導入してください"
+            "(vocal-analysis extra で両方導入されます)。"
+        ) from e
+    except OSError as e:
+        raise RecognitionError(
+            f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
+            "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
+        ) from e
+
+    token_ids = _run_model_inference(processor, model, resampled)
+    decoder = {v: k for k, v in processor.tokenizer.get_vocab().items()}
+    frame_symbols = _ids_to_symbols(token_ids, processor.tokenizer.pad_token_id, decoder)
+
+    segments = _merge_ctc_frames(frame_symbols, FRAME_DURATION_SEC)
+    return _absorb_short_segments(segments, MIN_SEGMENT_DURATION_SEC)
+
+
+def _downmix_to_mono(samples: np.ndarray) -> np.ndarray:
+    """複数チャンネルの PCM を平均でモノラルへダウンミックスする(§5.1)。"""
+    return samples.mean(axis=1)
+
+
+def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: int) -> np.ndarray:
+    """モノラル PCM を目標サンプルレートへ再サンプリングする(§5.1。多相補間)。"""
+    if sample_rate == target_sample_rate:
+        return mono
+    gcd = math.gcd(sample_rate, target_sample_rate)
+    up = target_sample_rate // gcd
+    down = sample_rate // gcd
+    return resample_poly(mono, up, down).astype(np.float32)
+
+
+def _ids_to_symbols(token_ids: list[int], pad_token_id: int, decoder: dict[int, str]) -> list[str | None]:
+    """CTC出力のトークンID列を音素記号列へ変換する(blank=pad_token_idはNone)。"""
+    return [None if tid == pad_token_id else decoder[tid] for tid in token_ids]
+
+
+def _run_model_inference(processor, model, samples: np.ndarray) -> list[int]:
+    """wav2vec2 モデルで推論し、フレームごとの argmax トークンID列を返す。"""
+    import torch
+
+    inputs = processor(samples, sampling_rate=RECOGNIZER_CONFIG.sample_rate, return_tensors="pt")
+    with torch.no_grad():
+        logits = model(inputs.input_values.to(RECOGNIZER_CONFIG.device)).logits
+    return torch.argmax(logits, dim=-1)[0].tolist()
+
+
+def _load_model_and_processor():
+    """認識器(wav2vec2 espeak)をS-1ゲート固定条件(§5.1・§8.3)でロードする。"""
+    import torch
+    from transformers import AutoModelForCTC, AutoProcessor
+
+    torch.manual_seed(RECOGNIZER_CONFIG.random_seed)
+    torch.set_num_threads(RECOGNIZER_CONFIG.num_threads)
+
+    # §5.1: wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
+    # 要求する。音素IDのデコードのみが必要で音素へのエンコードは不要なため do_phonemize=False
+    # でこの依存を回避する。
+    processor = AutoProcessor.from_pretrained(
+        RECOGNIZER_CONFIG.model_id,
+        revision=RECOGNIZER_CONFIG.model_revision,
+        do_phonemize=False,
+    )
+    model = AutoModelForCTC.from_pretrained(
+        RECOGNIZER_CONFIG.model_id,
+        revision=RECOGNIZER_CONFIG.model_revision,
+        torch_dtype=getattr(torch, RECOGNIZER_CONFIG.dtype),
+    )
+    model.to(RECOGNIZER_CONFIG.device)
+    model.eval()
+    return processor, model

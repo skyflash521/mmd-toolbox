@@ -21,6 +21,8 @@ vocal-analysis = [
     "soundfile",
     "audio-separator",
     "onnxruntime",
+    "torch",
+    "transformers",
 ]
 
 [project.scripts]
