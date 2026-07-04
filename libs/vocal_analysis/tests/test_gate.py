@@ -321,7 +321,6 @@ def test_remove_invalid_time_segments_excludes_overlap_with_non_adjacent_segment
     assert result == [_seg("a", 0.0, 3.0), _seg("a", 4.0, 8.0), _seg("a", 9.0, 10.0)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_no_mismatch_when_vowel_covered_by_note():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -331,7 +330,6 @@ def test_find_midi_mismatch_ranges_no_mismatch_when_vowel_covered_by_note():
     assert find_midi_mismatch_ranges(segments, midi_notes) == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_detects_vowel_with_no_note_for_300ms_or_more():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -342,7 +340,6 @@ def test_find_midi_mismatch_ranges_detects_vowel_with_no_note_for_300ms_or_more(
     assert find_midi_mismatch_ranges(segments, midi_notes) == [(0.0, 0.5)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_ignores_vowel_gap_just_under_threshold():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -353,7 +350,6 @@ def test_find_midi_mismatch_ranges_ignores_vowel_gap_just_under_threshold():
     assert find_midi_mismatch_ranges(segments, midi_notes) == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_detects_vowel_gap_of_exactly_threshold():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -364,7 +360,6 @@ def test_find_midi_mismatch_ranges_detects_vowel_gap_of_exactly_threshold():
     assert find_midi_mismatch_ranges(segments, midi_notes) == [(0.0, 0.3)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_detects_sil_covered_by_note_for_300ms_or_more():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -374,7 +369,6 @@ def test_find_midi_mismatch_ranges_detects_sil_covered_by_note_for_300ms_or_more
     assert find_midi_mismatch_ranges(segments, midi_notes) == [(0.0, 0.5)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_sil_brief_note_overlap_is_not_a_mismatch():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -385,7 +379,6 @@ def test_find_midi_mismatch_ranges_sil_brief_note_overlap_is_not_a_mismatch():
     assert find_midi_mismatch_ranges(segments, midi_notes) == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_sil_continuously_covered_by_adjacent_notes():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -396,7 +389,6 @@ def test_find_midi_mismatch_ranges_sil_continuously_covered_by_adjacent_notes():
     assert find_midi_mismatch_ranges(segments, midi_notes) == [(0.0, 0.35)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_sil_covered_with_gap_is_not_continuous():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -408,7 +400,6 @@ def test_find_midi_mismatch_ranges_sil_covered_with_gap_is_not_continuous():
     assert find_midi_mismatch_ranges(segments, midi_notes) == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_sil_without_note_is_not_a_mismatch():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -419,7 +410,6 @@ def test_find_midi_mismatch_ranges_sil_without_note_is_not_a_mismatch():
     assert find_midi_mismatch_ranges(segments, midi_notes) == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_find_midi_mismatch_ranges_ignores_consonant_segments():
     from vocal_analysis.gate import find_midi_mismatch_ranges
 
@@ -430,7 +420,6 @@ def test_find_midi_mismatch_ranges_ignores_consonant_segments():
     assert find_midi_mismatch_ranges(segments, midi_notes) == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_exclude_ranges_from_segments_splits_segment_around_excluded_middle():
     from vocal_analysis.gate import exclude_ranges_from_segments
 
@@ -442,7 +431,6 @@ def test_exclude_ranges_from_segments_splits_segment_around_excluded_middle():
     assert result == [_seg("a", 0.0, 3.0), _seg("a", 4.0, 10.0)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_exclude_ranges_from_segments_drops_fully_excluded_segment():
     from vocal_analysis.gate import exclude_ranges_from_segments
 
@@ -454,7 +442,6 @@ def test_exclude_ranges_from_segments_drops_fully_excluded_segment():
     assert result == [_seg("i", 1.0, 2.0)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate MIDI rough alignment", strict=True)
 def test_exclude_ranges_from_segments_leaves_unaffected_segment_unchanged():
     from vocal_analysis.gate import exclude_ranges_from_segments
 

@@ -151,3 +151,90 @@ def remove_invalid_time_segments(segments: list[CategorySegment]) -> list[Catego
             result.append(CategorySegment(category=valid[owner].category, start_sec=lo, end_sec=hi))
         owner_of_last = owner
     return result
+
+
+# MIDI粗整合の食い違いとみなす連続時間の閾値。
+_MIDI_MISMATCH_THRESHOLD_SEC = 0.3
+
+
+def _merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """区間列(開始, 終了)を開始時刻順に整列し、重なる/接する区間を結合する。"""
+    ordered = sorted((iv for iv in intervals if iv[1] > iv[0]), key=lambda iv: iv[0])
+    merged: list[tuple[float, float]] = []
+    for start, end in ordered:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _subtract_intervals(
+    base: tuple[float, float], subtract: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """base区間から subtract 区間群(結合済み・開始時刻順)を差し引いた残り区間列を返す。"""
+    start, end = base
+    remaining: list[tuple[float, float]] = []
+    cursor = start
+    for sub_start, sub_end in subtract:
+        if sub_end <= cursor or sub_start >= end:
+            continue
+        if sub_start > cursor:
+            remaining.append((cursor, min(sub_start, end)))
+        cursor = max(cursor, sub_end)
+        if cursor >= end:
+            break
+    if cursor < end:
+        remaining.append((cursor, end))
+    return remaining
+
+
+def _intersect_intervals(
+    base: tuple[float, float], others: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """base区間と others 区間群(結合済み・開始時刻順)との重なり区間列を返す。"""
+    start, end = base
+    result: list[tuple[float, float]] = []
+    for other_start, other_end in others:
+        lo = max(start, other_start)
+        hi = min(end, other_end)
+        if hi > lo:
+            result.append((lo, hi))
+    return result
+
+
+def find_midi_mismatch_ranges(
+    segments: list[CategorySegment], midi_notes: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """参照ラベルとMIDIノート(発音区間)を粗く突き合わせ、長時間の食い違いを検出する。
+
+    母音区間のうちMIDIノートに重ならない部分、および sil 区間のうちMIDIノートに連続して
+    覆われる部分について、`_MIDI_MISMATCH_THRESHOLD_SEC` 以上続くものを食い違い区間として
+    返す。子音区間は対象外。
+    """
+    merged_notes = _merge_intervals(midi_notes)
+    mismatches: list[tuple[float, float]] = []
+    for seg in segments:
+        if seg.category in _VOWEL_SYMBOLS:
+            candidates = _subtract_intervals((seg.start_sec, seg.end_sec), merged_notes)
+        elif seg.category == "sil":
+            candidates = _intersect_intervals((seg.start_sec, seg.end_sec), merged_notes)
+        else:
+            continue
+        for start, end in candidates:
+            if end - start >= _MIDI_MISMATCH_THRESHOLD_SEC:
+                mismatches.append((start, end))
+    return mismatches
+
+
+def exclude_ranges_from_segments(
+    segments: list[CategorySegment], ranges_to_exclude: list[tuple[float, float]]
+) -> list[CategorySegment]:
+    """segments から、ranges_to_exclude の各区間と重なる時間範囲を除外した区間列を返す
+    (重なる範囲だけを取り除き、区間を分割・全部除外・無変更のいずれかにする)。"""
+    merged_exclusions = _merge_intervals(ranges_to_exclude)
+    result: list[CategorySegment] = []
+    for seg in segments:
+        for start, end in _subtract_intervals((seg.start_sec, seg.end_sec), merged_exclusions):
+            result.append(CategorySegment(category=seg.category, start_sec=start, end_sec=end))
+    return result
