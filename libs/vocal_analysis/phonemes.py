@@ -19,8 +19,10 @@ _ESPEAK_IPA_TO_VOWEL = {
     "ʊ": "u",
     "w": "u",
     "e": "e",
+    "e̞": "e",  # lowered e(採用モデルの語彙における日本語「え」の表記。vocal_analysis.md §5.2)
     "ɛ": "e",
     "o": "o",
+    "o̞": "o",  # lowered o(採用モデルの語彙における日本語「お」の表記。vocal_analysis.md §5.2)
     "ɔ": "o",
 }
 
