@@ -103,3 +103,51 @@ def parse_htk100ns_monophone_label(path: str | Path) -> list[CategorySegment]:
     return _parse_monophone_label_lines(
         path, path.read_text(encoding="utf-8").splitlines(), time_scale=_HTK_100NS_UNITS_PER_SECOND
     )
+
+
+def clip_segments_to_audio_duration(
+    segments: list[CategorySegment], audio_duration_sec: float
+) -> list[CategorySegment]:
+    """採点の時間軸を [0, audio_duration_sec] に限定する。範囲外の区間は除外し、範囲をまたぐ
+    区間は範囲内に収まるようクリップする。範囲内で参照ラベルが被覆しない区間(末尾欠落等)を
+    埋める合成区間は追加しない。"""
+    result = []
+    for seg in segments:
+        start = max(seg.start_sec, 0.0)
+        end = min(seg.end_sec, audio_duration_sec)
+        if end > start:
+            result.append(CategorySegment(category=seg.category, start_sec=start, end_sec=end))
+    return result
+
+
+def remove_invalid_time_segments(segments: list[CategorySegment]) -> list[CategorySegment]:
+    """ゼロ長・時刻逆転の区間を除去し、2つ以上の区間が重複する時間範囲(隣接する区間どうしに
+    限らず、一方が他方を包含する場合や離れた区間と重なる場合も含む)を、どの区間からも除外する
+    (採点対象に残さず隙間にする)。
+
+    区間境界(開始・終了時刻)で時間軸を分割した各微小区間ごとに、それを覆う元区間の数を数える
+    (掃引法)。覆う元区間がちょうど1つの微小区間だけを採用し、同一の元区間に由来する隣接微小
+    区間は1つの区間へ結合する。覆う元区間が0または2つ以上の微小区間は捨てる。
+    """
+    valid = [seg for seg in segments if seg.end_sec > seg.start_sec]
+    if not valid:
+        return []
+
+    boundaries = sorted({seg.start_sec for seg in valid} | {seg.end_sec for seg in valid})
+    result: list[CategorySegment] = []
+    owner_of_last: int | None = None
+    for lo, hi in zip(boundaries, boundaries[1:]):
+        if hi <= lo:
+            continue
+        mid = (lo + hi) / 2
+        covering = [i for i, seg in enumerate(valid) if seg.start_sec <= mid < seg.end_sec]
+        if len(covering) != 1:
+            owner_of_last = None
+            continue
+        owner = covering[0]
+        if result and owner_of_last == owner and result[-1].end_sec == lo:
+            result[-1] = CategorySegment(category=valid[owner].category, start_sec=result[-1].start_sec, end_sec=hi)
+        else:
+            result.append(CategorySegment(category=valid[owner].category, start_sec=lo, end_sec=hi))
+        owner_of_last = owner
+    return result
