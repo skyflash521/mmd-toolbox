@@ -58,7 +58,7 @@ def vowel_shape(symbol: str) -> MouthShape | None:
     """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。
 
     母音記号テーブル自体は vocal_analysis(共有ドメイン層)が持つ(vocal_analysis.md §7.2。vpr を読む
-    CLI と S-1ゲートが同一の写像表を使うため、二重管理を避ける)。
+    CLI と S-1認識測定が同一の写像表を使うため、二重管理を避ける)。
     """
     letter = xsampa_vowel_letter(symbol)
     if letter is None:
