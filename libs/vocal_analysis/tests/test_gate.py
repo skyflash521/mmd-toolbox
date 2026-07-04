@@ -684,3 +684,138 @@ def test_compute_over_opening_rate_ignores_vowel_reference_frames():
     predicted = [_seg("sil", 0.0, 0.05), _seg("a", 0.05, 0.1)]
 
     assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_match_segments_matches_overlapping_same_vowel_pair():
+    from vocal_analysis.gate import match_segments
+
+    reference = [_seg("a", 0.0, 1.0)]
+    predicted = [_seg("a", 0.1, 1.1)]
+
+    matched, undetected, excess = match_segments(predicted, reference)
+
+    assert matched == [(reference[0], predicted[0])]
+    assert undetected == []
+    assert excess == []
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_match_segments_different_vowel_category_is_not_a_valid_pair():
+    from vocal_analysis.gate import match_segments
+
+    # 時間は完全に重なるが母音種別が異なるため対応しない。
+    reference = [_seg("a", 0.0, 1.0)]
+    predicted = [_seg("i", 0.0, 1.0)]
+
+    matched, undetected, excess = match_segments(predicted, reference)
+
+    assert matched == []
+    assert undetected == [reference[0]]
+    assert excess == [predicted[0]]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_match_segments_no_time_overlap_is_not_a_valid_pair():
+    from vocal_analysis.gate import match_segments
+
+    # 母音種別は一致するが時間重なりが無いため対応しない。
+    reference = [_seg("a", 0.0, 1.0)]
+    predicted = [_seg("a", 2.0, 3.0)]
+
+    matched, undetected, excess = match_segments(predicted, reference)
+
+    assert matched == []
+    assert undetected == [reference[0]]
+    assert excess == [predicted[0]]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_match_segments_ignores_non_vowel_segments_entirely():
+    from vocal_analysis.gate import match_segments
+
+    # c/silの区間は母音種別を持たないため対応付けの対象外(未検出にも余剰にも数えない)。
+    reference = [_seg("c", 0.0, 1.0), _seg("a", 1.0, 2.0)]
+    predicted = [_seg("sil", 0.0, 1.0), _seg("a", 1.0, 2.0)]
+
+    matched, undetected, excess = match_segments(predicted, reference)
+
+    assert matched == [(reference[1], predicted[1])]
+    assert undetected == []
+    assert excess == []
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_match_segments_finds_globally_optimal_total_overlap():
+    from vocal_analysis.gate import match_segments
+
+    # 基準区間どうしは重複しない(ref0=[0,3)、ref1=[3,7.05))。ref0はpred0とだけ重なる(重複3.0)。
+    # ref1はpred0(重複4.0)ともpred1(重複0.05)とも重なる。局所的にはref0がpred0を早い者勝ちで
+    # 取りたいところだが、全体の総重複時間を最大化する割当は「ref1をpred0に対応させ、ref0は
+    # 未検出・pred1は余剰にする」(総重複4.0)であり、「ref0をpred0に対応させる」
+    # (総重複3.0+0.05=3.05)より大きい。
+    reference = [_seg("a", 0.0, 3.0), _seg("a", 3.0, 7.05)]
+    predicted = [_seg("a", 0.0, 7.0), _seg("a", 7.0, 7.1)]
+
+    matched, undetected, excess = match_segments(predicted, reference)
+
+    assert matched == [(reference[1], predicted[0])]
+    assert undetected == [reference[0]]
+    assert excess == [predicted[1]]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_match_segments_tie_break_prefers_lexicographically_smallest_assignment():
+    from vocal_analysis.gate import match_segments
+
+    # ref0(幅広い1区間)はpred0・pred1のどちらとも重複時間1.0で等しく対応できるため、総重複時間は
+    # どちらを選んでも同点(1.0)。仕様の辞書式最小規則により、基準番号・予測番号の組が辞書式に
+    # 小さい方((0基準番号, 0予測番号)、すなわちref0をpred0に対応させる)を選び、pred1が余剰になる。
+    reference = [_seg("a", 0.0, 3.0)]
+    predicted = [_seg("a", 0.0, 1.0), _seg("a", 1.0, 2.0)]
+
+    matched, undetected, excess = match_segments(predicted, reference)
+
+    assert matched == [(reference[0], predicted[0])]
+    assert undetected == []
+    assert excess == [predicted[1]]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_compute_boundary_deviation_single_pair():
+    from vocal_analysis.gate import compute_boundary_deviation
+
+    # 予測開始時刻が基準より50ms(0.05秒)遅い。1件だけなら中央値・95パーセンタイルとも同じ値。
+    matched_pairs = [(_seg("a", 0.0, 1.0), _seg("a", 0.05, 1.05))]
+
+    result = compute_boundary_deviation(matched_pairs)
+
+    assert result == pytest.approx((50.0, 50.0))
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_compute_boundary_deviation_median_and_p95_over_multiple_pairs():
+    from vocal_analysis.gate import compute_boundary_deviation
+
+    # 開始時刻差(ミリ秒、符号は問わないため正負を混在): 10, 20, 30, 40, 50。
+    # 中央値(50パーセンタイル、線形補間)は30。95パーセンタイルは40と50の間を0.8で補間した48。
+    # 各組の基準区間はmatch_segmentsが実際に出力しうる形(基準区間どうしが重複しない)に揃えている。
+    matched_pairs = [
+        (_seg("a", 0.0, 1.0), _seg("a", 0.01, 1.01)),
+        (_seg("a", 2.0, 3.0), _seg("a", 1.98, 2.98)),
+        (_seg("a", 4.0, 5.0), _seg("a", 4.03, 5.03)),
+        (_seg("a", 6.0, 7.0), _seg("a", 6.04, 7.04)),
+        (_seg("a", 8.0, 9.0), _seg("a", 8.05, 9.05)),
+    ]
+
+    result = compute_boundary_deviation(matched_pairs)
+
+    assert result == pytest.approx((30.0, 48.0))
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate interval matching", strict=True)
+def test_compute_boundary_deviation_no_matched_pairs_is_undefined():
+    from vocal_analysis.gate import compute_boundary_deviation
+
+    # 対応区間が0件の曲は境界ずれが未定義(マクロ平均からの除外・ゲート不合格判定は集計処理側の責務)。
+    assert compute_boundary_deviation([]) is None
