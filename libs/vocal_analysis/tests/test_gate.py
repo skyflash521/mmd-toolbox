@@ -6,8 +6,6 @@
 
 import pytest
 
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis.gate", strict=True)
-
 
 @pytest.mark.parametrize(
     "symbol,expected",
