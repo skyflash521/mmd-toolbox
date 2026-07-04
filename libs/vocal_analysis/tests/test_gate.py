@@ -451,3 +451,64 @@ def test_exclude_ranges_from_segments_leaves_unaffected_segment_unchanged():
     result = exclude_ranges_from_segments(segments, ranges_to_exclude)
 
     assert result == segments
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
+def test_ticks_to_seconds_at_tick_zero_is_zero():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import ticks_to_seconds
+
+    tempos = [TempoEvent(tick=0, bpm=120.0)]
+
+    assert ticks_to_seconds(0, tempos, resolution=480) == pytest.approx(0.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
+def test_ticks_to_seconds_single_tempo_one_quarter_note():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import ticks_to_seconds
+
+    # BPM120では四分音符(1拍)は60/120=0.5秒。resolution(tick/四分音符)が480なら480tickで0.5秒。
+    tempos = [TempoEvent(tick=0, bpm=120.0)]
+
+    assert ticks_to_seconds(480, tempos, resolution=480) == pytest.approx(0.5)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
+def test_ticks_to_seconds_across_tempo_change():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import ticks_to_seconds
+
+    # tick 0〜480: BPM120(0.5秒)。tick 480〜960: BPM60(四分音符1拍=60/60=1.0秒)。
+    # 合計 tick=960 で 0.5+1.0=1.5秒。
+    tempos = [TempoEvent(tick=0, bpm=120.0), TempoEvent(tick=480, bpm=60.0)]
+
+    assert ticks_to_seconds(960, tempos, resolution=480) == pytest.approx(1.5)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
+def test_ticks_to_seconds_mid_segment_after_tempo_change():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import ticks_to_seconds
+
+    # tick=720は tempo変化後(tick 480, BPM60)の区間の途中(240tick=0.5拍=0.5秒分)。
+    # 0.5(最初の区間) + 0.5(2番目の区間の途中) = 1.0秒。
+    tempos = [TempoEvent(tick=0, bpm=120.0), TempoEvent(tick=480, bpm=60.0)]
+
+    assert ticks_to_seconds(720, tempos, resolution=480) == pytest.approx(1.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
+def test_ticks_to_seconds_accepts_unsorted_tempo_list():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import ticks_to_seconds
+
+    # テンポイベントが tick 降順で渡されても、内部で並べ替えて正しく計算する。
+    tempos = [TempoEvent(tick=480, bpm=60.0), TempoEvent(tick=0, bpm=120.0)]
+
+    assert ticks_to_seconds(960, tempos, resolution=480) == pytest.approx(1.5)
