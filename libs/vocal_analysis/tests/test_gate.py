@@ -812,7 +812,6 @@ def test_compute_boundary_deviation_no_matched_pairs_is_undefined():
     assert compute_boundary_deviation([]) is None
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_compute_song_metrics_basic_composition():
     from vocal_analysis.gate import compute_song_metrics
 
@@ -829,7 +828,6 @@ def test_compute_song_metrics_basic_composition():
     assert result.reference_vowel_count == 1
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_compute_song_metrics_reference_vowel_count_excludes_non_vowel_segments():
     from vocal_analysis.gate import compute_song_metrics
 
@@ -845,7 +843,6 @@ def test_compute_song_metrics_reference_vowel_count_excludes_non_vowel_segments(
     assert result.excess_count == 1
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_compute_song_metrics_boundary_deviation_is_none_without_matches():
     from vocal_analysis.gate import compute_song_metrics
 
@@ -877,7 +874,6 @@ def _song_metrics(
     )
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_judge_gate_averages_across_songs_and_passes():
     from vocal_analysis.gate import judge_gate
 
@@ -910,7 +906,6 @@ def test_judge_gate_averages_across_songs_and_passes():
     assert result.passed is True
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_judge_gate_fails_when_vowel_accuracy_below_threshold():
     from vocal_analysis.gate import judge_gate
 
@@ -919,7 +914,6 @@ def test_judge_gate_fails_when_vowel_accuracy_below_threshold():
     assert judge_gate(songs).passed is False
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_judge_gate_fails_when_over_opening_rate_above_threshold():
     from vocal_analysis.gate import judge_gate
 
@@ -928,7 +922,6 @@ def test_judge_gate_fails_when_over_opening_rate_above_threshold():
     assert judge_gate(songs).passed is False
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_judge_gate_fails_when_boundary_deviation_median_above_threshold():
     from vocal_analysis.gate import judge_gate
 
@@ -939,7 +932,6 @@ def test_judge_gate_fails_when_boundary_deviation_median_above_threshold():
     assert judge_gate(songs).passed is False
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_judge_gate_fails_when_boundary_deviation_p95_above_threshold():
     from vocal_analysis.gate import judge_gate
 
@@ -948,7 +940,6 @@ def test_judge_gate_fails_when_boundary_deviation_p95_above_threshold():
     assert judge_gate(songs).passed is False
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_judge_gate_fails_when_undetected_excess_rate_above_threshold():
     from vocal_analysis.gate import judge_gate
 
@@ -967,14 +958,31 @@ def test_judge_gate_fails_when_undetected_excess_rate_above_threshold():
     assert judge_gate(songs).passed is False
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
-def test_judge_gate_undefined_boundary_deviation_fails_and_clears_macro_boundary():
+def test_judge_gate_undefined_boundary_deviation_fails_but_averages_defined_songs():
     from vocal_analysis.gate import judge_gate
 
-    # 1曲でも対応区間0件(境界ずれ未定義)ならゲート全体を不合格にし、境界ずれのマクロ値もNoneにする。
+    # 1曲でも対応区間0件(境界ずれ未定義)ならゲート全体を不合格にするが、境界ずれのマクロ値自体は
+    # 未定義の曲だけを除外し、定義済みの曲(1曲目)だけで平均する(§9.4)。
     # 他の指標(母音正解率等)は算出できる範囲でそのまま報告する。
     songs = [
-        _song_metrics(vowel_accuracy=1.0, over_opening_rate=0.0, boundary_deviation=(0.0, 0.0)),
+        _song_metrics(vowel_accuracy=1.0, over_opening_rate=0.0, boundary_deviation=(10.0, 20.0)),
+        _song_metrics(vowel_accuracy=1.0, over_opening_rate=0.0, boundary_deviation=None),
+    ]
+
+    result = judge_gate(songs)
+
+    assert result.passed is False
+    assert result.macro_boundary_deviation_median_ms == pytest.approx(10.0)
+    assert result.macro_boundary_deviation_p95_ms == pytest.approx(20.0)
+    assert result.macro_vowel_accuracy == pytest.approx(1.0)
+
+
+def test_judge_gate_all_songs_undefined_boundary_deviation_macro_is_none():
+    from vocal_analysis.gate import judge_gate
+
+    # 定義済みの曲が1曲も無ければ、境界ずれのマクロ値は算出しようがないためNoneのまま。
+    songs = [
+        _song_metrics(vowel_accuracy=1.0, over_opening_rate=0.0, boundary_deviation=None),
         _song_metrics(vowel_accuracy=1.0, over_opening_rate=0.0, boundary_deviation=None),
     ]
 
@@ -983,10 +991,8 @@ def test_judge_gate_undefined_boundary_deviation_fails_and_clears_macro_boundary
     assert result.passed is False
     assert result.macro_boundary_deviation_median_ms is None
     assert result.macro_boundary_deviation_p95_ms is None
-    assert result.macro_vowel_accuracy == pytest.approx(1.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate song metrics aggregation", strict=True)
 def test_judge_gate_passes_at_exact_threshold_boundaries():
     from vocal_analysis.gate import judge_gate
 
