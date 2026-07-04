@@ -507,3 +507,98 @@ def test_ticks_to_seconds_accepts_unsorted_tempo_list():
     tempos = [TempoEvent(tick=480, bpm=60.0), TempoEvent(tick=0, bpm=120.0)]
 
     assert ticks_to_seconds(960, tempos, resolution=480) == pytest.approx(1.5)
+
+
+def _note(start_tick, duration_tick, phonemes):
+    from vpr.types import Note
+
+    return Note(start_tick=start_tick, duration_tick=duration_tick, pitch=60, lyric="", velocity=100, phonemes=phonemes)
+
+
+def _part(notes):
+    from vpr.types import Part
+
+    return Part(name="", start_tick=0, notes=notes)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
+def test_generate_vpr_reference_segments_single_vowel_note():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import generate_vpr_reference_segments
+
+    part = _part([_note(0, 480, ["a"])])
+
+    result = generate_vpr_reference_segments(part, tempos=[TempoEvent(tick=0, bpm=120.0)], resolution=480)
+
+    assert result == [_seg("a", 0.0, 0.5)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
+def test_generate_vpr_reference_segments_uses_last_phoneme_as_representative():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import generate_vpr_reference_segments
+
+    # 子音+母音(例: "s","a")の音符は、末尾の音素(母音)を代表として1区間にする
+    # (音符内の音素別タイミングは持たないため)。
+    part = _part([_note(0, 480, ["s", "a"])])
+
+    result = generate_vpr_reference_segments(part, tempos=[TempoEvent(tick=0, bpm=120.0)], resolution=480)
+
+    assert result == [_seg("a", 0.0, 0.5)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
+def test_generate_vpr_reference_segments_consonant_only_phoneme_maps_to_c():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import generate_vpr_reference_segments
+
+    part = _part([_note(0, 480, ["k"])])
+
+    result = generate_vpr_reference_segments(part, tempos=[TempoEvent(tick=0, bpm=120.0)], resolution=480)
+
+    assert result == [_seg("c", 0.0, 0.5)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
+def test_generate_vpr_reference_segments_continuation_inherits_and_merges_with_previous():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import generate_vpr_reference_segments
+
+    # 継続記号「-」の音符は直前の音符の音素を継承し、同一カテゴリで連続するため1区間に結合する。
+    part = _part([_note(0, 480, ["a"]), _note(480, 480, ["-"])])
+
+    result = generate_vpr_reference_segments(part, tempos=[TempoEvent(tick=0, bpm=120.0)], resolution=480)
+
+    assert result == [_seg("a", 0.0, 1.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
+def test_generate_vpr_reference_segments_includes_internal_rest_as_sil():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import generate_vpr_reference_segments
+
+    # 音符間の隙間[480tick, 960tick)(0.5〜1.0秒)は休符としてsil区間になる。
+    part = _part([_note(0, 480, ["a"]), _note(960, 480, ["i"])])
+
+    result = generate_vpr_reference_segments(part, tempos=[TempoEvent(tick=0, bpm=120.0)], resolution=480)
+
+    assert result == [_seg("a", 0.0, 0.5), _seg("sil", 0.5, 1.0), _seg("i", 1.0, 1.5)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
+def test_generate_vpr_reference_segments_leading_continuation_with_no_previous_is_skipped():
+    from vpr.types import TempoEvent
+
+    from vocal_analysis.gate import generate_vpr_reference_segments
+
+    # 最初の音符が継続記号のみで継承元が無い場合、解決できないためその音符は区間を生成しない。
+    part = _part([_note(0, 480, ["-"])])
+
+    result = generate_vpr_reference_segments(part, tempos=[TempoEvent(tick=0, bpm=120.0)], resolution=480)
+
+    assert result == []
