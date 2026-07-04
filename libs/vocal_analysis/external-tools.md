@@ -87,7 +87,8 @@ G2P(pyopenjtalk 系)で音素列へ変換し、CTC 音素モデルのロジッ�
 > ([vocal_analysis.md](vocal_analysis.md) §5・§10)。認識器は5母音と子音、未割当(gap)を区別できれば足り(無音/閉口の
 > 確定は利用先がRMS併用で行い、両唇閉鎖は音素から判定)、語彙認識より要件は緩い。
 
-**採用候補: 複合構成(Whisper 内容認識 + pyopenjtalk 系 G2P + wav2vec2 CTC 強制アライメント)**。決め手:
+**採用: 複合構成(Whisper 内容認識 + pyopenjtalk 系 G2P + wav2vec2 CTC 強制アライメント。id・モデル・
+revision の固定は vocal_analysis.md §5.2・§8.3 が正本)**。決め手:
 
 1. **歌唱で成立する唯一の実測済み構成**。内容(母音の種類)と開始時刻の双方が、参照ラベル付き歌唱データの
    測定で実用水準を示した(単段の自由認識は不成立)。
@@ -98,10 +99,10 @@ G2P(pyopenjtalk 系)で音素列へ変換し、CTC 音素モデルのロジッ�
    OpenJTalk 系コンポーネントは修正BSD)、アライメント用音素モデル
    `facebook/wav2vec2-lv-60-espeak-cv-ft` = Apache-2.0。
 
-採用の確定は、アダプタとして実装した上で **S-1 認識測定**(構成間の相対比較・破綻検出)と利用先の実装時
-調整・MMD 上の視聴確認に従う([vocal_analysis.md](vocal_analysis.md) §9)。アダプタ化の際は
-[vocal_analysis.md](vocal_analysis.md) §5・§8.3 を先に更新する。**Julius は代替**として残す(歌唱品質か速度が
-問題になれば評価する)。**Allosaurus は GPL-3.0(LICENSE実物が GNU GPL v3)で MIT 本体と非互換のため不採用**。
+実装(アダプタ)は [vocal_analysis.md](vocal_analysis.md) §5.2・§8.3 の確定仕様に従う。実装後の
+最終的な品質確認は **S-1 認識測定**(構成間の相対比較・破綻検出)と利用先の実装時調整・MMD 上の視聴確認に
+従う([vocal_analysis.md](vocal_analysis.md) §9)。**Julius は代替**として残す(歌唱品質か速度が問題に
+なれば評価する)。**Allosaurus は GPL-3.0(LICENSE実物が GNU GPL v3)で MIT 本体と非互換のため不採用**。
 
 ---
 
@@ -144,7 +145,7 @@ ffmpeg 自体が不要なことも多い。
 |---|---|---|---|---|
 | S0 入力読み込み | **soundfile 優先(mp3も可)+ 自動検出ffmpegにフォールバック**(リポジトリに同梱しない) | 内部ライブラリ/サブプロセス | soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等の同梱配布は不採用) |
 | S1 ボーカル抽出 | **Demucs v4 htdemucs_ft**(audio-separator 経由・`shifts=0`) | `audio_separator.separator.Separator`(in-process) | 高品質・MIT・ライブラリ呼び出し可・GPU不要でも動作。生 `demucs.api` は `torchaudio<2.2` 固定で新しい Python 向けビルドが無く不採用 | audio-separator の他モデル(Roformer系等。ライセンス個別確認要) / Spleeter / 分離なし |
-| S2 音素・母音認識 | **複合構成(Whisper 内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用候補とする**(単段の wav2vec2 自由認識は歌唱で不成立と実測済み。§2) | transformers + pyopenjtalk-plus(in-process) | 歌唱で成立する唯一の実測済み構成・in-process・torch/transformersは既存と共有・ライセンス清浄。確定は S-1 認識測定と利用先の実装時調整(vocal_analysis.md §9) | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素・母音認識 | **複合構成(Whisper 内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用**(単段の wav2vec2 自由認識は歌唱で不成立と実測済み。§2。id・モデル・revision の固定は vocal_analysis.md §5.2・§8.3 が正本) | transformers + pyopenjtalk-plus(in-process) | 歌唱で成立する唯一の実測済み構成・in-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
 
 S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterface(Separator / Recognizer)を満たせば
 差し替え可能。S0 は固定の内部処理。外部ツールは `vocal_analysis` が内部で呼び、依存は `vocal_analysis` 側に
