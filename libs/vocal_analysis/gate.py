@@ -8,6 +8,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from vpr.types import TempoEvent
+
 # モノフォンラベルのHTK 100ns単位を秒へ変換する係数。
 _HTK_100NS_UNITS_PER_SECOND = 1e7
 
@@ -238,3 +240,22 @@ def exclude_ranges_from_segments(
         for start, end in _subtract_intervals((seg.start_sec, seg.end_sec), merged_exclusions):
             result.append(CategorySegment(category=seg.category, start_sec=start, end_sec=end))
     return result
+
+
+def ticks_to_seconds(tick: int, tempos: list[TempoEvent], resolution: int) -> float:
+    """vpr の tick 値を、テンポマップ(`tempos`)と分解能(`resolution`。tick/四分音符)に基づいて
+    秒へ変換する(`vpr` は tick⇔秒変換を呼び出し側の責務とする)。
+
+    `tempos` はテンポ変化イベントの列(tick の順序は問わない)。各テンポ区間ごとに
+    経過秒数(`(区間のtick長 / resolution) * (60 / bpm)`)を積算する。
+    """
+    ordered = sorted(tempos, key=lambda t: t.tick)
+    seconds = 0.0
+    for i, tempo in enumerate(ordered):
+        next_tick = ordered[i + 1].tick if i + 1 < len(ordered) else None
+        segment_end = tick if next_tick is None or tick <= next_tick else next_tick
+        ticks_in_segment = segment_end - tempo.tick
+        seconds += (ticks_in_segment / resolution) * (60.0 / tempo.bpm)
+        if next_tick is None or tick <= next_tick:
+            break
+    return seconds

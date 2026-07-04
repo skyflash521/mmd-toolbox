@@ -453,7 +453,6 @@ def test_exclude_ranges_from_segments_leaves_unaffected_segment_unchanged():
     assert result == segments
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
 def test_ticks_to_seconds_at_tick_zero_is_zero():
     from vpr.types import TempoEvent
 
@@ -464,7 +463,6 @@ def test_ticks_to_seconds_at_tick_zero_is_zero():
     assert ticks_to_seconds(0, tempos, resolution=480) == pytest.approx(0.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
 def test_ticks_to_seconds_single_tempo_one_quarter_note():
     from vpr.types import TempoEvent
 
@@ -476,7 +474,6 @@ def test_ticks_to_seconds_single_tempo_one_quarter_note():
     assert ticks_to_seconds(480, tempos, resolution=480) == pytest.approx(0.5)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
 def test_ticks_to_seconds_across_tempo_change():
     from vpr.types import TempoEvent
 
@@ -489,7 +486,6 @@ def test_ticks_to_seconds_across_tempo_change():
     assert ticks_to_seconds(960, tempos, resolution=480) == pytest.approx(1.5)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
 def test_ticks_to_seconds_mid_segment_after_tempo_change():
     from vpr.types import TempoEvent
 
@@ -502,7 +498,6 @@ def test_ticks_to_seconds_mid_segment_after_tempo_change():
     assert ticks_to_seconds(720, tempos, resolution=480) == pytest.approx(1.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate tick to seconds conversion", strict=True)
 def test_ticks_to_seconds_accepts_unsorted_tempo_list():
     from vpr.types import TempoEvent
 
