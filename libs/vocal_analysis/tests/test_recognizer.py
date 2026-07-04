@@ -286,10 +286,7 @@ def test_absorb_short_segments_all_short_gap_run_terminates():
 
 # --- §5.2 手順3: 音素列の結合(pau挿入) ---
 
-_XFAIL_COMPOSITE = pytest.mark.xfail(reason="impl pending: composite recognizer helpers", strict=True)
 
-
-@_XFAIL_COMPOSITE
 def test_assemble_phoneme_sequence_wraps_single_chunk_with_pau():
     from vocal_analysis.recognizer import _assemble_phoneme_sequence
 
@@ -298,7 +295,6 @@ def test_assemble_phoneme_sequence_wraps_single_chunk_with_pau():
     assert result == ["pau", "a", "i", "pau"]
 
 
-@_XFAIL_COMPOSITE
 def test_assemble_phoneme_sequence_inserts_pau_between_chunks():
     from vocal_analysis.recognizer import _assemble_phoneme_sequence
 
@@ -307,7 +303,6 @@ def test_assemble_phoneme_sequence_inserts_pau_between_chunks():
     assert result == ["pau", "a", "pau", "k", "i", "pau"]
 
 
-@_XFAIL_COMPOSITE
 def test_assemble_phoneme_sequence_empty_chunk_still_gets_boundary_pau():
     from vocal_analysis.recognizer import _assemble_phoneme_sequence
 
@@ -317,7 +312,6 @@ def test_assemble_phoneme_sequence_empty_chunk_still_gets_boundary_pau():
     assert result == ["pau", "pau", "a", "pau"]
 
 
-@_XFAIL_COMPOSITE
 def test_assemble_phoneme_sequence_no_chunks_is_leading_and_trailing_pau_only():
     from vocal_analysis.recognizer import _assemble_phoneme_sequence
 
@@ -329,7 +323,6 @@ def test_assemble_phoneme_sequence_no_chunks_is_leading_and_trailing_pau_only():
 # --- §5.2 手順4: G2P記号→音素モデル語彙のトークンID変換 ---
 
 
-@_XFAIL_COMPOSITE
 def test_g2p_symbols_to_token_ids_maps_known_symbols():
     from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
 
@@ -340,7 +333,6 @@ def test_g2p_symbols_to_token_ids_maps_known_symbols():
     assert result == [5, 7]
 
 
-@_XFAIL_COMPOSITE
 def test_g2p_symbols_to_token_ids_maps_pau_and_cl_to_blank():
     from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
 
@@ -352,7 +344,6 @@ def test_g2p_symbols_to_token_ids_maps_pau_and_cl_to_blank():
     assert result == [0, 0]
 
 
-@_XFAIL_COMPOSITE
 def test_g2p_symbols_to_token_ids_devoiced_vowels_collapse_to_voiced():
     from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
 
@@ -364,7 +355,6 @@ def test_g2p_symbols_to_token_ids_devoiced_vowels_collapse_to_voiced():
     assert result == [3, 4]
 
 
-@_XFAIL_COMPOSITE
 def test_g2p_symbols_to_token_ids_unmapped_symbol_raises_recognition_error():
     from vocal_analysis.recognizer import RecognitionError, _g2p_symbols_to_token_ids
 
@@ -373,7 +363,6 @@ def test_g2p_symbols_to_token_ids_unmapped_symbol_raises_recognition_error():
         _g2p_symbols_to_token_ids(["xx"], {"<pad>": 0}, blank_token_id=0)
 
 
-@_XFAIL_COMPOSITE
 def test_g2p_symbols_to_token_ids_missing_vocab_entry_raises_recognition_error():
     from vocal_analysis.recognizer import RecognitionError, _g2p_symbols_to_token_ids
 
@@ -385,18 +374,16 @@ def test_g2p_symbols_to_token_ids_missing_vocab_entry_raises_recognition_error()
 # --- §5.2 手順5: 強制アライメント(Viterbi) ---
 
 
-@_XFAIL_COMPOSITE
 def test_forced_align_single_state_stays_for_all_frames():
     from vocal_analysis.recognizer import _forced_align
 
     log_probs = np.array([[0.1], [-1.0], [0.2]])
 
-    path = _forced_align(log_probs, token_ids=[0], blank_token_id=0)
+    path = _forced_align(log_probs, token_ids=[0])
 
     assert path == [0, 0, 0]
 
 
-@_XFAIL_COMPOSITE
 def test_forced_align_follows_dominant_emission_monotonically():
     from vocal_analysis.recognizer import _forced_align
 
@@ -411,12 +398,11 @@ def test_forced_align_follows_dominant_emission_monotonically():
         ]
     )
 
-    path = _forced_align(log_probs, token_ids=[0, 1], blank_token_id=0)
+    path = _forced_align(log_probs, token_ids=[0, 1])
 
     assert path == [0, 0, 1, 1]
 
 
-@_XFAIL_COMPOSITE
 def test_forced_align_raises_when_fewer_frames_than_tokens():
     from vocal_analysis.recognizer import RecognitionError, _forced_align
 
@@ -424,13 +410,12 @@ def test_forced_align_raises_when_fewer_frames_than_tokens():
     log_probs = np.zeros((2, 1))
 
     with pytest.raises(RecognitionError):
-        _forced_align(log_probs, token_ids=[0, 0, 0], blank_token_id=0)
+        _forced_align(log_probs, token_ids=[0, 0, 0])
 
 
 # --- §5.2 手順6・7: 区間の確定とSegment化 ---
 
 
-@_XFAIL_COMPOSITE
 def test_path_to_segments_builds_gap_and_vowel_segments():
     from vocal_analysis.recognizer import _path_to_segments
 
@@ -447,7 +432,6 @@ def test_path_to_segments_builds_gap_and_vowel_segments():
     assert segments[1].end_sec == pytest.approx(0.08)
 
 
-@_XFAIL_COMPOSITE
 def test_path_to_segments_merges_adjacent_states_with_same_output_symbol():
     from vocal_analysis.recognizer import _path_to_segments
 
@@ -461,7 +445,6 @@ def test_path_to_segments_merges_adjacent_states_with_same_output_symbol():
     assert segments[0].end_sec == pytest.approx(0.08)
 
 
-@_XFAIL_COMPOSITE
 def test_path_to_segments_merges_pau_and_cl_as_same_gap():
     from vocal_analysis.recognizer import _path_to_segments
 
@@ -475,7 +458,6 @@ def test_path_to_segments_merges_pau_and_cl_as_same_gap():
     assert segments[0].end_sec == pytest.approx(0.08)
 
 
-@_XFAIL_COMPOSITE
 def test_path_to_segments_last_token_extends_to_audio_end():
     from vocal_analysis.recognizer import _path_to_segments
 
