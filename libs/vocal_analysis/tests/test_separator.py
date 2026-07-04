@@ -12,10 +12,6 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-# vocal_analysis.separator が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis.separator", strict=True)
-
 
 def _make_pcm(sample_rate=8000, duration_sec=0.2, channels=2):
     from vocal_analysis.types import AudioPcm
@@ -136,4 +132,6 @@ def test_build_separator_configures_real_separator_with_pinned_values():
         sep = _build_separator(Path(tmp_dir))
 
     assert sep.output_single_stem == SEPARATOR_CONFIG.output_single_stem
-    assert sep.demucs_params["shifts"] == SEPARATOR_CONFIG.shifts
+    # Separator は demucs_params 引数を内部で arch_specific_params["Demucs"] へ格納する
+    # (audio-separator 実装の実際の格納先。コンストラクタ引数名とインスタンス属性名は異なる)。
+    assert sep.arch_specific_params["Demucs"]["shifts"] == SEPARATOR_CONFIG.shifts

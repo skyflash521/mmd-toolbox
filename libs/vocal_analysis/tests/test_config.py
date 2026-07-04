@@ -44,9 +44,6 @@ def test_separator_shifts_disabled_for_determinism():
     assert SEPARATOR_CONFIG.shifts == 0
 
 
-# SeparatorConfig の model_filename/output_single_stem が未実装の間は AttributeError になるため
-# xfail 印で緑を保つ。strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.config.SeparatorConfig fields", strict=True)
 def test_separator_model_and_stem_are_pinned():
     from vocal_analysis import SEPARATOR_CONFIG
 

@@ -28,8 +28,10 @@ class RecognizerConfig:
 
 @dataclass(frozen=True)
 class SeparatorConfig:
-    """S1 ボーカル分離器(Demucs)の固定条件(§4・§8.3)。"""
+    """S1 ボーカル分離器(audio-separator 経由の Demucs v4 htdemucs_ft)の固定条件(§4・§8.3)。"""
 
+    model_filename: str = "htdemucs_ft.yaml"
+    output_single_stem: str = "vocals"  # ボーカルstem以外を書き出させない(§8.3後注)
     shifts: int = 0  # shift 平均(非決定要素)を無効化
 
 
