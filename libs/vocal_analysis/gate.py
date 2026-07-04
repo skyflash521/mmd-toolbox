@@ -8,7 +8,10 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from vpr.types import TempoEvent
+from vpr.rests import rest_intervals
+from vpr.types import Part, TempoEvent
+
+from .phonemes import xsampa_vowel_letter
 
 # モノフォンラベルのHTK 100ns単位を秒へ変換する係数。
 _HTK_100NS_UNITS_PER_SECOND = 1e7
@@ -259,3 +262,52 @@ def ticks_to_seconds(tick: int, tempos: list[TempoEvent], resolution: int) -> fl
         if next_tick is None or tick <= next_tick:
             break
     return seconds
+
+
+def generate_vpr_reference_segments(
+    part: Part, tempos: list[TempoEvent], resolution: int
+) -> list[CategorySegment]:
+    """vpr の1パート(歌唱区間)から参照ラベルのセグメント列を生成する。
+
+    各音符の代表音素(音素列の末尾)を X-SAMPA母音写像で母音(a/i/u/e/o)または子音(c)へ分類する。
+    音符全体が継続記号「-」単独、または音素列が空の音符は、直前の音符の代表音素を継承する
+    (継続は音符全体の状態であり、他の音素と混在する「-」は想定しない。継承元が無い場合は
+    その音符の区間を生成しない)。音符間の隙間は休符として sil 区間にする。同一カテゴリで
+    時間的に連続する区間は1つに結合する。
+    """
+    segments: list[CategorySegment] = []
+    previous_phoneme: str | None = None
+    for note in part.notes:
+        resolved = previous_phoneme if not note.phonemes or note.phonemes == ["-"] else note.phonemes[-1]
+        if resolved is not None:
+            previous_phoneme = resolved
+        if resolved is None:
+            continue
+        vowel = xsampa_vowel_letter(resolved)
+        category = vowel if vowel is not None else "c"
+        segments.append(
+            CategorySegment(
+                category=category,
+                start_sec=ticks_to_seconds(note.start_tick, tempos, resolution),
+                end_sec=ticks_to_seconds(note.start_tick + note.duration_tick, tempos, resolution),
+            )
+        )
+
+    end_tick = max((note.start_tick + note.duration_tick for note in part.notes), default=0)
+    for rest_start_tick, rest_end_tick in rest_intervals(part.notes, end_tick):
+        segments.append(
+            CategorySegment(
+                category="sil",
+                start_sec=ticks_to_seconds(rest_start_tick, tempos, resolution),
+                end_sec=ticks_to_seconds(rest_end_tick, tempos, resolution),
+            )
+        )
+
+    segments.sort(key=lambda seg: seg.start_sec)
+    merged: list[CategorySegment] = []
+    for seg in segments:
+        if merged and merged[-1].category == seg.category and merged[-1].end_sec == seg.start_sec:
+            merged[-1] = CategorySegment(category=seg.category, start_sec=merged[-1].start_sec, end_sec=seg.end_sec)
+        else:
+            merged.append(seg)
+    return merged

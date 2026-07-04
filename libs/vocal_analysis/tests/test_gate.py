@@ -521,7 +521,6 @@ def _part(notes):
     return Part(name="", start_tick=0, notes=notes)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
 def test_generate_vpr_reference_segments_single_vowel_note():
     from vpr.types import TempoEvent
 
@@ -534,7 +533,6 @@ def test_generate_vpr_reference_segments_single_vowel_note():
     assert result == [_seg("a", 0.0, 0.5)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
 def test_generate_vpr_reference_segments_uses_last_phoneme_as_representative():
     from vpr.types import TempoEvent
 
@@ -549,7 +547,6 @@ def test_generate_vpr_reference_segments_uses_last_phoneme_as_representative():
     assert result == [_seg("a", 0.0, 0.5)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
 def test_generate_vpr_reference_segments_consonant_only_phoneme_maps_to_c():
     from vpr.types import TempoEvent
 
@@ -562,7 +559,6 @@ def test_generate_vpr_reference_segments_consonant_only_phoneme_maps_to_c():
     assert result == [_seg("c", 0.0, 0.5)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
 def test_generate_vpr_reference_segments_continuation_inherits_and_merges_with_previous():
     from vpr.types import TempoEvent
 
@@ -576,7 +572,6 @@ def test_generate_vpr_reference_segments_continuation_inherits_and_merges_with_p
     assert result == [_seg("a", 0.0, 1.0)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
 def test_generate_vpr_reference_segments_includes_internal_rest_as_sil():
     from vpr.types import TempoEvent
 
@@ -590,7 +585,6 @@ def test_generate_vpr_reference_segments_includes_internal_rest_as_sil():
     assert result == [_seg("a", 0.0, 0.5), _seg("sil", 0.5, 1.0), _seg("i", 1.0, 1.5)]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate vpr reference segment generation", strict=True)
 def test_generate_vpr_reference_segments_leading_continuation_with_no_previous_is_skipped():
     from vpr.types import TempoEvent
 
