@@ -596,3 +596,100 @@ def test_generate_vpr_reference_segments_leading_continuation_with_no_previous_i
     result = generate_vpr_reference_segments(part, tempos=[TempoEvent(tick=0, bpm=120.0)], resolution=480)
 
     assert result == []
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_vowel_accuracy_all_correct():
+    from vocal_analysis.gate import compute_vowel_accuracy
+
+    reference = [_seg("a", 0.0, 0.1)]
+    predicted = [_seg("a", 0.0, 0.1)]
+
+    assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_vowel_accuracy_wrong_vowel_is_zero():
+    from vocal_analysis.gate import compute_vowel_accuracy
+
+    reference = [_seg("a", 0.0, 0.1)]
+    predicted = [_seg("i", 0.0, 0.1)]
+
+    assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(0.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_vowel_accuracy_undetected_counts_as_mismatch():
+    from vocal_analysis.gate import compute_vowel_accuracy
+
+    reference = [_seg("a", 0.0, 0.1)]
+    predicted = []  # 予測が何も無い(未検出)
+
+    assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(0.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_vowel_accuracy_ignores_non_vowel_reference_frames():
+    from vocal_analysis.gate import compute_vowel_accuracy
+
+    # 基準がc(子音)のフレームは分母に含めない。母音フレームだけを見て全一致なら1.0。
+    reference = [_seg("c", 0.0, 0.05), _seg("a", 0.05, 0.1)]
+    predicted = [_seg("i", 0.0, 0.05), _seg("a", 0.05, 0.1)]  # 子音区間の予測は何でもよい
+
+    assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_vowel_accuracy_half_correct():
+    from vocal_analysis.gate import compute_vowel_accuracy
+
+    # 母音フレーム10個中、前半5個が正解・後半5個が不一致で正解率0.5。
+    reference = [_seg("a", 0.0, 0.1)]
+    predicted = [_seg("a", 0.0, 0.05), _seg("i", 0.05, 0.1)]
+
+    assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(0.5)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_over_opening_rate_detects_vowel_bleed():
+    from vocal_analysis.gate import compute_over_opening_rate
+
+    reference = [_seg("sil", 0.0, 0.1)]
+    predicted = [_seg("a", 0.0, 0.1)]  # 無音のはずが母音と誤検出(過開口)
+
+    assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_over_opening_rate_correct_silence_is_zero():
+    from vocal_analysis.gate import compute_over_opening_rate
+
+    reference = [_seg("sil", 0.0, 0.1)]
+    predicted = [_seg("sil", 0.0, 0.1)]
+
+    assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(0.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_over_opening_rate_includes_consonant_reference_frames():
+    from vocal_analysis.gate import compute_over_opening_rate
+
+    # 基準がc(子音)のフレームも過開口率の分母に含む(母音フレームだけ除外)。
+    reference = [_seg("c", 0.0, 0.1)]
+    predicted = [_seg("a", 0.0, 0.1)]
+
+    assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
+def test_compute_over_opening_rate_ignores_vowel_reference_frames():
+    from vocal_analysis.gate import compute_over_opening_rate
+
+    # 基準が母音のフレーム(前半)は過開口率の分母に含めない。前半は予測を非母音にしておくことで、
+    # もし母音フレームを誤って分母に含める実装なら分母が10フレームに増え、分子(母音誤検出は
+    # 後半の5フレームだけ)は変わらないため結果が0.5に落ちて判別できる(母音フレームを正しく
+    # 除外していれば分母は後半の5フレームだけなので1.0のまま)。
+    reference = [_seg("a", 0.0, 0.05), _seg("sil", 0.05, 0.1)]
+    predicted = [_seg("sil", 0.0, 0.05), _seg("a", 0.05, 0.1)]
+
+    assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
