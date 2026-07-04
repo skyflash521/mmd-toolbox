@@ -139,7 +139,8 @@
   寄せる)は利用先が行う(S3のRMSを使う)。`vocal_analysis` はトークン境界を一次情報として渡す。
 - 認識は外部ライブラリで内部実行し(必要時のみサブプロセス)、Recognizer 抽象の背後で差し替え可能とする
   (8章)。日本語の歌での母音認識品質が本方式の品質を直接左右するため、採用は S-1 認識ゲート(9章)で
-  確定する。
+  確定する。公開関数は `recognize(vocal_wav_path: Path) -> list[Segment]`(`vocal_analysis.recognizer`)。
+  ライブラリ未導入時、またはモデル取得に失敗した場合は `RecognitionError` で失敗する(8.3章)。
 
 ### 5.1 CTC区間化(アダプタ側。RMS不要)
 
