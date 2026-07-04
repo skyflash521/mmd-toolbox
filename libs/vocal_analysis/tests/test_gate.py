@@ -598,7 +598,6 @@ def test_generate_vpr_reference_segments_leading_continuation_with_no_previous_i
     assert result == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_vowel_accuracy_all_correct():
     from vocal_analysis.gate import compute_vowel_accuracy
 
@@ -608,7 +607,6 @@ def test_compute_vowel_accuracy_all_correct():
     assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_vowel_accuracy_wrong_vowel_is_zero():
     from vocal_analysis.gate import compute_vowel_accuracy
 
@@ -618,7 +616,6 @@ def test_compute_vowel_accuracy_wrong_vowel_is_zero():
     assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(0.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_vowel_accuracy_undetected_counts_as_mismatch():
     from vocal_analysis.gate import compute_vowel_accuracy
 
@@ -628,7 +625,6 @@ def test_compute_vowel_accuracy_undetected_counts_as_mismatch():
     assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(0.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_vowel_accuracy_ignores_non_vowel_reference_frames():
     from vocal_analysis.gate import compute_vowel_accuracy
 
@@ -639,7 +635,6 @@ def test_compute_vowel_accuracy_ignores_non_vowel_reference_frames():
     assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_vowel_accuracy_half_correct():
     from vocal_analysis.gate import compute_vowel_accuracy
 
@@ -650,7 +645,6 @@ def test_compute_vowel_accuracy_half_correct():
     assert compute_vowel_accuracy(predicted, reference, duration_sec=0.1) == pytest.approx(0.5)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_over_opening_rate_detects_vowel_bleed():
     from vocal_analysis.gate import compute_over_opening_rate
 
@@ -660,7 +654,6 @@ def test_compute_over_opening_rate_detects_vowel_bleed():
     assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_over_opening_rate_correct_silence_is_zero():
     from vocal_analysis.gate import compute_over_opening_rate
 
@@ -670,7 +663,6 @@ def test_compute_over_opening_rate_correct_silence_is_zero():
     assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(0.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_over_opening_rate_includes_consonant_reference_frames():
     from vocal_analysis.gate import compute_over_opening_rate
 
@@ -681,7 +673,6 @@ def test_compute_over_opening_rate_includes_consonant_reference_frames():
     assert compute_over_opening_rate(predicted, reference, duration_sec=0.1) == pytest.approx(1.0)
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate scoring metrics", strict=True)
 def test_compute_over_opening_rate_ignores_vowel_reference_frames():
     from vocal_analysis.gate import compute_over_opening_rate
 

@@ -311,3 +311,51 @@ def generate_vpr_reference_segments(
         else:
             merged.append(seg)
     return merged
+
+
+# 採点指標のフレーム展開幅。
+_FRAME_SEC = 0.01
+_NON_VOWEL_SCORED_CATEGORIES = frozenset({"c", "sil"})
+
+
+def _frame_categories(segments: list[CategorySegment], duration_sec: float) -> list[str | None]:
+    """[0, duration_sec) を `_FRAME_SEC` 刻みのフレームへ展開し、各フレーム代表時刻(フレーム中央)を
+    覆う区間のカテゴリ列を返す。どの区間にも覆われないフレームは None。segments は開始時刻順である
+    必要は無い(内部で並べ替える)。区間どうしは重複しない前提(`remove_invalid_time_segments` 適用後)。
+    """
+    ordered = sorted(segments, key=lambda seg: seg.start_sec)
+    num_frames = round(duration_sec / _FRAME_SEC)
+    categories: list[str | None] = []
+    idx = 0
+    for i in range(num_frames):
+        t = (i + 0.5) * _FRAME_SEC
+        while idx < len(ordered) and ordered[idx].end_sec <= t:
+            idx += 1
+        if idx < len(ordered) and ordered[idx].start_sec <= t:
+            categories.append(ordered[idx].category)
+        else:
+            categories.append(None)
+    return categories
+
+
+def compute_vowel_accuracy(
+    predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
+) -> float:
+    """母音正解率(§9.4): 基準が母音(a/i/u/e/o)のフレームのうち、予測の母音種別が一致した割合。
+    未検出(予測がそのフレームを覆わない)は不一致として数える。"""
+    ref_frames = _frame_categories(reference, duration_sec)
+    pred_frames = _frame_categories(predicted, duration_sec)
+    vowel_indices = [i for i, category in enumerate(ref_frames) if category in _VOWEL_SYMBOLS]
+    matches = sum(1 for i in vowel_indices if pred_frames[i] == ref_frames[i])
+    return matches / len(vowel_indices)
+
+
+def compute_over_opening_rate(
+    predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
+) -> float:
+    """過開口率(§9.4): 基準が c/sil のフレームのうち、予測が母音になったフレームの割合。"""
+    ref_frames = _frame_categories(reference, duration_sec)
+    pred_frames = _frame_categories(predicted, duration_sec)
+    non_vowel_indices = [i for i, category in enumerate(ref_frames) if category in _NON_VOWEL_SCORED_CATEGORIES]
+    bled = sum(1 for i in non_vowel_indices if pred_frames[i] in _VOWEL_SYMBOLS)
+    return bled / len(non_vowel_indices)
