@@ -380,7 +380,7 @@ blank)に対応する。フレームを**母音/子音**へ分類する基準を
 |---|---|---|---|
 | S0 入力読み込み | soundfile(現行 libsndfile は mp3 も可)優先 + 自動検出ffmpegへフォールバック(リポジトリに同梱しない) | 標準入出力を内部処理。soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等は不採用) |
 | S1 ボーカル抽出 | Demucs v4 htdemucs_ft を audio-separator 経由で実行(アダプタ id: `audio-separator-htdemucs-ft`。`audio_separator.separator.Separator`。`demucs_params.shifts=0`) | 高品質・MIT・ライブラリでin-process呼び出し可・GPU不要でも動作。生 `demucs.api`(adefossez fork)は `torchaudio<2.2` 固定で新しい Python(3.13等)向けビルドが無く採用しない(§8.3後注) | audio-separator の他モデル(MDXC系Roformer等。ライセンス個別確認要) / Spleeter / 分離なし(`never`) |
-| S2 音素/母音認識 | 複合構成(アダプタ id: `whisper-ctc-forcedalign`。Whisper 内容認識 + `pyopenjtalk-plus` G2P + 音素モデルの CTC 強制アライメント。5.2)。**単段の自由音素認識(旧アダプタ id `wav2vec2-espeak`)は歌唱で母音をほぼ出力しないことが S-1 測定で確認済みのため不採用**([external-tools.md](external-tools.md) §2) | 歌唱で内容・時刻とも実用水準と測定済み(9章)の唯一の構成。すべて純Pythonでin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要・高精度時刻)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素/母音認識 | 複合構成(アダプタ id: `whisper-ctc-forcedalign`。Whisper 内容認識 + `pyopenjtalk-plus` G2P + 音素モデルの CTC 強制アライメント。5.2)。**単段の自由音素認識(旧アダプタ id `wav2vec2-espeak`)は歌唱で母音をほぼ出力しないことが S-1 測定で確認済みのため不採用**([external-tools.md](external-tools.md) §2) | 歌唱で成立する(単段の自由認識のような不成立に陥らない)唯一の実測済み構成。精度の具体的な数値評価は9章のS-1測定に委ねる。すべて純Pythonでin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要・高精度時刻)。Allosaurusは GPL-3.0 で不可 |
 
 採用ツールは品質・導入性の評価で見直しうる(候補比較は [external-tools.md](external-tools.md)。見直す場合は
 本書を先に更新する)。重い依存(`torch`・`transformers`・`pyopenjtalk-plus`・モデル取得)は `vocal_analysis`
