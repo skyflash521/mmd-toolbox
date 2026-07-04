@@ -1,8 +1,10 @@
 """S2 音素/母音認識(vocal_analysis.md §5・§5.1・§5.2・§8.1・§8.3)。
 
-無音検出による区間分割・内容認識(Whisper)・G2P(pyopenjtalk-plus)・音素モデルのCTC強制アライメント
-(§5.2)を組み合わせた複合構成で、母音/子音/gap を区別したセグメント列を生成する。公開関数
-recognize(vocal_wav_path) -> list[Segment] が唯一の公開面(Recognizer アダプタ契約。§8.1)。
+無音検出による区間分割・内容認識・G2P(pyopenjtalk-plus)・音素モデルのCTC強制アライメント(§5.2)を
+組み合わせた複合構成で、母音/子音/gap を区別したセグメント列を生成する。公開関数
+recognize(vocal_wav_path, adapter_id) -> list[Segment] が唯一の公開面(Recognizer アダプタ契約。§8.1)。
+内容認識モデルは既定アダプタ `kana-whisper-ctc-forcedalign`(kana-whisper)と選択可能な代替アダプタ
+`whisper-ctc-forcedalign`(whisper-medium+かな限定プロンプト)を切り替えられる(§5.2)。
 """
 
 import math
@@ -14,8 +16,11 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 
-from .config import RECOGNIZER_CONFIG, WHISPER_CONFIG
+from .config import KANA_WHISPER_CONFIG, RECOGNIZER_CONFIG, WHISPER_CONFIG
 from .types import Segment
+
+DEFAULT_ADAPTER_ID = "kana-whisper-ctc-forcedalign"
+ALTERNATE_ADAPTER_ID = "whisper-ctc-forcedalign"
 
 FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
 
@@ -312,8 +317,24 @@ def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: f
     return segments
 
 
-def recognize(vocal_wav_path: Path) -> list[Segment]:
-    """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2複合構成)。"""
+def recognize(vocal_wav_path: Path, adapter_id: str = DEFAULT_ADAPTER_ID) -> list[Segment]:
+    """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2複合構成)。
+
+    adapter_id で内容認識モデルを選択する(既定 `kana-whisper-ctc-forcedalign`・選択可能な代替
+    `whisper-ctc-forcedalign`。§5.2・§8.2)。後段のG2P・強制アライメントはどちらも共通。
+    """
+    if adapter_id == DEFAULT_ADAPTER_ID:
+        transcribe_segment = _transcribe_segment
+        content_model_id, content_model_revision = KANA_WHISPER_CONFIG.model_id, KANA_WHISPER_CONFIG.model_revision
+    elif adapter_id == ALTERNATE_ADAPTER_ID:
+        transcribe_segment = _transcribe_segment_whisper_medium
+        content_model_id, content_model_revision = WHISPER_CONFIG.model_id, WHISPER_CONFIG.model_revision
+    else:
+        raise ValueError(
+            f"未知の内容認識アダプタです: {adapter_id!r}"
+            f"({DEFAULT_ADAPTER_ID!r} か {ALTERNATE_ADAPTER_ID!r} を指定してください)"
+        )
+
     samples, sample_rate = sf.read(vocal_wav_path, dtype="float32", always_2d=True)
     mono = _downmix_to_mono(samples)
     resampled = _resample_to_target(mono, sample_rate, RECOGNIZER_CONFIG.sample_rate)
@@ -341,7 +362,7 @@ def recognize(vocal_wav_path: Path) -> list[Segment]:
             continue
 
         try:
-            text = _transcribe_segment(chunk_samples)
+            text = transcribe_segment(chunk_samples)
         except ImportError as e:
             raise RecognitionError(
                 "transformers または torch が見つかりません。導入してください"
@@ -349,7 +370,7 @@ def recognize(vocal_wav_path: Path) -> list[Segment]:
             ) from e
         except OSError as e:
             raise RecognitionError(
-                f"内容認識モデル({WHISPER_CONFIG.model_id}, revision={WHISPER_CONFIG.model_revision})を"
+                f"内容認識モデル({content_model_id}, revision={content_model_revision})を"
                 "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
             ) from e
 
@@ -427,8 +448,9 @@ def _g2p(text: str) -> list[str]:
 
 
 def _transcribe_segment(samples: np.ndarray) -> str:
-    """区間のボーカル音声をWhisperで書き起こす(§5.2手順3。区間ごとに独立呼び出し)。"""
-    pipeline = _load_whisper_pipeline()
+    """区間のボーカル音声をkana-whisperで書き起こす(§5.2手順3。既定アダプタ
+    kana-whisper-ctc-forcedalign。区間ごとに独立呼び出し)。かなを直接返す。"""
+    pipeline = _load_kana_whisper_pipeline()
     result = pipeline(
         samples,
         generate_kwargs={
@@ -441,8 +463,40 @@ def _transcribe_segment(samples: np.ndarray) -> str:
     return result["text"]
 
 
+def _transcribe_segment_whisper_medium(samples: np.ndarray) -> str:
+    """区間のボーカル音声をwhisper-medium+かな限定プロンプトで書き起こす(§5.2手順3。選択可能な
+    代替アダプタ whisper-ctc-forcedalign。区間ごとに独立呼び出し)。かな化は区間により成功・失敗する。"""
+    pipeline = _load_whisper_pipeline()
+    prompt_ids = pipeline.tokenizer.get_prompt_ids(WHISPER_CONFIG.kana_prompt, return_tensors="pt").to(
+        pipeline.device
+    )
+    result = pipeline(
+        samples,
+        generate_kwargs={
+            "language": "japanese",
+            "task": "transcribe",
+            "num_beams": 1,
+            "do_sample": False,
+            "prompt_ids": prompt_ids,
+        },
+    )
+    return result["text"]
+
+
+def _load_kana_whisper_pipeline():
+    """内容認識器(kana-whisper)をS-1測定の固定条件(§8.3)でロードする。"""
+    from transformers import pipeline as transformers_pipeline
+
+    return transformers_pipeline(
+        "automatic-speech-recognition",
+        model=KANA_WHISPER_CONFIG.model_id,
+        revision=KANA_WHISPER_CONFIG.model_revision,
+        device=RECOGNIZER_CONFIG.device,
+    )
+
+
 def _load_whisper_pipeline():
-    """内容認識器(Whisper)をS-1測定の固定条件(§8.3)でロードする。"""
+    """内容認識器(whisper-medium)をS-1測定の固定条件(§8.3)でロードする。"""
     from transformers import pipeline as transformers_pipeline
 
     return transformers_pipeline(

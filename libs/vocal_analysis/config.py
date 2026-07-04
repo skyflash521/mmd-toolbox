@@ -1,6 +1,7 @@
 """外部モデル委譲ステージの固定推論条件(vocal_analysis.md §5.1・§5.2・§8.3・§4)。
 
-S2 の音素モデル(強制アライメント用)・内容認識モデル(Whisper)と S1 分離器の非決定要素を固定し、
+S2 の音素モデル(強制アライメント用)・内容認識モデル(既定 kana-whisper・選択可能な代替
+whisper-medium+かなプロンプト)と S1 分離器の非決定要素を固定し、
 S-1 測定と実装が同一条件で動くようにする。モデル id・revision は §8.3、Demucs の shift 平均無効化は
 §4・§8.3 が定める固定値。実行デバイス・dtype・スレッド・乱数シードは決定論のための固定値。これらは
 実装が独自に変えない(変更が要れば vocal_analysis.md を先に更新する)。
@@ -28,10 +29,19 @@ class RecognizerConfig:
 
 @dataclass(frozen=True)
 class WhisperConfig:
-    """S2 内容認識モデル(Whisper。§5.2)の固定条件(§8.3)。"""
+    """S2 内容認識モデル(選択可能な代替アダプタ whisper-ctc-forcedalign。§5.2)の固定条件(§8.3)。"""
 
     model_id: str = "openai/whisper-medium"
     model_revision: str = "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
+    kana_prompt: str = "これはすべてかなだけでかかれたぶんしょうです。かんじはいっさいつかいません。"
+
+
+@dataclass(frozen=True)
+class KanaWhisperConfig:
+    """S2 内容認識モデル(既定アダプタ kana-whisper-ctc-forcedalign。§5.2)の固定条件(§8.3)。"""
+
+    model_id: str = "sbintuitions/kana-whisper"
+    model_revision: str = "88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82"
 
 
 @dataclass(frozen=True)
@@ -45,4 +55,5 @@ class SeparatorConfig:
 
 RECOGNIZER_CONFIG = RecognizerConfig()
 WHISPER_CONFIG = WhisperConfig()
+KANA_WHISPER_CONFIG = KanaWhisperConfig()
 SEPARATOR_CONFIG = SeparatorConfig()

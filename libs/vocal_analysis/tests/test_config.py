@@ -37,6 +37,26 @@ def test_recognizer_inference_conditions_are_deterministic():
     assert RECOGNIZER_CONFIG.random_seed == 0
 
 
+def test_whisper_model_id_revision_and_kana_prompt_are_pinned():
+    from vocal_analysis import WHISPER_CONFIG
+
+    # §8.3 で固定した選択可能な代替アダプタ(whisper-ctc-forcedalign)のモデル・revisionと、
+    # かな限定プロンプトの固定文字列。実装が独自に変えない。
+    assert WHISPER_CONFIG.model_id == "openai/whisper-medium"
+    assert WHISPER_CONFIG.model_revision == "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
+    assert WHISPER_CONFIG.kana_prompt == (
+        "これはすべてかなだけでかかれたぶんしょうです。かんじはいっさいつかいません。"
+    )
+
+
+def test_kana_whisper_model_id_and_revision_are_pinned():
+    from vocal_analysis import KANA_WHISPER_CONFIG
+
+    # §8.3 で固定した既定アダプタ(kana-whisper-ctc-forcedalign)のモデルとrevision。
+    assert KANA_WHISPER_CONFIG.model_id == "sbintuitions/kana-whisper"
+    assert KANA_WHISPER_CONFIG.model_revision == "88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82"
+
+
 def test_separator_shifts_disabled_for_determinism():
     from vocal_analysis import SEPARATOR_CONFIG
 
@@ -53,10 +73,14 @@ def test_separator_model_and_stem_are_pinned():
 
 
 def test_configs_are_frozen():
-    from vocal_analysis import RECOGNIZER_CONFIG, SEPARATOR_CONFIG
+    from vocal_analysis import KANA_WHISPER_CONFIG, RECOGNIZER_CONFIG, SEPARATOR_CONFIG, WHISPER_CONFIG
 
     # 固定値なので再代入を禁じる(frozen dataclass)。
     with pytest.raises(dataclasses.FrozenInstanceError):
         RECOGNIZER_CONFIG.model_id = "other"
     with pytest.raises(dataclasses.FrozenInstanceError):
         SEPARATOR_CONFIG.shifts = 1
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        WHISPER_CONFIG.model_id = "other"
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        KANA_WHISPER_CONFIG.model_id = "other"
