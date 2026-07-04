@@ -1,4 +1,4 @@
-"""S-1 認識ゲートの参照ラベル処理。
+"""S-1 認識測定の参照ラベル処理と採点指標。
 
 参照ラベルの音素記号を採点用カテゴリ(母音 a/i/u/e/o・子音 c・無音/息 sil)へ写像する。想定外記号は
 黙って捨てず `UnknownReferenceSymbolError` で停止する。モノフォンラベル形式(秒単位・HTK 100ns単位)の
@@ -438,7 +438,7 @@ def compute_boundary_deviation(
 ) -> tuple[float, float] | None:
     """境界時刻ずれ(§9.4): match_segments が返す対応済み(基準区間, 予測区間)の組ごとに開始時刻差
     |予測-基準|(ミリ秒)を求め、その中央値と95パーセンタイル(線形補間)を返す。対応区間が無い場合は
-    未定義として None を返す(マクロ平均からの除外・ゲート不合格判定は集計処理=呼び出し側の責務)。
+    未定義として None を返す(マクロ平均からの除外とその事実の報告は集計側=呼び出し側の責務)。
     """
     if not matched_pairs:
         return None
@@ -464,7 +464,11 @@ class SongMetrics:
 def compute_song_metrics(
     predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
 ) -> SongMetrics:
-    """1曲分の採点指標(§9.4)をまとめて算出する。"""
+    """1曲分の採点指標(§9.4)をまとめて算出する。
+
+    合否判定は行わない(§9.5: 数値は認識構成間の相対比較と破綻検出に使い、品質の合否は利用先の
+    実装時調整と MMD 上の視聴確認が担う)。複数曲のマクロ平均などの集計は測定側(呼び出し側)が行う。
+    """
     matched, undetected, excess = match_segments(predicted, reference)
     return SongMetrics(
         vowel_accuracy=compute_vowel_accuracy(predicted, reference, duration_sec),
@@ -473,72 +477,4 @@ def compute_song_metrics(
         undetected_count=len(undetected),
         excess_count=len(excess),
         reference_vowel_count=len(matched) + len(undetected),
-    )
-
-
-# §9.5 受入基準の固定閾値。
-_MIN_VOWEL_ACCURACY = 0.80
-_MAX_OVER_OPENING_RATE = 0.10
-_MAX_BOUNDARY_DEVIATION_MEDIAN_MS = 50.0
-_MAX_BOUNDARY_DEVIATION_P95_MS = 120.0
-_MAX_UNDETECTED_EXCESS_RATE = 0.10
-
-
-@dataclass
-class GateResult:
-    """§9.5 の受入判定結果(曲数マクロ平均後の値と合否)。"""
-
-    macro_vowel_accuracy: float
-    macro_over_opening_rate: float
-    macro_boundary_deviation_median_ms: float | None
-    macro_boundary_deviation_p95_ms: float | None
-    macro_undetected_excess_rate: float
-    passed: bool
-
-
-def _mean(values) -> float:
-    values = list(values)
-    return sum(values) / len(values)
-
-
-def judge_gate(song_metrics: list[SongMetrics]) -> GateResult:
-    """集計と受入判定(§9.5)。
-
-    曲ごとの指標を曲数マクロ平均(単純平均)し、固定閾値(母音正解率80%以上・過開口率10%以下・
-    境界ずれ中央値50ms以下かつ95パーセンタイル120ms以下・(未検出+余剰)/基準区間数10%以下)と
-    比較して合否判定する。境界ずれが未定義(対応区間0件)の曲は境界ずれのマクロ平均から除外する
-    (定義済みの曲だけで平均する)が、そうした曲が1曲でもあればゲート全体を不合格にする(§9.4。
-    他の指標が基準を満たしていても不合格)。他の指標のマクロ値は算出できる範囲でそのまま報告する。
-    """
-    macro_vowel_accuracy = _mean(m.vowel_accuracy for m in song_metrics)
-    macro_over_opening_rate = _mean(m.over_opening_rate for m in song_metrics)
-    macro_undetected_excess_rate = _mean(
-        (m.undetected_count + m.excess_count) / m.reference_vowel_count for m in song_metrics
-    )
-
-    has_undefined_boundary_deviation = any(m.boundary_deviation is None for m in song_metrics)
-    defined_boundary_deviations = [m.boundary_deviation for m in song_metrics if m.boundary_deviation is not None]
-    if defined_boundary_deviations:
-        macro_boundary_median: float | None = _mean(d[0] for d in defined_boundary_deviations)
-        macro_boundary_p95: float | None = _mean(d[1] for d in defined_boundary_deviations)
-    else:
-        macro_boundary_median = None
-        macro_boundary_p95 = None
-
-    passed = (
-        not has_undefined_boundary_deviation
-        and macro_vowel_accuracy >= _MIN_VOWEL_ACCURACY
-        and macro_over_opening_rate <= _MAX_OVER_OPENING_RATE
-        and macro_boundary_median <= _MAX_BOUNDARY_DEVIATION_MEDIAN_MS
-        and macro_boundary_p95 <= _MAX_BOUNDARY_DEVIATION_P95_MS
-        and macro_undetected_excess_rate <= _MAX_UNDETECTED_EXCESS_RATE
-    )
-
-    return GateResult(
-        macro_vowel_accuracy=macro_vowel_accuracy,
-        macro_over_opening_rate=macro_over_opening_rate,
-        macro_boundary_deviation_median_ms=macro_boundary_median,
-        macro_boundary_deviation_p95_ms=macro_boundary_p95,
-        macro_undetected_excess_rate=macro_undetected_excess_rate,
-        passed=passed,
     )

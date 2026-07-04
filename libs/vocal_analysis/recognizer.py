@@ -221,7 +221,7 @@ def _run_model_inference(processor, model, samples: np.ndarray) -> list[int]:
 
 
 def _load_model_and_processor():
-    """認識器(wav2vec2 espeak)をS-1ゲート固定条件(§5.1・§8.3)でロードする。"""
+    """認識器(wav2vec2 espeak)をS-1測定の固定条件(§5.1・§8.3)でロードする。"""
     import torch
     from transformers import AutoModelForCTC, AutoProcessor
 
