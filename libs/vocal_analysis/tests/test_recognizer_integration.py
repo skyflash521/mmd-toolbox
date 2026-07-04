@@ -1,9 +1,11 @@
-"""S2 音素認識の統合テスト(vocal_analysis.md §5・§5.1・§8.1・§8.3)。
+"""S2 音素認識の統合テスト(vocal_analysis.md §5・§5.2・§8.1・§8.3)。
 
-実モデル(wav2vec2)の呼び出しはモック(_load_model_and_processor・_run_model_inference を差し替え)
-して検証し、ネットワーク・実モデルを必須にしない。ダウンミックス・リサンプルは合成配列で決定論的に
-検証する。recognize() の統合テストはモックしたモデル推論結果からセグメント列が正しく組み立てられる
-ことを確認する(_merge_ctc_frames・_absorb_short_segments 自体の網羅的な検証は test_recognizer.py)。
+外部呼び出し(Whisper書き起こし・G2P・音素モデル推論)はモック(_transcribe_with_timestamps・_g2p・
+_load_model_and_processor・_compute_log_probs を差し替え)して検証し、ネットワーク・実モデルを
+必須にしない。ダウンミックス・リサンプルは合成配列で決定論的に検証する。recognize() の統合テストは
+モックした書き起こし・G2P・推論結果から、複合構成の純関数群(_assemble_phoneme_sequence・
+_g2p_symbols_to_token_ids・_forced_align・_path_to_segments。各関数自体の網羅的な検証は
+test_recognizer.py)を経て正しくセグメント列が組み立てられることを確認する。
 """
 
 from pathlib import Path
@@ -54,17 +56,6 @@ def test_resample_to_target_downsamples_to_expected_length():
     assert len(result) == 16000
 
 
-def test_ids_to_symbols_maps_via_decoder_and_blank_to_none():
-    from vocal_analysis.recognizer import _ids_to_symbols
-
-    decoder = {0: "<pad>", 1: "a", 2: "n"}
-    token_ids = [1, 1, 0, 2]
-
-    symbols = _ids_to_symbols(token_ids, pad_token_id=0, decoder=decoder)
-
-    assert symbols == ["a", "a", None, "n"]
-
-
 class _FakeTokenizer:
     def __init__(self, decoder, pad_token_id=0):
         self.pad_token_id = pad_token_id
@@ -84,39 +75,122 @@ def _write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> Path:
     return path
 
 
-def test_recognize_builds_segments_from_mocked_inference(tmp_path, monkeypatch):
+def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 16kHz・モノラルの短い合成音(実値は使わずダウンミックス/リサンプル経路を通すだけ)。
-    # 960サンプル@16kHz = 60ms = 3フレーム分。§5.1の60ms吸収規則の閾値ちょうどにし、
-    # 単一フレーム(20ms)だと非gap隣接を持たずgap化されてしまうため、3フレーム同一ラベルにする。
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((960, 1), dtype=np.float32), 16000)
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
 
-    decoder = {0: "<pad>", 1: "a", 2: "n"}
-    fake_token_ids = [1, 1, 1]
+    # 1チャンク「あ」-> G2P「a」-> 音素列 ["pau","a","pau"]。語彙は blank=0・a=1 の2記号のみ。
+    # 対数確率行列は状態0(pau)がフレーム0-1、状態1(a)がフレーム2-3、状態2(pau)がフレーム4-5で
+    # 優勢になるよう設計し、強制アライメントの経路が [0,0,1,1,2,2] に決まることを確認済み。
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [
+            [5.0, -5.0],
+            [5.0, -5.0],
+            [-5.0, 5.0],
+            [-5.0, 5.0],
+            [5.0, -5.0],
+            [5.0, -5.0],
+        ]
+    )
 
+    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: ["あ"])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
-        recognizer_module, "_run_model_inference", lambda processor, model, samples: fake_token_ids
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
     )
 
     segments = recognizer_module.recognize(wav_path)
 
-    assert len(segments) == 1
-    assert segments[0].type == "vowel"
-    assert segments[0].phoneme == "a"
+    assert len(segments) == 3
+    assert segments[0].type == "gap"
+    assert segments[0].phoneme is None
     assert segments[0].start_sec == pytest.approx(0.0)
-    assert segments[0].end_sec == pytest.approx(0.06)
+    assert segments[0].end_sec == pytest.approx(0.04)
+    assert segments[1].type == "vowel"
+    assert segments[1].phoneme == "a"
+    assert segments[1].start_sec == pytest.approx(0.04)
+    assert segments[1].end_sec == pytest.approx(0.08)
+    assert segments[2].type == "gap"
+    assert segments[2].phoneme is None
+    assert segments[2].start_sec == pytest.approx(0.08)
+    assert segments[2].end_sec == pytest.approx(0.12)
 
 
-def test_recognize_missing_library_raises_clear_error(tmp_path, monkeypatch):
+def test_recognize_whisper_missing_library_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
     wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
 
     original_error = ImportError("no transformers")
+
+    def fake_transcribe(samples):
+        raise original_error
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", fake_transcribe)
+
+    with pytest.raises(recognizer_module.RecognitionError, match="transformers") as excinfo:
+        recognizer_module.recognize(wav_path)
+
+    # transformers・torch は同じ import 節で読み込むため、原因が torch 側の欠落でも
+    # メッセージが transformers だけを名指しして誤解を招かないよう、両方を案内する。
+    assert "torch" in str(excinfo.value)
+    assert excinfo.value.__cause__ is original_error
+
+
+def test_recognize_whisper_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # §4: モデルが未キャッシュでネットワークからも取得できない場合、モデル取得が必要と分かる
+    # エラーで失敗させる(黙って劣化させない)。from_pretrained 系はこの場合 OSError を送出する。
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+
+    original_error = OSError("model not found in cache and offline")
+
+    def fake_transcribe(samples):
+        raise original_error
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", fake_transcribe)
+
+    with pytest.raises(recognizer_module.RecognitionError, match="内容認識モデル") as excinfo:
+        recognizer_module.recognize(wav_path)
+
+    assert excinfo.value.__cause__ is original_error
+
+
+def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+
+    original_error = ImportError("no pyopenjtalk")
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: ["あ"])
+
+    def fake_g2p(text):
+        raise original_error
+
+    monkeypatch.setattr(recognizer_module, "_g2p", fake_g2p)
+
+    with pytest.raises(recognizer_module.RecognitionError, match="pyopenjtalk-plus") as excinfo:
+        recognizer_module.recognize(wav_path)
+
+    assert excinfo.value.__cause__ is original_error
+
+
+def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
+
+    original_error = ImportError("no transformers")
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: [])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: [])
 
     def fake_load(*args, **kwargs):
         raise original_error
@@ -126,22 +200,19 @@ def test_recognize_missing_library_raises_clear_error(tmp_path, monkeypatch):
     with pytest.raises(recognizer_module.RecognitionError, match="transformers") as excinfo:
         recognizer_module.recognize(wav_path)
 
-    # transformers・torch は同じ import 節で読み込むため、原因が torch 側の欠落でも
-    # メッセージが transformers だけを名指しして誤解を招かないよう、両方を案内する。
     assert "torch" in str(excinfo.value)
-    # 「分かるエラー」であることを検証する: 案内メッセージだけでなく元の例外を握り潰さず
-    # __cause__ として保持しているか確認する(原因追跡ができるように)。
     assert excinfo.value.__cause__ is original_error
 
 
-def test_recognize_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
+def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # §4: モデルが未キャッシュでネットワークからも取得できない場合、モデル取得が必要と分かる
-    # エラーで失敗させる(黙って劣化させない)。from_pretrained 系はこの場合 OSError を送出する。
     wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((320, 1), dtype=np.float32), 16000)
 
     original_error = OSError("model not found in cache and offline")
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_with_timestamps", lambda samples: [])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: [])
 
     def fake_load(*args, **kwargs):
         raise original_error

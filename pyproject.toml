@@ -23,6 +23,7 @@ vocal-analysis = [
     "onnxruntime",
     "torch",
     "transformers",
+    "pyopenjtalk-plus",
 ]
 
 [project.scripts]
