@@ -86,29 +86,43 @@ G2P(pyopenjtalk 系)で音素列へ変換し、CTC 音素モデルのロジッ�
 
 ### 2.2 候補
 
-| 構成 | 呼び出し | 時刻精度 | 歌唱での成立 | ライセンス |
-|---|---|---|---|---|
-| **複合構成: Whisper(内容)+ G2P + CTC強制アライメント(時刻)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元(具体的な精度はS-1測定=§9で確認。固定値はここに記載しない) | ○(歌唱で成立する唯一の実測済み構成) | Whisper モデル Apache-2.0 / pyopenjtalk-plus MIT(内包の OpenJTalk 系は修正BSD) |
-| wav2vec2 自由音素認識(単段) | transformers(in-process) | CTC近似 | ×(実測で不成立: blank支配で母音をほぼ出力しない) | transformers=Apache / torch=BSD + 許諾モデル |
-| Julius 音素認識(phone-loop) | C実行ファイル(内部subprocess) | フレーム単位(高) | 未評価(speech-HMM で歌唱は域外の懸念。phone-loop の構成も必要) | エンジン=修正BSD(音響モデルは個別確認) |
-| ~~Allosaurus~~ | Python API | 近似 | 未評価 | **GPL-3.0 → MIT本体と非互換で不可** |
+| 構成 | 呼び出し | 時刻精度 | 歌唱での成立 | 語彙置換のリスク | ライセンス |
+|---|---|---|---|---|---|
+| **kana-whisper + G2P + CTC強制アライメント(既定)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元(具体的な精度はS-1測定=§9で確認) | 母音を保ったまま局所的に誤ることはあるが、意味の通る別語への丸ごと置換は起きにくい(内容認識に強い言語モデル的補正を持たないため) | 低 | kana-whisper MIT / pyopenjtalk-plus MIT(内包の OpenJTalk 系は修正BSD) |
+| **Whisper(内容)+かな限定プロンプト+ G2P + CTC強制アライメント(選択可能)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元 | かな化に失敗した区間は通常のWhisperと同じ語彙置換のリスクが残る | 中(かな化成功区間は低、失敗区間は既存同等) | Whisper モデル Apache-2.0 / pyopenjtalk-plus MIT |
+| wav2vec2 自由音素認識(単段。音素/かな出力とも) | transformers(in-process) | CTC近似 | ×(実測で不成立: blank支配でほぼ何も出力しない) | 低(意味補正なし) | transformers=Apache / torch=BSD + 許諾モデル |
+| Julius 音素認識(phone-loop) | C実行ファイル(内部subprocess) | フレーム単位(高) | 未評価(speech-HMM で歌唱は域外の懸念。phone-loop の構成も必要) | 未評価 | エンジン=修正BSD(音響モデルは個別確認) |
+| ~~Allosaurus~~ | Python API | 近似 | 未評価 | 未評価 | **GPL-3.0 → MIT本体と非互換で不可** |
 
 > 補足: 強制アライメントの時刻は音素の開始側が正確で、終端(閉じ側)は近似となる。母音区間の境界の精緻化
 > (近傍にRMSオンセットがあるときそれへ寄せる)と閉じ側の確定は利用先(口パク生成系の入口)が行う
 > ([vocal_analysis.md](vocal_analysis.md) §5・§10)。認識器は5母音と子音、未割当(gap)を区別できれば足り(無音/閉口の
 > 確定は利用先がRMS併用で行い、両唇閉鎖は音素から判定)、語彙認識より要件は緩い。
 
-**採用: 複合構成(Whisper 内容認識 + pyopenjtalk 系 G2P + wav2vec2 CTC 強制アライメント。id・モデル・
-revision の固定は vocal_analysis.md §5.2・§8.3 が正本)**。決め手:
+**採用: 内容認識+G2P+CTC強制アライメントの複合構成(id・モデル・revision の固定は
+vocal_analysis.md §5.2・§8.3 が正本)。内容認識は既定 `kana-whisper`、選択可能な代替
+`openai/whisper-medium`+かな限定プロンプト**。決め手:
 
-1. **歌唱で成立する唯一の実測済み構成**。内容(母音の種類)と開始時刻の双方について、単段の自由認識より
-   明確に優れることを参照ラベル付き歌唱データの測定で確認した(単段の自由認識は不成立)。精度の具体的な
-   数値評価は vocal_analysis.md §9 の S-1 測定に委ねる。
-2. **すべて純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に合う。
-3. **torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる**。追加依存は
-   Whisper モデルの取得と pyopenjtalk 系のみ。
-4. ライセンスが清浄。Whisper モデル(Hugging Face 配布)= Apache-2.0、pyopenjtalk-plus = MIT(内包の
-   OpenJTalk 系コンポーネントは修正BSD)、アライメント用音素モデル
+1. **口パク生成系が必要とするのは母音の種類(母音正解率)であり、意味の通る文か否かではない**。内容認識に
+   強い言語モデル的補正を持つ構成(通常のWhisper書き起こし)は、聞き取りに自信が持てない区間で実際の
+   発声と無関係な別の語へ丸ごと置き換えることがあり、この場合は母音自体が変わり口形が破綻する
+   (参照ラベル付き歌唱データとの実測比較で確認済み)。かなを直接出力し言語モデル的補正を持たない
+   `kana-whisper` はこの種の語彙置換を起こしにくく、既定に選ぶ。
+2. **単段の自由CTC認識(音素/かな出力を問わず)は歌唱で不成立**。blank(未割当)が支配的になりほぼ
+   何も出力しない(参照ラベル付き歌唱データでの実測。wav2vec2ベースの複数の出力語彙で確認済み)。
+   `kana-whisper` は自由CTCではなく Whisper と同じ系列変換(自己回帰デコーダ)であるため、この不成立を
+   回避できる。
+3. **G2P(`pyopenjtalk-plus`)はどちらの内容認識モデルの出力に対しても同一の呼び出しで足りる**。入力が
+   かなであれば辞書引きに起因する読みの曖昧性(同字異音の読み違い)が構造的に生じない
+   (vocal_analysis.md §5.2)。
+4. `kana-whisper` は歌唱データでの学習・評価実績が無く、また実測で処理時間が既存の
+   Whisper+G2P+強制アライメント構成の6〜10倍かかる(9章のS-1測定)。この代償を許容しない場合の
+   選択可能な代替として、歌唱で検証済みかつ高速な `openai/whisper-medium`+かな限定プロンプトを残す
+   (かな化に失敗した区間は既存構成と同じ読み違いリスクが残るが、既存構成より悪化はしない)。
+5. **すべて純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に合う。
+   torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる。
+6. ライセンスが清浄。kana-whisper = MIT、Whisper モデル(Hugging Face 配布)= Apache-2.0、
+   pyopenjtalk-plus = MIT(内包の OpenJTalk 系コンポーネントは修正BSD)、アライメント用音素モデル
    `facebook/wav2vec2-lv-60-espeak-cv-ft` = Apache-2.0。
 
 実装(アダプタ)は [vocal_analysis.md](vocal_analysis.md) §5.2・§8.3 の確定仕様に従う。実装後の
@@ -149,15 +163,15 @@ ffmpeg 自体が不要なことも多い。
 
 ## 4. 採用ツールと選定理由
 
-各ステージの採用ツールは1つで、既定アダプタとして用いる(採用ツールの正本は
-[vocal_analysis.md](vocal_analysis.md) §8.3)。複数アダプタの登録と選択の扱いは
+各ステージの既定アダプタは1つ(採用ツールの正本は [vocal_analysis.md](vocal_analysis.md) §8.3)。
+S2 のみ、既定に加えて選択可能な代替アダプタを持つ。複数アダプタの登録と選択の扱いは
 [vocal_analysis.md](vocal_analysis.md) §8.2 に従う。
 
 | ステージ | 採用ツール | 呼び出し方 | 選定理由 | 代替候補 |
 |---|---|---|---|---|
 | S0 入力読み込み | **soundfile 優先(mp3も可)+ 自動検出ffmpegにフォールバック**(リポジトリに同梱しない) | 内部ライブラリ/サブプロセス | soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等の同梱配布は不採用) |
 | S1 ボーカル抽出 | **Demucs v4 htdemucs_ft**(audio-separator 経由・`shifts=0`) | `audio_separator.separator.Separator`(in-process) | 高品質・MIT・ライブラリ呼び出し可・GPU不要でも動作。生 `demucs.api` は `torchaudio<2.2` 固定で新しい Python 向けビルドが無く不採用 | audio-separator の他モデル(Roformer系等。ライセンス個別確認要) / Spleeter / 分離なし |
-| S2 音素・母音認識 | **複合構成(Whisper 内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用**(単段の wav2vec2 自由認識は歌唱で不成立と実測済み。§2。id・モデル・revision の固定は vocal_analysis.md §5.2・§8.3 が正本) | transformers + pyopenjtalk-plus(in-process) | 歌唱で成立する唯一の実測済み構成・in-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素・母音認識 | **複合構成(内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用**。既定は `kana-whisper`、選択可能な代替は `openai/whisper-medium`+かな限定プロンプト(単段の自由CTC認識は歌唱で不成立と実測済み。§2。id・モデル・revision の固定は vocal_analysis.md §5.2・§8.3 が正本) | transformers + pyopenjtalk-plus(in-process) | 既定は語彙置換による母音破綻が最も起きにくい構成。代替は歌唱で検証済み・高速。いずれもin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
 
 S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterface(Separator / Recognizer)を満たせば
 差し替え可能。S0 は固定の内部処理。外部ツールは `vocal_analysis` が内部で呼び、依存は `vocal_analysis` 側に
@@ -173,7 +187,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 |---|---|---|
 | ffmpeg(自動検出) | 復号したWAV | 復号PCM(チャンネル/サンプルレート保持)のパス。レベル正規化は S0 が施す([vocal_analysis.md](vocal_analysis.md) §3) |
 | audio-separator(`Separator.separate`) | API が返す出力ファイルパス(Demucs v4 htdemucs_ft の分離stem) | ボーカルWAVのパス(APIの戻り値を使い、命名を推測しない) |
-| 複合構成(Whisper + G2P + CTC強制アライメント) | Whisper: テキスト / G2P: 音素列 / アライメント: 音素ごとの開始位置(CTCスパイク) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル+任意の信頼度)。テキストと音素列はアダプタ内部にとどめ、共有出力に含めない。母音の終端(閉じ側)はスパイク位置からの近似で、確定は利用先(S3のRMS併用) |
+| 複合構成(内容認識 + G2P + CTC強制アライメント。既定=kana-whisper・代替=whisper-medium+かなプロンプト) | 内容認識: テキスト(既定はかな、代替はかな化されない場合あり) / G2P: 音素列 / アライメント: 音素ごとの開始位置(CTCスパイク) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル+任意の信頼度)。テキストと音素列はアダプタ内部にとどめ、共有出力に含めない。母音の終端(閉じ側)はスパイク位置からの近似で、確定は利用先(S3のRMS併用) |
 | wav2vec2 phoneme(単段自由認識) | フレームごとのCTC音素列(IPA) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル(IPA)+任意の信頼度。IPA→5母音写像は vocal_analysis が提供(RMS不要)、gap の無音/継続判定・無音/閉口の確定は利用先がS3のRMS併用で行い、両唇閉鎖判定は音素から利用先が行う) |
 | Julius 音素認識 | アライメント(開始/終了フレーム・音素) | 全時間軸被覆のセグメント列 |
 
@@ -188,9 +202,10 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 
 - 本体 MIT([../../LICENSE](../../LICENSE)) / soundfile BSD-3 / libsndfile LGPL-2.1(依存・両立) /
   audio-separator MIT(htdemucs_ft 重みは Demucs v4 由来・MIT)/ transformers Apache-2.0 / torch BSD-3 /
-  wav2vec2 モデル `facebook/wav2vec2-lv-60-espeak-cv-ft` Apache-2.0 / Whisper モデル(Hugging Face 配布)
-  Apache-2.0 / pyopenjtalk-plus MIT(内包の OpenJTalk・hts_engine は修正BSD系) / 代替候補: Spleeter MIT・
-  Julius エンジン 修正BSD / **Allosaurus GPL-3.0=不採用**。
+  wav2vec2 モデル `facebook/wav2vec2-lv-60-espeak-cv-ft` Apache-2.0 / kana-whisper モデル(Hugging Face
+  配布)MIT / Whisper モデル(Hugging Face 配布)Apache-2.0 / pyopenjtalk-plus MIT(内包の
+  OpenJTalk・hts_engine は修正BSD系) / 代替候補: Spleeter MIT・Julius エンジン 修正BSD /
+  **Allosaurus GPL-3.0=不採用**。
 - ffmpeg は同梱・再配布しない(§3)ため、そのビルドのライセンス(LGPL/GPL)による義務は生じない。
 - Julius を採用する場合のみ、その音響モデルの個別ライセンスを確認する。
 
@@ -204,6 +219,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 - Allosaurus(universal phone recognizer): <https://github.com/xinjli/allosaurus>
 - wav2vec2 phoneme(transformers): <https://huggingface.co/docs/transformers/en/model_doc/wav2vec2_phoneme>
 - Whisper(transformers): <https://huggingface.co/docs/transformers/en/model_doc/whisper>
+- kana-whisper: <https://huggingface.co/sbintuitions/kana-whisper>
 - pyopenjtalk-plus(G2P): <https://github.com/tsukumijima/pyopenjtalk-plus>
 - Julius(音素認識): <https://github.com/julius-speech/julius>
 - imageio-ffmpeg: <https://github.com/imageio/imageio-ffmpeg>
