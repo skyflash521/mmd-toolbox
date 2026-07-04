@@ -6,10 +6,6 @@ CTC出力をセグメント列へ正規化する純関数の核(母音/子音判
 
 import pytest
 
-# vocal_analysis.recognizer が未実装の間は import が失敗するため xfail 印で緑を保つ。
-# strict=True: 未実装印を外し忘れたまま通ると XPASS が失敗になり検出できる。
-pytestmark = pytest.mark.xfail(reason="impl pending: vocal_analysis.recognizer", strict=True)
-
 
 # §5.1 の母音記号基準集合(IPA母音チャートの基本母音28記号+R音性母音2記号+拡張母音記号1)を
 # 過不足なく列挙する(仕様の有限集合をそのまま固定する)。
@@ -256,3 +252,31 @@ def test_absorb_short_segments_leaves_long_segments_unchanged():
     result = _absorb_short_segments(segments, min_duration_sec=0.06)
 
     assert result == segments
+
+
+def test_absorb_short_segments_single_segment_with_no_neighbor_terminates():
+    from vocal_analysis.recognizer import _absorb_short_segments
+
+    # 非gapの隣接を一切持たない単独の短区間(吸収先が無い)。§5.1どおり自身をgapにして
+    # 終了する(隣接が無いためこれ以上連結しようがなく、無限に再判定してはならない)。
+    segments = [_seg("consonant", 0.00, 0.02, "n")]
+
+    result = _absorb_short_segments(segments, min_duration_sec=0.06)
+
+    assert result == [_seg("gap", 0.00, 0.02, None)]
+
+
+def test_absorb_short_segments_all_short_gap_run_terminates():
+    from vocal_analysis.recognizer import _absorb_short_segments
+
+    # 短区間が連続し非gapの隣接が一切無い(全体が短いblank連続)。すべてgapになり1区間へ
+    # 連結されて終了する(無限ループしない)。
+    segments = [
+        _seg("gap", 0.00, 0.02, None),
+        _seg("gap", 0.02, 0.04, None),
+        _seg("gap", 0.04, 0.06, None),
+    ]
+
+    result = _absorb_short_segments(segments, min_duration_sec=0.06)
+
+    assert result == [_seg("gap", 0.00, 0.06, None)]
