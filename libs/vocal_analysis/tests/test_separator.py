@@ -69,7 +69,9 @@ class _FakeSeparator:
         self._calls["audio_file_path"] = audio_file_path
         out = Path(audio_file_path).parent / "vocals_output.wav"
         out.write_bytes(b"")  # ダミー出力(内容は検証対象外)
-        return [str(out)]
+        # 実際の audio-separator(0.44.2)は output_dir 相対のファイル名だけを返す
+        # (絶対パスではない)。この挙動を模して separate() 側の解決ロジックを検証する。
+        return [out.name]
 
 
 @pytest.mark.parametrize("mode", ["always", "auto"])
