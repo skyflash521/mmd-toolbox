@@ -183,3 +183,124 @@ def test_parse_htk100ns_monophone_label_delegates_to_reference_symbol_to_categor
 
     assert calls == ["k"]
     assert segments[0].category == "SENTINEL"
+
+
+def _seg(category, start, end):
+    from vocal_analysis.gate import CategorySegment
+
+    return CategorySegment(category=category, start_sec=start, end_sec=end)
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_clip_segments_to_audio_duration_leaves_in_range_segment_unchanged():
+    from vocal_analysis.gate import clip_segments_to_audio_duration
+
+    segments = [_seg("a", 0.0, 1.0)]
+
+    result = clip_segments_to_audio_duration(segments, audio_duration_sec=2.0)
+
+    assert result == segments
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_clip_segments_to_audio_duration_trims_segment_extending_past_end():
+    from vocal_analysis.gate import clip_segments_to_audio_duration
+
+    # ラベルが音声より数秒長いケース: 音声長を超える区間は切り捨てる。
+    segments = [_seg("a", 0.0, 3.0)]
+
+    result = clip_segments_to_audio_duration(segments, audio_duration_sec=2.0)
+
+    assert result == [_seg("a", 0.0, 2.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_clip_segments_to_audio_duration_drops_segment_entirely_beyond_range():
+    from vocal_analysis.gate import clip_segments_to_audio_duration
+
+    segments = [_seg("a", 0.0, 1.0), _seg("i", 2.5, 3.0)]
+
+    result = clip_segments_to_audio_duration(segments, audio_duration_sec=2.0)
+
+    assert result == [_seg("a", 0.0, 1.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_clip_segments_to_audio_duration_clips_negative_start_to_zero():
+    from vocal_analysis.gate import clip_segments_to_audio_duration
+
+    segments = [_seg("a", -0.5, 1.0)]
+
+    result = clip_segments_to_audio_duration(segments, audio_duration_sec=2.0)
+
+    assert result == [_seg("a", 0.0, 1.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_clip_segments_to_audio_duration_drops_segment_entirely_before_zero():
+    from vocal_analysis.gate import clip_segments_to_audio_duration
+
+    segments = [_seg("a", -2.0, -1.0), _seg("i", 0.0, 1.0)]
+
+    result = clip_segments_to_audio_duration(segments, audio_duration_sec=2.0)
+
+    assert result == [_seg("i", 0.0, 1.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_clip_segments_to_audio_duration_leaves_uncovered_tail_unfilled():
+    from vocal_analysis.gate import clip_segments_to_audio_duration
+
+    # ラベルが音声より早く終わる(末尾欠落)場合、末尾を埋める合成区間は追加しない
+    # (被覆しない区間は採点から除外=結果に含めないだけでよい)。
+    segments = [_seg("a", 0.0, 1.0)]
+
+    result = clip_segments_to_audio_duration(segments, audio_duration_sec=5.0)
+
+    assert result == [_seg("a", 0.0, 1.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_remove_invalid_time_segments_leaves_valid_segments_unchanged():
+    from vocal_analysis.gate import remove_invalid_time_segments
+
+    segments = [_seg("a", 0.0, 1.0), _seg("i", 1.0, 2.0)]
+
+    result = remove_invalid_time_segments(segments)
+
+    assert result == segments
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_remove_invalid_time_segments_drops_zero_length_segment():
+    from vocal_analysis.gate import remove_invalid_time_segments
+
+    segments = [_seg("a", 0.0, 1.0), _seg("i", 1.0, 1.0), _seg("u", 1.0, 2.0)]
+
+    result = remove_invalid_time_segments(segments)
+
+    assert result == [_seg("a", 0.0, 1.0), _seg("u", 1.0, 2.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_remove_invalid_time_segments_drops_time_reversed_segment():
+    from vocal_analysis.gate import remove_invalid_time_segments
+
+    segments = [_seg("a", 0.0, 1.0), _seg("i", 2.0, 1.5), _seg("u", 2.0, 3.0)]
+
+    result = remove_invalid_time_segments(segments)
+
+    assert result == [_seg("a", 0.0, 1.0), _seg("u", 2.0, 3.0)]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis.gate mechanical validation", strict=True)
+def test_remove_invalid_time_segments_excludes_overlapping_range_from_both_sides():
+    from vocal_analysis.gate import remove_invalid_time_segments
+
+    # 2つの参照区間が [0.8, 1.0) で重複する。重複時間範囲はどちらの区間にも属させず、
+    # 採点から除外する(隙間として残す)。
+    segments = [_seg("a", 0.0, 1.0), _seg("i", 0.8, 2.0)]
+
+    result = remove_invalid_time_segments(segments)
+
+    assert result == [_seg("a", 0.0, 0.8), _seg("i", 1.0, 2.0)]
