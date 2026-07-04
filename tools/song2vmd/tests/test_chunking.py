@@ -12,10 +12,6 @@
 基準に行う」はRMS算出を1回だけ行うことで満たされ、本モジュールが担うセグメント結合とは別の関心事)。
 """
 
-import pytest
-
-pytest.importorskip("song2vmd.chunking", reason="impl pending: song2vmd chunking")
-
 from vocal_analysis import Segment
 
 from song2vmd import chunking
@@ -85,6 +81,20 @@ def test_forced_split_target_within_duration_is_still_applied():
         max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
     )
     assert boundaries == [300.0]
+
+
+def test_boundaries_keep_advancing_when_max_duration_is_small_relative_to_search_window():
+    # max_duration_secがsearch_window_sec以下(--max-durationに小さい値を与えた場合)でも、
+    # 終始無音(=常に候補になりうる)なデータで境界検出が前進し続け、有限回で終わることを確認する。
+    times = [round(t * 0.1, 1) for t in range(0, 200)]  # 0.0, 0.1, ..., 19.9
+    values = [0.01] * len(times)  # 終始無音しきい値以下
+    boundaries = chunking.find_chunk_boundaries(
+        duration_sec=10.0, rms_times_sec=times, rms_values=values,
+        max_duration_sec=1.0, search_window_sec=5.0, silence_threshold=0.06,
+    )
+    assert boundaries
+    assert boundaries == sorted(boundaries)
+    assert len(boundaries) == len(set(boundaries))  # 重複無く単調に前進している
 
 
 # --- merge_chunk_segments -----------------------------------------------------
