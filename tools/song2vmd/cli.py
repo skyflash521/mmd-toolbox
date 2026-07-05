@@ -113,8 +113,8 @@ def _nonneg_int(text: str) -> int:
 def _vowel_gain(text: str) -> tuple:
     """--vowel-gain の `a:i:u:e:o` を5要素 float タプルへ解析する(song2vmd.md 5.2・8.3)。
 
-    各要素は開き量への倍率なので非負の有限値を要求する。撥音「ん」の倍率(1.0固定)は
-    このタプルに含めず、lipsync へ渡す直前に補う(song2vmd.md 8.2)。
+    各要素はプリセットの母音別倍率へ乗算する微調整倍率なので非負の有限値を要求する。
+    撥音「ん」はプリセット値のままで本引数の対象外(song2vmd.md 8.2)。
     """
     parts = text.split(":")
     if len(parts) != 5:
@@ -189,7 +189,8 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
                    help="撥音「ん」に「ん」モーフを使わず無音(閉口)に倒す。--n-morphの対")
     p.add_argument("--vowel-gain", dest="vowel_gain", type=_vowel_gain, default=(1.0, 1.0, 1.0, 1.0, 1.0),
-                   help="母音別(あ/い/う/え/お)の開き量倍率(a:i:u:e:o)")
+                   help="母音別(あ/い/う/え/お)の開き量微調整倍率(a:i:u:e:o)。"
+                        "プリセットの母音別倍率へ要素ごとに乗算する")
     # 既定はプリセット値。未指定センチネル(None)は presets.resolve がプリセットから解決する。
     p.add_argument("--open-max", dest="open_max", type=_unit_float,
                    help="口の開き量の上限(0.0〜1.0。既定: プリセット値)")
@@ -404,7 +405,7 @@ def _report_params(args, openness, style_gen):
         "intensity_curve": args.intensity_curve,
         "silence_threshold_on": args.silence_threshold[0], "silence_threshold_off": args.silence_threshold[1],
         "coarticulation": style_gen.coartic_overlap_max, "anticipation": style_gen.anticipation_frames,
-        "min_hold": style_gen.min_hold_frames, "vowel_gain": args.vowel_gain,
+        "min_hold": style_gen.min_hold_frames, "vowel_scale": style_gen.vowel_scale,
         "max_duration_sec": args.max_duration,
     }
 
@@ -428,7 +429,7 @@ def _run(args, emitter, fail) -> int:
     content_recognizer_model = _resolve_content_recognizer_model(args)
     openness, style_gen = _presets.resolve(
         args.style, open_max=args.open_max, coarticulation=args.coarticulation,
-        anticipation=args.anticipation, min_hold=args.min_hold)
+        anticipation=args.anticipation, min_hold=args.min_hold, vowel_gain=args.vowel_gain)
     progress_reporter = _progress.ProgressReporter(
         machine=emitter is not None, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
     # 中間生成物は出力先の隣に <出力ファイル名>.intermediate/ を作って保存する(song2vmd.md 5.2・5.3)。
@@ -438,7 +439,7 @@ def _run(args, emitter, fail) -> int:
         result = _pipeline.run(
             args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
             content_recognizer_model=content_recognizer_model, max_duration_sec=args.max_duration,
-            use_n_morph=args.n_morph, vowel_gain=args.vowel_gain, intensity_curve=args.intensity_curve,
+            use_n_morph=args.n_morph, intensity_curve=args.intensity_curve,
             silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
             style_name=args.style, model_name=args.model_name,
             keep_intermediate_dir=keep_intermediate_dir, progress=progress_reporter)

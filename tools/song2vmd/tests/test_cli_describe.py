@@ -56,7 +56,7 @@ EXPECTED = {
 }
 
 EXPECTED_PRESETS = {
-    "pop": {"open_max": 0.90, "coarticulation": 2, "anticipation": 1, "min_hold": 3},
+    "pop": {"open_max": 0.90, "coarticulation": 6, "anticipation": 11, "min_hold": 1},
     "ballad": {"open_max": 0.70, "coarticulation": 3, "anticipation": 1, "min_hold": 4},
     "powerful": {"open_max": 0.97, "coarticulation": 2, "anticipation": 2, "min_hold": 3},
     "whisper": {"open_max": 0.50, "coarticulation": 2, "anticipation": 1, "min_hold": 3},

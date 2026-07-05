@@ -72,18 +72,29 @@ def _read_pcm_raw(path):
     return AudioPcm(samples=samples, sample_rate=sample_rate)
 
 
-def _build_generation_params(openness, style_gen, vowel_gain):
+def _build_generation_params(openness, style_gen):
     """presets の OpennessParams/StyleGenParams から lipsync.GenerationParams を組み立てる
-    (song2vmd.md §8.1・§8.2)。撥音「ん」の倍率は 1.0 固定で vowel_gain(5母音)に補う。"""
+    (song2vmd.md §8.1・§8.2)。
+
+    vowel_scale は presets.resolve が --vowel-gain 乗算まで済ませた最終6要素。プリセットが持つ
+    生成パラメータ一式を明示的に渡し、lipsync の生成既定への暗黙依存を残さない(song2vmd.md §8.1)。
+    """
     return GenerationParams(
         open_cap=openness.open_max,
-        vowel_scale=(*vowel_gain, 1.0),
+        vowel_scale=style_gen.vowel_scale,
         attack_frames=style_gen.attack_frames,
         release_frames=style_gen.release_frames,
         min_hold_frames=style_gen.min_hold_frames,
+        triangle_min_frames=style_gen.triangle_min_frames,
         coartic_overlap_max=style_gen.coartic_overlap_max,
         anticipation_frames=style_gen.anticipation_frames,
+        legato_valley_shallow=style_gen.legato_valley_shallow,
+        legato_valley_deep=style_gen.legato_valley_deep,
+        legato_valley_slope=style_gen.legato_valley_slope,
         exaggeration=style_gen.exaggeration,
+        vibrato_threshold=style_gen.vibrato_threshold,
+        vibrato_amp=style_gen.vibrato_amp,
+        vibrato_period=style_gen.vibrato_period,
     )
 
 
@@ -117,7 +128,7 @@ def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
 
 
 def run(input_path, *, separate_vocals, separator_name, content_recognizer_model, max_duration_sec,
-        use_n_morph, vowel_gain, intensity_curve, silence_on, openness, style_gen,
+        use_n_morph, intensity_curve, silence_on, openness, style_gen,
         style_name, model_name, keep_intermediate_dir=None, progress=None):
     """song2vmd の音声→VMDパイプラインを実行する(song2vmd.md 4章・6章)。
 
@@ -147,7 +158,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         use_n_morph=use_n_morph)
 
     _report_stage(progress, "generate")
-    gen_params = _build_generation_params(openness, style_gen, vowel_gain)
+    gen_params = _build_generation_params(openness, style_gen)
     document = morphs.build_vmd_document(mouth_events, gen_params, model_name)
 
     diagnostics = report.build_diagnostics(

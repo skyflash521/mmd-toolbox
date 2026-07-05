@@ -76,7 +76,9 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["separator_name"] == "audio-separator-htdemucs-ft"
     assert kwargs["max_duration_sec"] == 300.0
     assert kwargs["use_n_morph"] is True
-    assert kwargs["vowel_gain"] == (1.0, 1.0, 1.0, 1.0, 1.0)
+    # --vowel-gain の既定 1:1:1:1:1 は presets.resolve での乗算後もプリセット値のまま
+    # (song2vmd.md 8.2)。pipeline.run へは style_gen.vowel_scale として渡る。
+    assert kwargs["style_gen"].vowel_scale == _presets.resolve("pop")[1].vowel_scale
     assert kwargs["intensity_curve"] == 0.6
     assert kwargs["silence_on"] == 0.06
     assert kwargs["model_name"] == ""

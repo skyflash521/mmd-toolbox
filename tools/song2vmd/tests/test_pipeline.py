@@ -47,7 +47,7 @@ def _common_kwargs(**overrides):
     kw = dict(
         separate_vocals="auto", separator_name="audio-separator-htdemucs-ft",
         content_recognizer_model=_TEST_MODEL, max_duration_sec=300.0, use_n_morph=True,
-        vowel_gain=(1.0, 1.0, 1.0, 1.0, 1.0), intensity_curve=0.6, silence_on=0.06,
+        intensity_curve=0.6, silence_on=0.06,
         openness=openness, style_gen=style_gen, style_name="pop", model_name="",
     )
     kw.update(overrides)
@@ -243,20 +243,29 @@ def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monke
 
     monkeypatch.setattr(pipeline.morphs, "build_vmd_document", spy_build_vmd_document)
 
-    openness, style_gen = presets.resolve("powerful")
+    # vowel_gain は presets.resolve がプリセットの母音別倍率へ乗算して style_gen.vowel_scale に
+    # 織り込み済み(song2vmd.md 8.2)。pipeline は style_gen の値をそのまま lipsync へ渡す。
+    openness, style_gen = presets.resolve("powerful", vowel_gain=(1.1, 0.9, 1.0, 1.0, 1.2))
     pipeline.run(input_path, **_common_kwargs(
-        openness=openness, style_gen=style_gen, style_name="powerful",
-        vowel_gain=(1.1, 0.9, 1.0, 1.0, 1.2)))
+        openness=openness, style_gen=style_gen, style_name="powerful"))
 
     params = captured["params"]
     assert params.open_cap == pytest.approx(openness.open_max)
-    assert params.vowel_scale == (1.1, 0.9, 1.0, 1.0, 1.2, 1.0)
+    assert params.vowel_scale == style_gen.vowel_scale
+    assert params.vowel_scale == (1.1, 0.9, 1.0, 1.0, 1.2, 1.0)  # powerfulのプリセット倍率は全て1.0
     assert params.attack_frames == style_gen.attack_frames
     assert params.release_frames == style_gen.release_frames
     assert params.min_hold_frames == style_gen.min_hold_frames
+    assert params.triangle_min_frames == style_gen.triangle_min_frames
     assert params.coartic_overlap_max == style_gen.coartic_overlap_max
     assert params.anticipation_frames == style_gen.anticipation_frames
+    assert params.legato_valley_shallow == pytest.approx(style_gen.legato_valley_shallow)
+    assert params.legato_valley_deep == pytest.approx(style_gen.legato_valley_deep)
+    assert params.legato_valley_slope == pytest.approx(style_gen.legato_valley_slope)
     assert params.exaggeration == pytest.approx(style_gen.exaggeration)
+    assert params.vibrato_threshold == style_gen.vibrato_threshold
+    assert params.vibrato_amp == pytest.approx(style_gen.vibrato_amp)
+    assert params.vibrato_period == style_gen.vibrato_period
 
 
 # --- 長尺分割(--max-duration 超過) ---------------------------------------------
