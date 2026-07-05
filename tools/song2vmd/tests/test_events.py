@@ -332,11 +332,24 @@ def test_adjacent_same_vowel_segments_merge_into_one_event():
         seg("vowel", 0.2, 0.4, phoneme="a", confidence=0.9),
     ]
     rms = flat_rms(0.4, 0.8)
-    mouth_events, _diag = confirm(segments, rms)
+    mouth_events, diag = confirm(segments, rms)
     assert len(mouth_events) == 1
     assert mouth_events[0].shape == MouthShape.A
     assert mouth_events[0].start == pytest.approx(0.0)
     assert mouth_events[0].end == pytest.approx(0.4 * FRAME_RATE)
+    assert diag.merged_morae == 1  # 2区間→1イベントで1回統合(song2vmd.md 6.7)
+
+
+def test_three_adjacent_same_vowel_segments_merge_with_merged_count_two():
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.2, 0.4, phoneme="a", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.6, 0.8)
+    mouth_events, diag = confirm(segments, rms)
+    assert len(mouth_events) == 1
+    assert diag.merged_morae == 2  # 3区間→1イベントで2回統合
 
 
 def test_adjacent_different_vowels_do_not_merge():
@@ -345,8 +358,22 @@ def test_adjacent_different_vowels_do_not_merge():
         seg("vowel", 0.2, 0.4, phoneme="i", confidence=0.9),
     ]
     rms = flat_rms(0.4, 0.8)
-    mouth_events, _diag = confirm(segments, rms)
+    mouth_events, diag = confirm(segments, rms)
     assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.I]
+    assert diag.merged_morae == 0
+
+
+def test_adjacent_silence_segments_merging_does_not_count_as_merged_morae():
+    # 無音(閉口)区間同士の統合はモーラの併合ではないため merged_morae に数えない(song2vmd.md 6.7)。
+    segments = [
+        seg("gap", 0.0, 0.2),
+        seg("gap", 0.2, 0.4),
+    ]
+    rms = flat_rms(0.4, 0.01)
+    mouth_events, diag = confirm(segments, rms)
+    assert len(mouth_events) == 1
+    assert mouth_events[0].shape == MouthShape.SILENCE
+    assert diag.merged_morae == 0
 
 
 # --- RMSオンセット補正 -------------------------------------------------------
@@ -509,8 +536,9 @@ def test_events_are_time_ordered_contiguous_and_cover_full_range():
 
 def test_empty_segment_list_returns_empty_events():
     rms = flat_rms(0.1, 0.5)
-    mouth_events, _diag = confirm([], rms)
+    mouth_events, diag = confirm([], rms)
     assert mouth_events == []
+    assert diag.merged_morae == 0
 
 
 # --- 決定論(同じ入力から同じ出力) --------------------------------------------

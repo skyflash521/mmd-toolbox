@@ -83,10 +83,11 @@ class _Unit:
 
 @dataclass(frozen=True)
 class EventDiagnostics:
-    """口形イベント確定の診断。"""
+    """口形イベント確定の診断(song2vmd.md 6.7)。"""
 
     weak_vowels: int  # 低信頼・無声判定で開き量を弱めたモーラ数
     low_dynamics: bool  # 低ダイナミクス抑制(6.4)が働いたか
+    merged_morae: int  # 段階(3)の同母音連結で統合された(vowel/n)モーラ数
 
 
 def _nearest_index(times, t):
@@ -212,16 +213,25 @@ def _resolve_silence(units, rms, silence_on, low_dynamics):
     return result
 
 
+_MORA_KINDS = frozenset({"vowel", "n"})  # merged_morae(6.7)に数える対象(閉口・無音は含めない)
+
+
 def _merge_adjacent(units):
     """段階(3): 連続する同一口形区間を1つのイベントへまとめる(song2vmd.md 6.3)。
 
     content_start_sec/content_end_sec(代表RMS算出用の区間。6.4)は、先頭ユニットの開始から
     末尾ユニットの終了までへ広げる(同一口形が続く区間はすべて母音的内容とみなす)。
+
+    戻り値は (統合後のユニット列, 統合回数)。統合回数は母音/撥音「ん」区間の統合(6.7の
+    merged_morae)だけを数え、閉口・無音区間の統合は含めない。
     """
     merged = []
+    merged_morae = 0
     for u in units:
         if merged and merged[-1].kind == u.kind and (u.kind != "vowel" or merged[-1].letter == u.letter):
             prev = merged[-1]
+            if u.kind in _MORA_KINDS:
+                merged_morae += 1
             prev_content_start, _ = prev.content_span()
             _, u_content_end = u.content_span()
             merged[-1] = replace(
@@ -230,7 +240,7 @@ def _merge_adjacent(units):
             )
         else:
             merged.append(u)
-    return merged
+    return merged, merged_morae
 
 
 def _smoothed_rms(rms):
@@ -317,14 +327,15 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
     段階(6)の先頭子音種別付与とフレーム変換(30fps)は本関数内で行い、`lipsync` へ渡す最終形を返す。
     """
     if not segments:
-        return [], EventDiagnostics(weak_vowels=0, low_dynamics=False)
+        return [], EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0)
 
     low_dynamics = rms.dynamic_range_db < _LOW_DYNAMICS_THRESHOLD_DB
     units = _classify_phonetic(segments, use_n_morph)
     units = _resolve_silence(units, rms, silence_on, low_dynamics)
-    units = _merge_adjacent(units)
+    units, merged_morae_1 = _merge_adjacent(units)
     units = _refine_onsets(units, rms)
-    units = _merge_adjacent(units)  # オンセット補正で隣接区間が同一境界に揃うケースを再連結する
+    units, merged_morae_2 = _merge_adjacent(units)  # オンセット補正で隣接区間が同一境界に揃うケースを再連結する
+    merged_morae = merged_morae_1 + merged_morae_2
 
     mouth_events = []
     weak_vowels = 0
@@ -354,4 +365,5 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
             open_amount=open_amount, consonant_class=consonant_class,
         ))
 
-    return mouth_events, EventDiagnostics(weak_vowels=weak_vowels, low_dynamics=low_dynamics)
+    return mouth_events, EventDiagnostics(
+        weak_vowels=weak_vowels, low_dynamics=low_dynamics, merged_morae=merged_morae)
