@@ -86,10 +86,13 @@ G2P(pyopenjtalk 系)で音素列へ変換し、CTC 音素モデルのロジッ�
 
 ### 2.2 候補
 
+内容認識には、どのモデルでも共通のかな限定プロンプト(vocal_analysis.md §5.2・§8.3)を渡す(モデルに
+よる分岐は無い)。
+
 | 構成 | 呼び出し | 時刻精度 | 歌唱での成立 | 語彙置換のリスク | ライセンス |
 |---|---|---|---|---|---|
-| **kana-whisper + G2P + CTC強制アライメント(既定)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元(具体的な精度はS-1測定=§9で確認) | 母音を保ったまま局所的に誤ることはあるが、意味の通る別語への丸ごと置換は起きにくい(内容認識に強い言語モデル的補正を持たないため) | 低 | kana-whisper MIT / pyopenjtalk-plus MIT(内包の OpenJTalk 系は修正BSD) |
-| **Whisper(内容)+かな限定プロンプト+ G2P + CTC強制アライメント(選択可能)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元 | かな化に失敗した区間は通常のWhisperと同じ語彙置換のリスクが残る | 中(かな化成功区間は低、失敗区間は通常のWhisper単体と同等) | Whisper モデル Apache-2.0 / pyopenjtalk-plus MIT |
+| **`openai/whisper-medium` + G2P + CTC強制アライメント(既定値)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元 | ○(歌唱データで検証済み) | 中(かな化成功区間は低、失敗区間は通常のWhisper単体と同等) | Whisper モデル Apache-2.0 / pyopenjtalk-plus MIT |
+| **`kana-whisper` + G2P + CTC強制アライメント(候補値)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元(具体的な精度はvocal_analysis.md §9のS-1測定で確認) | 未評価(歌唱データでの学習・評価実績が無い) | 低(意味の通る別語への丸ごと置換は起きにくい) | kana-whisper MIT / pyopenjtalk-plus MIT(内包の OpenJTalk 系は修正BSD) |
 | wav2vec2 自由音素認識(単段。音素/かな出力とも) | transformers(in-process) | CTC近似 | ×(実測で不成立: blank支配でほぼ何も出力しない) | 低(意味補正なし) | transformers=Apache / torch=BSD + 許諾モデル |
 | Julius 音素認識(phone-loop) | C実行ファイル(内部subprocess) | フレーム単位(高) | 未評価(speech-HMM で歌唱は域外の懸念。phone-loop の構成も必要) | 未評価 | エンジン=修正BSD(音響モデルは個別確認) |
 | ~~Allosaurus~~ | Python API | 近似 | 未評価 | 未評価 | **GPL-3.0 → MIT本体と非互換で不可** |
@@ -100,26 +103,27 @@ G2P(pyopenjtalk 系)で音素列へ変換し、CTC 音素モデルのロジッ�
 > 確定は利用先がRMS併用で行い、両唇閉鎖は音素から判定)、語彙認識より要件は緩い。
 
 **採用: 内容認識+G2P+CTC強制アライメントの複合構成(id・モデル・revision の固定は
-vocal_analysis.md §5.2・§8.3 が正本)。内容認識は既定 `kana-whisper`、選択可能な代替
-`openai/whisper-medium`+かな限定プロンプト**。決め手:
+vocal_analysis.md §5.2・§8.3 が正本)。内容認識は既定値 `openai/whisper-medium`、候補値
+`kana-whisper`(いずれもかな限定プロンプトを渡す)**。決め手:
 
-1. **口パク生成系が必要とするのは母音の種類(母音正解率)であり、意味の通る文か否かではない**。内容認識に
+1. **既定値は歌唱データで検証済み・高速**。`openai/whisper-medium`+かな限定プロンプトは既存のS-1
+   測定で歌唱データにおける成立が確認済みで、`kana-whisper` より大幅に高速(具体的な倍率は実行環境に
+   依存するため恒久値として固定しない)。かな限定プロンプトの効果が及ばず漢字混じりの書き起こしに
+   留まった区間は、`pyopenjtalk-plus` の辞書・形態素解析が読みを決めるため同字異音の読み違いが
+   残りうる(vocal_analysis.md §5.2)。
+2. **口パク生成系が必要とするのは母音の種類(母音正解率)であり、意味の通る文か否かではない**。内容認識に
    強い言語モデル的補正を持つ構成(通常のWhisper書き起こし)は、聞き取りに自信が持てない区間で実際の
    発声と無関係な別の語へ丸ごと置き換えることがあり、この場合は母音自体が変わり口形が破綻する
    (参照ラベル付き歌唱データとの実測比較で確認済み)。かなを直接出力し言語モデル的補正を持たない
-   `kana-whisper` はこの種の語彙置換を起こしにくく、既定に選ぶ。
-2. **単段の自由CTC認識(音素/かな出力を問わず)は歌唱で不成立**。blank(未割当)が支配的になりほぼ
+   `kana-whisper` はこの種の語彙置換を起こしにくく、候補値として提供する。ただし歌唱データでの
+   学習・評価実績が無い。
+3. **単段の自由CTC認識(音素/かな出力を問わず)は歌唱で不成立**。blank(未割当)が支配的になりほぼ
    何も出力しない(参照ラベル付き歌唱データでの実測。wav2vec2ベースの複数の出力語彙で確認済み)。
    `kana-whisper` は自由CTCではなく Whisper と同じ系列変換(自己回帰デコーダ)であるため、この不成立を
    回避できる。
-3. **G2P(`pyopenjtalk-plus`)はどちらの内容認識モデルの出力に対しても同一の呼び出しで足りる**。入力が
+4. **G2P(`pyopenjtalk-plus`)はどちらの内容認識モデルの出力に対しても同一の呼び出しで足りる**。入力が
    かなであれば辞書引きに起因する読みの曖昧性(同字異音の読み違い)が構造的に生じない
    (vocal_analysis.md §5.2)。
-4. `kana-whisper` は歌唱データでの学習・評価実績が無く、また処理時間が選択可能な代替
-   (`openai/whisper-medium`+かな限定プロンプト)構成より大幅にかかる(具体的な倍率は実行環境に
-   依存するため恒久値として固定しない)。この代償を許容しない場合の選択可能な代替として、歌唱で
-   検証済みかつ高速な `openai/whisper-medium`+かな限定プロンプトを残す(かな化に失敗した区間は
-   この代替構成でプロンプトを渡さない場合と同じ読み違いリスクが残るが、それより悪化はしない)。
 5. **すべて純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に合う。
    torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる。
 6. ライセンスが清浄。kana-whisper = MIT、Whisper モデル(Hugging Face 配布)= Apache-2.0、
@@ -164,15 +168,16 @@ ffmpeg 自体が不要なことも多い。
 
 ## 4. 採用ツールと選定理由
 
-各ステージの既定アダプタは1つ(採用ツールの正本は [vocal_analysis.md](vocal_analysis.md) §8.3)。
-S2 のみ、既定に加えて選択可能な代替アダプタを持つ。複数アダプタの登録と選択の扱いは
-[vocal_analysis.md](vocal_analysis.md) §8.2 に従う。
+各ステージのアダプタは1つ(採用ツールの正本は [vocal_analysis.md](vocal_analysis.md) §8.3)。
+S2 のみ、内容認識モデルを `content_recognizer_model` 引数(既定値・候補値・任意指定。
+vocal_analysis.md §5.2)で
+選べる。アダプタの登録と選択の扱いは [vocal_analysis.md](vocal_analysis.md) §8.2 に従う。
 
 | ステージ | 採用ツール | 呼び出し方 | 選定理由 | 代替候補 |
 |---|---|---|---|---|
 | S0 入力読み込み | **soundfile 優先(mp3も可)+ 自動検出ffmpegにフォールバック**(リポジトリに同梱しない) | 内部ライブラリ/サブプロセス | soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等の同梱配布は不採用) |
 | S1 ボーカル抽出 | **Demucs v4 htdemucs_ft**(audio-separator 経由・`shifts=0`) | `audio_separator.separator.Separator`(in-process) | 高品質・MIT・ライブラリ呼び出し可・GPU不要でも動作。生 `demucs.api` は `torchaudio<2.2` 固定で新しい Python 向けビルドが無く不採用 | audio-separator の他モデル(Roformer系等。ライセンス個別確認要) / Spleeter / 分離なし |
-| S2 音素・母音認識 | **複合構成(内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用**。既定は `kana-whisper`、選択可能な代替は `openai/whisper-medium`+かな限定プロンプト(単段の自由CTC認識は歌唱で不成立と実測済み。§2。id・モデル・revision の固定は vocal_analysis.md §5.2・§8.3 が正本) | transformers + pyopenjtalk-plus(in-process) | 既定は語彙置換による母音破綻が最も起きにくい構成。代替は歌唱で検証済み・高速。いずれもin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素・母音認識 | **複合構成(内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用**。内容認識は既定値 `openai/whisper-medium`、候補値 `kana-whisper`(いずれもかな限定プロンプトを渡す。単段の自由CTC認識は歌唱で不成立と実測済み。§2。id・モデル・revision の固定は vocal_analysis.md §5.2・§8.3 が正本) | transformers + pyopenjtalk-plus(in-process) | 既定値は歌唱で検証済み・高速。候補値は語彙置換による母音破綻が起きにくい。いずれもin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
 
 S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterface(Separator / Recognizer)を満たせば
 差し替え可能。S0 は固定の内部処理。外部ツールは `vocal_analysis` が内部で呼び、依存は `vocal_analysis` 側に
@@ -188,7 +193,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 |---|---|---|
 | ffmpeg(自動検出) | 復号したWAV | 復号PCM(チャンネル/サンプルレート保持)のパス。レベル正規化は S0 が施す([vocal_analysis.md](vocal_analysis.md) §3) |
 | audio-separator(`Separator.separate`) | API が返す出力ファイルパス(Demucs v4 htdemucs_ft の分離stem) | ボーカルWAVのパス(APIの戻り値を使い、命名を推測しない) |
-| 複合構成(内容認識 + G2P + CTC強制アライメント。既定=kana-whisper・代替=whisper-medium+かなプロンプト) | 内容認識: テキスト(既定はかな、代替はかな化されない場合あり) / G2P: 音素列 / アライメント: 音素ごとの開始位置(CTCスパイク) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル+任意の信頼度)。テキストと音素列はアダプタ内部にとどめ、共有出力に含めない。母音の終端(閉じ側)はスパイク位置からの近似で、確定は利用先(S3のRMS併用) |
+| 複合構成(内容認識 + G2P + CTC強制アライメント。既定値=whisper-medium・候補値=kana-whisper) | 内容認識: テキスト(既定値はかな化されない場合あり、候補値は常にかな) / G2P: 音素列 / アライメント: 音素ごとの開始位置(CTCスパイク) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル+任意の信頼度)。テキストと音素列はアダプタ内部にとどめ、共有出力に含めない。母音の終端(閉じ側)はスパイク位置からの近似で、確定は利用先(S3のRMS併用) |
 | wav2vec2 phoneme(単段自由認識) | フレームごとのCTC音素列(IPA) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル(IPA)+任意の信頼度。IPA→5母音写像は vocal_analysis が提供(RMS不要)、gap の無音/継続判定・無音/閉口の確定は利用先がS3のRMS併用で行い、両唇閉鎖判定は音素から利用先が行う) |
 | Julius 音素認識 | アライメント(開始/終了フレーム・音素) | 全時間軸被覆のセグメント列 |
 

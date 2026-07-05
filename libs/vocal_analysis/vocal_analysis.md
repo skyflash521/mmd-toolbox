@@ -140,7 +140,8 @@
   寄せる)は利用先が行う(S3のRMSを使う)。`vocal_analysis` はトークン境界を一次情報として渡す。
 - 認識は外部ライブラリで内部実行し(必要時のみサブプロセス)、Recognizer 抽象の背後で差し替え可能とする
   (8章)。日本語の歌での母音認識品質が本方式の品質を直接左右するため、採用は S-1 認識測定(9章)で
-  確定する。公開関数は `recognize(vocal_wav_path: Path) -> list[Segment]`(`vocal_analysis.recognizer`)。
+  確定する。公開関数は `recognize(vocal_wav_path: Path, content_recognizer_model: ContentRecognizerModel = ...) -> list[Segment]`
+  (`vocal_analysis.recognizer`。`content_recognizer_model`は5.2・8.3)。
   ライブラリ未導入時、またはモデル取得に失敗した場合は `RecognitionError` で失敗する(8.3章)。
 
 ### 5.1 母音/子音の判定基準とフレーム時間(アダプタ共通。RMS不要)
@@ -185,27 +186,23 @@ blank)に対応する。フレームを**母音/子音**へ分類する基準を
 内容認識由来の文字列から G2P で得て既知にすることで、強制アライメントは blank 支配の影響を
 受けずに音素の**位置**(開始時刻)を正確に出せる。
 
-**内容認識モデルの選択(既定/選択可能な代替)**: 内容認識(手順3)は2種のモデルを切り替えられる。
+**内容認識モデルの指定(既定値・候補値・任意指定)**: 内容認識(手順3)に使うモデルは
+`ContentRecognizerModel`(`model_id`・`model_revision`の組。8.3)で指定する。`recognize()`は
+`content_recognizer_model`引数(既定値は下記「既定値」)を受け取り、内容認識には常に同じ手順
+(パイプライン読み込み→かな限定プロンプト(8.3)でprompt_ids取得→貪欲デコード)を適用する。モデルに
+よる分岐は持たない(かな限定プロンプトは既定値・候補値のいずれに渡しても害がないことを確認済み)。
 
-- **既定: `kana-whisper`**(`sbintuitions/kana-whisper`。8.3)。音声からかな(カタカナ)を直接出力し、
-  漢字を一切経由しない。後段のG2P(手順4)は入力が既にかなであるため辞書引きによる読みの決定を
-  行わず、かな→音素の決定論的な変換として働く(かなは発音を一意に決めるため、読みの曖昧性が
-  構造的に生じない)。既定に選ぶ理由: 口パク生成系が必要とするのは母音の種類(7章の5母音写像)であり、
-  母音を保ったまま誤る失敗(子音違い等)は語彙的に無関係な語へ丸ごと置き換わる失敗より口形への実害が
-  小さい。一方、内容認識に強い言語モデル的補正を持つ構成(下記の代替)は、聞き取りに自信が持てない
-  区間で実際の発声と無関係な別の語へ丸ごと置き換えることがあり(意味は通るが実際の音と異なる)、
-  この場合は母音自体が変わり口形が破綻する。`kana-whisper` はこの種の語彙置換を行わない代わりに、
-  反復語(「ダンスダンスダンス」等)を短い区間で正しく繰り返せず崩れることがある(既知の弱点。
-  9章のS-1測定で構成間の相対比較に用いる)。**歌唱データでの学習・評価実績はなく**(学習は自然発話
-  コーパスCSJ、評価は朗読音声JSUTによる)、話し言葉の書き起こしを日本語で行う既存のWhisper系より
-  推論が大幅に遅い(具体的な倍率は実行環境に依存するため恒久値として固定しない)。
-- **選択可能な代替: `whisper-ctc-forcedalign`**(8.3)。既存のWhisper(`openai/whisper-medium`)による
-  内容認識に、かな限定を促す固定プロンプト(8.3)を渡して実行する。歌唱データで既に検証済み
-  (9章)で速度も`kana-whisper`よりはるかに速いが、プロンプトの効果は区間ごとに不安定であり、
-  出力が通常の書き起こし(漢字混じり)に留まることがある。その場合、後段のG2Pはこれまで通り
-  `pyopenjtalk-plus` の辞書・形態素解析で読みを決定するため、手順4記載の同字異音の読み違いが残りうる
-  (この構成はプロンプトを渡さない場合と比べて悪化しない。プロンプトが効いた区間だけ読みの曖昧性が
-  減る)。
+- **既定値**: `openai/whisper-medium`(revisionは8.3に固定)。かな化される場合とされない場合が
+  ある(手順4の既知の限界)。
+- **候補値**: `kana-whisper`(`sbintuitions/kana-whisper`。revisionは8.3に固定)。常にかなを返す
+  (手順4の既知の限界を持たない)。
+- **任意指定**: `ContentRecognizerModel(model_id=..., model_revision=...)` で既定値・候補値以外の
+  モデルも指定できる。`model_revision` を省略した場合は最新リビジョンを使う(8.3)。既定値・候補値は
+  いずれも実測・検証済みの組み合わせとして `model_revision` を固定しており、この省略時最新化の
+  対象ではない。
+
+候補値の選定理由・トレードオフは [external-tools.md](external-tools.md) §2 を正とする(重複記載
+しない)。
 
 ボーカルWAV全体を単一の Whisper 呼び出し・単一の強制アライメントで処理すると、次の2つの実測済みの
 不具合が生じる。**(a) 長尺入力での書き起こし破綻**: Whisper は数分規模の入力で反復幻覚(同一文の
@@ -234,23 +231,22 @@ blank)に対応する。フレームを**母音/子音**へ分類する基準を
    扱い、Whisper呼び出し・G2P・強制アライメントを行わず `type="gap"`・`phoneme=None` のSegmentを
    区間全体に対して直接確定する(不要な認識呼び出しを避け、無音入力に対するWhisperの定型句幻覚を
    構造的に防ぐ)。
-3. **内容認識**: 無音でない各区間の音声を、選択した内容認識モデル(前掲「内容認識モデルの選択」。
-   モデル固定は8.3)へ個別に入力し、テキストを得る(区間ごとに独立呼び出しとし、他区間の文脈を
-   引き継がない。これにより長尺入力特有の反復幻覚を避ける)。既定の `kana-whisper` はかなを直接
-   返す。代替の `whisper-ctc-forcedalign` は、かな限定を促す固定プロンプト(8.3)を渡した
-   `openai/whisper-medium` の書き起こしを返す(かな化される場合とされない場合がある)。得られた
-   テキストは強制アライメントの入力にのみ使い、共有出力(2章)には含めない(5章)。
+3. **内容認識**: 無音でない各区間の音声を、指定された `content_recognizer_model`(前掲「内容認識
+   モデルの指定」。モデル固定は8.3)へ個別に入力し、テキストを得る(区間ごとに独立呼び出しとし、
+   他区間の文脈を引き継がない。これにより長尺入力特有の反復幻覚を避ける)。かな限定プロンプト
+   (8.3)を渡した書き起こしを返す(候補値`kana-whisper`は常にかなを返す。既定値
+   `openai/whisper-medium`はかな化される場合とされない場合がある)。得られたテキストは強制
+   アライメントの入力にのみ使い、共有出力(2章)には含めない(5章)。
 4. **G2P**: 区間のテキストを `pyopenjtalk-plus`(8.3)で音素記号列(下記の記号集合)へ変換する。
-   文中の句読点は `pau`(無音)記号として現れる。この変換はどちらの内容認識モデルの出力に対しても
-   同一の呼び出しであり、テキストがかな(既定の`kana-whisper`は常にかな、代替の
-   `whisper-ctc-forcedalign`はかな化された区間)であれば辞書引きを要さない決定論的な変換になる
-   (かなは発音を一意に決めるため)。**既知の限界(代替構成でテキストが漢字を含む場合のみ)**:
-   `whisper-ctc-forcedalign` でかな化されず漢字を含む書き起こしになった区間は、漢字の読みを
-   `pyopenjtalk-plus` 自身の辞書・形態素解析が決定するため、歌詞特有の当て字・非標準的な読み
-   (歌唱でのみ使われる読み方)を誤ることがある(同字異音の読み違い)。この場合、その語の音素列
-   自体が実際の発声と異なり、強制アライメントにもその誤りが伝播する。既定の `kana-whisper` はこの
-   限界を持たない(入力に漢字が現れないため)。書き起こしテキストから読みを再現する以上の対策(歌詞テキストの
-   直接指定等)は現状持たない。
+   文中の句読点は `pau`(無音)記号として現れる。この変換はどの内容認識モデルの出力に対しても
+   同一の呼び出しであり、テキストがかな(候補値`kana-whisper`は常にかな、既定値はかな化された
+   区間)であれば辞書引きを要さない決定論的な変換になる(かなは発音を一意に決めるため)。
+   **既知の限界(テキストが漢字を含む場合のみ)**: かな化されず漢字を含む書き起こしになった区間は、
+   漢字の読みを `pyopenjtalk-plus` 自身の辞書・形態素解析が決定するため、歌詞特有の当て字・
+   非標準的な読み(歌唱でのみ使われる読み方)を誤ることがある(同字異音の読み違い)。この場合、
+   その語の音素列自体が実際の発声と異なり、強制アライメントにもその誤りが伝播する。候補値
+   `kana-whisper` はこの限界を持たない(入力に漢字が現れないため)。書き起こしテキストから
+   読みを再現する以上の対策(歌詞テキストの直接指定等)は現状持たない。
 5. **音素列の組み立て**: 区間の音素記号列の先頭と末尾に `pau` を1つずつ補う(区間境界の無音・息継ぎを
    吸収できるようにする)。
 6. **記号→アライメント用トークンへの変換**: 組み立てた記号列の各要素を、`pau`・`cl`(促音の閉鎖。無音と
@@ -390,8 +386,9 @@ blank)に対応する。フレームを**母音/子音**へ分類する基準を
 - **Separator**: `separate(vocal_source, mode) -> vocal_wav_path`(内部でライブラリ/サブプロセスを呼ぶ)。
   出力は「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・分離トラック構成・一時ファイルは各実装に
   閉じる。`mode`(`auto`/`always`/`never`)もこの抽象が解釈する。
-- **Recognizer**: `recognize(vocal_wav_path) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
-  (文字列なしの音素認識)。`type` は **母音/子音/gap** の3種で、出力は全時間軸を重複・欠落なく被覆する。
+- **Recognizer**: `recognize(vocal_wav_path, content_recognizer_model) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
+  (文字列なしの音素認識)。`content_recognizer_model`(`ContentRecognizerModel`。5.2・8.3)は既定値を
+  持つ省略可能引数。`type` は **母音/子音/gap** の3種で、出力は全時間軸を重複・欠落なく被覆する。
   アダプタは言語非依存の音素分割(母音/子音/gap)までに責務を限定し、RMS を必要としない(IPA→母音写像の
   適用・無音/閉口確定は利用先)。
 
@@ -403,7 +400,8 @@ blank)に対応する。フレームを**母音/子音**へ分類する基準を
   差し替えはアダプタの実装追加だけで行える構造とする。
 - 各アダプタは、利用先 CLI がバックエンド選択引数の値・既定値・選択肢(自己記述)に使う**安定 id**
   (小文字・ハイフン区切り)を持つ。現行の id は 8.3 の表のとおり(S1 `audio-separator-htdemucs-ft`・
-  S2 既定 `kana-whisper-ctc-forcedalign`・S2 選択可能 `whisper-ctc-forcedalign`)。
+  S2 `whisper-ctc-forcedalign`)。S2 の内容認識モデルは id ではなく `content_recognizer_model`
+  引数(`ContentRecognizerModel`。5.2)で選ぶ。
 - 同一ステージに複数のアダプタがあるときは、引数で適用ツールを選択可能にする(選択肢の公開は利用先
   CLIが行う)。アダプタと id の追加・変更は本書(8.3)を先に更新する。
 
@@ -413,7 +411,7 @@ blank)に対応する。フレームを**母音/子音**へ分類する基準を
 |---|---|---|---|
 | S0 入力読み込み | soundfile(現行 libsndfile は mp3 も可)優先 + 自動検出ffmpegへフォールバック(リポジトリに同梱しない) | 標準入出力を内部処理。soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等は不採用) |
 | S1 ボーカル抽出 | Demucs v4 htdemucs_ft を audio-separator 経由で実行(アダプタ id: `audio-separator-htdemucs-ft`。`audio_separator.separator.Separator`。`demucs_params.shifts=0`) | 高品質・MIT・ライブラリでin-process呼び出し可・GPU不要でも動作。生 `demucs.api`(adefossez fork)は `torchaudio<2.2` 固定で新しい Python(3.13等)向けビルドが無く採用しない(§8.3後注) | audio-separator の他モデル(MDXC系Roformer等。ライセンス個別確認要) / Spleeter / 分離なし(`never`) |
-| S2 音素/母音認識 | 複合構成(内容認識 + `pyopenjtalk-plus` G2P + 音素モデルの CTC 強制アライメント。5.2)。既定アダプタ id: `kana-whisper-ctc-forcedalign`(内容認識に `kana-whisper`。かな直接出力でG2Pの読み曖昧性が生じない)。選択可能なアダプタ id: `whisper-ctc-forcedalign`(内容認識に `openai/whisper-medium`+かな限定プロンプト。歌唱で検証済み・高速だがかな化は不安定)。**単段の自由音素認識(旧アダプタ id `wav2vec2-espeak`)は歌唱で母音をほぼ出力しないことが S-1 測定で確認済みのため不採用**([external-tools.md](external-tools.md) §2) | 既定は口パク生成系が必要とする母音の種類(7章)への実害(語彙置換による母音破綻)が最も小さい構成(5.2)。選択可能な代替は歌唱での実測済み・高速という利点を持つ。精度の具体的な数値評価は9章のS-1測定に委ねる。すべて純Pythonでin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要・高精度時刻)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素/母音認識 | 複合構成(内容認識 + `pyopenjtalk-plus` G2P + 音素モデルの CTC 強制アライメント。5.2。アダプタ id: `whisper-ctc-forcedalign`)。内容認識モデルは `content_recognizer_model` 引数で指定する(既定値 `openai/whisper-medium`・候補値 `kana-whisper`。5.2)。**単段の自由音素認識(`wav2vec2-espeak`)は歌唱で母音をほぼ出力しないことが S-1 測定で確認済みのため不採用**([external-tools.md](external-tools.md) §2) | すべて純Pythonでin-process・torch/transformersは既存と共有・ライセンス清浄。内容認識モデルの選定理由は [external-tools.md](external-tools.md) §2 を正とする | Julius 音素認識(phone-loop構成が必要・高精度時刻)。Allosaurusは GPL-3.0 で不可 |
 
 採用ツールは品質・導入性の評価で見直しうる(候補比較は [external-tools.md](external-tools.md)。見直す場合は
 本書を先に更新する)。重い依存(`torch`・`transformers`・`pyopenjtalk-plus`・モデル取得)は `vocal_analysis`
@@ -422,12 +420,12 @@ blank)に対応する。フレームを**母音/子音**へ分類する基準を
 取得できない場合は、モデル取得が必要と分かるエラーで失敗する(黙って劣化させない)。
 
 S2 の音素モデル(強制アライメント用。5.2)は `facebook/wav2vec2-lv-60-espeak-cv-ft`
-(revision `ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4`)に固定する。S2 の内容認識モデルは、既定
-(`kana-whisper-ctc-forcedalign`)が `sbintuitions/kana-whisper`(revision
-`88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82`)、選択可能な代替(`whisper-ctc-forcedalign`)が
-`openai/whisper-medium`(revision `abdf7c39ab9d0397620ccaea8974cc764cd0953e`)に固定する(その他の
-推論条件の固定は 5.1・5.2)。`whisper-ctc-forcedalign` が渡すかな限定プロンプト(5.2)の文字列は、
-このidが常に同じ構成(モデル・プロンプト)を指すように(§8.2の安定id)、「すべて ひらがなだけで こたえてください。かんじは つかわないでください。」で固定する。
+(revision `ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4`)に固定する(その他の推論条件の固定は
+5.1・5.2)。S2 の内容認識モデル(`ContentRecognizerModel`。5.2)は、既定値が `openai/whisper-medium`
+(revision `abdf7c39ab9d0397620ccaea8974cc764cd0953e`)、候補値が `sbintuitions/kana-whisper`
+(revision `88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82`)に固定する。既定値・候補値以外を指定する
+場合、`model_revision` を省略すると最新リビジョンを使う(5.2)。かな限定プロンプト(5.2)の文字列は
+「すべて ひらがなだけで こたえてください。かんじは つかわないでください。」に固定する。
 
 **S1 実行ライブラリの補足**: 生 `demucs.api`(adefossez fork)は依存 `torchaudio` を `<2.2` に固定しており、
 この上限を満たす `torchaudio` のビルドが無い新しい Python(3.13等)では導入できないため採用しない。
@@ -440,12 +438,11 @@ S2 の音素モデル(強制アライメント用。5.2)は `facebook/wav2vec2-l
 `shifts=0`と同じ意図)。
 
 **S2 複合構成の補足**: 無音検出による区間分割・内容認識・G2P(`pyopenjtalk-plus`)・強制アライメント
-(5.2)の各段は、内容認識モデルの選択(既定 `kana-whisper-ctc-forcedalign`・選択可能
-`whisper-ctc-forcedalign`)だけが異なる2つの Recognizer アダプタとしてまとめて実装し、外部から見た
-契約はどちらも他の Recognizer 実装と同じ `recognize(vocal_wav_path) -> list[Segment]`(8.1)のみと
-する(内部の中間結果(書き起こしテキスト・音素記号列・区間境界)はアダプタ内部にとどめ、外部へ公開
-しない。5章)。追加依存(`transformers` のWhisper系実行・`pyopenjtalk-plus`)は `vocal_analysis` の
-optional dependency に加える。
+(5.2)の各段は1つの Recognizer アダプタ(id `whisper-ctc-forcedalign`)としてまとめて実装し、
+外部から見た契約は他の Recognizer 実装と同じ `recognize(vocal_wav_path, content_recognizer_model) ->
+list[Segment]`(8.1)のみとする(内部の中間結果(書き起こしテキスト・音素記号列・区間境界)は
+アダプタ内部にとどめ、外部へ公開しない。5章)。追加依存(`transformers` のWhisper系実行・
+`pyopenjtalk-plus`)は `vocal_analysis` の optional dependency に加える。
 
 ---
 
