@@ -111,6 +111,30 @@ def test_separate_uses_pinned_separator_config(monkeypatch):
     assert calls["model_filename"] == SEPARATOR_CONFIG.model_filename
 
 
+def test_separate_registers_work_dir_cleanup_that_removes_it(monkeypatch):
+    import shutil
+
+    from vocal_analysis import separator as separator_module
+
+    registered = []
+    monkeypatch.setattr(
+        separator_module.atexit, "register",
+        lambda fn, *args, **kwargs: registered.append((fn, args, kwargs)))
+
+    result = separator_module.separate(_make_pcm(), mode="never")
+    work_dir = result.parent
+    assert work_dir.exists()
+
+    assert len(registered) == 1
+    fn, args, kwargs = registered[0]
+    assert fn is shutil.rmtree
+    assert args == (work_dir,)
+    assert kwargs == {"ignore_errors": True}
+    fn(*args, **kwargs)
+
+    assert not work_dir.exists()
+
+
 def test_separate_missing_library_raises_clear_error(monkeypatch):
     from vocal_analysis import separator as separator_module
 

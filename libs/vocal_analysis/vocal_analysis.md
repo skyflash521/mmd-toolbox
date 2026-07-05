@@ -120,6 +120,10 @@
 - 分離は外部ライブラリで内部実行し(必要時のみサブプロセス)、Separator 抽象の背後で差し替え可能とする(8章)。
   公開関数は `separate(pcm: AudioPcm, mode: Literal["auto","always","never"]) -> Path`
   (`vocal_analysis.separator`)。ライブラリ未導入時は `SeparationError` で失敗する。
+- `separate()` は分離前後の一時WAVを格納する作業ディレクトリをOSの一時領域に作る。このディレクトリは
+  呼び出し元に公開せず、プロセスの正常終了時に削除を試みる(強制終了時や削除失敗時は残置を許容する)。
+  呼び出し元は戻り値の `Path` を読み終えたタイミングを`vocal_analysis`側へ伝える手段を持たず、
+  削除タイミングを制御できない。
 
 ---
 
