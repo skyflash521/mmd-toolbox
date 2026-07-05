@@ -168,6 +168,48 @@ def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkey
     assert segments[-1].end_sec == pytest.approx(5.0)  # 音声全体の終端まで被覆する
 
 
+def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 先頭1.5秒は完全な無音(RMS=0)、続く2.0秒は大音量。先頭の無音区間[0,1.5)は分割点(中点0.75秒)を
+    # 立てるが、区間[0,0.75)は最小長1.5秒未満のため次と結合され、全体が1つの非無音区間[0,3.5)になる。
+    # §5.2手順2のトリムにより、有声スパン(1.5秒から。100msフレーム単位)の外側余白100msを残した
+    # 1.4秒より前は gap として直接確定され、アライメント結果のセグメントは絶対時刻1.4秒起点で
+    # オフセットされるべきである(先頭無音上にトークンを置かない)。
+    silence = np.zeros((24000, 1), dtype=np.float32)
+    loud = _loud_samples(32000)
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.concatenate([silence, loud], axis=0), 16000)
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    segments = recognizer_module.recognize(wav_path)
+
+    # トリムgap[0,1.4) とローカル先頭pau由来gap[1.4,1.44) は結合されて1本の先頭gapになる。
+    assert len(segments) == 3
+    assert segments[0].type == "gap"
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(1.44)
+    assert segments[1].type == "vowel"
+    assert segments[1].phoneme == "a"
+    assert segments[1].start_sec == pytest.approx(1.44)
+    assert segments[1].end_sec == pytest.approx(1.48)
+    assert segments[2].type == "gap"
+    assert segments[2].start_sec == pytest.approx(1.48)
+    assert segments[2].end_sec == pytest.approx(3.5)  # 末尾トリム無し: 区間終端まで被覆
+
+
 def test_recognize_fully_silent_input_never_loads_phoneme_model(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 

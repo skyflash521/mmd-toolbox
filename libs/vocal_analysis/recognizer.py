@@ -49,6 +49,7 @@ _SILENCE_THRESHOLD_DB_BELOW_PEAK = 30.0  # §5.2手順1: ピーク(95パーセ�
 _SILENCE_MIN_RUN_SEC = 0.6  # §5.2手順1: 分割点とみなす無音区間の最小長
 _SEGMENT_MIN_SEC = 1.5  # §5.2手順1: 区間の最小長(未満は次の分割点まで結合)
 _SEGMENT_MAX_SEC = 25.0  # §5.2手順1: 区間の最大長(超過は均等分割)
+_TRIM_MARGIN_SEC = 0.1  # §5.2手順2: 有声スパンの外側に残す余白(しきい値未満の子音の助走を切らない)
 
 
 def _frame_rms(mono: np.ndarray, sample_rate: int, frame_sec: float) -> np.ndarray:
@@ -133,6 +134,25 @@ def _is_segment_silent(segment_samples: np.ndarray, threshold: float) -> bool:
         return True
     rms = float(np.sqrt(np.mean(np.square(segment_samples.astype(np.float64)))))
     return rms <= threshold
+
+
+def _voiced_trim_bounds(segment_samples: np.ndarray, sample_rate: int, threshold: float) -> tuple[int, int]:
+    """無音でない区間の有声スパン+余白のサンプル範囲を返す(§5.2手順2のトリム)。
+
+    しきい値を上回る最初のフレームの開始から最後のフレームの終了までを有声スパンとし、
+    その外側へ余白(_TRIM_MARGIN_SEC)を加えて区間内へクランプする。有声フレームが1つも
+    無い場合(区間全体RMSはしきい値超だがフレーム単位では全て以下、の端ケース)は
+    トリムせず区間全体を返す。
+    """
+    frame_rms = _frame_rms(segment_samples, sample_rate, _SILENCE_FRAME_SEC)
+    voiced = np.nonzero(frame_rms > threshold)[0]
+    if voiced.size == 0:
+        return 0, len(segment_samples)
+    frame_len = max(1, round(_SILENCE_FRAME_SEC * sample_rate))
+    margin = round(_TRIM_MARGIN_SEC * sample_rate)
+    lo = max(0, int(voiced[0]) * frame_len - margin)
+    hi = min(len(segment_samples), (int(voiced[-1]) + 1) * frame_len + margin)
+    return lo, hi
 
 
 def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
@@ -350,6 +370,19 @@ def recognize(
             )
             continue
 
+        # §5.2手順2: 有声スパンへトリムしてから内容認識・アライメントへ渡す。区間の境界は無音区間の
+        # 中点のため端に長い無音を含みうる。トリムで除いた先頭・末尾はgapとして直接確定する。
+        # トリムが無い側の境界は丸め誤差を持ち込まないよう区間自身の境界秒をそのまま使う。
+        trim_lo, trim_hi = _voiced_trim_bounds(chunk_samples, RECOGNIZER_CONFIG.sample_rate, threshold)
+        trimmed_tail = trim_hi < len(chunk_samples)
+        trim_lo_sec = start_sec + trim_lo / RECOGNIZER_CONFIG.sample_rate if trim_lo > 0 else start_sec
+        trim_hi_sec = start_sec + trim_hi / RECOGNIZER_CONFIG.sample_rate if trimmed_tail else end_sec
+        if trim_lo > 0:
+            all_segments.append(
+                Segment(type="gap", start_sec=start_sec, end_sec=trim_lo_sec, phoneme=None, confidence=None)
+            )
+        chunk_samples = chunk_samples[trim_lo:trim_hi]
+
         try:
             text = _transcribe_segment(chunk_samples, content_recognizer_model)
         except ImportError as e:
@@ -393,23 +426,27 @@ def recognize(
         path = _forced_align(log_probs, token_ids)
         local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
         # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
-        # 使わず、区間自身の真の終端(end_sec - start_sec)へ強制的に揃える(フレーム数計算の
-        # 丸め等で区間境界とわずかにずれ、隣接区間との欠落・重複を生むことを防ぐ)。
+        # 使わず、トリム後区間の真の終端(trim_hi_sec - trim_lo_sec)へ強制的に揃える(フレーム数
+        # 計算の丸め等で区間境界とわずかにずれ、隣接区間との欠落・重複を生むことを防ぐ)。
         if local_segments:
             last = local_segments[-1]
             local_segments[-1] = Segment(
-                type=last.type, start_sec=last.start_sec, end_sec=end_sec - start_sec,
+                type=last.type, start_sec=last.start_sec, end_sec=trim_hi_sec - trim_lo_sec,
                 phoneme=last.phoneme, confidence=None,
             )
         for seg in local_segments:
             all_segments.append(
                 Segment(
                     type=seg.type,
-                    start_sec=seg.start_sec + start_sec,
-                    end_sec=seg.end_sec + start_sec,
+                    start_sec=seg.start_sec + trim_lo_sec,
+                    end_sec=seg.end_sec + trim_lo_sec,
                     phoneme=seg.phoneme,
                     confidence=None,
                 )
+            )
+        if trimmed_tail:
+            all_segments.append(
+                Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
             )
 
     return _merge_adjacent_segments(all_segments)

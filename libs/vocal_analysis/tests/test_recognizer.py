@@ -211,6 +211,48 @@ def test_is_segment_silent_empty_segment_is_silent():
     assert _is_segment_silent(np.array([], dtype=np.float32), threshold=0.01) is True
 
 
+def test_voiced_trim_bounds_trims_leading_and_trailing_silence_with_margin():
+    from vocal_analysis.recognizer import _voiced_trim_bounds
+
+    # 16kHz・100msフレーム。先頭2.0秒無音 + 有声1.0秒 + 末尾3.0秒無音。
+    sr = 16000
+    silence_head = np.zeros(2 * sr, dtype=np.float32)
+    voiced = np.full(1 * sr, 0.5, dtype=np.float32)
+    silence_tail = np.zeros(3 * sr, dtype=np.float32)
+    samples = np.concatenate([silence_head, voiced, silence_tail])
+
+    lo, hi = _voiced_trim_bounds(samples, sr, threshold=0.01)
+
+    # 有声スパン[2.0,3.0]秒の外側に余白100ms → [1.9,3.1]秒。
+    assert lo == round(1.9 * sr)
+    assert hi == round(3.1 * sr)
+
+
+def test_voiced_trim_bounds_clamps_margin_to_segment_edges():
+    from vocal_analysis.recognizer import _voiced_trim_bounds
+
+    # 全体が有声。余白を加えても区間の外へ出ない。
+    sr = 16000
+    samples = np.full(1 * sr, 0.5, dtype=np.float32)
+
+    lo, hi = _voiced_trim_bounds(samples, sr, threshold=0.01)
+
+    assert lo == 0
+    assert hi == len(samples)
+
+
+def test_voiced_trim_bounds_no_voiced_frame_returns_whole_segment():
+    from vocal_analysis.recognizer import _voiced_trim_bounds
+
+    # フレーム単位では全て以下(端ケース)。トリムせず全体を返す。
+    sr = 16000
+    samples = np.full(1 * sr, 0.001, dtype=np.float32)
+
+    lo, hi = _voiced_trim_bounds(samples, sr, threshold=0.01)
+
+    assert (lo, hi) == (0, len(samples))
+
+
 def test_merge_adjacent_segments_combines_same_type_and_phoneme():
     from vocal_analysis.recognizer import _merge_adjacent_segments
     from vocal_analysis.types import Segment
