@@ -33,7 +33,7 @@ class WhisperConfig:
 
     model_id: str = "openai/whisper-medium"
     model_revision: str = "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
-    kana_prompt: str = "これはすべてかなだけでかかれたぶんしょうです。かんじはいっさいつかいません。"
+    kana_prompt: str = "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
 
 
 @dataclass(frozen=True)

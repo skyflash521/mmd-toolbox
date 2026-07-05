@@ -45,7 +45,7 @@ def test_whisper_model_id_revision_and_kana_prompt_are_pinned():
     assert WHISPER_CONFIG.model_id == "openai/whisper-medium"
     assert WHISPER_CONFIG.model_revision == "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
     assert WHISPER_CONFIG.kana_prompt == (
-        "これはすべてかなだけでかかれたぶんしょうです。かんじはいっさいつかいません。"
+        "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
     )
 
 

@@ -89,7 +89,7 @@ G2P(pyopenjtalk 系)で音素列へ変換し、CTC 音素モデルのロジッ�
 | 構成 | 呼び出し | 時刻精度 | 歌唱での成立 | 語彙置換のリスク | ライセンス |
 |---|---|---|---|---|---|
 | **kana-whisper + G2P + CTC強制アライメント(既定)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元(具体的な精度はS-1測定=§9で確認) | 母音を保ったまま局所的に誤ることはあるが、意味の通る別語への丸ごと置換は起きにくい(内容認識に強い言語モデル的補正を持たないため) | 低 | kana-whisper MIT / pyopenjtalk-plus MIT(内包の OpenJTalk 系は修正BSD) |
-| **Whisper(内容)+かな限定プロンプト+ G2P + CTC強制アライメント(選択可能)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元 | かな化に失敗した区間は通常のWhisperと同じ語彙置換のリスクが残る | 中(かな化成功区間は低、失敗区間は既存同等) | Whisper モデル Apache-2.0 / pyopenjtalk-plus MIT |
+| **Whisper(内容)+かな限定プロンプト+ G2P + CTC強制アライメント(選択可能)** | transformers + pyopenjtalk-plus(いずれも in-process) | 強制アライメントで復元 | かな化に失敗した区間は通常のWhisperと同じ語彙置換のリスクが残る | 中(かな化成功区間は低、失敗区間は通常のWhisper単体と同等) | Whisper モデル Apache-2.0 / pyopenjtalk-plus MIT |
 | wav2vec2 自由音素認識(単段。音素/かな出力とも) | transformers(in-process) | CTC近似 | ×(実測で不成立: blank支配でほぼ何も出力しない) | 低(意味補正なし) | transformers=Apache / torch=BSD + 許諾モデル |
 | Julius 音素認識(phone-loop) | C実行ファイル(内部subprocess) | フレーム単位(高) | 未評価(speech-HMM で歌唱は域外の懸念。phone-loop の構成も必要) | 未評価 | エンジン=修正BSD(音響モデルは個別確認) |
 | ~~Allosaurus~~ | Python API | 近似 | 未評価 | 未評価 | **GPL-3.0 → MIT本体と非互換で不可** |
@@ -115,10 +115,11 @@ vocal_analysis.md §5.2・§8.3 が正本)。内容認識は既定 `kana-whisper
 3. **G2P(`pyopenjtalk-plus`)はどちらの内容認識モデルの出力に対しても同一の呼び出しで足りる**。入力が
    かなであれば辞書引きに起因する読みの曖昧性(同字異音の読み違い)が構造的に生じない
    (vocal_analysis.md §5.2)。
-4. `kana-whisper` は歌唱データでの学習・評価実績が無く、また実測で処理時間が既存の
-   Whisper+G2P+強制アライメント構成の6〜10倍かかる(9章のS-1測定)。この代償を許容しない場合の
-   選択可能な代替として、歌唱で検証済みかつ高速な `openai/whisper-medium`+かな限定プロンプトを残す
-   (かな化に失敗した区間は既存構成と同じ読み違いリスクが残るが、既存構成より悪化はしない)。
+4. `kana-whisper` は歌唱データでの学習・評価実績が無く、また処理時間が選択可能な代替
+   (`openai/whisper-medium`+かな限定プロンプト)構成より大幅にかかる(具体的な倍率は実行環境に
+   依存するため恒久値として固定しない)。この代償を許容しない場合の選択可能な代替として、歌唱で
+   検証済みかつ高速な `openai/whisper-medium`+かな限定プロンプトを残す(かな化に失敗した区間は
+   この代替構成でプロンプトを渡さない場合と同じ読み違いリスクが残るが、それより悪化はしない)。
 5. **すべて純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に合う。
    torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる。
 6. ライセンスが清浄。kana-whisper = MIT、Whisper モデル(Hugging Face 配布)= Apache-2.0、
