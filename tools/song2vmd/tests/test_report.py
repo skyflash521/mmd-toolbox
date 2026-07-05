@@ -8,8 +8,6 @@ report.build_diagnostics と、それを人間向けテキスト(--dry-run)・�
 
 import pytest
 
-pytest.importorskip("song2vmd.report", reason="impl pending: song2vmd report")
-
 from lipsync import MouthEvent, MouthShape
 
 from song2vmd import events, report
