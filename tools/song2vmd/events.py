@@ -36,7 +36,7 @@ _VOWEL_SHAPES = {"a": MouthShape.A, "i": MouthShape.I, "u": MouthShape.U, "e": M
 _VOWEL_LIKE_KINDS = frozenset({"vowel", "n"})
 
 _LOW_DYNAMICS_THRESHOLD_DB = 12.0  # song2vmd.md 6.4(初期値)。
-_MORA_CENTER_FRACTION = 0.6  # 母音区間の中央60%平均(song2vmd.md 6.4)。
+_MORA_CENTER_FRACTION = 0.6  # 代表RMSの中央60%窓の比率(母音核・モーラ全体の二窓共通。song2vmd.md 6.4)。
 _ONSET_WINDOW_SEC = 0.06  # 母音境界のRMSオンセット補正窓(song2vmd.md 6.3。初期値)。
 _ONSET_SLOPE_PER_10MS = 0.15  # オンセット判定の傾きしきい値(song2vmd.md 6.3。初期値)。
 _ONSET_SMOOTH_WINDOW_SEC = 0.03  # オンセット検出前の平滑化窓(song2vmd.md 6.3。初期値)。
@@ -62,8 +62,9 @@ class _Unit:
     """口形イベント確定の中間表現(確定前の口形区間。時刻は秒)。
 
     start_sec/end_sec は口形イベントとして表示する区間(吸収した子音区間を含みうる)。
-    content_start_sec/content_end_sec は代表RMS算出に使う「子音区間を除いた」区間(vowel/nのみ
-    意味を持つ。未指定なら start_sec/end_sec をそのまま使う。song2vmd.md 6.4「母音中央代表値」)。
+    content_start_sec/content_end_sec は「子音区間を除いた」母音核区間(vowel/nのみ意味を持つ。
+    未指定なら start_sec/end_sec をそのまま使う)。代表RMSは母音核区間とモーラ区間全体の
+    中央60%平均の大きい方(song2vmd.md 6.4「モーラ代表RMS」)。
     """
 
     kind: str  # "vowel" | "bilabial" | "n" | "gap" | "silence"
@@ -113,10 +114,25 @@ def _rms_window_average(rms, start_sec, end_sec):
 
 
 def _mora_rms(rms, start_sec, end_sec):
-    """モーラ区間の代表RMS(区間中央60%の平均。song2vmd.md 6.4)。"""
+    """区間の中央60%の平均RMS(song2vmd.md 6.4)。"""
     span = end_sec - start_sec
     margin = span * (1.0 - _MORA_CENTER_FRACTION) / 2.0
     return _rms_window_average(rms, start_sec + margin, end_sec - margin)
+
+
+def _mora_representative_rms(rms, unit):
+    """モーラ代表RMS(母音核区間と、吸収した先行子音を含むモーラ区間全体の、中央60%平均の
+    大きい方。song2vmd.md 6.4)。
+
+    強制アライメントは伸ばして歌う発声の大部分を先行子音トークンへ割り当て、母音核を数十msまで
+    狭めることがある。その狭い窓だけで判定すると、発声中のモーラを無音補正で閉口させたり開き量を
+    過小にするため、モーラ区間全体の窓とも比べて大きい方を採る。
+    """
+    content_start, content_end = unit.content_span()
+    value = _mora_rms(rms, content_start, content_end)
+    if (unit.start_sec, unit.end_sec) != (content_start, content_end):
+        value = max(value, _mora_rms(rms, unit.start_sec, unit.end_sec))
+    return value
 
 
 def _classify_phonetic(segments, use_n_morph):
@@ -197,8 +213,7 @@ def _resolve_silence(units, rms, silence_on, low_dynamics):
                 result.append(_Unit("silence", u.start_sec, u.end_sec))
                 open_kind = None
         elif u.kind == "vowel":
-            content_start, content_end = u.content_span()
-            if not low_dynamics and _mora_rms(rms, content_start, content_end) <= silence_on:
+            if not low_dynamics and _mora_representative_rms(rms, u) <= silence_on:
                 result.append(_Unit("silence", u.start_sec, u.end_sec))
                 open_kind = None
             else:
@@ -341,8 +356,7 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
     weak_vowels = 0
     for u in units:
         if u.kind in ("vowel", "n"):
-            content_start, content_end = u.content_span()
-            mora_rms = _mora_rms(rms, content_start, content_end)
+            mora_rms = _mora_representative_rms(rms, u)
             open_amount = _map_open_amount(
                 mora_rms, open_lo=open_lo, open_hi=open_hi, open_max=open_max,
                 intensity_curve=intensity_curve,

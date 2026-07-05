@@ -323,6 +323,49 @@ def test_low_dynamics_suppresses_vowel_silence_override():
     assert mouth_events[0].shape == MouthShape.A
 
 
+def _loud_consonant_quiet_core_fixture():
+    """伸ばして歌う発声の大部分が先行子音トークンへ割り当てられたモーラを再現する
+    (song2vmd.md 6.4「モーラ代表RMS」の(b)窓が要る事例)。
+
+    子音 n [0.0, 0.9](発声の実体。高RMS)+ 母音 i [0.9, 0.92](狭い母音核。低RMS)。
+    母音核の中央60%だけを見ると無音しきい値以下になるが、モーラ区間全体では大音量。
+    """
+    segments = [
+        seg("consonant", 0.0, 0.9, phoneme="n"),
+        seg("vowel", 0.9, 0.92, phoneme="i", confidence=0.9),
+    ]
+    hop = 0.010
+    n = 93
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    values = [0.9 if t <= 0.85 else 0.02 for t in times]
+    return segments, rms_env(times, values)
+
+
+def test_vowel_with_quiet_core_but_loud_mora_span_is_not_silenced():
+    segments, rms = _loud_consonant_quiet_core_fixture()
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[0].shape == MouthShape.I
+
+
+def test_vowel_with_quiet_core_but_loud_mora_span_opens_from_the_louder_window():
+    segments, rms = _loud_consonant_quiet_core_fixture()
+    mouth_events, _diag = confirm(
+        segments, rms, intensity_curve=1.0, open_lo=0.0, open_hi=1.0, open_max=1.0)
+    # モーラ区間全体[0.0,0.92]の中央60%はほぼ0.9。母音核だけの窓(≈0.02)に引きずられない。
+    assert mouth_events[0].open_amount == pytest.approx(0.9, abs=0.05)
+
+
+def test_vowel_with_absorbed_consonant_still_silenced_when_whole_mora_is_quiet():
+    # 二窓のどちらも無音しきい値以下なら閉口する(誤検出母音対策)。
+    segments = [
+        seg("consonant", 0.0, 0.2, phoneme="n"),
+        seg("vowel", 0.2, 0.3, phoneme="i", confidence=0.9),
+    ]
+    rms = flat_rms(0.3, 0.01)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[0].shape == MouthShape.SILENCE
+
+
 # --- 同母音連結 --------------------------------------------------------------
 
 
@@ -483,7 +526,7 @@ def test_bilabial_and_silence_have_zero_open_amount():
 
 def test_open_amount_uses_middle_60_percent_of_vowel_segment():
     # 母音区間[0,1.0]の中央60%([0.2,0.8])だけ高RMS、両端(子音トランジェント相当)は低RMSにする
-    # (song2vmd.md 6.4「母音中央代表値」)。中央60%平均(≈0.8)を使うはずで、両端に引きずられる
+    # (song2vmd.md 6.4「モーラ代表RMS」)。中央60%平均(≈0.8)を使うはずで、両端に引きずられる
     # 区間全体平均より明らかに大きくなる。
     hop = 0.010
     n = 101
