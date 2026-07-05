@@ -1,8 +1,9 @@
 """S2 音素認識の統合テスト(vocal_analysis.md §5・§5.2・§8.1・§8.3)。
 
-無音検出による区間分割(§5.2手順1・2)は合成音声(実RMS)でそのまま検証し、外部呼び出し(Whisper
-書き起こし・G2P・音素モデル推論)はモック(_transcribe_segment・_g2p・_load_model_and_processor・
-_compute_log_probs を差し替え)して検証する(ネットワーク・実モデルを必須にしない)。ダウンミックス・
+無音検出による区間分割(§5.2手順1・2)は合成音声(実RMS)でそのまま検証し、外部呼び出し(内容認識器の
+書き起こし・G2P・音素モデル推論)はモック(_transcribe_segment・_load_content_recognizer_pipeline・
+_g2p・_load_model_and_processor・_compute_log_probs を差し替え)して検証する(ネットワーク・実モデルを
+必須にしない)。ダウンミックス・
 リサンプルは合成配列で決定論的に検証する。recognize() の統合テストは、実RMSによる区間分割・無音判定と、
 モックした書き起こし・G2P・推論結果から複合構成の純関数群(_assemble_phoneme_sequence・
 _g2p_symbols_to_token_ids・_forced_align・_path_to_segments。各関数自体の網羅的な検証は
@@ -104,7 +105,7 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
         ]
     )
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
@@ -130,10 +131,10 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     assert segments[2].end_sec == pytest.approx(0.12)
 
 
-def test_recognize_skips_whisper_for_silent_segment(tmp_path, monkeypatch):
+def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 先頭2秒は大音量、続く3秒は完全な無音(RMS=0)。無音区間はWhisper呼び出し自体をスキップする
+    # 先頭2秒は大音量、続く3秒は完全な無音(RMS=0)。無音区間は内容認識呼び出し自体をスキップする
     # (§5.2手順2)。分割点は無音区間[2.0,5.0)の中点3.5秒に立ち、区間[0,3.5)は大音量を含むため
     # 無音でなく、区間[3.5,5.0)は完全に無音になる。
     loud = _loud_samples(32000)
@@ -146,7 +147,7 @@ def test_recognize_skips_whisper_for_silent_segment(tmp_path, monkeypatch):
     )
     call_count = {"transcribe": 0}
 
-    def fake_transcribe(samples):
+    def fake_transcribe(samples, content_recognizer_model):
         call_count["transcribe"] += 1
         return "あ"
 
@@ -161,7 +162,7 @@ def test_recognize_skips_whisper_for_silent_segment(tmp_path, monkeypatch):
 
     segments = recognizer_module.recognize(wav_path)
 
-    assert call_count["transcribe"] == 1  # 無音区間ではWhisperを呼ばない
+    assert call_count["transcribe"] == 1  # 無音区間では内容認識を呼ばない
     assert segments[-1].type == "gap"
     assert segments[-1].phoneme is None
     assert segments[-1].end_sec == pytest.approx(5.0)  # 音声全体の終端まで被覆する
@@ -170,7 +171,7 @@ def test_recognize_skips_whisper_for_silent_segment(tmp_path, monkeypatch):
 def test_recognize_fully_silent_input_never_loads_phoneme_model(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 音声全体が無音(RMS=0)の場合、§5.2手順2により全区間がWhisper呼び出し無しでgap確定され、
+    # 音声全体が無音(RMS=0)の場合、§5.2手順2により全区間が内容認識呼び出し無しでgap確定され、
     # 音素モデル(_load_model_and_processor)は一度も必要にならない(不要な依存失敗を避ける)。
     wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((32000, 1), dtype=np.float32), 16000)
 
@@ -201,7 +202,7 @@ def test_recognize_last_local_segment_extends_exactly_to_segment_boundary(tmp_pa
         [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
     )
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
@@ -216,7 +217,7 @@ def test_recognize_last_local_segment_extends_exactly_to_segment_boundary(tmp_pa
     assert segments[-1].end_sec == pytest.approx(2.0)
 
 
-def test_recognize_whisper_missing_library_raises_clear_error(tmp_path, monkeypatch):
+def test_recognize_content_recognizer_missing_library_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
@@ -227,7 +228,7 @@ def test_recognize_whisper_missing_library_raises_clear_error(tmp_path, monkeypa
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
 
-    def fake_transcribe(samples):
+    def fake_transcribe(samples, content_recognizer_model):
         raise original_error
 
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
@@ -241,7 +242,7 @@ def test_recognize_whisper_missing_library_raises_clear_error(tmp_path, monkeypa
     assert excinfo.value.__cause__ is original_error
 
 
-def test_recognize_whisper_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
+def test_recognize_content_recognizer_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
     # §4: モデルが未キャッシュでネットワークからも取得できない場合、モデル取得が必要と分かる
@@ -254,7 +255,7 @@ def test_recognize_whisper_model_fetch_failure_raises_clear_error(tmp_path, monk
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
 
-    def fake_transcribe(samples):
+    def fake_transcribe(samples, content_recognizer_model):
         raise original_error
 
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
@@ -275,7 +276,7 @@ def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch)
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
 
     def fake_g2p(text):
         raise original_error
@@ -291,12 +292,12 @@ def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch)
 def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 音素モデルは Whisper・G2P が両方成功した後(初回の非無音区間)に遅延ロードされるため、
+    # 音素モデルは 内容認識・G2P が両方成功した後(初回の非無音区間)に遅延ロードされるため、
     # 実モデルを呼ばずにそこへ到達させるには _transcribe_segment・_g2p もモックする必要がある。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = ImportError("no transformers")
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
 
     def fake_load(*args, **kwargs):
@@ -317,7 +318,7 @@ def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monk
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = OSError("model not found in cache and offline")
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
 
     def fake_load(*args, **kwargs):
@@ -392,49 +393,39 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
     assert captured["manual_seed"] == RECOGNIZER_CONFIG.random_seed
 
 
-def test_recognize_default_adapter_uses_kana_whisper_pipeline(tmp_path, monkeypatch):
-    """既定アダプタ(kana-whisper-ctc-forcedalign)は_transcribe_segment(kana-whisper)経由で
-    書き起こす(§5.2内容認識モデルの選択)。_transcribe_segment 自体は差し替えず、その内部が呼ぶ
-    _load_kana_whisper_pipeline の呼び出しで既定アダプタの配線を検証する。"""
-    from vocal_analysis import recognizer as recognizer_module
+def test_load_content_recognizer_pipeline_passes_pinned_config(monkeypatch):
+    # transformers が実際に導入されている環境でのみ、_load_content_recognizer_pipeline の実体を
+    # 検証する(最小環境では skip)。transformers.pipeline 自体をモンキーパッチするためネットワーク・
+    # 実モデルのダウンロードは発生しない。
+    transformers = pytest.importorskip("transformers")
+    from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL, RECOGNIZER_CONFIG
+    from vocal_analysis.recognizer import _load_content_recognizer_pipeline
 
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+    captured = {}
 
-    decoder = {0: "<pad>", 1: "a"}
-    log_probs = np.array(
-        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
-    )
-    calls = {"pipeline_loaded": False}
+    def fake_pipeline(task, model=None, revision=None, device=None, **kwargs):
+        captured["task"] = task
+        captured["model"] = model
+        captured["revision"] = revision
+        captured["device"] = device
+        return object()
 
-    class _FakeKanaWhisperPipeline:
-        def __call__(self, samples, generate_kwargs):
-            calls["generate_kwargs"] = generate_kwargs
-            return {"text": "あ"}
+    monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
 
-    def fake_load_kana_whisper_pipeline():
-        calls["pipeline_loaded"] = True
-        return _FakeKanaWhisperPipeline()
+    _load_content_recognizer_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
 
-    monkeypatch.setattr(recognizer_module, "_load_kana_whisper_pipeline", fake_load_kana_whisper_pipeline)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
-    monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
-    )
-    monkeypatch.setattr(
-        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
-    )
-
-    segments = recognizer_module.recognize(wav_path)
-
-    assert calls["pipeline_loaded"] is True
-    assert "prompt_ids" not in calls["generate_kwargs"]  # kana-whisperはプロンプト不要
-    assert segments[1].phoneme == "a"
+    assert captured["task"] == "automatic-speech-recognition"
+    # §5.2・§8.3: content_recognizer_model が指すモデル・revisionをそのままロードに渡す。
+    assert captured["model"] == DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id
+    assert captured["revision"] == DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision
+    # §5.1: 実行デバイスを固定条件どおりに適用する。
+    assert captured["device"] == RECOGNIZER_CONFIG.device
 
 
-def test_recognize_alternate_adapter_uses_whisper_medium_with_kana_prompt(tmp_path, monkeypatch):
-    """選択可能な代替アダプタ(whisper-ctc-forcedalign)はwhisper-medium+かな限定プロンプトで
-    書き起こす(§5.2)。_transcribe_segment(既定/kana-whisper側)は呼ばれない。"""
-    from vocal_analysis import WHISPER_CONFIG
+def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_path, monkeypatch):
+    """既定値(DEFAULT_CONTENT_RECOGNIZER_MODEL)で呼び出すと、そのmodel_id・revisionで
+    パイプラインをロードし、かな限定プロンプト(KANA_PROMPT)をprompt_idsとして渡す(§5.2)。"""
+    from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL, KANA_PROMPT
     from vocal_analysis import recognizer as recognizer_module
 
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
@@ -445,7 +436,12 @@ def test_recognize_alternate_adapter_uses_whisper_medium_with_kana_prompt(tmp_pa
     )
     calls = {}
 
-    class _FakeWhisperMediumPipeline:
+    class _FakePromptIds:
+        def to(self, device):
+            calls["prompt_ids_device"] = device
+            return "PROMPT_IDS"
+
+    class _FakePipeline:
         device = "cpu"
 
         class tokenizer:
@@ -458,16 +454,11 @@ def test_recognize_alternate_adapter_uses_whisper_medium_with_kana_prompt(tmp_pa
             calls["generate_kwargs"] = generate_kwargs
             return {"text": "あ"}
 
-    class _FakePromptIds:
-        def to(self, device):
-            calls["prompt_ids_device"] = device
-            return "PROMPT_IDS"
+    def fake_load_pipeline(content_recognizer_model):
+        calls["loaded_model"] = content_recognizer_model
+        return _FakePipeline()
 
-    def fail_if_kana_whisper_loaded():
-        raise AssertionError("代替アダプタでkana-whisperのパイプラインをロードしてはならない")
-
-    monkeypatch.setattr(recognizer_module, "_load_whisper_pipeline", lambda: _FakeWhisperMediumPipeline())
-    monkeypatch.setattr(recognizer_module, "_load_kana_whisper_pipeline", fail_if_kana_whisper_loaded)
+    monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
@@ -476,36 +467,79 @@ def test_recognize_alternate_adapter_uses_whisper_medium_with_kana_prompt(tmp_pa
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
     )
 
-    segments = recognizer_module.recognize(wav_path, adapter_id=recognizer_module.ALTERNATE_ADAPTER_ID)
+    segments = recognizer_module.recognize(wav_path)
 
-    assert calls["prompt_text"] == WHISPER_CONFIG.kana_prompt
+    assert calls["loaded_model"] == DEFAULT_CONTENT_RECOGNIZER_MODEL
+    assert calls["prompt_text"] == KANA_PROMPT
     assert calls["generate_kwargs"]["prompt_ids"] == "PROMPT_IDS"
     assert segments[1].phoneme == "a"
 
 
-def test_recognize_unknown_adapter_id_raises_value_error(tmp_path):
+def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, monkeypatch):
+    """content_recognizer_model に既定値以外(例: 候補値 KANA_WHISPER_MODEL)を渡すと、
+    そのモデルでパイプラインをロードする(モデルによる分岐は無い。§5.2)。"""
+    from vocal_analysis import KANA_WHISPER_MODEL
     from vocal_analysis import recognizer as recognizer_module
 
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
-    with pytest.raises(ValueError, match="未知の内容認識アダプタ"):
-        recognizer_module.recognize(wav_path, adapter_id="bogus-adapter")
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+    calls = {}
+
+    class _FakePromptIds:
+        def to(self, device):
+            return "PROMPT_IDS"
+
+    class _FakePipeline:
+        device = "cpu"
+
+        class tokenizer:
+            @staticmethod
+            def get_prompt_ids(prompt, return_tensors):
+                return _FakePromptIds()
+
+        def __call__(self, samples, generate_kwargs):
+            return {"text": "あ"}
+
+    def fake_load_pipeline(content_recognizer_model):
+        calls["loaded_model"] = content_recognizer_model
+        return _FakePipeline()
+
+    monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    recognizer_module.recognize(wav_path, content_recognizer_model=KANA_WHISPER_MODEL)
+
+    assert calls["loaded_model"] == KANA_WHISPER_MODEL
 
 
-def test_recognize_alternate_adapter_model_fetch_failure_names_whisper_medium(tmp_path, monkeypatch):
-    from vocal_analysis import WHISPER_CONFIG
+def test_recognize_content_recognizer_model_fetch_failure_names_that_model(tmp_path, monkeypatch):
+    """内容認識モデルの取得失敗時、エラーメッセージに指定したcontent_recognizer_modelの
+    model_id・revisionが含まれる(既定値以外を渡した場合でも正しく名指しする)。"""
+    from vocal_analysis import ContentRecognizerModel
     from vocal_analysis import recognizer as recognizer_module
 
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
+    custom_model = ContentRecognizerModel(model_id="openai/whisper-large-v3", model_revision="deadbeef")
 
     original_error = OSError("model not found in cache and offline")
 
-    def fail_transcribe(samples):
+    def fail_load_pipeline(content_recognizer_model):
         raise original_error
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment_whisper_medium", fail_transcribe)
+    monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fail_load_pipeline)
 
-    with pytest.raises(recognizer_module.RecognitionError, match=WHISPER_CONFIG.model_id) as excinfo:
-        recognizer_module.recognize(wav_path, adapter_id=recognizer_module.ALTERNATE_ADAPTER_ID)
+    with pytest.raises(recognizer_module.RecognitionError, match="openai/whisper-large-v3") as excinfo:
+        recognizer_module.recognize(wav_path, content_recognizer_model=custom_model)
 
+    assert "deadbeef" in str(excinfo.value)
     assert excinfo.value.__cause__ is original_error

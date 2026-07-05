@@ -37,24 +37,35 @@ def test_recognizer_inference_conditions_are_deterministic():
     assert RECOGNIZER_CONFIG.random_seed == 0
 
 
-def test_whisper_model_id_revision_and_kana_prompt_are_pinned():
-    from vocal_analysis import WHISPER_CONFIG
+def test_default_content_recognizer_model_id_and_revision_are_pinned():
+    from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL
 
-    # §8.3 で固定した選択可能な代替アダプタ(whisper-ctc-forcedalign)のモデル・revisionと、
-    # かな限定プロンプトの固定文字列。実装が独自に変えない。
-    assert WHISPER_CONFIG.model_id == "openai/whisper-medium"
-    assert WHISPER_CONFIG.model_revision == "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
-    assert WHISPER_CONFIG.kana_prompt == (
-        "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
-    )
+    # §8.3 で固定した既定値(openai/whisper-medium)のモデル・revision。実装が独自に変えない。
+    assert DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id == "openai/whisper-medium"
+    assert DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision == "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
 
 
 def test_kana_whisper_model_id_and_revision_are_pinned():
-    from vocal_analysis import KANA_WHISPER_CONFIG
+    from vocal_analysis import KANA_WHISPER_MODEL
 
-    # §8.3 で固定した既定アダプタ(kana-whisper-ctc-forcedalign)のモデルとrevision。
-    assert KANA_WHISPER_CONFIG.model_id == "sbintuitions/kana-whisper"
-    assert KANA_WHISPER_CONFIG.model_revision == "88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82"
+    # §8.3 で固定した候補値(kana-whisper)のモデルとrevision。
+    assert KANA_WHISPER_MODEL.model_id == "sbintuitions/kana-whisper"
+    assert KANA_WHISPER_MODEL.model_revision == "88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82"
+
+
+def test_kana_prompt_is_pinned():
+    from vocal_analysis import KANA_PROMPT
+
+    # §8.3 で固定したかな限定プロンプトの文字列。既定値・候補値どちらに渡す場合も共通。
+    assert KANA_PROMPT == "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
+
+
+def test_content_recognizer_model_revision_defaults_to_none():
+    from vocal_analysis import ContentRecognizerModel
+
+    # revision省略時は最新リビジョンを使う(§5.2)。既定値・候補値以外を任意指定するときの挙動。
+    custom = ContentRecognizerModel(model_id="openai/whisper-large-v3")
+    assert custom.model_revision is None
 
 
 def test_separator_shifts_disabled_for_determinism():
@@ -73,7 +84,12 @@ def test_separator_model_and_stem_are_pinned():
 
 
 def test_configs_are_frozen():
-    from vocal_analysis import KANA_WHISPER_CONFIG, RECOGNIZER_CONFIG, SEPARATOR_CONFIG, WHISPER_CONFIG
+    from vocal_analysis import (
+        DEFAULT_CONTENT_RECOGNIZER_MODEL,
+        KANA_WHISPER_MODEL,
+        RECOGNIZER_CONFIG,
+        SEPARATOR_CONFIG,
+    )
 
     # 固定値なので再代入を禁じる(frozen dataclass)。
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -81,6 +97,6 @@ def test_configs_are_frozen():
     with pytest.raises(dataclasses.FrozenInstanceError):
         SEPARATOR_CONFIG.shifts = 1
     with pytest.raises(dataclasses.FrozenInstanceError):
-        WHISPER_CONFIG.model_id = "other"
+        DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id = "other"
     with pytest.raises(dataclasses.FrozenInstanceError):
-        KANA_WHISPER_CONFIG.model_id = "other"
+        KANA_WHISPER_MODEL.model_id = "other"

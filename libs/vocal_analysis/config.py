@@ -1,10 +1,9 @@
 """外部モデル委譲ステージの固定推論条件(vocal_analysis.md §5.1・§5.2・§8.3・§4)。
 
-S2 の音素モデル(強制アライメント用)・内容認識モデル(既定 kana-whisper・選択可能な代替
-whisper-medium+かなプロンプト)と S1 分離器の非決定要素を固定し、
-S-1 測定と実装が同一条件で動くようにする。モデル id・revision は §8.3、Demucs の shift 平均無効化は
-§4・§8.3 が定める固定値。実行デバイス・dtype・スレッド・乱数シードは決定論のための固定値。これらは
-実装が独自に変えない(変更が要れば vocal_analysis.md を先に更新する)。
+S2 の音素モデル(強制アライメント用)・内容認識モデル(既定値・候補値)と S1 分離器の非決定要素を
+固定し、S-1 測定と実装が同一条件で動くようにする。モデル id・revision は §8.3、Demucs の shift
+平均無効化は §4・§8.3 が定める固定値。実行デバイス・dtype・スレッド・乱数シードは決定論のための
+固定値。これらは実装が独自に変えない(変更が要れば vocal_analysis.md を先に更新する)。
 
 §5.1 が固定対象に挙げる条件のうち、mono への downmix・16kHz への再サンプリング方式・バッチは
 S2 アダプタの変換/推論の実装内部で確定する(採用ライブラリと実測に依存するため、アダプタ実装が
@@ -28,20 +27,27 @@ class RecognizerConfig:
 
 
 @dataclass(frozen=True)
-class WhisperConfig:
-    """S2 内容認識モデル(選択可能な代替アダプタ whisper-ctc-forcedalign。§5.2)の固定条件(§8.3)。"""
+class ContentRecognizerModel:
+    """S2 内容認識モデルの指定(§5.2)。model_revision を省略(None)すると最新リビジョンを使う。"""
 
-    model_id: str = "openai/whisper-medium"
-    model_revision: str = "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
-    kana_prompt: str = "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
+    model_id: str
+    model_revision: str | None = None
 
 
-@dataclass(frozen=True)
-class KanaWhisperConfig:
-    """S2 内容認識モデル(既定アダプタ kana-whisper-ctc-forcedalign。§5.2)の固定条件(§8.3)。"""
+# 既定値: 歌唱データで検証済み・高速(§5.2・external-tools.md §2)。
+DEFAULT_CONTENT_RECOGNIZER_MODEL = ContentRecognizerModel(
+    model_id="openai/whisper-medium",
+    model_revision="abdf7c39ab9d0397620ccaea8974cc764cd0953e",
+)
 
-    model_id: str = "sbintuitions/kana-whisper"
-    model_revision: str = "88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82"
+# 候補値: 常にかなを返す。歌唱データでの学習・評価実績は無い(§5.2・external-tools.md §2)。
+KANA_WHISPER_MODEL = ContentRecognizerModel(
+    model_id="sbintuitions/kana-whisper",
+    model_revision="88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82",
+)
+
+# かな限定プロンプト(§5.2・§8.3)。既定値・候補値のどちらにも同じ手順で渡す(モデルによる分岐なし)。
+KANA_PROMPT = "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
 
 
 @dataclass(frozen=True)
@@ -54,6 +60,4 @@ class SeparatorConfig:
 
 
 RECOGNIZER_CONFIG = RecognizerConfig()
-WHISPER_CONFIG = WhisperConfig()
-KANA_WHISPER_CONFIG = KanaWhisperConfig()
 SEPARATOR_CONFIG = SeparatorConfig()

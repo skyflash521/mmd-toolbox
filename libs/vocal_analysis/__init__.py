@@ -1,12 +1,12 @@
 from .config import (
-    KANA_WHISPER_CONFIG,
+    DEFAULT_CONTENT_RECOGNIZER_MODEL,
+    KANA_PROMPT,
+    KANA_WHISPER_MODEL,
     RECOGNIZER_CONFIG,
     SEPARATOR_CONFIG,
-    WHISPER_CONFIG,
-    KanaWhisperConfig,
+    ContentRecognizerModel,
     RecognizerConfig,
     SeparatorConfig,
-    WhisperConfig,
 )
 from .types import AnalysisResult, AudioPcm, RmsEnvelope, Segment
 
@@ -15,12 +15,12 @@ __all__ = [
     "AudioPcm",
     "RmsEnvelope",
     "Segment",
-    "KANA_WHISPER_CONFIG",
+    "DEFAULT_CONTENT_RECOGNIZER_MODEL",
+    "KANA_PROMPT",
+    "KANA_WHISPER_MODEL",
     "RECOGNIZER_CONFIG",
     "SEPARATOR_CONFIG",
-    "WHISPER_CONFIG",
-    "KanaWhisperConfig",
+    "ContentRecognizerModel",
     "RecognizerConfig",
     "SeparatorConfig",
-    "WhisperConfig",
 ]

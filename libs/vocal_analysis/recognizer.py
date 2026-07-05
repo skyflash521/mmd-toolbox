@@ -2,9 +2,9 @@
 
 無音検出による区間分割・内容認識・G2P(pyopenjtalk-plus)・音素モデルのCTC強制アライメント(§5.2)を
 組み合わせた複合構成で、母音/子音/gap を区別したセグメント列を生成する。公開関数
-recognize(vocal_wav_path, adapter_id) -> list[Segment] が唯一の公開面(Recognizer アダプタ契約。§8.1)。
-内容認識モデルは既定アダプタ `kana-whisper-ctc-forcedalign`(kana-whisper)と選択可能な代替アダプタ
-`whisper-ctc-forcedalign`(whisper-medium+かな限定プロンプト)を切り替えられる(§5.2)。
+recognize(vocal_wav_path, content_recognizer_model) -> list[Segment] が唯一の公開面(Recognizer
+アダプタ契約。§8.1)。内容認識モデルは `content_recognizer_model`(`ContentRecognizerModel`。§5.2)で
+指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・候補値 `KANA_WHISPER_MODEL`・任意指定も可)。
 """
 
 import math
@@ -16,11 +16,8 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 
-from .config import KANA_WHISPER_CONFIG, RECOGNIZER_CONFIG, WHISPER_CONFIG
+from .config import DEFAULT_CONTENT_RECOGNIZER_MODEL, KANA_PROMPT, RECOGNIZER_CONFIG, ContentRecognizerModel
 from .types import Segment
-
-DEFAULT_ADAPTER_ID = "kana-whisper-ctc-forcedalign"
-ALTERNATE_ADAPTER_ID = "whisper-ctc-forcedalign"
 
 FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
 
@@ -175,7 +172,7 @@ def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
     """チャンクごとのG2P音素記号列を pau を挟んで結合する(§5.2手順5)。
 
     チャンク境界ごとに pau を1つ挟み、列の先頭と末尾にも pau を1つずつ補う(区間ごとに独立して
-    Whisper呼び出しを行う現行パイプラインでは chunk_phonemes は常に1要素で呼ばれ、実質的に
+    内容認識呼び出しを行う現行パイプラインでは chunk_phonemes は常に1要素で呼ばれ、実質的に
     その区間の音素記号列の先頭・末尾へ pau を補う処理になる)。
     """
     sequence = ["pau"]
@@ -317,24 +314,15 @@ def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: f
     return segments
 
 
-def recognize(vocal_wav_path: Path, adapter_id: str = DEFAULT_ADAPTER_ID) -> list[Segment]:
+def recognize(
+    vocal_wav_path: Path,
+    content_recognizer_model: ContentRecognizerModel = DEFAULT_CONTENT_RECOGNIZER_MODEL,
+) -> list[Segment]:
     """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2複合構成)。
 
-    adapter_id で内容認識モデルを選択する(既定 `kana-whisper-ctc-forcedalign`・選択可能な代替
-    `whisper-ctc-forcedalign`。§5.2・§8.2)。後段のG2P・強制アライメントはどちらも共通。
+    content_recognizer_model で内容認識モデルを指定する(既定値・候補値・任意指定。§5.2)。
+    後段のG2P・強制アライメントはどのモデルでも共通。
     """
-    if adapter_id == DEFAULT_ADAPTER_ID:
-        transcribe_segment = _transcribe_segment
-        content_model_id, content_model_revision = KANA_WHISPER_CONFIG.model_id, KANA_WHISPER_CONFIG.model_revision
-    elif adapter_id == ALTERNATE_ADAPTER_ID:
-        transcribe_segment = _transcribe_segment_whisper_medium
-        content_model_id, content_model_revision = WHISPER_CONFIG.model_id, WHISPER_CONFIG.model_revision
-    else:
-        raise ValueError(
-            f"未知の内容認識アダプタです: {adapter_id!r}"
-            f"({DEFAULT_ADAPTER_ID!r} か {ALTERNATE_ADAPTER_ID!r} を指定してください)"
-        )
-
     samples, sample_rate = sf.read(vocal_wav_path, dtype="float32", always_2d=True)
     mono = _downmix_to_mono(samples)
     resampled = _resample_to_target(mono, sample_rate, RECOGNIZER_CONFIG.sample_rate)
@@ -346,7 +334,8 @@ def recognize(vocal_wav_path: Path, adapter_id: str = DEFAULT_ADAPTER_ID) -> lis
     segment_bounds = _build_segment_bounds(duration_sec, split_points)
 
     # 音素モデルは無音でない区間が実際に現れるまでロードしない(§5.2手順2: 全区間が無音なら
-    # モデルを一切必要としない。非無音区間でもWhisper・G2Pより先にロードして失敗境界を隠さない)。
+    # モデルを一切必要としない。非無音区間でも内容認識・G2Pより先にロードするのではなく、それらが
+    # 成功した後に遅延ロードする。ただしロード自体の失敗は握りつぶさず例外にして失敗境界を隠さない)。
     processor = model = vocab = blank_token_id = None
 
     all_segments: list[Segment] = []
@@ -362,7 +351,7 @@ def recognize(vocal_wav_path: Path, adapter_id: str = DEFAULT_ADAPTER_ID) -> lis
             continue
 
         try:
-            text = transcribe_segment(chunk_samples)
+            text = _transcribe_segment(chunk_samples, content_recognizer_model)
         except ImportError as e:
             raise RecognitionError(
                 "transformers または torch が見つかりません。導入してください"
@@ -370,7 +359,8 @@ def recognize(vocal_wav_path: Path, adapter_id: str = DEFAULT_ADAPTER_ID) -> lis
             ) from e
         except OSError as e:
             raise RecognitionError(
-                f"内容認識モデル({content_model_id}, revision={content_model_revision})を"
+                f"内容認識モデル({content_recognizer_model.model_id}, "
+                f"revision={content_recognizer_model.model_revision})を"
                 "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
             ) from e
 
@@ -447,29 +437,14 @@ def _g2p(text: str) -> list[str]:
     return pyopenjtalk.g2p(text, kana=False, join=False)
 
 
-def _transcribe_segment(samples: np.ndarray) -> str:
-    """区間のボーカル音声をkana-whisperで書き起こす(§5.2手順3。既定アダプタ
-    kana-whisper-ctc-forcedalign。区間ごとに独立呼び出し)。かなを直接返す。"""
-    pipeline = _load_kana_whisper_pipeline()
-    result = pipeline(
-        samples,
-        generate_kwargs={
-            "language": "japanese",
-            "task": "transcribe",
-            "num_beams": 1,
-            "do_sample": False,
-        },
-    )
-    return result["text"]
+def _transcribe_segment(samples: np.ndarray, content_recognizer_model: ContentRecognizerModel) -> str:
+    """区間のボーカル音声を書き起こす(§5.2手順3。区間ごとに独立呼び出し)。
 
-
-def _transcribe_segment_whisper_medium(samples: np.ndarray) -> str:
-    """区間のボーカル音声をwhisper-medium+かな限定プロンプトで書き起こす(§5.2手順3。選択可能な
-    代替アダプタ whisper-ctc-forcedalign。区間ごとに独立呼び出し)。かな化は区間により成功・失敗する。"""
-    pipeline = _load_whisper_pipeline()
-    prompt_ids = pipeline.tokenizer.get_prompt_ids(WHISPER_CONFIG.kana_prompt, return_tensors="pt").to(
-        pipeline.device
-    )
+    どの content_recognizer_model でも同じ手順(パイプライン読み込み→かな限定プロンプトで
+    prompt_ids取得→貪欲デコード)を適用する(モデルによる分岐は持たない)。
+    """
+    pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
+    prompt_ids = pipeline.tokenizer.get_prompt_ids(KANA_PROMPT, return_tensors="pt").to(pipeline.device)
     result = pipeline(
         samples,
         generate_kwargs={
@@ -483,26 +458,14 @@ def _transcribe_segment_whisper_medium(samples: np.ndarray) -> str:
     return result["text"]
 
 
-def _load_kana_whisper_pipeline():
-    """内容認識器(kana-whisper)をS-1測定の固定条件(§8.3)でロードする。"""
+def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognizerModel):
+    """内容認識器を content_recognizer_model が指すモデル・revisionでロードする(§5.2・§8.3)。"""
     from transformers import pipeline as transformers_pipeline
 
     return transformers_pipeline(
         "automatic-speech-recognition",
-        model=KANA_WHISPER_CONFIG.model_id,
-        revision=KANA_WHISPER_CONFIG.model_revision,
-        device=RECOGNIZER_CONFIG.device,
-    )
-
-
-def _load_whisper_pipeline():
-    """内容認識器(whisper-medium)をS-1測定の固定条件(§8.3)でロードする。"""
-    from transformers import pipeline as transformers_pipeline
-
-    return transformers_pipeline(
-        "automatic-speech-recognition",
-        model=WHISPER_CONFIG.model_id,
-        revision=WHISPER_CONFIG.model_revision,
+        model=content_recognizer_model.model_id,
+        revision=content_recognizer_model.model_revision,
         device=RECOGNIZER_CONFIG.device,
     )
 
