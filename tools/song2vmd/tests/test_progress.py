@@ -7,8 +7,6 @@
 
 import pytest
 
-pytest.importorskip("song2vmd.progress", reason="impl pending: song2vmd progress")
-
 from song2vmd import progress
 
 
