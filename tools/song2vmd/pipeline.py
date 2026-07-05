@@ -15,7 +15,9 @@ vocal_analysis.io.load_audio のピーク正規化を経ずに読み込む(正�
 倍率が全体にかかるだけなのでRMSの相対正規化(ゲイン不変)を壊さない)。
 """
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -29,6 +31,10 @@ from vocal_analysis.types import AudioPcm
 from . import chunking, events, morphs, report
 
 _CHUNK_OVERLAP_SEC = 1.0  # song2vmd.md §6.6(初期値)。
+
+
+class IntermediateWriteError(Exception):
+    """--keep-intermediate の中間生成物書き込み失敗(song2vmd.md 5.3・11章・12.3)。"""
 
 
 @dataclass(frozen=True)
@@ -90,23 +96,49 @@ def _report_stage(progress, stage, *, done=0, total=None, note=""):
         progress.stage(stage, done=done, total=total, note=note, elapsed=0.0)
 
 
+def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
+    """--keep-intermediate 指定時に中間生成物を保存する(song2vmd.md 5.2・5.3)。
+
+    S0正規化PCM(input_normalized.wav)・分離後ボーカルWAV(vocal.wav。長尺分割時は核区間を
+    連結した曲全体分)・S2認識結果(segments.json)を、指定ディレクトリへ保存する。書き込み失敗
+    (権限・ディスク等のI/O失敗)は IntermediateWriteError として送出する(song2vmd.md 11章・12.3)。
+    `sf.write` はlibsndfileが開くため失敗を `OSError` でなく `sf.SoundFileError` 系で送出する
+    (`mkdir`/`write_text` の失敗は `OSError`)ため、両方を捕捉する。
+    """
+    try:
+        directory = Path(keep_intermediate_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        sf.write(directory / "input_normalized.wav", pcm.samples, pcm.sample_rate)
+        sf.write(directory / "vocal.wav", vocal_pcm.samples, vocal_pcm.sample_rate)
+        (directory / "segments.json").write_text(
+            json.dumps([asdict(s) for s in segments], ensure_ascii=False, indent=2), encoding="utf-8")
+    except (OSError, sf.SoundFileError) as e:
+        raise IntermediateWriteError(str(e)) from e
+
+
 def run(input_path, *, separate_vocals, separator_name, content_recognizer_model, max_duration_sec,
         use_n_morph, vowel_gain, intensity_curve, silence_on, openness, style_gen,
-        style_name, model_name, progress=None):
+        style_name, model_name, keep_intermediate_dir=None, progress=None):
     """song2vmd の音声→VMDパイプラインを実行する(song2vmd.md 4章・6章)。
 
     content_recognizer_model は vocal_analysis.recognizer.recognize が受け取る
-    ContentRecognizerModel(vocal_analysis.md §5.2・§8.3)。
+    ContentRecognizerModel(vocal_analysis.md §5.2・§8.3)。keep_intermediate_dir を渡すと
+    中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)をそのディレクトリへ保存する(5.2の
+    --keep-intermediate)。省略時(既定None)は何も保存しない。
     """
     _report_stage(progress, "load")
     pcm = _va_io.load_audio(input_path)
     duration_sec = len(pcm.samples) / pcm.sample_rate
 
     if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
-        segments, rms_envelope = _run_single(pcm, separate_vocals, content_recognizer_model, progress)
+        segments, rms_envelope, vocal_pcm = _run_single(
+            pcm, separate_vocals, content_recognizer_model, progress)
     else:
-        segments, rms_envelope = _run_chunked(
+        segments, rms_envelope, vocal_pcm = _run_chunked(
             pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec, progress)
+
+    if keep_intermediate_dir is not None:
+        _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments)
 
     _report_stage(progress, "events")
     mouth_events, event_diag = events.confirm_mouth_events(
@@ -138,7 +170,7 @@ def _run_single(pcm, separate_vocals, content_recognizer_model, progress):
     _report_stage(progress, "rms")
     vocal_pcm = _va_io.load_audio(vocal_path)
     rms_envelope = _va_rms.compute_rms(vocal_pcm)
-    return segments, rms_envelope
+    return segments, rms_envelope, vocal_pcm
 
 
 def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec, progress):
@@ -174,4 +206,4 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model, m
     whole_vocal_pcm = _concat_pcm(vocal_core_chunks)
     _report_stage(progress, "rms")
     rms_envelope = _va_rms.compute_rms(whole_vocal_pcm)
-    return merged_segments, rms_envelope
+    return merged_segments, rms_envelope, whole_vocal_pcm

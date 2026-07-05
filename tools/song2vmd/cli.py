@@ -208,7 +208,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="出力せず処理計画と診断を表示する(引数検証は dry-run でも実施する)")
     p.add_argument("--keep-intermediate", dest="keep_intermediate", action="store_true",
-                   help="中間生成物(正規化PCM・分離WAV・認識結果)を残す(診断用)")
+                   help="中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)を残す(診断用)")
     p.add_argument("-v", "--verbose", dest="verbose", action="store_true",
                    help="詳細ログを標準エラーへ出す")
     p.add_argument("--quiet", dest="quiet", action="store_true",
@@ -431,6 +431,8 @@ def _run(args, emitter, fail) -> int:
         anticipation=args.anticipation, min_hold=args.min_hold)
     progress_reporter = _progress.ProgressReporter(
         machine=emitter is not None, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
+    # 中間生成物は出力先の隣に <出力ファイル名>.intermediate/ を作って保存する(song2vmd.md 5.2・5.3)。
+    keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
 
     try:
         result = _pipeline.run(
@@ -438,13 +440,16 @@ def _run(args, emitter, fail) -> int:
             content_recognizer_model=content_recognizer_model, max_duration_sec=args.max_duration,
             use_n_morph=args.n_morph, vowel_gain=args.vowel_gain, intensity_curve=args.intensity_curve,
             silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
-            style_name=args.style, model_name=args.model_name, progress=progress_reporter)
+            style_name=args.style, model_name=args.model_name,
+            keep_intermediate_dir=keep_intermediate_dir, progress=progress_reporter)
     except AudioLoadError as e:
         return fail("decoder_missing", str(e), 4, field="input")
     except SeparationError as e:
         return fail("stage_failed", str(e), 4, stage="separate")
     except RecognitionError as e:
         return fail("stage_failed", str(e), 4, stage="recognize")
+    except _pipeline.IntermediateWriteError as e:
+        return fail("write_failed", str(e), 3, field="--keep-intermediate", path=keep_intermediate_dir)
 
     if result.diagnostics.low_dynamics:
         # --quiet は進捗表示だけを抑制し、警告は抑制しない(song2vmd.md 5.2)。機械モードは

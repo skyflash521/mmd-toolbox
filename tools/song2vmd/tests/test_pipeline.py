@@ -7,6 +7,8 @@ vocal_analysis(S0読込・S1分離・S2認識・S3 RMS)から song2vmd 自身の
 ここではモックしてパイプライン側の呼び出し・受け渡しだけを検証する)。
 """
 
+import json
+
 import numpy as np
 import pytest
 import soundfile as sf
@@ -480,6 +482,98 @@ def test_run_works_without_progress_reporter(tmp_path, monkeypatch):
 
     result = pipeline.run(input_path, **_common_kwargs())
     assert result.document is not None
+
+
+# --- --keep-intermediate(中間生成物の保存) ------------------------------------
+
+
+def test_keep_intermediate_dir_none_creates_nothing(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    keep_dir = tmp_path / "out.vmd.intermediate"
+    pipeline.run(input_path, **_common_kwargs())  # keep_intermediate_dir省略(既定None)
+    assert not keep_dir.exists()
+
+
+def test_keep_intermediate_saves_normalized_input_vocal_and_segments(tmp_path, monkeypatch):
+    # input と vocal を異なるサンプルレートにし、保存先が入れ替わる退行を検出できるようにする。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0, sample_rate=8000)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, sample_rate=11025, amplitude=0.8)
+    given_segments = [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize", lambda path, content_recognizer_model: given_segments)
+
+    keep_dir = tmp_path / "out.vmd.intermediate"
+    pipeline.run(input_path, keep_intermediate_dir=keep_dir, **_common_kwargs())
+
+    assert (keep_dir / "input_normalized.wav").exists()
+    assert (keep_dir / "vocal.wav").exists()
+    _, saved_input_sr = sf.read(str(keep_dir / "input_normalized.wav"))
+    _, saved_vocal_sr = sf.read(str(keep_dir / "vocal.wav"))
+    assert saved_input_sr == 8000
+    assert saved_vocal_sr == 11025
+    segments_path = keep_dir / "segments.json"
+    assert segments_path.exists()
+    saved = json.loads(segments_path.read_text(encoding="utf-8"))
+    assert saved == [
+        {"type": "vowel", "start_sec": 0.0, "end_sec": 1.0, "phoneme": "a", "confidence": 0.9},
+    ]
+
+
+def test_keep_intermediate_write_failure_raises_intermediate_write_error(tmp_path, monkeypatch):
+    # sf.write はlibsndfileが開くため、失敗を OSError でなく sf.SoundFileError 系で送出する。
+    # モックで OSError を偽装せず、書き込み先の名前をディレクトリで塞いで実際に失敗させる。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    keep_dir = tmp_path / "out.vmd.intermediate"
+    keep_dir.mkdir()
+    (keep_dir / "input_normalized.wav").mkdir()  # 同名ディレクトリで sf.write の書き込み先を塞ぐ
+
+    with pytest.raises(pipeline.IntermediateWriteError):
+        pipeline.run(input_path, keep_intermediate_dir=keep_dir, **_common_kwargs())
+
+
+def test_keep_intermediate_chunked_saves_concatenated_vocal(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=6.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=6.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [3.0])
+    monkeypatch.setattr(
+        pipeline.chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    keep_dir = tmp_path / "out.vmd.intermediate"
+    pipeline.run(input_path, keep_intermediate_dir=keep_dir, **_common_kwargs(max_duration_sec=3.0))
+
+    saved_samples, saved_sr = sf.read(str(keep_dir / "vocal.wav"), dtype="float32", always_2d=True)
+    # 曲全体(6秒)分の核区間連結ボーカルが保存される(チャンクごとの重複区間を含まない)。
+    assert saved_samples.shape[0] == pytest.approx(6.0 * saved_sr, abs=saved_sr * 0.01)
 
 
 # --- PCMスライス/連結ヘルパ(純粋ロジック) -------------------------------------

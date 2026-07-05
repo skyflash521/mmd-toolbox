@@ -645,7 +645,7 @@ MMD/MMM上の視覚確認で調整する。特に開き量レンジ・最小保�
 | 入力を音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
 | 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。`--recognizer-model-id` を指定せず `--recognizer-model-revision` だけを指定した場合(組み合わせ検証。5.2)も含む | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は対象引数の長形式フラグ名 | 2 |
 | 出力先が入力と同一パス・`--overwrite` 未指定(5.3) | `output_overwrites_input` | `"--output"` | 2 |
-| 出力書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"`(+ `path`) | 3 |
+| 出力書き込み失敗、または `--keep-intermediate` 指定時の中間生成物書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"` または `"--keep-intermediate"`(+ `path`) | 3 |
 | 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない(vocal_analysis.md §3) | `decoder_missing` | `"input"` | 4 |
 | 分離・認識のモデル取得/実行失敗 | `stage_failed`(+ `stage`) | `null` | 4 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |

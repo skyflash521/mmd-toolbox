@@ -2,7 +2,7 @@
 
 cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(PipelineResult)を
 --dry-run の人間向けレポート/機械モードの result イベント、VMD 書き出し、警告発行、
-エラー変換(AudioLoadError/SeparationError/RecognitionError)・中断(KeyboardInterrupt)へ
+エラー変換(AudioLoadError/SeparationError/RecognitionError/IntermediateWriteError)・中断(KeyboardInterrupt)へ
 正しく橋渡しすることを検証する。pipeline.run 自体はモックし、実音声処理は行わない。
 """
 
@@ -81,6 +81,17 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["silence_on"] == 0.06
     assert kwargs["model_name"] == ""
     assert kwargs["progress"] is not None
+    assert kwargs["keep_intermediate_dir"] is None
+
+
+def test_keep_intermediate_resolves_to_output_path_plus_suffix(tmp_path, monkeypatch):
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "out.vmd"
+    captured = _capture_run_kwargs(monkeypatch)
+
+    rc = cli.main([src, "-o", str(out), "--keep-intermediate", "--dry-run"])
+    assert rc == 0
+    assert captured["kwargs"]["keep_intermediate_dir"] == f"{out}.intermediate"
 
 
 def test_run_builds_custom_content_recognizer_model_from_cli_options(tmp_path, monkeypatch):
@@ -280,6 +291,22 @@ def test_recognition_error_maps_to_stage_failed_recognize(tmp_path, monkeypatch,
     events = _events_of(capsysbinary)
     assert events[-1]["code"] == "stage_failed"
     assert events[-1]["stage"] == "recognize"
+
+
+def test_intermediate_write_error_maps_to_write_failed(tmp_path, monkeypatch, capsysbinary):
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(
+        cli._pipeline, "run",
+        lambda *a, **k: (_ for _ in ()).throw(_pipeline.IntermediateWriteError("disk full")))
+
+    rc = cli.main([src, "--keep-intermediate", "--machine", "--dry-run"])
+    assert rc == 3
+    events = _events_of(capsysbinary)
+    assert events[-1]["type"] == "error"
+    assert events[-1]["code"] == "write_failed"
+    assert events[-1]["field"] == "--keep-intermediate"
+    assert events[-1]["path"] == f"{tmp_path / 'in.vmd'}.intermediate"
+    assert events[-1]["exit_code"] == 3
 
 
 def test_recognizer_model_revision_without_id_machine_mode_emits_bad_argument(tmp_path, monkeypatch, capsysbinary):
