@@ -11,12 +11,12 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-pytest.importorskip("song2vmd.pipeline", reason="impl pending: song2vmd pipeline")
-
-from vocal_analysis import Segment
+from vocal_analysis import ContentRecognizerModel, Segment
 from vocal_analysis.types import AudioPcm
 
-from song2vmd import chunking, pipeline, presets
+from song2vmd import pipeline, presets
+
+_TEST_MODEL = ContentRecognizerModel(model_id="test-content-recognizer")
 
 
 def write_wav(path, seconds, sample_rate=8000, channels=2, amplitude=0.5):
@@ -44,7 +44,7 @@ def _common_kwargs(**overrides):
     openness, style_gen = presets.resolve("pop")
     kw = dict(
         separate_vocals="auto", separator_name="audio-separator-htdemucs-ft",
-        recognizer_name="whisper-ctc-forcedalign", max_duration_sec=300.0, use_n_morph=True,
+        content_recognizer_model=_TEST_MODEL, max_duration_sec=300.0, use_n_morph=True,
         vowel_gain=(1.0, 1.0, 1.0, 1.0, 1.0), intensity_curve=0.6, silence_on=0.06,
         openness=openness, style_gen=style_gen, style_name="pop", model_name="",
     )
@@ -64,7 +64,7 @@ def test_single_run_calls_stages_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     progress = _RecordingProgress()
     result = pipeline.run(input_path, progress=progress, **_common_kwargs())
@@ -106,7 +106,7 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
         captured["separate_pcm"] = pcm
         return vocal_path
 
-    def spy_recognize(path, adapter_id):
+    def spy_recognize(path, content_recognizer_model):
         call_order.append("recognize")
         captured["recognize_path"] = path
         return given_segments
@@ -128,6 +128,10 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
         call_order.append("build_vmd_document")
         return real_build(events_, params, model_name)
 
+    class _OrderRecordingProgress:
+        def stage(self, stage, *, done=0, total=None, note="", elapsed=0.0):
+            call_order.append(f"progress:{stage}")
+
     monkeypatch.setattr(pipeline._va_io, "load_audio", spy_load_audio)
     monkeypatch.setattr(pipeline._va_separator, "separate", spy_separate)
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", spy_recognize)
@@ -136,13 +140,16 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
     monkeypatch.setattr(pipeline.morphs, "build_vmd_document", spy_build)
 
     openness, style_gen = presets.resolve("pop")
-    pipeline.run(input_path, **_common_kwargs(
+    pipeline.run(input_path, progress=_OrderRecordingProgress(), **_common_kwargs(
         openness=openness, intensity_curve=0.7, silence_on=0.05, use_n_morph=False))
 
-    # load_audioは入力読み込みと(分離後の)ボーカル読み込みの2回呼ばれる。
+    # load_audioは入力読み込みと(分離後の)ボーカル読み込みの2回呼ばれる。各段のprogress発行
+    # ("progress:X")は、その段の実処理("X")より必ず前に来る(song2vmd.md 12.1「各段は開始時に
+    # 最低1本のprogressを出す」の後退を防ぐ回帰テスト)。
     assert call_order == [
-        "load_audio", "separate", "recognize", "load_audio", "compute_rms",
-        "confirm_mouth_events", "build_vmd_document",
+        "progress:load", "load_audio", "progress:separate", "separate", "progress:recognize",
+        "recognize", "progress:rms", "load_audio", "compute_rms", "progress:events",
+        "confirm_mouth_events", "progress:generate", "build_vmd_document",
     ]
     assert str(captured["recognize_path"]) == str(vocal_path)
     # 1回目のload_audioの戻り値がそのままseparateへ渡ること、compute_rmsの戻り値がそのまま
@@ -165,10 +172,11 @@ def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, m
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     result = pipeline.run(input_path, **_common_kwargs(
-        separator_name="sep-x", recognizer_name="rec-y", style_name="ballad", separate_vocals="always"))
+        separator_name="sep-x", content_recognizer_model=ContentRecognizerModel(model_id="rec-y"),
+        style_name="ballad", separate_vocals="always"))
 
     assert result.diagnostics.backends == {"separator": "sep-x", "recognizer": "rec-y"}
     assert result.diagnostics.style == "ballad"
@@ -187,13 +195,13 @@ def test_separated_flag_matches_separate_vocals_mode(tmp_path, monkeypatch, mode
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, m: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     result = pipeline.run(input_path, **_common_kwargs(separate_vocals=mode))
     assert result.diagnostics.separated is expected
 
 
-def test_recognizer_receives_selected_adapter_id(tmp_path, monkeypatch):
+def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -201,15 +209,16 @@ def test_recognizer_receives_selected_adapter_id(tmp_path, monkeypatch):
 
     received = {}
 
-    def fake_recognize(path, adapter_id):
-        received["adapter_id"] = adapter_id
+    def fake_recognize(path, content_recognizer_model):
+        received["content_recognizer_model"] = content_recognizer_model
         return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
-    pipeline.run(input_path, **_common_kwargs(recognizer_name="whisper-ctc-forcedalign"))
-    assert received["adapter_id"] == "whisper-ctc-forcedalign"
+    given_model = ContentRecognizerModel(model_id="whisper-ctc-forcedalign", model_revision="rev1")
+    pipeline.run(input_path, **_common_kwargs(content_recognizer_model=given_model))
+    assert received["content_recognizer_model"] is given_model
 
 
 def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monkeypatch):
@@ -221,7 +230,7 @@ def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monke
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     captured = {}
     real_build = pipeline.morphs.build_vmd_document
@@ -278,7 +287,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
 
     recognize_calls = []
 
-    def fake_recognize(path, adapter_id):
+    def fake_recognize(path, content_recognizer_model):
         recognize_calls.append(path)
         return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
@@ -295,16 +304,18 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
     assert separate_calls[1] == pytest.approx(5.0, abs=0.05)  # [3-1, 6+1]
     assert separate_calls[2] == pytest.approx(5.0, abs=0.05)  # [6-1, 10]
     assert result.diagnostics.duration_sec == pytest.approx(10.0, abs=0.05)
+    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり。song2vmd.md 12.1)。
     separate_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "separate"]
-    assert separate_done_totals == [(1, 3), (2, 3), (3, 3)]
+    assert separate_done_totals == [(0, 3), (1, 3), (2, 3)]
 
 
 def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_events(tmp_path, monkeypatch):
     # 境界決定(find_chunk_boundaries)には分離前の生音声のRMSを使い、口形イベント確定
     # (events.confirm_mouth_events)にはチャンクの核区間を連結した曲全体のボーカルRMSを
     # 1回だけ渡す(チャンクごとに個別正規化しない。song2vmd.md 6.4・6.6)ことを検証する。
-    # rms.compute_rmsは実関数をそのまま通し、生音声(振幅0.5)とボーカル音声(振幅0.8)の
-    # 振幅差で呼び出しごとの入力を識別する。
+    # rms.compute_rmsは実関数をそのまま通し、どちらの呼び出しがどの下流(境界決定/events)へ
+    # 渡ったかは戻り値の同一性(is)で識別する(io.load_audioがピーク正規化するため、振幅の
+    # 大小では入力を識別できない)。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0, amplitude=0.5)
     vocal_path = tmp_path / "vocal.wav"
@@ -323,14 +334,12 @@ def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_e
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
-    rms_input_peaks = []
     compute_rms_results = []
     real_compute_rms = pipeline._va_rms.compute_rms
 
     def recording_compute_rms(pcm):
-        rms_input_peaks.append(float(np.max(np.abs(pcm.samples))) if pcm.samples.size else 0.0)
         result = real_compute_rms(pcm)
         compute_rms_results.append(result)
         return result
@@ -351,15 +360,63 @@ def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_e
     assert len(boundary_calls) == 1
     assert boundary_calls[0][0] == pytest.approx(10.0, abs=0.05)
     # compute_rmsはちょうど2回: (1)境界決定用の生音声、(2)events用の曲全体ボーカル。
-    assert len(rms_input_peaks) == 2
-    assert rms_input_peaks[0] == pytest.approx(0.5, abs=0.05)  # 生音声(振幅0.5)
-    assert rms_input_peaks[1] == pytest.approx(0.8, abs=0.05)  # ボーカル(振幅0.8)
+    assert len(compute_rms_results) == 2
     # 1回目のcompute_rmsの戻り値がそのままfind_chunk_boundariesへ、2回目の戻り値がそのまま
     # confirm_mouth_eventsへ渡ること(取り違えが無いこと)を同一性で確認する。
     assert boundary_calls[0][1] is compute_rms_results[0].times_sec
     assert boundary_calls[0][2] is compute_rms_results[0].values
     assert len(confirm_rms_args) == 1
     assert confirm_rms_args[0] is compute_rms_results[1]
+
+
+def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeypatch):
+    # 各チャンクの分離済みボーカル音声の振幅が異なるとき(曲の強弱)、チャンクごとの読み込みで
+    # vocal_analysis.io.load_audioのピーク正規化(目標値固定)を経由すると、静かなチャンクも
+    # 大きいチャンクも独立に同じ目標振幅へ引き伸ばされ、チャンク間の相対的な強弱(曲全体基準の
+    # RMS。song2vmd.md 6.4・6.6)が壊れる。核区間を連結した曲全体のボーカル音声が、チャンクごとの
+    # 元の振幅差を保持していることを検証する。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=6.0)
+    quiet_vocal = tmp_path / "vocal_quiet.wav"
+    write_wav(quiet_vocal, seconds=6.0, amplitude=0.1)
+    loud_vocal = tmp_path / "vocal_loud.wav"
+    write_wav(loud_vocal, seconds=6.0, amplitude=0.9)
+
+    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [3.0])
+    monkeypatch.setattr(
+        pipeline.chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+
+    separate_call_count = [0]
+
+    def fake_separate(pcm, mode):
+        separate_call_count[0] += 1
+        return quiet_vocal if separate_call_count[0] == 1 else loud_vocal
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", fake_separate)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    compute_rms_pcms = []
+    real_compute_rms = pipeline._va_rms.compute_rms
+
+    def recording_compute_rms(pcm):
+        compute_rms_pcms.append(pcm)
+        return real_compute_rms(pcm)
+
+    monkeypatch.setattr(pipeline._va_rms, "compute_rms", recording_compute_rms)
+
+    pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+
+    # compute_rmsは2回呼ばれる: (1)境界決定用の生音声、(2)events用の曲全体ボーカル。
+    whole_vocal_samples = compute_rms_pcms[1].samples
+    half = len(whole_vocal_samples) // 2
+    first_half_peak = float(np.max(np.abs(whole_vocal_samples[:half])))
+    second_half_peak = float(np.max(np.abs(whole_vocal_samples[half:])))
+    # ピーク正規化がチャンクごとにかかっていれば両半分とも同じ目標振幅になり見分けがつかない。
+    # 個別正規化を経ていなければ、静かな前半(0.1)と大きい後半(0.9)の振幅差が保たれる。
+    assert first_half_peak < second_half_peak * 0.5
 
 
 def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monkeypatch):
@@ -375,13 +432,14 @@ def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monk
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     progress = _RecordingProgress()
     pipeline.run(input_path, progress=progress, **_common_kwargs(max_duration_sec=3.0))
 
+    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり。song2vmd.md 12.1)。
     recognize_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "recognize"]
-    assert recognize_done_totals == [(1, 2), (2, 2)]
+    assert recognize_done_totals == [(0, 2), (1, 2)]
 
 
 def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_recognize(tmp_path, monkeypatch):
@@ -394,7 +452,7 @@ def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_reco
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     progress = _RecordingProgress()
     pipeline.run(input_path, progress=progress, **_common_kwargs())
@@ -418,7 +476,7 @@ def test_run_works_without_progress_reporter(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
-        lambda path, adapter_id: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, content_recognizer_model: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     result = pipeline.run(input_path, **_common_kwargs())
     assert result.document is not None

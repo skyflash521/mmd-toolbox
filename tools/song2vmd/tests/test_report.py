@@ -90,6 +90,18 @@ def test_merged_morae_comes_from_event_diagnostics():
     assert diag.merged_morae == 7
 
 
+def test_low_dynamics_comes_from_event_diagnostics():
+    # low_dynamicsは機械モードのresultペイロードには載せない(呼び出し側のwarningイベント判定専用。
+    # song2vmd.md 12.1)ため、result_run_fields/result_inspect_fieldsのキー集合検証とは別に
+    # Diagnostics自体のフィールドとして直接検証する。
+    assert diag_of(
+        event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=True, merged_morae=0)
+    ).low_dynamics is True
+    assert diag_of(
+        event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0)
+    ).low_dynamics is False
+
+
 def test_mora_details_lists_only_vowel_like_events_with_shape_and_hold():
     mouth_events = [mev(MouthShape.A, 0, 10, 0.4), mev(MouthShape.BILABIAL, 10, 12), mev(MouthShape.N, 12, 18, 0.3)]
     diag = diag_of(mouth_events=mouth_events, keys=3)

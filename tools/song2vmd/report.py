@@ -31,7 +31,11 @@ class MoraReport:
 
 @dataclass(frozen=True)
 class Diagnostics:
-    """song2vmd.md 6.7・12.1 が定める統計をまとめた診断データ。"""
+    """song2vmd.md 6.7・12.1 が定める統計をまとめた診断データ。
+
+    low_dynamics は機械モードのresultペイロード(12.1のキー集合)には含まれない。呼び出し側が
+    warningイベント(code="low_dynamics_suppressed"。12.1)を出すかどうかの判定に使う。
+    """
 
     backends: dict
     style: str
@@ -45,6 +49,7 @@ class Diagnostics:
     duration_sec: float
     keys: int
     mora_details: tuple
+    low_dynamics: bool
 
 
 def build_diagnostics(*, segments, mouth_events, event_diagnostics, backends, style, separated,
@@ -64,6 +69,7 @@ def build_diagnostics(*, segments, mouth_events, event_diagnostics, backends, st
         backends=dict(backends), style=style, separated=separated, phonemes=phonemes, morae=morae,
         merged_morae=event_diagnostics.merged_morae, coverage=coverage, closed_ranges=closed_ranges,
         max_opening=max_opening, duration_sec=duration_sec, keys=keys, mora_details=mora_details,
+        low_dynamics=event_diagnostics.low_dynamics,
     )
 
 
