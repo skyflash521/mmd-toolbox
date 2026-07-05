@@ -449,8 +449,9 @@ def test_min_stay_expansion_forces_phoneme_to_occupy_expanded_frames():
     from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay, _forced_align
 
     # blankが全面的に優勢で音素(id=1)は1フレームしか優勢でない放出確率。展開なしなら
-    # 音素に1フレームだけ滞在する経路が最尤になる構成だが、サブ状態連鎖(10フレームに
-    # サブ状態7個で経路に自由度が残る)により元トークンの滞在は最小滞在フレーム数以上になる。
+    # 音素に1フレームだけ滞在する経路が最尤になる構成だが、サブ状態連鎖(展開後は
+    # blank2個+音素_MIN_STAY_FRAMES個で10フレームに経路の自由度が残る)により
+    # 元トークンの滞在は最小滞在フレーム数以上になる。
     log_probs = np.array(
         [[5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [-5.0, 5.0],
          [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0]]

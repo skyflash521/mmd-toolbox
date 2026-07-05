@@ -226,7 +226,7 @@ def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_t
 
 
 _FORCED_ALIGN_BAND_SEC = 1.0  # §5.2手順7: blank支配下での押し込み崩壊を防ぐ位置バンド幅
-_MIN_STAY_FRAMES = 5  # §5.2手順7: 非blank(音素)状態の最小滞在フレーム数(100ms)
+_MIN_STAY_FRAMES = 6  # §5.2手順7: 非blank(音素)状態の最小滞在フレーム数(120ms)
 _VOICED_BLANK_PENALTY = 7.0  # §5.2手順7: 有声フレームのblank列から引く対数確率ペナルティ
 
 
