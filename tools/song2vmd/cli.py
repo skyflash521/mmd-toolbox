@@ -1,9 +1,9 @@
 """song2vmd CLI(song2vmd.md §5)。
 
 日本語の歌声音声からアニメ的口パクの口パク VMD を1コマンドで生成する独立 CLI。本ファイルは
-引数解析・検証・出力先解決・上書きガードと `--dry-run` の空実行を実装する。実際の変換パイプライン
-(vocal_analysis による音声読み込み・分離・認識・強弱RMS算出 → 口形イベント確定 → lipsync による
-モーフキー生成 → vmd.io による VMD 出力)は `_run()` に未実装(`NotImplementedError`)。
+引数解析・検証・出力先解決・上書きガードと、`pipeline`(vocal_analysis による音声読み込み・分離・
+認識・強弱RMS算出 → 口形イベント確定 → lipsync によるモーフキー生成)の呼び出し・
+`vmd.io` による VMD 出力・レポート/診断(`report`)・進捗表示(`progress`)への配線を実装する。
 
 終了コード(song2vmd.md 11章): 0 正常 / 1 入力不正 / 2 引数エラー(範囲・書式・上書きガード等) /
 3 出力書き込み失敗 / 4 音声前段の外部依存の失敗(失敗ステージ明示) / 130 協調的な中断(Ctrl-C 等)。
@@ -26,9 +26,17 @@ from cli_events import (
     argparse_error_field,
     error_event,
 )
+from vocal_analysis import ContentRecognizerModel, DEFAULT_CONTENT_RECOGNIZER_MODEL
+from vocal_analysis.io import AudioLoadError
+from vocal_analysis.recognizer import RecognitionError
+from vocal_analysis.separator import SeparationError
+from vmd import write_file as _vmd_write_file
 
 from . import __version__
+from . import pipeline as _pipeline
 from . import presets as _presets
+from . import progress as _progress
+from . import report as _report
 
 # 歌い方スタイルプリセット名(song2vmd.md 8.1)。具体値の解決は presets モジュールが持つ。
 STYLE_NAMES = _presets.STYLE_NAMES
@@ -36,11 +44,11 @@ STYLE_NAMES = _presets.STYLE_NAMES
 # --separate-vocals の実施方針(song2vmd.md 5.2)。
 SEPARATE_VOCALS_MODES = ("auto", "always", "never")
 
-# S1/S2 の登録アダプタの安定 id(vocal_analysis.md §8.2・§8.3 が正本)。選択肢の公開は利用先 CLI の
+# S1 の登録アダプタの安定 id(vocal_analysis.md §8.2・§8.3 が正本)。選択肢の公開は利用先 CLI の
 # 責務なので、現行の採用アダプタ id をここで公開する(採用アダプタの追加・変更は vocal_analysis.md
-# §8.3 を先に更新してから、この一覧を追随させる)。
+# §8.3 を先に更新してから、この一覧を追随させる)。S2内容認識モデルは安定idでなく
+# `--recognizer-model-id`/`--recognizer-model-revision`(ContentRecognizerModel。5.2)で選ぶ。
 SEPARATOR_NAMES = ("audio-separator-htdemucs-ft",)
-RECOGNIZER_NAMES = ("whisper-ctc-forcedalign",)
 
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS(song2vmd.md 5.2・9章)。
 _MODEL_NAME_MAX_BYTES = 20
@@ -123,11 +131,11 @@ def _vowel_gain(text: str) -> tuple:
 
 
 def _silence_threshold(text: str) -> tuple:
-    """--silence-threshold の `ON:OFF` を (on, off) へ解析する(song2vmd.md 4.3・8.1)。
+    """--silence-threshold の `ON:OFF` を (on, off) へ解析する(song2vmd.md 6.4・8.1)。
 
-    正規化RMSのヒステリシスしきい値で、いずれも 0.0〜1.0。開いている状態から閉口へ入る
-    下降側(ON)は、閉じている状態から開口へ戻る上昇側(OFF)より小さくなければならない
-    (下降側 < 上昇側。無音ヒステリシスの意味上の制約)。
+    正規化RMSのヒステリシスしきい値で、いずれも 0.0〜1.0。無音/継続の判定に使う下降側(ON)は
+    上昇側(OFF)より小さくなければならない(下降側 < 上昇側。無音ヒステリシスの意味上の制約)。
+    上昇側(OFF)は無音状態からの母音復帰自体の判定には使わない(song2vmd.md 6.4)。
     """
     parts = text.split(":")
     if len(parts) != 2:
@@ -167,8 +175,14 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    default="auto", help="ボーカル分離の実施方針(auto/always/never)")
     p.add_argument("--separator", choices=SEPARATOR_NAMES, default=SEPARATOR_NAMES[0],
                    help="S1ボーカル分離バックエンドの選択(vocal_analysisの登録アダプタ安定id)")
-    p.add_argument("--recognizer", choices=RECOGNIZER_NAMES, default=RECOGNIZER_NAMES[0],
-                   help="S2音素/母音認識バックエンドの選択(vocal_analysisの登録アダプタ安定id)")
+    p.add_argument("--recognizer-model-id", dest="recognizer_model_id", default=None,
+                   help=f"S2内容認識モデルの指定。未指定時は vocal_analysis の既定モデル"
+                        f"(model_id={DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id!r}・"
+                        f"model_revision={DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision!r}固定)を使う")
+    p.add_argument("--recognizer-model-revision", dest="recognizer_model_revision", default=None,
+                   help="--recognizer-model-id のリビジョン指定(組で使う。--recognizer-model-id "
+                        "指定時にこれを省略すると最新リビジョンを使う。--recognizer-model-id 自体を"
+                        "省略した場合は本オプションは無視されず引数エラーになる)")
     # --n-morph / --no-n-morph は既定 on の対(song2vmd.md 5.2)。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
                    help="撥音「ん」に「ん」モーフを使う(既定on)。--no-n-morphの対の明示形")
@@ -236,7 +250,8 @@ _D_TYPE = {
     "style": ("enum", {"choices": list(STYLE_NAMES)}),
     "separate_vocals": ("enum", {"choices": list(SEPARATE_VOCALS_MODES)}),
     "separator": ("enum", {"choices": list(SEPARATOR_NAMES)}),
-    "recognizer": ("enum", {"choices": list(RECOGNIZER_NAMES)}),
+    "recognizer_model_id": ("str", None),
+    "recognizer_model_revision": ("str", None),
     "n_morph": ("flag", None),
     "vowel_gain": ("compound", _D_COMPOUND["vowel_gain"]),
     "open_max": ("float", _D_UNIT),
@@ -329,12 +344,15 @@ def main(argv=None) -> int:
     describe = "--describe" in argv
     emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
 
-    def fail(code, message, exit_code, *, field=None, path=None):
+    def fail(code, message, exit_code, *, field=None, path=None, stage=None):
         """失敗を報告して終了コードを返す(12.3)。構造化出力モードは error イベントでストリームを終端し、
-        それ以外は理由を標準エラーへ1行出す(トレースバックは出さない)。"""
+        それ以外は理由を標準エラーへ1行出す(トレースバックは出さない)。stage は stage_failed のみが
+        持つ追加キー(失敗ステージの安定id。12.1のprogressと同じ語彙)。"""
         if emitter is not None:
-            emitter.error(**error_event(
-                code=code, message=message, exit_code=exit_code, field=field, path=path))
+            event = error_event(code=code, message=message, exit_code=exit_code, field=field, path=path)
+            if stage is not None:
+                event["stage"] = stage
+            emitter.error(**event)
         else:
             print(f"error: {message}", file=sys.stderr)
         return exit_code
@@ -370,12 +388,29 @@ def main(argv=None) -> int:
         return fail("internal_error", f"{type(e).__name__}: {e}", 1)
 
 
-def _run(args, emitter, fail) -> int:
-    """引数解析済みの本体(検証 → 空実行 or 変換)。失敗は fail() で終端する(12.3)。
+def _resolve_content_recognizer_model(args):
+    """--recognizer-model-id/--recognizer-model-revision から ContentRecognizerModel を組み立てる
+    (song2vmd.md 5.2)。--recognizer-model-id 未指定時は vocal_analysis の既定モデルを使う。"""
+    if args.recognizer_model_id is None:
+        return DEFAULT_CONTENT_RECOGNIZER_MODEL
+    return ContentRecognizerModel(
+        model_id=args.recognizer_model_id, model_revision=args.recognizer_model_revision)
 
-    出力先解決・上書きガード・`--dry-run` の空実行のみを実装する。音声読み込み〜VMD書き出しの
-    変換パイプライン(非 dry-run の実行、および `--machine --dry-run` の入力検査 result)は未実装。
-    """
+
+def _report_params(args, openness, style_gen):
+    """--dry-run の人間向けレポート(6.7の「選択した...主要パラメータ」)に載せる解決後パラメータ。"""
+    return {
+        "open_lo": openness.open_lo, "open_hi": openness.open_hi, "open_max": openness.open_max,
+        "intensity_curve": args.intensity_curve,
+        "silence_threshold_on": args.silence_threshold[0], "silence_threshold_off": args.silence_threshold[1],
+        "coarticulation": style_gen.coartic_overlap_max, "anticipation": style_gen.anticipation_frames,
+        "min_hold": style_gen.min_hold_frames, "vowel_gain": args.vowel_gain,
+        "max_duration_sec": args.max_duration,
+    }
+
+
+def _run(args, emitter, fail) -> int:
+    """引数解析済みの本体(検証 → パイプライン実行 → 空実行/書き出し)。失敗は fail() で終端する(12.3)。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
     # 上書きガード(song2vmd.md 5.3): 出力先が入力と同一パスになる指定だけを --overwrite 無しで拒否する。
@@ -384,12 +419,60 @@ def _run(args, emitter, fail) -> int:
         return fail("output_overwrites_input",
                     f"出力先が入力と同一パスです(--overwrite が必要): {output}", 2, field="--output")
 
-    # --dry-run は出力を書かずに終える(song2vmd.md 5.2の「空実行」)。機械モードは result/error の
-    # ちょうど1つで終端する契約(12章・CLI インターフェース規約 §4)のため、`--machine --dry-run` の
-    # 入力検査 result は未実装のため、無イベントで正常終了させず internal_error へ畳む。
+    # --recognizer-model-id 未指定なのに --recognizer-model-revision だけを指定するのは対象が無く無意味。
+    if args.recognizer_model_id is None and args.recognizer_model_revision is not None:
+        return fail("bad_argument",
+                    "--recognizer-model-revision は --recognizer-model-id と組で指定する",
+                    2, field="--recognizer-model-revision")
+
+    content_recognizer_model = _resolve_content_recognizer_model(args)
+    openness, style_gen = _presets.resolve(
+        args.style, open_max=args.open_max, coarticulation=args.coarticulation,
+        anticipation=args.anticipation, min_hold=args.min_hold)
+    progress_reporter = _progress.ProgressReporter(
+        machine=emitter is not None, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
+
+    try:
+        result = _pipeline.run(
+            args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
+            content_recognizer_model=content_recognizer_model, max_duration_sec=args.max_duration,
+            use_n_morph=args.n_morph, vowel_gain=args.vowel_gain, intensity_curve=args.intensity_curve,
+            silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
+            style_name=args.style, model_name=args.model_name, progress=progress_reporter)
+    except AudioLoadError as e:
+        return fail("decoder_missing", str(e), 4, field="input")
+    except SeparationError as e:
+        return fail("stage_failed", str(e), 4, stage="separate")
+    except RecognitionError as e:
+        return fail("stage_failed", str(e), 4, stage="recognize")
+
+    if result.diagnostics.low_dynamics:
+        # --quiet は進捗表示だけを抑制し、警告は抑制しない(song2vmd.md 5.2)。機械モードは
+        # warning イベント、非機械モードは標準エラーへの1行(12.1・5.2 の警告非抑制の趣旨)。
+        if emitter is not None:
+            emitter.warning(code="low_dynamics_suppressed",
+                            message="曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました")
+        else:
+            print("warning: 曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました",
+                  file=sys.stderr)
+
+    # --dry-run は出力を書かずに終える(song2vmd.md 5.2の「空実行」)。診断は実データから得る(6.7)。
     if args.dry_run:
         if emitter is not None:
-            raise NotImplementedError("song2vmd: --machine --dry-run の入力検査は未実装")
+            emitter.result(mode="inspect", **_report.result_inspect_fields(
+                result.diagnostics, input_kind="audio",
+                sample_rate=result.sample_rate, channels=result.channels))
+        else:
+            params = _report_params(args, openness, style_gen)
+            sys.stdout.write(_report.render_report_text(result.diagnostics, params))
         return 0
 
-    raise NotImplementedError("song2vmd: 音声処理パイプラインは未実装")
+    progress_reporter.stage("write")
+    try:
+        _vmd_write_file(result.document, output)
+    except OSError as e:
+        return fail("write_failed", str(e), 3, field="--output", path=output)
+
+    if emitter is not None:
+        emitter.result(mode="run", **_report.result_run_fields(result.diagnostics, output=output))
+    return 0

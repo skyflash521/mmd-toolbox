@@ -1,7 +1,8 @@
 """song2vmd CLI 骨組みのテスト(song2vmd.md §5・11章)。
 
-範囲は CLI の起動・引数解析・検証・出力先解決・上書きガードと `--dry-run` の空実行(出力を書かない)に
-限る。音声読み込み・口形イベント確定・lipsync 連携・VMD 生成は音声処理パイプラインの実装後に検証する。
+範囲は CLI の起動・引数解析・検証・出力先解決・上書きガードと `--dry-run` の(出力を書かない)経路に
+限る。実際の音声処理パイプライン(`pipeline.run`)は決定論的なスタブに差し替え、引数の受理・検証・
+出力先解決だけを対象にする(パイプラインの実データ配線は test_cli_run.py で検証する)。
 
 終了コード(song2vmd.md 11章): 0 正常 / 1 入力不正 / 2 引数エラー(未知オプション・範囲不正・
 上書きガード等) / 3 出力書き込み失敗 / 4 音声前段の外部依存の失敗 / 130 協調的な中断。
@@ -10,11 +11,32 @@
 import pytest
 
 from song2vmd import cli
+from song2vmd import events as _events
+from song2vmd import pipeline as _pipeline
+from song2vmd import report as _report
+from vmd import VmdDocument
 
 
 def _touch(path):
     path.write_bytes(b"")
     return str(path)
+
+
+def _stub_pipeline_result():
+    document = VmdDocument(model_name_raw=b"\x00" * 20, morph=[])
+    diagnostics = _report.build_diagnostics(
+        segments=[], mouth_events=[],
+        event_diagnostics=_events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
+        backends={"separator": "audio-separator-htdemucs-ft", "recognizer": "openai/whisper-medium"},
+        style="pop", separated=True, duration_sec=1.0, keys=0,
+    )
+    return _pipeline.PipelineResult(document=document, diagnostics=diagnostics, sample_rate=44100, channels=2)
+
+
+@pytest.fixture(autouse=True)
+def _stub_pipeline_run(monkeypatch):
+    """cli.py の引数解析・検証だけを対象にするため、実処理(pipeline.run)を決定論的スタブへ差し替える。"""
+    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: _stub_pipeline_result())
 
 
 # --- 主要オプションの受理と --dry-run の空実行 -------------------------------
@@ -31,7 +53,8 @@ def test_parses_full_option_set_in_dry_run(tmp_path):
         "--style", "ballad",
         "--separate-vocals", "always",
         "--separator", "audio-separator-htdemucs-ft",
-        "--recognizer", "whisper-ctc-forcedalign",
+        "--recognizer-model-id", "openai/whisper-medium",
+        "--recognizer-model-revision", "abc123",
         "--no-n-morph",
         "--vowel-gain", "1.0:0.9:0.8:0.7:0.6",
         "--open-max", "0.8",
@@ -139,9 +162,16 @@ def test_unknown_separator_is_arg_error(tmp_path):
     assert cli.main([src, "--separator", "nope", "--dry-run"]) == 2
 
 
-def test_unknown_recognizer_is_arg_error(tmp_path):
+def test_recognizer_model_id_accepts_any_string(tmp_path):
+    """--recognizer-model-id は安定idでなく自由な文字列(vocal_analysis.md §5.2)。"""
     src = _touch(tmp_path / "in.wav")
-    assert cli.main([src, "--recognizer", "nope", "--dry-run"]) == 2
+    assert cli.main([src, "--recognizer-model-id", "anything/goes", "--dry-run"]) == 0
+
+
+def test_recognizer_model_revision_without_model_id_is_arg_error(tmp_path):
+    """--recognizer-model-revision だけの指定は対象が無く無意味なので引数エラー。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--recognizer-model-revision", "abc123", "--dry-run"]) == 2
 
 
 @pytest.mark.parametrize("opt", ["--open-max", "--intensity-curve", "--max-duration"])
@@ -295,6 +325,6 @@ def test_help_lists_key_flags(capsys):
     assert rc == 0
     text = capsys.readouterr().out
     for flag in ("--machine", "--describe", "--quiet", "--version", "--style",
-                 "--separate-vocals", "--separator", "--recognizer", "--vowel-gain",
+                 "--separate-vocals", "--separator", "--recognizer-model-id", "--vowel-gain",
                  "--silence-threshold", "--no-n-morph"):
         assert flag in text

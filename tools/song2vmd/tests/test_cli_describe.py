@@ -23,7 +23,7 @@ def _ffield(name, mn, mx, ex):
     return {"name": name, "type": "float", "min": mn, "max": mx, "exclusive_min": ex}
 
 
-# song2vmd.md 12.2 の options 全21要素。name → (type, constraint, default)。
+# song2vmd.md 12.2 の options 全22要素。name → (type, constraint, default)。
 EXPECTED = {
     "input": ("str", None, None),
     "--output": ("str", None, None),
@@ -32,7 +32,8 @@ EXPECTED = {
     "--style": ("enum", {"choices": ["pop", "ballad", "powerful", "whisper", "rap"]}, "pop"),
     "--separate-vocals": ("enum", {"choices": ["auto", "always", "never"]}, "auto"),
     "--separator": ("enum", {"choices": ["audio-separator-htdemucs-ft"]}, "audio-separator-htdemucs-ft"),
-    "--recognizer": ("enum", {"choices": ["whisper-ctc-forcedalign"]}, "whisper-ctc-forcedalign"),
+    "--recognizer-model-id": ("str", None, None),
+    "--recognizer-model-revision": ("str", None, None),
     "--n-morph": ("flag", None, True),
     "--vowel-gain": ("compound",
                      {"format": "a:i:u:e:o",

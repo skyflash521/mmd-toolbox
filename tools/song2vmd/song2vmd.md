@@ -161,7 +161,8 @@ song2vmd INPUT [options]
 | `--style NAME` | `pop` | 歌い方スタイルプリセット(8.1)。開き量レンジ・タイミングを切り替える |
 | `--separate-vocals MODE` | `auto` | ボーカル分離 `auto` / `always` / `never` |
 | `--separator NAME` | vocal_analysis の既定アダプタ | S1ボーカル分離バックエンドの選択(7章)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3) |
-| `--recognizer NAME` | vocal_analysis の既定アダプタ | S2音素/母音認識バックエンドの選択。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3。採用構成の確定も同節が正本) |
+| `--recognizer-model-id ID` | vocal_analysis の既定内容認識モデル(`ContentRecognizerModel.model_id`) | S2内容認識モデルの指定(vocal_analysis.md §5.2・§8.3)。未指定時は vocal_analysis の既定モデルを使う |
+| `--recognizer-model-revision REV` | 既定モデルのリビジョン(`--recognizer-model-id` 未指定時)。`--recognizer-model-id` 指定時は未指定なら最新リビジョン | S2内容認識モデルのリビジョン指定(`ContentRecognizerModel.model_revision`)。`--recognizer-model-id` と組で使う。`--recognizer-model-id` を指定せず本引数だけを指定するのは対象が無く無意味なため引数エラー(11章・12.3) |
 | `--no-n-morph` | off(既定で「ん」モーフを使う) | 撥音「ん」(音節末の鼻音)に「ん」モーフ(`MouthShape.N`)を使わず、無音(閉口)に倒す。既定では「ん」モーフを使う(6.3) |
 | `--vowel-gain a:i:u:e:o` | `1:1:1:1:1` | 母音別(あ/い/う/え/お)の開き量倍率(口形バランス調整。プリセット非依存の共通既定。8.1)。撥音「ん」の倍率は 1.0 固定で本引数の対象外(8.2) |
 | `--open-max V` | プリセット値(8.1) | 口の開き量の上限(開けすぎ防止) |
@@ -252,7 +253,7 @@ song2vmd INPUT [options]
 - **ボーカル抽出(S1)**: vocal_analysis.md §4。分離の挙動 `auto`/`always`/`never` の選択は `song2vmd` の CLI
   (`--separate-vocals`、5.2)で公開する。
 - **音素/母音認識(S2)**: vocal_analysis.md §5。母音/子音/gap の全被覆セグメント列＋IPAラベル(任意の信頼度)を
-  得る。バックエンド選択は CLI(`--recognizer`、5.2)で公開する。
+  得る。内容認識モデルの選択は CLI(`--recognizer-model-id`・`--recognizer-model-revision`、5.2)で公開する。
 - **強弱RMS算出(S3)**: vocal_analysis.md §6。相対正規化したRMSを得る。RMS を使う判断(無音/閉口・開き量)は
   `song2vmd` 入口(6.3・6.4)。
 
@@ -338,7 +339,10 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
 - **母音中央代表値**: 各モーラの開き量には、子音区間を除いた母音区間の中央 60%(初期値)の平均RMSを
   代表値として使う。子音トランジェントで開き量が乱れるのを防ぐ(母音区間は vocal_analysis の音素セグメント
   から得る)。
-- **無音判定のヒステリシス**: 開始しきい値と終了しきい値を分け、境界付近の開閉反復(小刻み)を防ぐ。
+- **無音判定のヒステリシス**: gap の無音/継続および母音区間の無音補正は、開始(下降側)しきい値だけで
+  判定する(下降側以下なら無音、上回れば直前の母音的口形を継続する)。終了(上昇側)しきい値は、
+  無音状態からの母音復帰(口形の種類)自体の判定には用いず、閉じ側の境界調整(6.3)の候補パラメータ
+  として扱う。
 - **低信頼区間**: 認識・発声の信頼度が低い区間は、既定の最小開き量を保証せず閉口寄りに抑える。信頼度は
   認識器が出せる場合に用い、出せないバックエンドでは音量のみで代替する。
 - 各モーラ区間のRMSから、そのモーラの口の開き量を決める(6.5)。
@@ -403,8 +407,9 @@ interface(Separator / Recognizer)、正規化中間形式、アダプタの登�
 
 - 利用者は `song2vmd INPUT` の1コマンドだけを実行する。音声前段の外部ツール(分離・認識・復号)は
   `vocal_analysis` が内部で呼び、利用者がそれらを手で実行することはない。
-- バックエンドの選択(`--separator` / `--recognizer` / `--separate-vocals`)は `song2vmd` の CLI で公開する
-  (5.2)。アダプタの追加・切り替えは vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
+- バックエンドの選択(`--separator` / `--recognizer-model-id` / `--recognizer-model-revision` /
+  `--separate-vocals`)は `song2vmd` の CLI で公開する(5.2)。アダプタの追加・切り替えや内容認識
+  モデルの既定値・候補値の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
 - 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、本リポジトリ本体の
   必須依存は `numpy/scipy` のまま保つ。
 
@@ -602,15 +607,18 @@ MMD/MMM上の視覚確認で調整する。特に開き量レンジ・最小保�
 - `type`: 固定語彙 `"float"` / `"int"` / `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)/ `"compound"`
   (複合トークン)。
 - `constraint`: 数値(`float`/`int`)は `{min, max, exclusive_min}`、`enum` は `{choices:[...]}`
-  (`--style` は 8.1 のプリセット名、`--separate-vocals` は `auto`/`always`/`never`、`--separator`/
-  `--recognizer` は vocal_analysis の登録アダプタの安定 id)、`compound`
+  (`--style` は 8.1 のプリセット名、`--separate-vocals` は `auto`/`always`/`never`、`--separator` は
+  vocal_analysis の登録アダプタの安定 id)、`compound`
   (`--vowel-gain`=`"a:i:u:e:o"`・`--silence-threshold`=`"ON:OFF"`)は `{format, fields}`(`format` は
   トークン文法の文字列、`fields` は各トークンの数値制約の配列)、`flag` と制約なしは `null`。制約値は CLI
   実装の引数検証から機械導出し、手書きで複製しない。
 - `default`: 解決後の既定値。プリセット由来の既定(`--open-max`/`--coarticulation`/`--anticipation`/
   `--min-hold`)と入力名由来の `--output` は単一リテラルで表せないため `null`(算出規則は `help` に記す。
-  プリセット由来の値は `presets` 側に載る)。プリセットに依らない共通既定を持つ `--vowel-gain`/
-  `--intensity-curve`/`--silence-threshold` は、その既定(8.1)をリテラルで載せる。
+  プリセット由来の値は `presets` 側に載る)。`--recognizer-model-id`/`--recognizer-model-revision` も
+  同様に `null`(実際の既定値は vocal_analysis の既定内容認識モデルが持つ `model_id`/`model_revision`
+  の組であり、`--recognizer-model-revision` の実質的な既定は `--recognizer-model-id` の指定有無に
+  依存するため、単一リテラルで表せない。算出規則は `help` に記す)。プリセットに依らない共通既定を持つ
+  `--vowel-gain`/`--intensity-curve`/`--silence-threshold` は、その既定(8.1)をリテラルで載せる。
 - `help`: 人間向け説明(5.2 の各引数説明)。
 
 `presets` は各要素 `{name, values}` の配列。`name` は 8.1 のプリセット名、`values` は公開引数名→その
@@ -625,7 +633,7 @@ MMD/MMM上の視覚確認で調整する。特に開き量レンジ・最小保�
 | 事象 | `code` | `field` | `exit_code` |
 |---|---|---|---|
 | 入力を音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
-| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出) | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`) | 2 |
+| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。`--recognizer-model-id` を指定せず `--recognizer-model-revision` だけを指定した場合(組み合わせ検証。5.2)も含む | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は対象引数の長形式フラグ名 | 2 |
 | 出力先が入力と同一パス・`--overwrite` 未指定(5.3) | `output_overwrites_input` | `"--output"` | 2 |
 | 出力書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"`(+ `path`) | 3 |
 | 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない(vocal_analysis.md §3) | `decoder_missing` | `"input"` | 4 |
