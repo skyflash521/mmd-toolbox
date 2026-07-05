@@ -373,6 +373,98 @@ def test_g2p_symbols_to_token_ids_missing_vocab_entry_raises_recognition_error()
 # --- §5.2 手順7: 強制アライメント(バンド制限Viterbi) ---
 
 
+def test_voiced_blank_penalty_applies_only_to_voiced_frames_blank_column():
+    from vocal_analysis.recognizer import _VOICED_BLANK_PENALTY, _apply_voiced_blank_penalty
+
+    # 16kHz・20msフレーム(320サンプル)×4フレーム。フレーム0-1は無音、フレーム2-3は有声。
+    sr = 16000
+    samples = np.concatenate([np.zeros(640, dtype=np.float32), np.full(640, 0.5, dtype=np.float32)])
+    log_probs = np.zeros((4, 3))
+
+    result = _apply_voiced_blank_penalty(log_probs, samples, threshold=0.01, blank_token_id=1)
+
+    # 有声フレーム(2,3)のblank列(id=1)だけがペナルティ分下がる。他は不変。
+    expected = np.zeros((4, 3))
+    expected[2, 1] = -_VOICED_BLANK_PENALTY
+    expected[3, 1] = -_VOICED_BLANK_PENALTY
+    assert np.array_equal(result, expected)
+    assert np.array_equal(log_probs, np.zeros((4, 3)))  # 入力は破壊しない
+
+
+def test_voiced_blank_penalty_handles_frame_count_mismatch():
+    from vocal_analysis.recognizer import _apply_voiced_blank_penalty
+
+    # 音声由来のフレーム数(3)と対数確率行列のフレーム数(4)がずれても短い方だけ処理して例外を出さない
+    # (音素モデルの畳み込み丸めでずれうる)。
+    samples = np.full(960, 0.5, dtype=np.float32)  # 20msフレーム(320サンプル)×3フレーム分
+    log_probs = np.zeros((4, 2))
+
+    result = _apply_voiced_blank_penalty(log_probs, samples, threshold=0.01, blank_token_id=0)
+
+    assert result.shape == (4, 2)
+    assert result[3, 0] == 0.0  # 音声側に対応フレームが無い行は不変
+    assert result[0, 0] < 0.0  # 有声フレームの行は下がる
+
+
+def test_expand_min_stay_expands_phoneme_tokens_only():
+    from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay
+
+    # blank(id=0)は1状態のまま、非blank(音素)は最小滞在フレーム数ぶんの連鎖サブ状態になる。
+    sub_ids, sub_to_token = _expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=100)
+
+    assert sub_ids == [0] + [7] * _MIN_STAY_FRAMES + [0]
+    assert sub_to_token == [0] + [1] * _MIN_STAY_FRAMES + [2]
+
+
+def test_expand_min_stay_reduces_stay_when_frames_are_scarce():
+    from vocal_analysis.recognizer import _expand_min_stay
+
+    # フレーム数がサブ状態総数に足りない場合、成立する最大の滞在数へ引き下げる。
+    # blank2個+音素1個・6フレーム → 滞在数 = (6-2)//1 = 4。
+    sub_ids, sub_to_token = _expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=6)
+
+    assert sub_ids == [0, 7, 7, 7, 7, 0]
+    assert sub_to_token == [0, 1, 1, 1, 1, 2]
+
+
+def test_expand_min_stay_never_reduces_below_one():
+    from vocal_analysis.recognizer import _expand_min_stay
+
+    # 極端にフレームが少なくても滞在数は1未満にしない(不足自体は _forced_align が検出して停止する)。
+    sub_ids, _ = _expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=2)
+
+    assert sub_ids == [0, 7, 0]
+
+
+def test_expand_min_stay_all_blank_sequence_is_unchanged():
+    from vocal_analysis.recognizer import _expand_min_stay
+
+    sub_ids, sub_to_token = _expand_min_stay([0, 0], blank_token_id=0, num_frames=10)
+
+    assert sub_ids == [0, 0]
+    assert sub_to_token == [0, 1]
+
+
+def test_min_stay_expansion_forces_phoneme_to_occupy_expanded_frames():
+    from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay, _forced_align
+
+    # blankが全面的に優勢で音素(id=1)は1フレームしか優勢でない放出確率。展開なしなら
+    # 音素に1フレームだけ滞在する経路が最尤になる構成だが、サブ状態連鎖(10フレームに
+    # サブ状態7個で経路に自由度が残る)により元トークンの滞在は最小滞在フレーム数以上になる。
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [-5.0, 5.0],
+         [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+    plain_path = _forced_align(log_probs, [0, 1, 0])
+    assert sum(1 for s in plain_path if s == 1) == 1  # 展開なしでは1フレーム通過が最尤
+
+    sub_ids, sub_to_token = _expand_min_stay([0, 1, 0], blank_token_id=0, num_frames=10)
+    sub_path = _forced_align(log_probs, sub_ids)
+    path = [sub_to_token[s] for s in sub_path]
+
+    assert sum(1 for s in path if s == 1) >= _MIN_STAY_FRAMES
+
+
 def test_forced_align_single_state_stays_for_all_frames():
     from vocal_analysis.recognizer import _forced_align
 

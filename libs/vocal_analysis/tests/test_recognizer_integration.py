@@ -91,8 +91,8 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
     # 区間のテキスト「あ」-> G2P「a」-> 音素列 ["pau","a","pau"]。語彙は blank=0・a=1 の2記号のみ。
-    # 対数確率行列は状態0(pau)がフレーム0-1、状態1(a)がフレーム2-3、状態2(pau)がフレーム4-5で
-    # 優勢になるよう設計しており、強制アライメントの経路は [0,0,1,1,2,2] になる。
+    # 最小滞在制約(§5.2手順7)により a は (6-2)//1=4 個のサブ状態へ展開され、6フレームに
+    # サブ状態6個がちょうど収まるため経路は [0,1,1,1,1,2] に一意に定まる(a はフレーム1〜4)。
     decoder = {0: "<pad>", 1: "a"}
     log_probs = np.array(
         [
@@ -120,14 +120,14 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     assert segments[0].type == "gap"
     assert segments[0].phoneme is None
     assert segments[0].start_sec == pytest.approx(0.0)
-    assert segments[0].end_sec == pytest.approx(0.04)
+    assert segments[0].end_sec == pytest.approx(0.02)
     assert segments[1].type == "vowel"
     assert segments[1].phoneme == "a"
-    assert segments[1].start_sec == pytest.approx(0.04)
-    assert segments[1].end_sec == pytest.approx(0.08)
+    assert segments[1].start_sec == pytest.approx(0.02)
+    assert segments[1].end_sec == pytest.approx(0.10)
     assert segments[2].type == "gap"
     assert segments[2].phoneme is None
-    assert segments[2].start_sec == pytest.approx(0.08)
+    assert segments[2].start_sec == pytest.approx(0.10)
     assert segments[2].end_sec == pytest.approx(0.12)
 
 
@@ -196,17 +196,19 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
 
     segments = recognizer_module.recognize(wav_path)
 
-    # トリムgap[0,1.4) とローカル先頭pau由来gap[1.4,1.44) は結合されて1本の先頭gapになる。
+    # 最小滞在制約により a は4サブ状態へ展開され、6フレームのモック行列では経路が
+    # [0,1,1,1,1,2](a はローカル[0.02,0.10))に一意に定まる。トリムgap[0,1.4) と
+    # ローカル先頭pau由来gap[1.4,1.42) は結合されて1本の先頭gapになる。
     assert len(segments) == 3
     assert segments[0].type == "gap"
     assert segments[0].start_sec == pytest.approx(0.0)
-    assert segments[0].end_sec == pytest.approx(1.44)
+    assert segments[0].end_sec == pytest.approx(1.42)
     assert segments[1].type == "vowel"
     assert segments[1].phoneme == "a"
-    assert segments[1].start_sec == pytest.approx(1.44)
-    assert segments[1].end_sec == pytest.approx(1.48)
+    assert segments[1].start_sec == pytest.approx(1.42)
+    assert segments[1].end_sec == pytest.approx(1.50)
     assert segments[2].type == "gap"
-    assert segments[2].start_sec == pytest.approx(1.48)
+    assert segments[2].start_sec == pytest.approx(1.50)
     assert segments[2].end_sec == pytest.approx(3.5)  # 末尾トリム無し: 区間終端まで被覆
 
 

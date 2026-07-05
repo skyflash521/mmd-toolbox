@@ -226,6 +226,51 @@ def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_t
 
 
 _FORCED_ALIGN_BAND_SEC = 1.0  # §5.2手順7: blank支配下での押し込み崩壊を防ぐ位置バンド幅
+_MIN_STAY_FRAMES = 5  # §5.2手順7: 非blank(音素)状態の最小滞在フレーム数(100ms)
+_VOICED_BLANK_PENALTY = 7.0  # §5.2手順7: 有声フレームのblank列から引く対数確率ペナルティ
+
+
+def _apply_voiced_blank_penalty(
+    log_probs: np.ndarray, chunk_samples: np.ndarray, threshold: float, blank_token_id: int
+) -> np.ndarray:
+    """有声フレームのblank列へ固定ペナルティを適用する(§5.2手順7)。
+
+    blank優勢の歌唱では、声が出ているフレームでもblank(pau)に留まる経路が最尤になりやすく、
+    フレーズ先頭のモーラが実際の発声より数百ms遅れて置かれるため、有声フレーム(20msフレームRMSが
+    手順1のしきい値超)ではblankを不利にする。無音フレーム(トリム余白・息継ぎ)は変更しない。
+    """
+    frame_rms = _frame_rms(chunk_samples, RECOGNIZER_CONFIG.sample_rate, FRAME_DURATION_SEC)
+    n = min(len(frame_rms), log_probs.shape[0])
+    penalized = log_probs.copy()
+    voiced = frame_rms[:n] > threshold
+    penalized[:n][voiced, blank_token_id] -= _VOICED_BLANK_PENALTY
+    return penalized
+
+
+def _expand_min_stay(
+    token_ids: list[int], blank_token_id: int, num_frames: int
+) -> tuple[list[int], list[int]]:
+    """非blankトークンを最小滞在フレーム数ぶんの連鎖サブ状態へ展開する(§5.2手順7)。
+
+    blank優勢の歌唱では音素状態を1フレームで通過する経路が最尤になりやすく、モーラが数十msへ
+    潰れるため、非blankトークンをサブ状態の連鎖(各1フレーム以上滞在)で表して合計滞在を強制する。
+    入力範囲のフレーム数がサブ状態総数に足りない場合は、成立する最大の滞在数へ引き下げる
+    (1未満にはしない)。
+
+    戻り値は (展開後トークンID列, 各サブ状態が対応する元トークンindexの列)。
+    """
+    num_blank = sum(1 for tid in token_ids if tid == blank_token_id)
+    num_phoneme = len(token_ids) - num_blank
+    stay = _MIN_STAY_FRAMES
+    if num_phoneme > 0:
+        stay = min(stay, max(1, (num_frames - num_blank) // num_phoneme))
+    sub_token_ids: list[int] = []
+    sub_to_token: list[int] = []
+    for index, tid in enumerate(token_ids):
+        reps = 1 if tid == blank_token_id else stay
+        sub_token_ids.extend([tid] * reps)
+        sub_to_token.extend([index] * reps)
+    return sub_token_ids, sub_to_token
 
 
 def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
@@ -423,7 +468,13 @@ def recognize(
         seq = _assemble_phoneme_sequence([phonemes])
         token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
         log_probs = _compute_log_probs(processor, model, chunk_samples)
-        path = _forced_align(log_probs, token_ids)
+        # §5.2手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
+        # 非blankトークンをサブ状態へ展開してアライメントし、経路を元トークンindexへ戻してから
+        # Segment化する。
+        log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
+        sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
+        sub_path = _forced_align(log_probs, sub_token_ids)
+        path = [sub_to_token[s] for s in sub_path]
         local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
         # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
         # 使わず、トリム後区間の真の終端(trim_hi_sec - trim_lo_sec)へ強制的に揃える(フレーム数
