@@ -184,11 +184,12 @@ _BLANK_G2P_SYMBOLS = frozenset({"pau", "cl"})
 
 
 def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
-    """チャンクごとのG2P音素記号列を pau を挟んで結合する(§5.2手順5)。
+    """チャンクごとのG2P音素記号列を pau を挟んで結合する(§5.2手順5。単語タイムスタンプ非取得時)。
 
     チャンク境界ごとに pau を1つ挟み、列の先頭と末尾にも pau を1つずつ補う(区間ごとに独立して
     内容認識呼び出しを行う現行パイプラインでは chunk_phonemes は常に1要素で呼ばれ、実質的に
-    その区間の音素記号列の先頭・末尾へ pau を補う処理になる)。
+    その区間の音素記号列の先頭・末尾へ pau を補う処理になる)。単語窓は対応付けない(§5.2手順7の
+    フォールバック=位置バンド制限で整列する)。
     """
     sequence = ["pau"]
     for i, phonemes in enumerate(chunk_phonemes):
@@ -197,6 +198,43 @@ def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
         sequence.extend(phonemes)
     sequence.append("pau")
     return sequence
+
+
+def _assemble_with_word_windows(
+    words_phonemes: list[tuple[list[str], float, float]], margin_sec: float, duration_sec: float
+) -> tuple[list[str], list[tuple[float, float]]]:
+    """単語ごとの音素記号列と時間窓から、pauで連結したトークン記号列と各記号の時間窓を組み立てる
+    (§5.2手順5。単語タイムスタンプ取得時)。
+
+    words_phonemes は単語の時系列順の (音素記号列, 開始時刻, 終了時刻) の列(開始・終了はトリムした
+    入力範囲内の相対秒。§5.2手順3で単調化・クランプ済み)。単語内の音素記号(句読点由来の pau を
+    含む)は自身の単語の [開始-余白, 終了+余白] を窓とする。単語境界に挿入する pau は隣接する
+    2単語の [前の終了-余白, 次の開始+余白]、先頭の pau は [0, 最初の開始+余白]、末尾の pau は
+    [最後の終了-余白, duration_sec] を窓とする。窓の下端が上端を上回る場合は入れ替える(空窓に
+    しない)。
+    """
+
+    def ordered(lo: float, hi: float) -> tuple[float, float]:
+        return (lo, hi) if lo <= hi else (hi, lo)
+
+    first_start = words_phonemes[0][1]
+    sequence = ["pau"]
+    windows: list[tuple[float, float]] = [ordered(0.0, first_start + margin_sec)]
+
+    for index, (phonemes, start, end) in enumerate(words_phonemes):
+        word_window = ordered(start - margin_sec, end + margin_sec)
+        sequence.extend(phonemes)
+        windows.extend([word_window] * len(phonemes))
+        if index + 1 < len(words_phonemes):
+            next_start = words_phonemes[index + 1][1]
+            sequence.append("pau")
+            windows.append(ordered(end - margin_sec, next_start + margin_sec))
+
+    last_end = words_phonemes[-1][2]
+    sequence.append("pau")
+    windows.append(ordered(last_end - margin_sec, duration_sec))
+
+    return sequence, windows
 
 
 def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_token_id: int) -> list[int]:
@@ -220,9 +258,10 @@ def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_t
     return token_ids
 
 
-_FORCED_ALIGN_BAND_SEC = 1.0  # §5.2手順7: blank支配下での押し込み崩壊を防ぐ位置バンド幅
+_FORCED_ALIGN_BAND_SEC = 1.0  # §5.2手順7: blank支配下での押し込み崩壊を防ぐ位置バンド幅(フォールバック)
 _MIN_STAY_FRAMES = 6  # §5.2手順7: 非blank(音素)状態の最小滞在フレーム数(120ms)
 _VOICED_BLANK_PENALTY = 7.0  # §5.2手順7: 有声フレームのblank列から引く対数確率ペナルティ
+_WORD_WINDOW_MARGIN_SEC = 0.75  # §5.2手順7: 単語窓制約の余白(0.2/0.5/0.75秒の実測比較で採用)
 
 
 def _apply_voiced_blank_penalty(
@@ -268,23 +307,62 @@ def _expand_min_stay(
     return sub_token_ids, sub_to_token
 
 
-def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
-    """既知のトークン列を対数確率行列へ単調に対応付ける(§5.2手順7。バンド制限Viterbi)。
+def _viterbi_monotonic(log_probs: np.ndarray, token_ids: list[int], out_of_bounds: np.ndarray) -> list[int] | None:
+    """トークン列を対数確率行列へ単調に対応付ける共通Viterbi(§5.2手順7)。
 
     各トークンを1状態とし、フレームごとに「同一状態に留まる」「次のトークンの状態へ進む」の
     2種の遷移のみ許す(読み飛ばし禁止)。各状態の対数確率には token_ids が指すその状態自身の
     語彙IDの列を使う(pau・cl由来の状態のblank列選択は、呼び出し側の _g2p_symbols_to_token_ids が
     そこへ blank_token_id を書き込み済みであることに由来し、本関数はトークン種別を区別しない)。
+    状態 l がフレーム t に遷移できるかは呼び出し側が渡す out_of_bounds[t, l](到達不能なら True)
+    で制約する(単語窓制約・位置バンド制限のいずれもこの共通形へ帰着する)。
+
+    フレーム0は状態0に固定し、最終フレームは状態 len(token_ids)-1 に到達している経路の中で
+    最尤のものを採る。戻り値は各フレームが対応する状態(トークン列中のindex)。最終フレームで
+    末尾状態へ到達する経路が無い場合は None を返す(呼び出し側が RecognitionError にするか
+    フォールバックへ切り替えるかを判断する)。
+    """
+    num_frames, num_states = out_of_bounds.shape
+    emission = log_probs[:, token_ids]  # (num_frames, num_states)
+    neg_inf = float("-inf")
+    dp = np.full((num_frames, num_states), neg_inf, dtype=np.float64)
+    backpointer = np.zeros((num_frames, num_states), dtype=np.int64)
+
+    dp[0, 0] = emission[0, 0] if not out_of_bounds[0, 0] else neg_inf
+    for t in range(1, num_frames):
+        stay = dp[t - 1, :]
+        advance = np.concatenate(([neg_inf], dp[t - 1, :-1]))
+        take_advance = advance > stay
+        candidate = np.where(take_advance, advance, stay) + emission[t, :]
+        candidate[out_of_bounds[t]] = neg_inf
+        dp[t, :] = candidate
+        backpointer[t, :] = take_advance.astype(np.int64)
+
+    if dp[num_frames - 1, num_states - 1] == neg_inf:
+        return None
+
+    path = [0] * num_frames
+    state = num_states - 1
+    path[num_frames - 1] = state
+    for t in range(num_frames - 1, 0, -1):
+        state -= int(backpointer[t, state])
+        path[t - 1] = state
+    return path
+
+
+def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
+    """既知のトークン列を対数確率行列へ単調に対応付ける(§5.2手順7の**フォールバック**。位置バンド制限)。
+
+    単語タイムスタンプが取得できない場合、または単語窓制約(下記 _forced_align_windowed)で
+    最終フレームへ到達できない場合に用いる。
 
     **位置バンド制限**: 状態 l の期待フレーム位置を (l / (L-1)) * (T-1)(トークン列を区間内へ均等
     割り当てした場合の位置。L=1 なら0)とし、フレーム t が状態 l に遷移できるのは
     |t - 期待フレーム位置| <= バンド幅 を満たす場合に限る(バンド幅は1.0秒に相当するフレーム数で
     固定)。blank 支配下でも均等割り当てから大きく外れた押し込み崩壊を構造的に防ぐ。
 
-    フレーム0は状態0に固定し、最終フレームは状態 len(token_ids)-1 に到達している経路の中で
-    最尤のものを採る。戻り値は各フレームが対応する状態(トークン列中のindex)。理論上到達不能
-    (フレーム数がトークン数未満、またはバンド制限により到達不能な場合)は RecognitionError で
-    停止する。
+    理論上到達不能(フレーム数がトークン数未満、またはバンド制限により到達不能な場合)は
+    RecognitionError で停止する。
     """
     num_frames = log_probs.shape[0]
     num_states = len(token_ids)
@@ -304,30 +382,43 @@ def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
         [[abs(t - expected_frame(l)) > band_frames for l in range(num_states)] for t in range(num_frames)]
     )
 
-    emission = log_probs[:, token_ids]  # (num_frames, num_states)
-    neg_inf = float("-inf")
-    dp = np.full((num_frames, num_states), neg_inf, dtype=np.float64)
-    backpointer = np.zeros((num_frames, num_states), dtype=np.int64)
-
-    dp[0, 0] = emission[0, 0]
-    for t in range(1, num_frames):
-        stay = dp[t - 1, :]
-        advance = np.concatenate(([neg_inf], dp[t - 1, :-1]))
-        take_advance = advance > stay
-        candidate = np.where(take_advance, advance, stay) + emission[t, :]
-        candidate[out_of_band[t]] = neg_inf
-        dp[t, :] = candidate
-        backpointer[t, :] = take_advance.astype(np.int64)
-
-    if dp[num_frames - 1, num_states - 1] == neg_inf:
+    path = _viterbi_monotonic(log_probs, token_ids, out_of_band)
+    if path is None:
         raise RecognitionError("強制アライメントが末尾トークンへ到達できませんでした")
+    return path
 
-    path = [0] * num_frames
-    state = num_states - 1
-    path[num_frames - 1] = state
-    for t in range(num_frames - 1, 0, -1):
-        state -= int(backpointer[t, state])
-        path[t - 1] = state
+
+def _forced_align_windowed(
+    log_probs: np.ndarray, token_ids: list[int], windows_sec: list[tuple[float, float]]
+) -> list[int]:
+    """単語タイムスタンプの窓で状態ごとの到達可能フレームを制約した強制アライメント
+    (§5.2手順7の**単語窓制約**。主経路)。
+
+    状態 l がフレーム t に遷移できるのは、windows_sec[l] = (lo, hi) がフレーム区間
+    [t*frame_dur, (t+1)*frame_dur) と交差する場合(lo < (t+1)*frame_dur かつ hi > t*frame_dur)に
+    限る。windows_sec は token_ids と同じ長さ(サブ状態展開後、各サブ状態は由来するトークンの窓を
+    共有する)。開始・終端条件・遷移規則は _forced_align と同じ(共通の _viterbi_monotonic を使う)。
+
+    最終フレームで末尾状態へ到達する経路が無い場合(単語タイムスタンプの誤り等)は
+    RecognitionError で停止する(呼び出し側が _forced_align へフォールバックする)。
+    """
+    num_frames = log_probs.shape[0]
+    num_states = len(token_ids)
+    if num_states == 0 or num_frames < num_states:
+        raise RecognitionError(
+            f"強制アライメントが対応付け不能です(フレーム数{num_frames}、トークン数{num_states})"
+        )
+
+    out_of_window = np.array(
+        [
+            [not (lo < (t + 1) * FRAME_DURATION_SEC and hi > t * FRAME_DURATION_SEC) for lo, hi in windows_sec]
+            for t in range(num_frames)
+        ]
+    )
+
+    path = _viterbi_monotonic(log_probs, token_ids, out_of_window)
+    if path is None:
+        raise RecognitionError("単語窓制約下で強制アライメントが末尾トークンへ到達できませんでした")
     return path
 
 
@@ -440,7 +531,7 @@ def recognize(
         chunk_samples = chunk_samples[trim_lo:trim_hi]
 
         try:
-            text = _transcribe_segment(chunk_samples, content_recognizer_model)
+            text, words = _transcribe_segment(chunk_samples, content_recognizer_model)
         except ImportError as e:
             raise RecognitionError(
                 "transformers または torch が見つかりません。導入してください"
@@ -453,8 +544,29 @@ def recognize(
                 "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
             ) from e
 
+        # §5.2手順3: 書き起こしが空文字列(単語0個)の区間はG2P・アライメントを試みず、区間全体を
+        # gapとして直接確定する(手順2の無音確定・手順4の音素密度超過確定と同様の扱い)。
+        if not text.strip():
+            all_segments.append(
+                Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None, confidence=None)
+            )
+            if trimmed_tail:
+                all_segments.append(
+                    Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
+                )
+            continue
+
+        trim_duration_sec = trim_hi_sec - trim_lo_sec
+
         try:
-            phonemes = _g2p(text)
+            # §5.2手順4: 単語タイムスタンプが取得できた場合は単語ごとに個別にG2Pし(手順5の窓割り当てに
+            # 使う)、取得できなかった場合は区間の書き起こし全体を1回で変換する(単語単位に分割しない)。
+            if words:
+                words_phonemes = [(_g2p(word_text), w_start, w_end) for word_text, w_start, w_end in words]
+                phonemes = [p for word_phonemes, _, _ in words_phonemes for p in word_phonemes]
+            else:
+                words_phonemes = None
+                phonemes = _g2p(text)
         except ImportError as e:
             raise RecognitionError(
                 "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
@@ -463,7 +575,7 @@ def recognize(
         # §5.2手順4の音素密度による幻覚検出: 内容認識の反復幻覚(同一文・同一フレーズの繰り返し)は
         # 区間の実際の発声より著しく多い音素列を生む。書き起こし・G2P・強制アライメントの結果を
         # 用いず、区間全体をgapとして確定する(利用先のgap解決へ委ねる)。
-        if _is_hallucinated_phoneme_density(len(phonemes), trim_hi_sec - trim_lo_sec):
+        if _is_hallucinated_phoneme_density(len(phonemes), trim_duration_sec):
             all_segments.append(
                 Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None, confidence=None)
             )
@@ -489,7 +601,14 @@ def recognize(
             vocab = processor.tokenizer.get_vocab()
             blank_token_id = processor.tokenizer.pad_token_id
 
-        seq = _assemble_phoneme_sequence([phonemes])
+        # §5.2手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ従来どおり
+        # (単語分割していない一括の)音素記号列の前後にpauを補うだけにする。
+        if words_phonemes is not None:
+            seq, windows_sec = _assemble_with_word_windows(words_phonemes, _WORD_WINDOW_MARGIN_SEC, trim_duration_sec)
+        else:
+            seq = _assemble_phoneme_sequence([phonemes])
+            windows_sec = None
+
         token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
         log_probs = _compute_log_probs(processor, model, chunk_samples)
         # §5.2手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
@@ -497,7 +616,18 @@ def recognize(
         # Segment化する。
         log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
         sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
-        sub_path = _forced_align(log_probs, sub_token_ids)
+
+        # §5.2手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
+        # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。
+        if windows_sec is not None:
+            sub_windows = [windows_sec[i] for i in sub_to_token]
+            try:
+                sub_path = _forced_align_windowed(log_probs, sub_token_ids, sub_windows)
+            except RecognitionError:
+                sub_path = _forced_align(log_probs, sub_token_ids)
+        else:
+            sub_path = _forced_align(log_probs, sub_token_ids)
+
         path = [sub_to_token[s] for s in sub_path]
         local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
         # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
@@ -549,16 +679,60 @@ def _g2p(text: str) -> list[str]:
     return pyopenjtalk.g2p(text, kana=False, join=False)
 
 
-def _transcribe_segment(samples: np.ndarray, content_recognizer_model: ContentRecognizerModel) -> str:
-    """区間のボーカル音声を書き起こす(§5.2手順3。区間ごとに独立呼び出し)。
+_MIN_WORD_DURATION_SEC = 0.05  # §5.2手順3: 単語タイムスタンプ単調化の最小長
+
+
+def _sanitize_word_timestamps(
+    words: list[tuple[str, float, float]], duration_sec: float
+) -> list[tuple[str, float, float]]:
+    """単語タイムスタンプを単調化する(§5.2手順3)。
+
+    まず開始・終了をトリムした入力範囲 [0, duration_sec] へクランプし、続けて開始時刻を直前の
+    単語の開始時刻以上へ、終了時刻を自身の開始時刻+最小長以上へ、単語の時系列順にクランプする。
+    """
+    sanitized: list[tuple[str, float, float]] = []
+    prev_start = 0.0
+    for text, start, end in words:
+        start = min(max(start, 0.0), duration_sec)
+        end = min(max(end, 0.0), duration_sec)
+        start = max(start, prev_start)
+        end = max(end, start + _MIN_WORD_DURATION_SEC)
+        sanitized.append((text, start, end))
+        prev_start = start
+    return sanitized
+
+
+def _extract_word_timestamps(chunks: list[dict], duration_sec: float) -> list[tuple[str, float, float]]:
+    """内容認識パイプラインの chunks から単語タイムスタンプを抽出し単調化する(§5.2手順3)。
+
+    テキストが空、または開始時刻が無い要素は読み飛ばす。終了時刻が無い要素(生成が単語の途中で
+    打ち切られた場合)は開始時刻+最小長で補う。
+    """
+    words: list[tuple[str, float, float]] = []
+    for chunk in chunks:
+        text = chunk.get("text", "").strip()
+        start, end = chunk.get("timestamp", (None, None))
+        if not text or start is None:
+            continue
+        end_sec = float(end) if end is not None else float(start) + _MIN_WORD_DURATION_SEC
+        words.append((text, float(start), end_sec))
+    return _sanitize_word_timestamps(words, duration_sec)
+
+
+def _transcribe_segment(
+    samples: np.ndarray, content_recognizer_model: ContentRecognizerModel
+) -> tuple[str, list[tuple[str, float, float]] | None]:
+    """区間のボーカル音声を書き起こし、単語タイムスタンプも得る(§5.2手順3。区間ごとに独立呼び出し)。
 
     どの content_recognizer_model でも同じ手順(パイプライン読み込み→かな限定プロンプトで
-    prompt_ids取得→貪欲デコード)を適用する(モデルによる分岐は持たない)。
+    prompt_ids取得→単語タイムスタンプ付き貪欲デコード)を適用する(モデルによる分岐は持たない)。
+    単語タイムスタンプを返さないモデルは None を返す(§5.2手順7のフォールバックに帰着)。
     """
     pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
     prompt_ids = pipeline.tokenizer.get_prompt_ids(KANA_PROMPT, return_tensors="pt").to(pipeline.device)
     result = pipeline(
         samples,
+        return_timestamps="word",
         generate_kwargs={
             "language": "japanese",
             "task": "transcribe",
@@ -567,7 +741,11 @@ def _transcribe_segment(samples: np.ndarray, content_recognizer_model: ContentRe
             "prompt_ids": prompt_ids,
         },
     )
-    return result["text"]
+    chunks = result.get("chunks")
+    if not chunks:
+        return result["text"], None
+    duration_sec = len(samples) / RECOGNIZER_CONFIG.sample_rate
+    return result["text"], _extract_word_timestamps(chunks, duration_sec)
 
 
 def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognizerModel):

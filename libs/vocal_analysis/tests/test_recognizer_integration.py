@@ -6,8 +6,9 @@ _g2p・_load_model_and_processor・_compute_log_probs を差し替え)して検�
 必須にしない)。ダウンミックス・
 リサンプルは合成配列で決定論的に検証する。recognize() の統合テストは、実RMSによる区間分割・無音判定と、
 モックした書き起こし・G2P・推論結果から複合構成の純関数群(_assemble_phoneme_sequence・
-_g2p_symbols_to_token_ids・_forced_align・_path_to_segments。各関数自体の網羅的な検証は
-test_recognizer.py)を経て正しくセグメント列が組み立てられることを確認する。
+_assemble_with_word_windows・_g2p_symbols_to_token_ids・_forced_align・_forced_align_windowed・
+_path_to_segments。各関数自体の網羅的な検証は test_recognizer.py)を経て正しくセグメント列が
+組み立てられることを確認する。
 """
 
 from pathlib import Path
@@ -105,7 +106,7 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
         ]
     )
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
@@ -149,7 +150,7 @@ def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkey
 
     def fake_transcribe(samples, content_recognizer_model):
         call_count["transcribe"] += 1
-        return "あ"
+        return "あ", None
 
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
@@ -185,7 +186,7 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
         [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
     )
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
@@ -222,7 +223,7 @@ def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatc
 
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment",
-        lambda samples, content_recognizer_model: "かんじは つかわないでください。" * 20)
+        lambda samples, content_recognizer_model: ("かんじは つかわないでください。" * 20, None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"] * 100)
 
     def fail_if_called():
@@ -237,6 +238,215 @@ def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatc
     assert segments[0].phoneme is None
     assert segments[0].start_sec == pytest.approx(0.0)
     assert segments[0].end_sec == pytest.approx(2.0)
+
+
+def test_recognize_empty_transcription_confirms_gap_without_g2p_or_model(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 書き起こしが空文字列(空白のみを含む)の区間は、§5.2手順3によりG2P・強制アライメントを
+    # 試みず区間全体をgapとして直接確定する(手順2の無音確定・手順4の音素密度超過確定と同様)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)  # 2.0秒・無音区間なし
+
+    monkeypatch.setattr(
+        recognizer_module, "_transcribe_segment",
+        lambda samples, content_recognizer_model: ("  ", None))
+
+    def fail_g2p(text):
+        raise AssertionError("空文字列の区間でG2Pを呼んではならない")
+
+    def fail_load_model():
+        raise AssertionError("空文字列の区間で音素モデルをロードしてはならない")
+
+    monkeypatch.setattr(recognizer_module, "_g2p", fail_g2p)
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fail_load_model)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert len(segments) == 1
+    assert segments[0].type == "gap"
+    assert segments[0].phoneme is None
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(2.0)
+
+
+def test_recognize_computes_and_passes_word_windows(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 単語タイムスタンプが取得できた場合、§5.2手順5の窓を計算して単語窓制約Viterbi
+    # (_forced_align_windowed)へ渡す(位置バンド制限へのフォールバックではない)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)  # 0.12秒・6フレーム
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+    captured = {}
+
+    def fake_transcribe(samples, content_recognizer_model):
+        return "あ", [("あ", 0.02, 0.06)]
+
+    def fake_forced_align_windowed(log_probs_arg, token_ids, windows_sec):
+        captured["windows_sec"] = windows_sec
+        # 実際の経路組み立ては既存のバンド制限Viterbiへ委譲する(窓の受け渡しだけを検証する)。
+        return recognizer_module._forced_align(log_probs_arg, token_ids)
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+    monkeypatch.setattr(recognizer_module, "_forced_align_windowed", fake_forced_align_windowed)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert "windows_sec" in captured  # 単語窓制約経路が呼ばれた
+    margin = recognizer_module._WORD_WINDOW_MARGIN_SEC
+    # seq=["pau","a","pau"]。aは最小滞在で4サブ状態へ展開されるため、窓は
+    # [先頭pau, a, a, a, a, 末尾pau] の6個(log_probsの6フレームに対応)。
+    windows_sec = captured["windows_sec"]
+    assert windows_sec[0] == pytest.approx((0.0, 0.02 + margin))
+    assert all(w == pytest.approx((0.02 - margin, 0.06 + margin)) for w in windows_sec[1:5])
+    assert windows_sec[5] == pytest.approx((0.06 - margin, 0.12))
+    assert segments[1].phoneme == "a"
+
+
+def test_recognize_falls_back_to_band_alignment_when_word_window_infeasible(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 単語窓制約Viterbiが末尾トークンへ到達できず RecognitionError を送出した場合、
+    # §5.2手順7のフォールバック(位置バンド制限)へ切り替えて正常にセグメントを組み立てる
+    # (エラーを外へ伝播させない)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+
+    def fake_transcribe(samples, content_recognizer_model):
+        return "あ", [("あ", 0.02, 0.06)]
+
+    def fail_windowed(log_probs_arg, token_ids, windows_sec):
+        raise recognizer_module.RecognitionError("単語窓制約下で強制アライメントが末尾トークンへ到達できませんでした")
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+    monkeypatch.setattr(recognizer_module, "_forced_align_windowed", fail_windowed)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert segments[1].type == "vowel"
+    assert segments[1].phoneme == "a"
+
+
+def test_recognize_places_multiple_words_via_per_word_g2p_and_inter_word_window(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 単語2個("あ"→G2P"a"、"い"→G2P"i")。単語ごとに個別G2Pされ(辞書引きモックのため、結合
+    # テキストを1回で変換する誤実装ならKeyErrorになる)、母音が正しい順序で配置されることを
+    # 検証する(§5.2手順4・5)。窓・単語間pauの拘束力そのものは他のテスト
+    # (test_recognize_computes_and_passes_word_windows・test_forced_align_windowed_*)が担う
+    # (この音声長0.14秒は余白0.75秒に対し極めて短く、ここでは窓は実質非拘束になる)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(2240), 16000)  # 0.14秒・7フレーム
+
+    decoder = {0: "<pad>", 1: "a", 2: "i"}
+    log_probs = np.array(
+        [
+            [5.0, -5.0, -5.0],   # frame0: 先頭pau
+            [-5.0, 5.0, -5.0],   # frame1-2: a
+            [-5.0, 5.0, -5.0],
+            [5.0, -5.0, -5.0],   # frame3: 単語間pau
+            [-5.0, -5.0, 5.0],   # frame4-5: i
+            [-5.0, -5.0, 5.0],
+            [5.0, -5.0, -5.0],   # frame6: 末尾pau
+        ]
+    )
+
+    def fake_transcribe(samples, content_recognizer_model):
+        return "あ い", [("あ", 0.02, 0.04), ("い", 0.06, 0.08)]
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"], "い": ["i"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    segments = recognizer_module.recognize(wav_path)
+
+    vowels = [(s.phoneme, s.start_sec, s.end_sec) for s in segments if s.type == "vowel"]
+    assert [p for p, _, _ in vowels] == ["a", "i"]
+    assert vowels[0][2] <= vowels[1][1]  # 「あ」は「い」より前に置かれる
+
+
+def test_recognize_hallucination_density_sums_across_words(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 単語ごとにG2Pする場合の音素密度(§5.2手順4)は全単語分の音素数の合計で判定する。
+    # 1.0秒の区間に単語2個・各15音素を割り当てる: 単語1個分だけ(15音素/秒)ならしきい値
+    # (20音素/秒)未満で見逃すが、2単語の合計(30音素/秒)なら明確に超過する。単語1個分しか
+    # 数えない誤実装ならこの区間をgap確定できず音素モデルをロードしてしまい、fail_if_calledで
+    # 検出できる。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(16000), 16000)  # 1.0秒・無音区間なし
+
+    monkeypatch.setattr(
+        recognizer_module, "_transcribe_segment",
+        lambda samples, content_recognizer_model: ("あ い", [("あ", 0.1, 0.4), ("い", 0.5, 0.9)]))
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"] * 15)
+
+    def fail_if_called():
+        raise AssertionError("音素密度が高い区間で音素モデルをロードしてはならない")
+
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fail_if_called)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert len(segments) == 1
+    assert segments[0].type == "gap"
+
+
+def test_recognize_empty_word_list_with_nonempty_text_falls_back_like_no_timestamps(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 書き起こしは非空だが単語タイムスタンプが空リスト(chunksはあったが単語として使える要素が
+    # 無かった場合)は、Noneと同様に「単語タイムスタンプが取得できない場合」として扱い、
+    # 単語ごとのG2P・単語窓制約を使わず、区間の書き起こし全体を1回で変換して位置バンド制限で
+    # 整列する(§5.2手順3・4・5)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+
+    def fail_windowed(*args, **kwargs):
+        raise AssertionError("単語タイムスタンプ非取得扱いでは単語窓制約経路を呼んではならない")
+
+    monkeypatch.setattr(
+        recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: ("あ", []))
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+    monkeypatch.setattr(recognizer_module, "_forced_align_windowed", fail_windowed)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert segments[1].phoneme == "a"
 
 
 def test_recognize_fully_silent_input_never_loads_phoneme_model(tmp_path, monkeypatch):
@@ -273,7 +483,7 @@ def test_recognize_last_local_segment_extends_exactly_to_segment_boundary(tmp_pa
         [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
     )
 
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
@@ -347,7 +557,7 @@ def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch)
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: ("あ", None))
 
     def fake_g2p(text):
         raise original_error
@@ -368,7 +578,7 @@ def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, mo
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = ImportError("no transformers")
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
 
     def fake_load(*args, **kwargs):
@@ -389,7 +599,7 @@ def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monk
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
     original_error = OSError("model not found in cache and offline")
-    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: "あ")
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda samples, content_recognizer_model: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
 
     def fake_load(*args, **kwargs):
@@ -493,6 +703,79 @@ def test_load_content_recognizer_pipeline_passes_pinned_config(monkeypatch):
     assert captured["device"] == RECOGNIZER_CONFIG.device
 
 
+def test_transcribe_segment_extracts_word_timestamps_from_chunks(monkeypatch):
+    """パイプラインが chunks(単語ごとのテキスト・タイムスタンプ)を返す場合、_transcribe_segment は
+    それを単調化した単語タイムスタンプ列として書き起こしテキストと共に返す(§5.2手順3)。"""
+    from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL
+    from vocal_analysis import recognizer as recognizer_module
+
+    class _FakePromptIds:
+        def to(self, device):
+            return "PROMPT_IDS"
+
+    class _FakePipeline:
+        device = "cpu"
+
+        class tokenizer:
+            @staticmethod
+            def get_prompt_ids(prompt, return_tensors):
+                return _FakePromptIds()
+
+        def __call__(self, samples, return_timestamps, generate_kwargs):
+            return {
+                "text": "あ い",
+                "chunks": [
+                    {"text": "あ", "timestamp": (0.0, 0.5)},
+                    {"text": "い", "timestamp": (0.5, 1.0)},
+                ],
+            }
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model: _FakePipeline(),
+    )
+
+    samples = np.zeros(16000, dtype=np.float32)  # 1.0秒@16kHz
+    text, words = recognizer_module._transcribe_segment(samples, DEFAULT_CONTENT_RECOGNIZER_MODEL)
+
+    assert text == "あ い"
+    assert words == [("あ", 0.0, 0.5), ("い", 0.5, 1.0)]
+
+
+def test_transcribe_segment_returns_none_words_when_pipeline_has_no_chunks(monkeypatch):
+    """パイプラインが chunks を返さない(単語タイムスタンプ非対応の)場合、_transcribe_segment は
+    words に None を返す(§5.2手順7のフォールバックに帰着)。"""
+    from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL
+    from vocal_analysis import recognizer as recognizer_module
+
+    class _FakePromptIds:
+        def to(self, device):
+            return "PROMPT_IDS"
+
+    class _FakePipeline:
+        device = "cpu"
+
+        class tokenizer:
+            @staticmethod
+            def get_prompt_ids(prompt, return_tensors):
+                return _FakePromptIds()
+
+        def __call__(self, samples, return_timestamps, generate_kwargs):
+            return {"text": "あ"}  # chunksキー自体が無い
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model: _FakePipeline(),
+    )
+
+    text, words = recognizer_module._transcribe_segment(
+        np.zeros(16000, dtype=np.float32), DEFAULT_CONTENT_RECOGNIZER_MODEL
+    )
+
+    assert text == "あ"
+    assert words is None
+
+
 def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_path, monkeypatch):
     """既定値(DEFAULT_CONTENT_RECOGNIZER_MODEL)で呼び出すと、そのmodel_id・revisionで
     パイプラインをロードし、かな限定プロンプト(KANA_PROMPT)をprompt_idsとして渡す(§5.2)。"""
@@ -521,8 +804,9 @@ def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_pa
                 calls["prompt_text"] = prompt
                 return _FakePromptIds()
 
-        def __call__(self, samples, generate_kwargs):
+        def __call__(self, samples, return_timestamps, generate_kwargs):
             calls["generate_kwargs"] = generate_kwargs
+            calls["return_timestamps"] = return_timestamps
             return {"text": "あ"}
 
     def fake_load_pipeline(content_recognizer_model):
@@ -543,6 +827,7 @@ def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_pa
     assert calls["loaded_model"] == DEFAULT_CONTENT_RECOGNIZER_MODEL
     assert calls["prompt_text"] == KANA_PROMPT
     assert calls["generate_kwargs"]["prompt_ids"] == "PROMPT_IDS"
+    assert calls["return_timestamps"] == "word"  # §5.2手順3: 単語タイムスタンプ付きで呼び出す
     assert segments[1].phoneme == "a"
 
 
@@ -572,7 +857,7 @@ def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, m
             def get_prompt_ids(prompt, return_tensors):
                 return _FakePromptIds()
 
-        def __call__(self, samples, generate_kwargs):
+        def __call__(self, samples, return_timestamps, generate_kwargs):
             return {"text": "あ"}
 
     def fake_load_pipeline(content_recognizer_model):

@@ -304,6 +304,74 @@ def test_merge_adjacent_segments_keeps_different_phoneme_separate():
     assert len(result) == 2
 
 
+# --- §5.2 手順3: 単語タイムスタンプの単調化・抽出 ---
+
+
+def test_sanitize_word_timestamps_clamps_to_duration_range():
+    from vocal_analysis.recognizer import _sanitize_word_timestamps
+
+    # 開始が負・終了が範囲長を超える値は [0, duration_sec] へクランプする。
+    result = _sanitize_word_timestamps([("a", -0.5, 3.0)], duration_sec=2.0)
+
+    assert result == [("a", 0.0, 2.0)]
+
+
+def test_sanitize_word_timestamps_enforces_start_order():
+    from vocal_analysis.recognizer import _sanitize_word_timestamps
+
+    # 単語2の開始(0.3)が単語1の開始(0.5)より前退している場合、単語1の開始以上へ引き上げる。
+    result = _sanitize_word_timestamps([("a", 0.5, 0.8), ("b", 0.3, 0.9)], duration_sec=2.0)
+
+    assert result[0] == ("a", 0.5, 0.8)
+    assert result[1][1] == pytest.approx(0.5)
+
+
+def test_sanitize_word_timestamps_enforces_minimum_length():
+    from vocal_analysis.recognizer import _MIN_WORD_DURATION_SEC, _sanitize_word_timestamps
+
+    # 終了が開始+最小長に満たない場合、開始+最小長へ引き上げる。
+    result = _sanitize_word_timestamps([("a", 1.0, 1.0)], duration_sec=2.0)
+
+    assert result[0][2] == pytest.approx(1.0 + _MIN_WORD_DURATION_SEC)
+
+
+def test_sanitize_word_timestamps_clamp_precedes_minimum_length_enforcement():
+    from vocal_analysis.recognizer import _sanitize_word_timestamps
+
+    # §5.2手順3: 「まず[0,duration_sec]へクランプし、続けて…終了時刻を自身の開始時刻+最小長以上へ」
+    # の順序どおりだと、終了は先にduration(2.0)へクランプされてから+最小長(0.05)されるため、
+    # 最終的な終了(2.03)がduration自体を上回りうる(クランプを後段でやり直すなら2.0のまま)。
+    result = _sanitize_word_timestamps([("a", 1.98, 2.5)], duration_sec=2.0)
+
+    assert result == [("a", 1.98, pytest.approx(2.03))]
+
+
+def test_extract_word_timestamps_skips_empty_text_and_missing_start():
+    from vocal_analysis.recognizer import _extract_word_timestamps
+
+    chunks = [
+        {"text": "あ", "timestamp": (0.0, 0.5)},
+        {"text": "  ", "timestamp": (0.5, 1.0)},  # 空白のみ: 読み飛ばす
+        {"text": "い", "timestamp": (None, 1.5)},  # 開始無し: 読み飛ばす
+        {"text": "う", "timestamp": (1.5, 2.0)},
+    ]
+
+    result = _extract_word_timestamps(chunks, duration_sec=2.0)
+
+    assert [w[0] for w in result] == ["あ", "う"]
+
+
+def test_extract_word_timestamps_fills_missing_end_with_minimum_length():
+    from vocal_analysis.recognizer import _MIN_WORD_DURATION_SEC, _extract_word_timestamps
+
+    # 生成が単語途中で打ち切られ終了時刻が無い場合、開始時刻+最小長で補う。
+    chunks = [{"text": "あ", "timestamp": (1.0, None)}]
+
+    result = _extract_word_timestamps(chunks, duration_sec=2.0)
+
+    assert result == [("あ", 1.0, 1.0 + _MIN_WORD_DURATION_SEC)]
+
+
 # --- §5.2 手順5: 音素列の組み立て(pau挿入) ---
 
 
@@ -338,6 +406,49 @@ def test_assemble_phoneme_sequence_no_chunks_is_leading_and_trailing_pau_only():
     result = _assemble_phoneme_sequence([])
 
     assert result == ["pau", "pau"]
+
+
+# --- §5.2 手順5: 単語窓の割り当て(単語タイムスタンプ取得時) ---
+
+
+def test_assemble_with_word_windows_single_word():
+    from vocal_analysis.recognizer import _assemble_with_word_windows
+
+    # 単語「あ」(音素["a"])が[1.0,1.5]秒。余白0.5秒。
+    seq, windows = _assemble_with_word_windows([(["a"], 1.0, 1.5)], margin_sec=0.5, duration_sec=3.0)
+
+    assert seq == ["pau", "a", "pau"]
+    assert windows[0] == (0.0, 1.5)  # 先頭pau: [0, 最初の開始+余白]
+    assert windows[1] == (0.5, 2.0)  # 単語: [開始-余白, 終了+余白]
+    assert windows[2] == (1.0, 3.0)  # 末尾pau: [最後の終了-余白, duration_sec]
+
+
+def test_assemble_with_word_windows_inter_word_pau_window():
+    from vocal_analysis.recognizer import _assemble_with_word_windows
+
+    # 単語間pau窓は隣接2単語の[前の終了-余白, 次の開始+余白]。
+    words_phonemes = [(["a"], 0.5, 1.0), (["k", "i"], 2.0, 2.5)]
+
+    seq, windows = _assemble_with_word_windows(words_phonemes, margin_sec=0.3, duration_sec=3.0)
+
+    assert seq == ["pau", "a", "pau", "k", "i", "pau"]
+    inter_word_window = windows[2]
+    assert inter_word_window == pytest.approx((0.7, 2.3))
+    # 単語内の全音素記号(句読点由来のpauを含む)は自身の単語の窓を共有する。
+    assert windows[3] == windows[4]
+
+
+def test_assemble_with_word_windows_swaps_inverted_window():
+    from vocal_analysis.recognizer import _assemble_with_word_windows
+
+    # 単調化は開始順序のみ保証するため、前の単語の終了が次の単語の開始を余白の2倍を超えて
+    # 上回る(重なる)場合、単語間pau窓は下端が上端を上回る。小さい方を下端として入れ替える。
+    words_phonemes = [(["a"], 0.0, 2.0), (["i"], 2.1, 2.5)]  # 重なり(2.0-2.1=1.9) > 余白の2倍(1.0)
+
+    _, windows = _assemble_with_word_windows(words_phonemes, margin_sec=0.5, duration_sec=3.0)
+
+    inter_word_window = windows[2]
+    assert inter_word_window[0] <= inter_word_window[1]
 
 
 # --- §5.2 手順6: G2P記号→音素モデル語彙のトークンID変換 ---
@@ -546,6 +657,68 @@ def test_forced_align_band_limit_excludes_out_of_band_favorable_evidence():
     assert state1_frames  # 状態1は必ずどこかのフレームを占有する
     assert all(49 <= f <= 150 for f in state1_frames)
     assert all(f not in range(180, 186) for f in state1_frames)
+
+
+# --- §5.2 手順7: 単語窓制約Viterbi(主経路) ---
+
+
+def test_forced_align_windowed_follows_dominant_emission_within_window():
+    from vocal_analysis.recognizer import _forced_align_windowed
+
+    log_probs = np.array(
+        [
+            [5.0, -5.0],
+            [5.0, -5.0],
+            [-5.0, 5.0],
+            [-5.0, 5.0],
+        ]
+    )
+    windows = [(0.0, 10.0), (0.0, 10.0)]  # 制約が緩ければ _forced_align と同じ経路になる
+
+    path = _forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=windows)
+
+    assert path == [0, 0, 1, 1]
+
+
+def test_forced_align_windowed_excludes_evidence_outside_window():
+    from vocal_analysis.recognizer import _forced_align_windowed
+
+    # 200フレーム・3状態(pau, 内容, pau)。状態1(内容)の窓は[0,3.0]秒(フレーム0-149相当)に
+    # 限定する。内容にとって最も有利な区間(フレーム180-185)はこの窓の外にあるため、状態1は
+    # そこへ到達できず、窓内のフレームだけを占有する(状態0はフレーム0固定・状態2は末尾固定
+    # のため両端の窓は範囲全体を許容する)。
+    num_frames = 200
+    log_probs = np.zeros((num_frames, 3))
+    log_probs[:, 1] = -8.0
+    log_probs[180:186, 1] = 0.0
+    windows = [(0.0, 4.0), (0.0, 3.0), (0.0, 4.0)]
+
+    path = _forced_align_windowed(log_probs, token_ids=[0, 1, 0], windows_sec=windows)
+
+    state1_frames = [i for i, state in enumerate(path) if state == 1]
+    assert state1_frames  # 状態1は必ずどこかのフレームを占有する
+    assert all(f < 150 for f in state1_frames)
+    assert all(f not in range(180, 186) for f in state1_frames)
+
+
+def test_forced_align_windowed_raises_when_window_unreachable():
+    from vocal_analysis.recognizer import RecognitionError, _forced_align_windowed
+
+    # 状態1の窓がフレーム範囲と一切交差しないため、末尾状態へ到達する経路が存在しない。
+    log_probs = np.zeros((4, 2))
+    windows = [(0.0, 10.0), (100.0, 200.0)]
+
+    with pytest.raises(RecognitionError):
+        _forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=windows)
+
+
+def test_forced_align_windowed_raises_when_fewer_frames_than_tokens():
+    from vocal_analysis.recognizer import RecognitionError, _forced_align_windowed
+
+    log_probs = np.zeros((2, 1))
+
+    with pytest.raises(RecognitionError):
+        _forced_align_windowed(log_probs, token_ids=[0, 0, 0], windows_sec=[(0, 1), (0, 1), (0, 1)])
 
 
 # --- §5.2 手順8・9: 区切りの確定とSegment化 ---
