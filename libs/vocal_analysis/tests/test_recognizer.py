@@ -211,6 +211,27 @@ def test_is_segment_silent_empty_segment_is_silent():
     assert _is_segment_silent(np.array([], dtype=np.float32), threshold=0.01) is True
 
 
+def test_is_hallucinated_phoneme_density_below_threshold_is_not_hallucinated():
+    from vocal_analysis.recognizer import _HALLUCINATION_PHONEME_RATE, _is_hallucinated_phoneme_density
+
+    # しきい値ちょうど(20音素/秒)は超過ではない。
+    assert _is_hallucinated_phoneme_density(
+        phoneme_count=round(_HALLUCINATION_PHONEME_RATE * 2.0), duration_sec=2.0) is False
+
+
+def test_is_hallucinated_phoneme_density_above_threshold_is_hallucinated():
+    from vocal_analysis.recognizer import _is_hallucinated_phoneme_density
+
+    # 実測(反復幻覚)相当: 21.15秒に863音素 ≈ 40.8音素/秒。
+    assert _is_hallucinated_phoneme_density(phoneme_count=863, duration_sec=21.15) is True
+
+
+def test_is_hallucinated_phoneme_density_zero_duration_is_not_hallucinated():
+    from vocal_analysis.recognizer import _is_hallucinated_phoneme_density
+
+    assert _is_hallucinated_phoneme_density(phoneme_count=100, duration_sec=0.0) is False
+
+
 def test_voiced_trim_bounds_trims_leading_and_trailing_silence_with_margin():
     from vocal_analysis.recognizer import _voiced_trim_bounds
 

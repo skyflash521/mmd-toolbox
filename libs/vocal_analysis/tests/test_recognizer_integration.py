@@ -212,6 +212,33 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
     assert segments[2].end_sec == pytest.approx(3.5)  # 末尾トリム無し: 区間終端まで被覆
 
 
+def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 2.0秒の有声区間に対しG2Pが100音素(密度50/秒。§5.2手順4のしきい値20/秒を大幅に超える)を
+    # 返すケース(内容認識の反復幻覚を模す)。誤った音素列で強制アライメントを試みず、区間全体を
+    # gapとして確定し、音素モデルも一度もロードしない。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)  # 2.0秒・無音区間なし
+
+    monkeypatch.setattr(
+        recognizer_module, "_transcribe_segment",
+        lambda samples, content_recognizer_model: "かんじは つかわないでください。" * 20)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"] * 100)
+
+    def fail_if_called():
+        raise AssertionError("音素密度が高い区間で音素モデルをロードしてはならない")
+
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fail_if_called)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert len(segments) == 1
+    assert segments[0].type == "gap"
+    assert segments[0].phoneme is None
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(2.0)
+
+
 def test_recognize_fully_silent_input_never_loads_phoneme_model(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 

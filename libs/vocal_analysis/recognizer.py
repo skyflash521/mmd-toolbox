@@ -155,22 +155,17 @@ def _voiced_trim_bounds(segment_samples: np.ndarray, sample_rate: int, threshold
     return lo, hi
 
 
-def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
-    """隣接する同一 type・phoneme の Segment を1つへ結合する(§5.2手順9。区間境界をまたぐ結合)。"""
-    merged: list[Segment] = []
-    for seg in segments:
-        if merged and merged[-1].type == seg.type and merged[-1].phoneme == seg.phoneme:
-            prev = merged[-1]
-            merged[-1] = Segment(
-                type=prev.type, start_sec=prev.start_sec, end_sec=seg.end_sec,
-                phoneme=prev.phoneme, confidence=None,
-            )
-        else:
-            merged.append(seg)
-    return merged
-
-
 # --- §5.2 手順4以降: 内容認識+G2P+強制アライメントの区間化 ---
+
+_HALLUCINATION_PHONEME_RATE = 20.0  # §5.2手順4: 反復幻覚を疑う音素密度のしきい値(音素/秒)
+
+
+def _is_hallucinated_phoneme_density(phoneme_count: int, duration_sec: float) -> bool:
+    """音素密度(音素/秒)が反復幻覚を疑うしきい値を超えるかを判定する(§5.2手順4)。"""
+    if duration_sec <= 0:
+        return False
+    return phoneme_count / duration_sec > _HALLUCINATION_PHONEME_RATE
+
 
 # §5.2 の写像表(確定): pyopenjtalk-plus の音素記号(無声化母音 I/U を含む)を音素モデルの語彙(espeak
 # 表記)へ対応付ける。pau・cl はここに含めず、blank トークン(呼び出し側が渡す blank_token_id)へ変換する。
@@ -379,6 +374,21 @@ def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: f
     return segments
 
 
+def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
+    """隣接する同一 type・phoneme の Segment を1つへ結合する(§5.2手順9。区間境界をまたぐ結合)。"""
+    merged: list[Segment] = []
+    for seg in segments:
+        if merged and merged[-1].type == seg.type and merged[-1].phoneme == seg.phoneme:
+            prev = merged[-1]
+            merged[-1] = Segment(
+                type=prev.type, start_sec=prev.start_sec, end_sec=seg.end_sec,
+                phoneme=prev.phoneme, confidence=None,
+            )
+        else:
+            merged.append(seg)
+    return merged
+
+
 def recognize(
     vocal_wav_path: Path,
     content_recognizer_model: ContentRecognizerModel = DEFAULT_CONTENT_RECOGNIZER_MODEL,
@@ -398,9 +408,10 @@ def recognize(
     split_points = _detect_silence_split_points(resampled, RECOGNIZER_CONFIG.sample_rate)
     segment_bounds = _build_segment_bounds(duration_sec, split_points)
 
-    # 音素モデルは無音でない区間が実際に現れるまでロードしない(§5.2手順2: 全区間が無音なら
-    # モデルを一切必要としない。非無音区間でも内容認識・G2Pより先にロードするのではなく、それらが
-    # 成功した後に遅延ロードする。ただしロード自体の失敗は握りつぶさず例外にして失敗境界を隠さない)。
+    # 音素モデルは実際に強制アライメントへ進む区間が現れるまでロードしない(§5.2手順2: 全区間が
+    # 無音ならモデルを一切必要としない。非無音区間でも内容認識・G2P・手順4の音素密度チェックより
+    # 先にロードするのではなく、それらを経てなお進む区間だけで遅延ロードする。幻覚検出でgap確定
+    # した区間はロードせずスキップする。ロード自体の失敗は握りつぶさず例外にして失敗境界を隠さない)。
     processor = model = vocab = blank_token_id = None
 
     all_segments: list[Segment] = []
@@ -448,6 +459,19 @@ def recognize(
             raise RecognitionError(
                 "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
             ) from e
+
+        # §5.2手順4の音素密度による幻覚検出: 内容認識の反復幻覚(同一文・同一フレーズの繰り返し)は
+        # 区間の実際の発声より著しく多い音素列を生む。書き起こし・G2P・強制アライメントの結果を
+        # 用いず、区間全体をgapとして確定する(利用先のgap解決へ委ねる)。
+        if _is_hallucinated_phoneme_density(len(phonemes), trim_hi_sec - trim_lo_sec):
+            all_segments.append(
+                Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None, confidence=None)
+            )
+            if trimmed_tail:
+                all_segments.append(
+                    Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
+                )
+            continue
 
         if processor is None:
             try:
