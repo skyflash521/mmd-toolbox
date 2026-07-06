@@ -577,6 +577,104 @@ def test_expand_min_stay_all_blank_sequence_is_unchanged():
     assert sub_to_token == [0, 1]
 
 
+# --- §5.2 手順7: 最小滞在の局所適応(単語タイムスタンプ取得時) ---
+
+
+def test_expand_min_stay_local_uses_word_duration_over_phoneme_count():
+    from vocal_analysis.recognizer import _expand_min_stay_local
+
+    # token_ids = [pau, a, i, pau](単語1個・音素2個)。単語の実時間0.12s(6フレーム)を
+    # 音素数2で割った3フレームが最小滞在になる。
+    words_phonemes = [(["a", "i"], 0.0, 0.12)]
+    sub_ids, sub_to_token = _expand_min_stay_local([0, 1, 2, 0], words_phonemes, blank_token_id=0)
+
+    assert sub_ids == [0, 1, 1, 1, 2, 2, 2, 0]
+    assert sub_to_token == [0, 1, 1, 1, 2, 2, 2, 3]
+
+
+def test_expand_min_stay_local_varies_per_word_within_same_chunk():
+    from vocal_analysis.recognizer import _expand_min_stay_local
+
+    # 単語1「あ」(音素1個・0.12s=6フレーム→stay6)と単語2「い」(音素1個・0.02s=1フレーム→stay1)。
+    # チャンク全体で1つの平均を使う _expand_min_stay と異なり、テンポが速い単語だけ短縮される。
+    # token_ids = [pau, a, pau(単語間), i, pau(末尾)]
+    words_phonemes = [(["a"], 0.0, 0.12), (["i"], 0.12, 0.14)]
+    sub_ids, sub_to_token = _expand_min_stay_local([0, 1, 0, 2, 0], words_phonemes, blank_token_id=0)
+
+    assert sub_ids == [0] + [1] * 6 + [0] + [2] * 1 + [0]
+    assert sub_to_token == [0] + [1] * 6 + [2] + [3] * 1 + [4]
+
+
+def test_expand_min_stay_local_clamps_to_global_max_stay():
+    from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay_local
+
+    # 実時間が長く音素数が少ない単語でも、最小滞在は _MIN_STAY_FRAMES(6)を超えない。
+    words_phonemes = [(["a"], 0.0, 2.0)]  # 100フレーム分の実時間・音素1個
+    sub_ids, _ = _expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
+
+    assert sub_ids == [0] + [1] * _MIN_STAY_FRAMES + [0]
+
+
+def test_expand_min_stay_local_never_reduces_below_one():
+    from vocal_analysis.recognizer import _expand_min_stay_local
+
+    # 実時間が音素数に対して極端に短くても、最小滞在は1未満にしない。
+    words_phonemes = [(["a", "i", "u"], 0.0, 0.02)]  # 1フレームに音素3個
+    sub_ids, _ = _expand_min_stay_local([0, 1, 2, 3, 0], words_phonemes, blank_token_id=0)
+
+    assert sub_ids == [0, 1, 2, 3, 0]
+
+
+def test_expand_min_stay_local_rounds_floating_point_boundary_correctly():
+    from vocal_analysis.recognizer import _expand_min_stay_local
+
+    # (0.06-0.02)/0.02 は浮動小数点誤差で1.9999999999999996になり、floor()なら1へ切り捨てて
+    # しまう境界値。真の四捨五入(int(x+0.5))で正しく2フレームへ丸められることを確認する。
+    words_phonemes = [(["a"], 0.02, 0.06)]
+    sub_ids, _ = _expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
+
+    assert sub_ids == [0, 1, 1, 0]
+
+
+def test_expand_min_stay_local_rounds_half_up_not_half_to_even():
+    from vocal_analysis.recognizer import _expand_min_stay_local
+
+    # 単語の最小長クランプ(§5.2手順3の_MIN_WORD_DURATION_SEC=0.05秒)により、実時間/音素数が
+    # ちょうど2.5フレーム(0.05/0.02)になる商へ実際に到達しうる。Python組み込みのround()は
+    # 偶数丸めで2.5→2になるが、実装は真の四捨五入(0.5は常に切り上げ)を使うため3になる。
+    words_phonemes = [(["a"], 0.0, 0.05)]
+    sub_ids, _ = _expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
+
+    assert sub_ids == [0, 1, 1, 1, 0]
+
+
+def test_expand_min_stay_local_empty_phonemes_word_contributes_no_substates():
+    from vocal_analysis.recognizer import _expand_min_stay_local
+
+    # 音素0個の単語(句読点のみ等)を挟んでも、その単語自身はトークンを持たないため
+    # token_ids・words_phonemesの対応関係は崩れない(隣接pauのみが1状態で並ぶ)。
+    words_phonemes = [([], 0.0, 0.02), (["a"], 0.02, 0.14)]
+    sub_ids, sub_to_token = _expand_min_stay_local([0, 0, 1, 0], words_phonemes, blank_token_id=0)
+
+    assert sub_ids == [0, 0] + [1] * 6 + [0]
+    assert sub_to_token == [0, 1] + [2] * 6 + [3]
+
+
+def test_expand_min_stay_local_word_internal_blank_symbol_stays_one_frame():
+    from vocal_analysis.recognizer import _expand_min_stay_local
+
+    # 単語内に促音(cl。blank写像)を含む場合、その単語の音素記号列の要素数(blank記号を含む4個)で
+    # 実時間を割ってstay(0.24s=12フレーム/4個=3)を計算するが、blank記号自身は展開時に常に
+    # 1フレームへ落ちる(非blank記号だけがstay分だけ展開される)。
+    words_phonemes = [(["a", "cl", "t", "e"], 0.0, 0.24)]
+    sub_ids, sub_to_token = _expand_min_stay_local(
+        [0, 5, 0, 7, 6, 0], words_phonemes, blank_token_id=0
+    )
+
+    assert sub_ids == [0] + [5] * 3 + [0] + [7] * 3 + [6] * 3 + [0]
+    assert sub_to_token == [0] + [1] * 3 + [2] + [3] * 3 + [4] * 3 + [5]
+
+
 def test_min_stay_expansion_forces_phoneme_to_occupy_expanded_frames():
     from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay, _forced_align
 

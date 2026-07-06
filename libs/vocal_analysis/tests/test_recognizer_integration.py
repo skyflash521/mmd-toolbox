@@ -304,12 +304,15 @@ def test_recognize_computes_and_passes_word_windows(tmp_path, monkeypatch):
 
     assert "windows_sec" in captured  # 単語窓制約経路が呼ばれた
     margin = recognizer_module._WORD_WINDOW_MARGIN_SEC
-    # seq=["pau","a","pau"]。aは最小滞在で4サブ状態へ展開されるため、窓は
-    # [先頭pau, a, a, a, a, 末尾pau] の6個(log_probsの6フレームに対応)。
+    # seq=["pau","a","pau"]。最小滞在は単語ごとの局所適応(§5.2手順7)で、「あ」の実時間
+    # 0.02s-0.06s(2フレーム)を音素数1で割った2フレームへ展開されるため、窓は
+    # [先頭pau, a, a, 末尾pau] の4個(log_probsの6フレームのうち残り2フレームはViterbi自身が
+    # stay遷移で埋める)。
     windows_sec = captured["windows_sec"]
+    assert len(windows_sec) == 4
     assert windows_sec[0] == pytest.approx((0.0, 0.02 + margin))
-    assert all(w == pytest.approx((0.02 - margin, 0.06 + margin)) for w in windows_sec[1:5])
-    assert windows_sec[5] == pytest.approx((0.06 - margin, 0.12))
+    assert all(w == pytest.approx((0.02 - margin, 0.06 + margin)) for w in windows_sec[1:3])
+    assert windows_sec[3] == pytest.approx((0.06 - margin, 0.12))
     assert segments[1].phoneme == "a"
 
 
@@ -344,6 +347,57 @@ def test_recognize_falls_back_to_band_alignment_when_word_window_infeasible(tmp_
 
     segments = recognizer_module.recognize(wav_path)
 
+    assert segments[1].type == "vowel"
+    assert segments[1].phoneme == "a"
+
+
+def test_recognize_falls_back_to_global_min_stay_when_windowed_alignment_fails(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 単語窓制約Viterbiが失敗した場合、フォールバック(位置バンド制限)は単語ごとの局所適応
+    # (_expand_min_stay_local)ではなく、チャンク全体の最小滞在(_expand_min_stay)を計算し
+    # 直したサブ状態を使う(§5.2手順7)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+    calls = {"local": 0, "global": 0}
+
+    def fake_transcribe(samples, content_recognizer_model):
+        return "あ", [("あ", 0.02, 0.06)]
+
+    def fail_windowed(log_probs_arg, token_ids, windows_sec):
+        raise recognizer_module.RecognitionError("単語窓制約下で強制アライメントが末尾トークンへ到達できませんでした")
+
+    original_local = recognizer_module._expand_min_stay_local
+    original_global = recognizer_module._expand_min_stay
+
+    def spy_local(*args, **kwargs):
+        calls["local"] += 1
+        return original_local(*args, **kwargs)
+
+    def spy_global(*args, **kwargs):
+        calls["global"] += 1
+        return original_global(*args, **kwargs)
+
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+    monkeypatch.setattr(recognizer_module, "_forced_align_windowed", fail_windowed)
+    monkeypatch.setattr(recognizer_module, "_expand_min_stay_local", spy_local)
+    monkeypatch.setattr(recognizer_module, "_expand_min_stay", spy_global)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert calls["local"] == 1  # 主経路でまず局所適応を試みる
+    assert calls["global"] == 1  # 窓制約の失敗を受けてチャンク全体の最小滞在を計算し直す
     assert segments[1].type == "vowel"
     assert segments[1].phoneme == "a"
 

@@ -307,6 +307,48 @@ def _expand_min_stay(
     return sub_token_ids, sub_to_token
 
 
+def _expand_min_stay_local(
+    token_ids: list[int],
+    words_phonemes: list[tuple[list[str], float, float]],
+    blank_token_id: int,
+) -> tuple[list[int], list[int]]:
+    """最小滞在フレーム数を単語ごとに局所適応させて展開する(§5.2手順7の局所適応。単語
+    タイムスタンプが取得できた場合のみ使う)。
+
+    _expand_min_stay(チャンク全体で1回だけ最小滞在を計算する版)と異なり、単語ごとに
+    「その単語の実時間(フレーム数)を音素記号列の要素数(pau・cl由来のblank記号を含む)で割った値を
+    四捨五入したもの」を最小滞在とする(1〜_MIN_STAY_FRAMESにクランプ)。歌唱ではフレーズ内で
+    テンポが不均一なことがあり、チャンク全体の平均では十分な余裕があっても、テンポの速い一部の
+    単語群だけが局所的に逼迫し、単調遷移と単語窓を同時に満たす経路が理論上到達不能になることが
+    実測で確認された。単語ごとの実時間に応じて最小滞在を短縮することで、この逼迫を解消する。
+
+    token_ids は手順5・6で組み立てたトークン列(先頭pau・各単語の音素・単語間/末尾pauを含む)の
+    語彙IDへの変換結果で、words_phonemes と同じ単語の並びから組み立てられていることを前提とする。
+
+    戻り値は (展開後トークンID列, 各サブ状態が対応する元トークンindexの列)。
+    """
+    stays = [1]  # 先頭pau(blank)
+    for i, (phonemes, start, end) in enumerate(words_phonemes):
+        word_frames = (end - start) / FRAME_DURATION_SEC
+        # 四捨五入は int(x + 0.5)(真の四捨五入)を使う。Python組み込みのround()は偶数丸めで
+        # ちょうど.5の商(例: 単語の実時間が最小長0.05秒=2.5フレームにクランプされた場合)を
+        # 切り捨てうるため使わない。浮動小数点誤差でfloor()が1フレーム低く切り捨てる境界値
+        # (例: (0.06-0.02)/0.02 が2.0でなく1.9999999999999996になる)もこの式で正しく丸まる。
+        stay = min(_MIN_STAY_FRAMES, max(1, int(word_frames / len(phonemes) + 0.5))) if phonemes else 1
+        stays.extend([stay] * len(phonemes))
+        if i + 1 < len(words_phonemes):
+            stays.append(1)  # 単語間pau(blank)
+    stays.append(1)  # 末尾pau(blank)
+
+    sub_token_ids: list[int] = []
+    sub_to_token: list[int] = []
+    for index, (tid, stay) in enumerate(zip(token_ids, stays, strict=True)):
+        reps = 1 if tid == blank_token_id else stay
+        sub_token_ids.extend([tid] * reps)
+        sub_to_token.extend([index] * reps)
+    return sub_token_ids, sub_to_token
+
+
 def _viterbi_monotonic(log_probs: np.ndarray, token_ids: list[int], out_of_bounds: np.ndarray) -> list[int] | None:
     """トークン列を対数確率行列へ単調に対応付ける共通Viterbi(§5.2手順7)。
 
@@ -615,17 +657,21 @@ def recognize(
         # 非blankトークンをサブ状態へ展開してアライメントし、経路を元トークンindexへ戻してから
         # Segment化する。
         log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
-        sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
 
         # §5.2手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
-        # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。
+        # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。単語窓がある場合、
+        # 最小滞在は単語ごとの局所適応(_expand_min_stay_local)を使う。局所適応でも窓制約が
+        # 到達不能ならチャンク全体の最小滞在(_expand_min_stay)へ計算し直し、位置バンド制限を使う。
         if windows_sec is not None:
+            sub_token_ids, sub_to_token = _expand_min_stay_local(token_ids, words_phonemes, blank_token_id)
             sub_windows = [windows_sec[i] for i in sub_to_token]
             try:
                 sub_path = _forced_align_windowed(log_probs, sub_token_ids, sub_windows)
             except RecognitionError:
+                sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
                 sub_path = _forced_align(log_probs, sub_token_ids)
         else:
+            sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
             sub_path = _forced_align(log_probs, sub_token_ids)
 
         path = [sub_to_token[s] for s in sub_path]
