@@ -262,6 +262,7 @@ _FORCED_ALIGN_BAND_SEC = 1.0  # §5.2手順7: blank支配下での押し込み�
 _MIN_STAY_FRAMES = 6  # §5.2手順7: 非blank(音素)状態の最小滞在フレーム数(120ms)
 _VOICED_BLANK_PENALTY = 7.0  # §5.2手順7: 有声フレームのblank列から引く対数確率ペナルティ
 _WORD_WINDOW_MARGIN_SEC = 0.75  # §5.2手順7: 単語窓制約の余白(0.2/0.5/0.75秒の実測比較で採用)
+_EARLY_COMMIT_BONUS = 2.0  # §5.2手順7: 単語窓制約の早期遷移ボーナスの加算項上限(実測比較で採用)
 
 
 def _apply_voiced_blank_penalty(
@@ -349,7 +350,12 @@ def _expand_min_stay_local(
     return sub_token_ids, sub_to_token
 
 
-def _viterbi_monotonic(log_probs: np.ndarray, token_ids: list[int], out_of_bounds: np.ndarray) -> list[int] | None:
+def _viterbi_monotonic(
+    log_probs: np.ndarray,
+    token_ids: list[int],
+    out_of_bounds: np.ndarray,
+    state_bias: np.ndarray | None = None,
+) -> list[int] | None:
     """トークン列を対数確率行列へ単調に対応付ける共通Viterbi(§5.2手順7)。
 
     各トークンを1状態とし、フレームごとに「同一状態に留まる」「次のトークンの状態へ進む」の
@@ -357,7 +363,10 @@ def _viterbi_monotonic(log_probs: np.ndarray, token_ids: list[int], out_of_bound
     語彙IDの列を使う(pau・cl由来の状態のblank列選択は、呼び出し側の _g2p_symbols_to_token_ids が
     そこへ blank_token_id を書き込み済みであることに由来し、本関数はトークン種別を区別しない)。
     状態 l がフレーム t に遷移できるかは呼び出し側が渡す out_of_bounds[t, l](到達不能なら True)
-    で制約する(単語窓制約・位置バンド制限のいずれもこの共通形へ帰着する)。
+    で制約する(単語窓制約・位置バンド制限のいずれもこの共通形へ帰着する)。state_bias を渡すと
+    (num_frames, num_states)の加算項として対数確率へ足し込む(単語窓制約の早期遷移ボーナス。
+    下記 _forced_align_windowed)。省略時(None)は何も加算しない(_forced_align のフォールバックは
+    渡さない)。
 
     フレーム0は状態0に固定し、最終フレームは状態 len(token_ids)-1 に到達している経路の中で
     最尤のものを採る。戻り値は各フレームが対応する状態(トークン列中のindex)。最終フレームで
@@ -366,6 +375,8 @@ def _viterbi_monotonic(log_probs: np.ndarray, token_ids: list[int], out_of_bound
     """
     num_frames, num_states = out_of_bounds.shape
     emission = log_probs[:, token_ids]  # (num_frames, num_states)
+    if state_bias is not None:
+        emission = emission + state_bias
     neg_inf = float("-inf")
     dp = np.full((num_frames, num_states), neg_inf, dtype=np.float64)
     backpointer = np.zeros((num_frames, num_states), dtype=np.int64)
@@ -441,6 +452,14 @@ def _forced_align_windowed(
     限る。windows_sec は token_ids と同じ長さ(サブ状態展開後、各サブ状態は由来するトークンの窓を
     共有する)。開始・終端条件・遷移規則は _forced_align と同じ(共通の _viterbi_monotonic を使う)。
 
+    **早期遷移ボーナス**: 各状態の対数確率に、その状態の窓内での相対位置(早いほど大きい)に応じた
+    加算項 `_EARLY_COMMIT_BONUS * (1 - 窓内相対位置)` を加える(窓の下端で最大 `_EARLY_COMMIT_BONUS`、
+    上端で0)。単語窓制約は「窓内のどこでもよい」というハード制約のみで窓内の位置選好を持たないため、
+    blank優勢の歌唱では有声フレームのblank抑制だけでは覆いきれず、窓の遅い側(上端寄り)へ配置が
+    偏る実測済みの不具合への対処(先行する状態に留まるほどその状態自身の窓内相対位置が進み加算項が
+    減衰する一方、後続状態はその状態自身の窓の下端に近いフレームで遷移するほど加算項が大きいため、
+    早く遷移するほど総和が相対的に有利になる)。窓外は到達不能のまま変えない。
+
     最終フレームで末尾状態へ到達する経路が無い場合(単語タイムスタンプの誤り等)は
     RecognitionError で停止する(呼び出し側が _forced_align へフォールバックする)。
     """
@@ -451,14 +470,17 @@ def _forced_align_windowed(
             f"強制アライメントが対応付け不能です(フレーム数{num_frames}、トークン数{num_states})"
         )
 
-    out_of_window = np.array(
-        [
-            [not (lo < (t + 1) * FRAME_DURATION_SEC and hi > t * FRAME_DURATION_SEC) for lo, hi in windows_sec]
-            for t in range(num_frames)
-        ]
-    )
+    frame_lo = np.arange(num_frames) * FRAME_DURATION_SEC
+    frame_hi = frame_lo + FRAME_DURATION_SEC
+    win_lo = np.array([w[0] for w in windows_sec])
+    win_hi = np.array([w[1] for w in windows_sec])
+    width = np.maximum(win_hi - win_lo, 1e-9)  # 幅0の窓(hi==lo)での0除算を避ける下駄
 
-    path = _viterbi_monotonic(log_probs, token_ids, out_of_window)
+    out_of_window = ~((win_lo[None, :] < frame_hi[:, None]) & (win_hi[None, :] > frame_lo[:, None]))
+    relative_position = np.clip((frame_lo[:, None] - win_lo[None, :]) / width[None, :], 0.0, 1.0)
+    state_bias = _EARLY_COMMIT_BONUS * (1.0 - relative_position)
+
+    path = _viterbi_monotonic(log_probs, token_ids, out_of_window, state_bias)
     if path is None:
         raise RecognitionError("単語窓制約下で強制アライメントが末尾トークンへ到達できませんでした")
     return path
@@ -643,7 +665,7 @@ def recognize(
             vocab = processor.tokenizer.get_vocab()
             blank_token_id = processor.tokenizer.pad_token_id
 
-        # §5.2手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ従来どおり
+        # §5.2手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ
         # (単語分割していない一括の)音素記号列の前後にpauを補うだけにする。
         if words_phonemes is not None:
             seq, windows_sec = _assemble_with_word_windows(words_phonemes, _WORD_WINDOW_MARGIN_SEC, trim_duration_sec)

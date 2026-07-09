@@ -819,6 +819,49 @@ def test_forced_align_windowed_raises_when_fewer_frames_than_tokens():
         _forced_align_windowed(log_probs, token_ids=[0, 0, 0], windows_sec=[(0, 1), (0, 1), (0, 1)])
 
 
+def test_forced_align_windowed_early_commit_bonus_pulls_transition_toward_window_open():
+    from vocal_analysis.recognizer import FRAME_DURATION_SEC, _forced_align_windowed
+
+    # 状態0(pau)は窓[0.0,8.0]秒でフレーム全域に到達可能、状態1(音素)は窓[2.0,8.0]秒で
+    # 状態0と広く重なるが開始が遅い。放出は状態0がわずかに優勢(0.0 対 -0.05。blank優勢の
+    # 歌唱を模した固定差)なため、窓の到達可能性だけでは遷移点が定まらず、早期遷移ボーナス
+    # (状態1の窓内相対位置に応じた加算)が無ければ状態1への遷移を可能な限り遅らせる
+    # (フレーム全域の末尾まで留まる)方が総対数確率上有利になる(次のテストで対照確認)。
+    # ボーナスが効けば、状態1の窓が開いた直後(2.0秒)へ遷移が引き寄せられる。
+    num_frames = int(8.0 / FRAME_DURATION_SEC)
+    log_probs = np.zeros((num_frames, 2))
+    log_probs[:, 1] = -0.05
+    windows = [(0.0, 8.0), (2.0, 8.0)]
+
+    path = _forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=windows)
+
+    first_state1_frame = path.index(1)
+    assert first_state1_frame == round(2.0 / FRAME_DURATION_SEC)
+
+
+def test_viterbi_monotonic_without_state_bias_delays_transition_to_deadline():
+    from vocal_analysis.recognizer import FRAME_DURATION_SEC, _viterbi_monotonic
+
+    # 前テストと同じ放出・窓構成を state_bias=None で直接 _viterbi_monotonic に渡す
+    # (_forced_align のフォールバック経路が使う形)。早期遷移ボーナスが無いと、状態0優勢の
+    # 放出により状態1への遷移が窓の上端(=フレーム全域の末尾)まで遅延することを確認する。
+    num_frames = int(8.0 / FRAME_DURATION_SEC)
+    log_probs = np.zeros((num_frames, 2))
+    log_probs[:, 1] = -0.05
+    windows = [(0.0, 8.0), (2.0, 8.0)]
+
+    frame_lo = np.arange(num_frames) * FRAME_DURATION_SEC
+    frame_hi = frame_lo + FRAME_DURATION_SEC
+    win_lo = np.array([w[0] for w in windows])
+    win_hi = np.array([w[1] for w in windows])
+    out_of_window = ~((win_lo[None, :] < frame_hi[:, None]) & (win_hi[None, :] > frame_lo[:, None]))
+
+    path = _viterbi_monotonic(log_probs, token_ids=[0, 1], out_of_bounds=out_of_window, state_bias=None)
+
+    first_state1_frame = path.index(1)
+    assert first_state1_frame == num_frames - 1
+
+
 # --- §5.2 手順8・9: 区切りの確定とSegment化 ---
 
 
