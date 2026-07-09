@@ -32,9 +32,6 @@ _SPREAD_PHONEMES = frozenset({"ɕ", "tɕ", "dʑ", "ɲ", "ç"})
 
 _VOWEL_SHAPES = {"a": MouthShape.A, "i": MouthShape.I, "u": MouthShape.U, "e": MouthShape.E, "o": MouthShape.O}
 
-# 母音的口形(gap継続・無音判定で「開いている」とみなす対象。song2vmd.md 6.3)。
-_VOWEL_LIKE_KINDS = frozenset({"vowel", "n"})
-
 _LOW_DYNAMICS_THRESHOLD_DB = 12.0  # song2vmd.md 6.4(初期値)。
 _MORA_CENTER_FRACTION = 0.6  # 代表RMSの中央60%窓の比率(母音核・モーラ全体の二窓共通。song2vmd.md 6.4)。
 _ONSET_WINDOW_SEC = 0.06  # 母音境界のRMSオンセット補正窓(song2vmd.md 6.3。初期値)。
@@ -188,11 +185,43 @@ def _classify_phonetic(segments, use_n_morph):
     return units
 
 
+_GAP_CLOSE_RUN_SEC = 0.2  # §6.4: gap走査で発声終了とみなす、下降側しきい値以下の最小連続長
+
+
+def _gap_close_time(rms, start_sec, end_sec, silence_on):
+    """gap内の正規化RMSを先頭から走査し、発声終了時刻を返す(song2vmd.md 6.4のgap走査)。
+
+    silence_on以下が _GAP_CLOSE_RUN_SEC 以上連続した最初の連続、または gap 終端まで続く連続の
+    開始時刻を返す(連続要件はビブラート・トレモロの瞬間的な谷での早期閉口を防ぐ余裕で、終端まで
+    達した連続にはその先の発声再開が無いため適用しない)。しきい値以下の連続が無ければ None
+    (gap全体で発声が継続)。gap内の最初のフレームから始まる連続は start_sec を返す(そのフレームの
+    RMS窓はgap開始時刻を覆っており、gap先頭から無音として全体閉口に倒す。フレーム中心時刻を返すと
+    幅十数msの継続断片が生じ、直前母音への併合がモーラ併合の診断値を実体なく水増しするため)。
+    """
+    times, values = rms.times_sec, rms.values
+    lo = int(np.searchsorted(times, start_sec, side="left"))
+    hi = int(np.searchsorted(times, end_sec, side="left"))
+    run_start_index = None
+    for i in range(lo, hi):
+        if values[i] <= silence_on:
+            if run_start_index is None:
+                run_start_index = i
+            if times[i] - times[run_start_index] >= _GAP_CLOSE_RUN_SEC:
+                break
+        else:
+            run_start_index = None
+    if run_start_index is None:
+        return None
+    return start_sec if run_start_index == lo else float(times[run_start_index])
+
+
 def _resolve_silence(units, rms, silence_on, low_dynamics):
     """段階(2): gap解決・母音区間の無音補正(song2vmd.md 6.3・6.4)。
 
     gapの無音/継続は、直前に確定した口形が母音的(母音・撥音「ん」)かどうかと開始(下降側)しきい値
-    だけで決める(継続なら直前の母音的口形をそのまま延長する)。先頭・末尾のgapはRMSに依らず常に無音。
+    だけで決める。gap全体をひとまとめに判定せず、RMSを先頭から走査して発声が終わった時点でgapを
+    分割し、前半は直前の母音的口形の継続・残りは無音にする(§6.4のgap走査。一度閉じたgap内では
+    再度開かない)。先頭・末尾のgapはRMSに依らず常に無音。
     低ダイナミクス曲では、この音量に基づく無音化(gap無音化・母音区間の無音補正)を抑制する
     (先頭・末尾の閉口は対象外)。
     """
@@ -205,12 +234,16 @@ def _resolve_silence(units, rms, silence_on, low_dynamics):
                 result.append(_Unit("silence", u.start_sec, u.end_sec))
                 open_kind = None
                 continue
-            continue_open = low_dynamics or _rms_window_average(rms, u.start_sec, u.end_sec) > silence_on
-            if continue_open:
-                kind, letter = open_kind
+            close_at = None if low_dynamics else _gap_close_time(rms, u.start_sec, u.end_sec, silence_on)
+            kind, letter = open_kind
+            if close_at is None:
                 result.append(_Unit(kind, u.start_sec, u.end_sec, letter=letter))
-            else:
+            elif close_at <= u.start_sec:
                 result.append(_Unit("silence", u.start_sec, u.end_sec))
+                open_kind = None
+            else:
+                result.append(_Unit(kind, u.start_sec, close_at, letter=letter))
+                result.append(_Unit("silence", close_at, u.end_sec))
                 open_kind = None
         elif u.kind == "vowel":
             if not low_dynamics and _mora_representative_rms(rms, u) <= silence_on:

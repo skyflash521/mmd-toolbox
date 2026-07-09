@@ -219,16 +219,17 @@ def test_gap_below_silence_threshold_becomes_silence():
         seg("vowel", 0.4, 0.6, phoneme="i", confidence=0.9),
     ]
     rms = flat_rms(0.6, 0.8)
-    # gap区間(0.2〜0.4)だけ無音しきい値(0.06)以下にする。
-    idx_lo = int(0.2 / 0.010)
-    idx_hi = int(0.4 / 0.010)
-    for i in range(idx_lo, idx_hi + 1):
-        rms.values[i] = 0.02
-    mouth_events, _diag = confirm(segments, rms)
+    # gap区間(0.2〜0.4)に中心が落ちる全フレームを無音しきい値(0.06)以下にする。
+    for i in range(len(rms.times_sec)):
+        if 0.2 <= rms.times_sec[i] < 0.4:
+            rms.values[i] = 0.02
+    mouth_events, diag = confirm(segments, rms)
     shapes = [e.shape for e in mouth_events]
-    assert MouthShape.SILENCE in shapes
-    # 無音の前後にA・Iが残る。
-    assert shapes[0] == MouthShape.A and shapes[-1] == MouthShape.I
+    assert shapes == [MouthShape.A, MouthShape.SILENCE, MouthShape.I]
+    # gap先頭から無音の連続が始まる場合はgap全体が無音になる(song2vmd.md 6.4)。直前母音は
+    # gap側へ延長されず(継続断片が生じず)、モーラ併合の診断値も増えない。
+    assert mouth_events[0].end == pytest.approx(0.2 * FRAME_RATE)
+    assert diag.merged_morae == 0
 
 
 def test_gap_above_silence_threshold_continues_preceding_vowel():
@@ -285,6 +286,85 @@ def test_gap_after_silence_does_not_continue_as_open():
     rms = flat_rms(0.5, 0.5)
     mouth_events, _diag = confirm(segments, rms)
     assert [e.shape for e in mouth_events] == [MouthShape.SILENCE, MouthShape.A]
+
+
+def test_gap_with_voiced_head_and_silent_tail_splits_at_voice_end():
+    # 伸ばして歌う発声の尾部(有声)と真の無音が1つのgapに混在する場合、gap全体の一発判定ではなく
+    # 走査で分割し、発声が終わった時点から無音にする(song2vmd.md 6.4のgap走査)。
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="e̞", confidence=0.9),
+        seg("gap", 0.2, 2.0),
+        seg("vowel", 2.0, 2.2, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(2.2, 0.8)
+    # gapの前半(0.2〜1.0秒)は発声継続(0.8のまま)、後半(1.0秒〜)を無音レベルにする。
+    for i in range(len(rms.times_sec)):
+        if 1.0 <= rms.times_sec[i] < 2.0:
+            rms.values[i] = 0.02
+    mouth_events, _diag = confirm(segments, rms)
+    shapes = [e.shape for e in mouth_events]
+    assert shapes == [MouthShape.E, MouthShape.SILENCE, MouthShape.A]
+    # E(継続込み)は発声が終わる1.0秒付近まで、無音はそこからgap終端(2.0秒)まで。
+    assert mouth_events[0].end == pytest.approx(1.0 * FRAME_RATE, abs=0.5)
+    assert mouth_events[1].end == pytest.approx(2.0 * FRAME_RATE, abs=0.5)
+
+
+def test_gap_with_short_dip_does_not_close_when_voice_resumes():
+    # gap内の0.2秒未満の瞬間的な谷(ビブラート・トレモロ)では閉口せず、gap全体を継続する
+    # (song2vmd.md 6.4のgap走査の連続要件)。
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("gap", 0.2, 1.0),
+        seg("vowel", 1.0, 1.2, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(1.2, 0.8)
+    # gap中央に0.1秒だけの谷(その後gap内で発声が再開する)。
+    for i in range(len(rms.times_sec)):
+        if 0.5 <= rms.times_sec[i] < 0.6:
+            rms.values[i] = 0.02
+    mouth_events, _diag = confirm(segments, rms)
+    # 谷では閉じず、gapがA継続のまま前後のAと連結して1イベントになる。
+    assert [e.shape for e in mouth_events] == [MouthShape.A]
+
+
+def test_gap_stays_closed_after_scan_close_even_if_voice_returns():
+    # 0.2秒以上の無音で一度閉じたgap内では、後から音量が戻っても再度開かない
+    # (song2vmd.md 6.4: 無音を挟んで戻る発声は直前母音の継続ではない)。
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("gap", 0.2, 1.4),
+        seg("vowel", 1.4, 1.6, phoneme="i", confidence=0.9),
+    ]
+    rms = flat_rms(1.6, 0.8)
+    # gap前半(0.4〜0.8秒)を無音レベルにし、gap後半(0.8〜1.4秒)で音量が戻る。
+    for i in range(len(rms.times_sec)):
+        if 0.4 <= rms.times_sec[i] < 0.8:
+            rms.values[i] = 0.02
+    mouth_events, _diag = confirm(segments, rms)
+    shapes = [e.shape for e in mouth_events]
+    assert shapes == [MouthShape.A, MouthShape.SILENCE, MouthShape.I]
+    # 無音は谷の開始(0.4秒)からgap終端(1.4秒)まで続く(途中で再開しない)。
+    assert mouth_events[1].start == pytest.approx(0.4 * FRAME_RATE, abs=0.5)
+    assert mouth_events[1].end == pytest.approx(1.4 * FRAME_RATE, abs=0.5)
+
+
+def test_gap_short_quiet_tail_reaching_gap_end_closes_without_debounce():
+    # gap終端まで達する下降側しきい値以下の連続には0.2秒の連続要件を適用しない
+    # (その先で発声が再開しないため。song2vmd.md 6.4)。
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("gap", 0.2, 1.0),
+        seg("vowel", 1.0, 1.2, phoneme="i", confidence=0.9),
+    ]
+    rms = flat_rms(1.2, 0.8)
+    # gap末尾の0.1秒(0.9〜1.0秒)だけ無音レベル(0.2秒未満だがgap終端に達する)。
+    for i in range(len(rms.times_sec)):
+        if 0.9 <= rms.times_sec[i] < 1.0:
+            rms.values[i] = 0.02
+    mouth_events, _diag = confirm(segments, rms)
+    shapes = [e.shape for e in mouth_events]
+    assert shapes == [MouthShape.A, MouthShape.SILENCE, MouthShape.I]
+    assert mouth_events[1].start == pytest.approx(0.9 * FRAME_RATE, abs=0.5)
 
 
 def test_low_dynamics_suppresses_gap_silence_except_leading_trailing():
