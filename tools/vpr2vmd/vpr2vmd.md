@@ -18,7 +18,7 @@ VOCALOID プロジェクトファイル(vpr)から、標準口モーフ(あ・�
 入力 vpr(VOCALOIDプロジェクト)
   -> vpr2vmd(vpr 解析 → 口形イベント列＋開き量 → lipsync)
   -> 口パクVMD
-  -> MMD/MMMで確認・編集
+  -> MMDで確認・編集
 ```
 
 ### 1.2 設計境界
