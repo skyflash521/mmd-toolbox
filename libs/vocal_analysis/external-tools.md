@@ -128,7 +128,16 @@ vocal_analysis.md §5.2・§8.3 が正本)。内容認識は既定値 `openai/wh
    かなであれば、漢字の読みに起因する曖昧性(同字異音の読み違い)は構造的に生じない。ただし助詞の
    読みや長音の解釈などかなでも文脈依存のケースはわずかに残る(vocal_analysis.md §5.2)。
 5. **すべて純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に合う。
-   torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる。
+   torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる。内容認識モデルの
+   実行デバイスは環境依存で自動選択し(GPUが利用可能ならGPUを使う)、CPU実行時もスレッド数を制限しない
+   (アライメント用音素モデルはCPU・単一スレッド固定のまま。決定論を含む詳細は
+   [vocal_analysis.md](vocal_analysis.md) §5.1・§5.2 が正本)。この自動選択は実行時の分岐であり、
+   導入する torch 自体がCUDA対応ビルドかどうかは pip の既定インストールでは選べない
+   (CPU専用ビルドがPyPI本体の既定で、CUDA対応ビルドは別indexでのみ配布されるため)。GPU利用は
+   利用者が任意でCUDA対応ビルドを追加導入した場合の効果に留まり、既定インストール(CPU専用ビルド)
+   でもGPU不要という前提どおり確実に動く。S1(audio-separator)も torch の
+   `torch.cuda.is_available()` を自ら見てGPUを自動選択する(ライブラリ側の既存挙動)ため、
+   同じ前提を共有する。
 6. ライセンスが清浄。kana-whisper = MIT、Whisper モデル(Hugging Face 配布)= Apache-2.0、
    pyopenjtalk-plus = MIT(内包の OpenJTalk 系コンポーネントは修正BSD)、アライメント用音素モデル
    `facebook/wav2vec2-lv-60-espeak-cv-ft` = Apache-2.0。

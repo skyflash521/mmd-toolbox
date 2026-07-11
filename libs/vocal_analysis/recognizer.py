@@ -567,7 +567,10 @@ def recognize(
     # 無音ならモデルを一切必要としない。非無音区間でも内容認識・G2P・手順4の音素密度チェックより
     # 先にロードするのではなく、それらを経てなお進む区間だけで遅延ロードする。幻覚検出でgap確定
     # した区間はロードせずスキップする。ロード自体の失敗は握りつぶさず例外にして失敗境界を隠さない)。
+    # 内容認識パイプライン(Whisper系)も同様に無音でない最初の区間で遅延ロードし、以降の区間では
+    # 使い回す(区間ごとの再ロードによるモデル転送コスト(特にGPU使用時)の浪費を避ける)。
     processor = model = vocab = blank_token_id = None
+    content_pipeline = None
 
     all_segments: list[Segment] = []
     for start_sec, end_sec in segment_bounds:
@@ -595,7 +598,9 @@ def recognize(
         chunk_samples = chunk_samples[trim_lo:trim_hi]
 
         try:
-            text, words = _transcribe_segment(chunk_samples, content_recognizer_model)
+            if content_pipeline is None:
+                content_pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
+            text, words = _transcribe_segment(content_pipeline, chunk_samples)
         except ImportError as e:
             raise RecognitionError(
                 "transformers または torch が見つかりません。導入してください"
@@ -788,15 +793,16 @@ def _extract_word_timestamps(chunks: list[dict], duration_sec: float) -> list[tu
 
 
 def _transcribe_segment(
-    samples: np.ndarray, content_recognizer_model: ContentRecognizerModel
+    pipeline, samples: np.ndarray
 ) -> tuple[str, list[tuple[str, float, float]] | None]:
     """区間のボーカル音声を書き起こし、単語タイムスタンプも得る(§5.2手順3。区間ごとに独立呼び出し)。
 
-    どの content_recognizer_model でも同じ手順(パイプライン読み込み→かな限定プロンプトで
-    prompt_ids取得→単語タイムスタンプ付き貪欲デコード)を適用する(モデルによる分岐は持たない)。
-    単語タイムスタンプを返さないモデルは None を返す(§5.2手順7のフォールバックに帰着)。
+    pipeline は呼び出し側(recognize())が無音でない最初の区間で一度だけロードし、以降の区間へ
+    使い回す(区間ごとの再ロードによるモデル転送コストの浪費を避ける)。
+    どの content_recognizer_model でも同じ手順(かな限定プロンプトでprompt_ids取得→単語
+    タイムスタンプ付き貪欲デコード)を適用する(モデルによる分岐は持たない)。単語タイムスタンプを
+    返さないモデルは None を返す(§5.2手順7のフォールバックに帰着)。
     """
-    pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
     prompt_ids = pipeline.tokenizer.get_prompt_ids(KANA_PROMPT, return_tensors="pt").to(pipeline.device)
     result = pipeline(
         samples,
@@ -816,36 +822,66 @@ def _transcribe_segment(
     return result["text"], _extract_word_timestamps(chunks, duration_sec)
 
 
+def _select_content_recognizer_device() -> str:
+    """内容認識モデル(Whisper系)の実行デバイスを環境から自動選択する(§5.1・§5.2)。
+
+    GPU(CUDA)が利用可能ならGPUを使う。強制アライメント用の音素モデル(RECOGNIZER_CONFIG.device)は
+    決定論のためCPU固定のままで、この自動選択の対象外(§5.1「実行条件の固定」)。内容認識の貪欲デコード
+    (ビーム幅1・サンプリング無し)はサンプリング由来の乱数的非決定性を排除するが、実行デバイス・
+    スレッド数の違いによる浮動小数点演算の丸め誤差までは排除しない。環境が異なれば僅差のトークン
+    選択が割れ、書き起こし結果がわずかに変わりうる(§5.2「決定論」)。
+    """
+    import torch
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognizerModel):
-    """内容認識器を content_recognizer_model が指すモデル・revisionでロードする(§5.2・§8.3)。"""
+    """内容認識器を content_recognizer_model が指すモデル・revisionでロードする(§5.2・§8.3)。
+
+    実行デバイスは環境から自動選択する(_select_content_recognizer_device。§5.1)。
+    """
     from transformers import pipeline as transformers_pipeline
 
     return transformers_pipeline(
         "automatic-speech-recognition",
         model=content_recognizer_model.model_id,
         revision=content_recognizer_model.model_revision,
-        device=RECOGNIZER_CONFIG.device,
+        device=_select_content_recognizer_device(),
     )
 
 
 def _compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:
-    """音素モデルで推論し、フレームごとの対数確率行列を返す(§5.2手順7の入力)。"""
+    """音素モデルで推論し、フレームごとの対数確率行列を返す(§5.2手順7の入力)。
+
+    スレッド数の固定(RECOGNIZER_CONFIG.num_threads。§5.1)はこの音素モデル推論だけへ局所的に
+    適用し、呼び出し前後の設定へ復元する(内容認識(Whisper系。手順3)のCPU実行はこの制約を
+    受けず、環境のデフォルトスレッド数で並列に動く)。
+    """
     import torch
 
     inputs = processor(samples, sampling_rate=RECOGNIZER_CONFIG.sample_rate, return_tensors="pt")
-    with torch.no_grad():
-        logits = model(inputs.input_values.to(RECOGNIZER_CONFIG.device)).logits
-    log_probs = torch.log_softmax(logits, dim=-1)
-    return log_probs[0].cpu().numpy()
+    prev_num_threads = torch.get_num_threads()
+    torch.set_num_threads(RECOGNIZER_CONFIG.num_threads)
+    try:
+        with torch.no_grad():
+            logits = model(inputs.input_values.to(RECOGNIZER_CONFIG.device)).logits
+        log_probs = torch.log_softmax(logits, dim=-1)
+        return log_probs[0].cpu().numpy()
+    finally:
+        torch.set_num_threads(prev_num_threads)
 
 
 def _load_model_and_processor():
-    """音素モデル(強制アライメント用)をS-1測定の固定条件(§5.1・§8.3)でロードする。"""
+    """音素モデル(強制アライメント用)をS-1測定の固定条件(§5.1・§8.3)でロードする。
+
+    スレッド数の固定(RECOGNIZER_CONFIG.num_threads)はロード時ではなく推論時(_compute_log_probs)
+    に局所適用する(内容認識(Whisper系)のCPU実行を道連れにしないため)。
+    """
     import torch
     from transformers import AutoModelForCTC, AutoProcessor
 
     torch.manual_seed(RECOGNIZER_CONFIG.random_seed)
-    torch.set_num_threads(RECOGNIZER_CONFIG.num_threads)
 
     # §5.1: wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
     # 要求する。音素IDのデコードのみが必要で音素へのエンコードは不要なため do_phonemize=False

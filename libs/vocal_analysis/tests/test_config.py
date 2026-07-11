@@ -30,7 +30,9 @@ def test_recognizer_target_sample_rate_is_16khz():
 def test_recognizer_inference_conditions_are_deterministic():
     from vocal_analysis import RECOGNIZER_CONFIG
 
-    # 実行デバイス/dtype・スレッド・乱数シードを固定して決定論にする(§5.1)。
+    # 音素モデル(強制アライメント用)の実行デバイス/dtype・スレッド・乱数シードを固定して決定論に
+    # する(§5.1)。内容認識モデル(Whisper系)の実行デバイスは環境依存で自動選択し、この固定値の
+    # 対象外(recognizer.py の _select_content_recognizer_device)。
     assert RECOGNIZER_CONFIG.device == "cpu"
     assert RECOGNIZER_CONFIG.dtype == "float32"
     assert RECOGNIZER_CONFIG.num_threads == 1
