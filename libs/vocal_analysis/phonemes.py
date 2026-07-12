@@ -1,8 +1,14 @@
-"""音素→5母音写像(vocal_analysis.md §7)。
+"""音素→5母音写像・S2アダプタ共有の記号分類(vocal_analysis.md §5.1・§5.2・§5.3・§7)。
 
 認識器・vpr が返す音素記号を日本語の5母音 a/i/u/e/o へ写像する規則を提供する。系統の違う2つの入力
-記号系(espeak IPA・VOCALOID X-SAMPA)を扱うため、写像も2つに分ける。
+記号系(espeak IPA・VOCALOID X-SAMPA)を扱うため、写像も2つに分ける。加えて、S2の複数アダプタ
+(wav2vec2 CTC経路・SOFA経路。§5.2・§5.3)が共有する「G2P記号→音素モデル語彙の写像表」「IPA記号の
+母音/子音分類」「blank/gap記号集合」もここに置く(両アダプタから参照でき、アダプタ実装同士の
+循環importを避けるため)。
 """
+
+import unicodedata
+from typing import Literal
 
 # §7.1: espeak(wav2vec2)が返す母音セグメントの IPA を5母音へ完全一致のテーブル参照でバケット化する。
 # テーブルは採用認識器の音素インベントリ(espeak)から S-1測定の採点前に確定・固定する。
@@ -54,3 +60,39 @@ def xsampa_vowel_letter(symbol: str) -> str | None:
     母音記号テーブルに無ければ None(子音・継続記号など、母音でないことを示す)。
     """
     return _XSAMPA_VOWEL_LETTERS.get(symbol)
+
+
+# §5.1: IPA母音チャートの基本母音28記号 + R音性母音2記号(ɚ・ɝ) + 拡張母音記号1(ᵻ)。
+_VOWEL_BASE_CHARACTERS = frozenset("iyɨʉɯuɪʏʊeøɘɵɤoəɛœɜɞʌɔæɐaɶɑɒɚɝᵻ")
+
+
+def _classify_symbol(symbol: str) -> Literal["vowel", "consonant"]:
+    """確定済みのIPA記号1つを母音/子音へ分類する(§5.1。言語非依存・S2アダプタ共通)。
+
+    NFD 正規化後の先頭の基底文字(長音記号・鼻音化の結合チルダ等の修飾記号は正規化により基底文字の
+    後ろに分離される)が母音記号基準集合に含まれれば母音、そうでなければ子音とする。wav2vec2 CTC経路
+    (§5.2)はCTC出力の各フレームが対応する1記号へ、SOFA経路(§5.3)はSOFAの出力セグメントが直接
+    確定する1記号へ、この同じ分類規則を適用する。
+    """
+    if not symbol:
+        return "consonant"
+    base = unicodedata.normalize("NFD", symbol)[0]
+    return "vowel" if base in _VOWEL_BASE_CHARACTERS else "consonant"
+
+
+# §5.2手順6・§5.3の写像表(確定): pyopenjtalk-plus の音素記号(無声化母音 I/U を含む)を音素モデルの
+# 語彙(espeak表記)へ対応付ける。pau・cl はここに含めず、blank/gap記号(呼び出し側が渡す
+# blank_token_id、またはSOFA経路のgap判定)へ変換する。wav2vec2 CTC経路・SOFA経路の両方が使う
+# (§5.3。独自の写像表を新設しない)。
+_G2P_TO_VOCAB_SYMBOL: dict[str, str] = {
+    "a": "a", "i": "i", "u": "ɯ", "e": "e̞", "o": "o̞",
+    "I": "i", "U": "ɯ",
+    "k": "k", "ky": "kʲ", "g": "ɡ", "gy": "ɡʲ",
+    "s": "s", "sh": "ɕ", "z": "z", "j": "dʑ",
+    "t": "t", "ch": "tɕ", "ts": "ts", "d": "d",
+    "n": "n", "ny": "ɲ", "h": "h", "hy": "ç", "f": "ɸ",
+    "b": "b", "by": "bʲ", "p": "p", "py": "pʲ",
+    "m": "m", "my": "mʲ", "y": "j", "r": "ɾ", "ry": "ɾ",
+    "w": "w", "v": "v", "N": "ɴ",
+}
+_BLANK_G2P_SYMBOLS = frozenset({"pau", "cl"})

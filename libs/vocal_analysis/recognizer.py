@@ -8,15 +8,14 @@ recognize(vocal_wav_path, content_recognizer_model) -> list[Segment] が唯一�
 """
 
 import math
-import unicodedata
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 
 from .config import DEFAULT_CONTENT_RECOGNIZER_MODEL, KANA_PROMPT, RECOGNIZER_CONFIG, ContentRecognizerModel
+from .phonemes import _BLANK_G2P_SYMBOLS, _classify_symbol, _G2P_TO_VOCAB_SYMBOL
 from .types import Segment
 
 FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
@@ -24,22 +23,6 @@ FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストラ�
 
 class RecognitionError(Exception):
     """S2 の認識失敗(transformers 未導入、写像表に無い記号、強制アライメント失敗など)。"""
-
-
-# §5.1: IPA母音チャートの基本母音28記号 + R音性母音2記号(ɚ・ɝ) + 拡張母音記号1(ᵻ)。
-_VOWEL_BASE_CHARACTERS = frozenset("iyɨʉɯuɪʏʊeøɘɵɤoəɛœɜɞʌɔæɐaɶɑɒɚɝᵻ")
-
-
-def _classify_symbol(symbol: str) -> Literal["vowel", "consonant"]:
-    """音素記号を母音/子音へ分類する(§5.1。言語非依存)。
-
-    NFD 正規化後の先頭の基底文字(長音記号・鼻音化の結合チルダ等の修飾記号は正規化により基底文字の
-    後ろに分離される)が母音記号基準集合に含まれれば母音、そうでなければ子音とする。
-    """
-    if not symbol:
-        return "consonant"
-    base = unicodedata.normalize("NFD", symbol)[0]
-    return "vowel" if base in _VOWEL_BASE_CHARACTERS else "consonant"
 
 
 # --- §5.2 手順1・2: 無音検出による区間分割 ---
@@ -165,22 +148,6 @@ def _is_hallucinated_phoneme_density(phoneme_count: int, duration_sec: float) ->
     if duration_sec <= 0:
         return False
     return phoneme_count / duration_sec > _HALLUCINATION_PHONEME_RATE
-
-
-# §5.2 の写像表(確定): pyopenjtalk-plus の音素記号(無声化母音 I/U を含む)を音素モデルの語彙(espeak
-# 表記)へ対応付ける。pau・cl はここに含めず、blank トークン(呼び出し側が渡す blank_token_id)へ変換する。
-_G2P_TO_VOCAB_SYMBOL: dict[str, str] = {
-    "a": "a", "i": "i", "u": "ɯ", "e": "e̞", "o": "o̞",
-    "I": "i", "U": "ɯ",
-    "k": "k", "ky": "kʲ", "g": "ɡ", "gy": "ɡʲ",
-    "s": "s", "sh": "ɕ", "z": "z", "j": "dʑ",
-    "t": "t", "ch": "tɕ", "ts": "ts", "d": "d",
-    "n": "n", "ny": "ɲ", "h": "h", "hy": "ç", "f": "ɸ",
-    "b": "b", "by": "bʲ", "p": "p", "py": "pʲ",
-    "m": "m", "my": "mʲ", "y": "j", "r": "ɾ", "ry": "ɾ",
-    "w": "w", "v": "v", "N": "ɴ",
-}
-_BLANK_G2P_SYMBOLS = frozenset({"pau", "cl"})
 
 
 def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
