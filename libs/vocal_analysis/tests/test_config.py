@@ -6,6 +6,8 @@
 """
 
 import dataclasses
+import typing
+from pathlib import Path
 
 import pytest
 
@@ -83,6 +85,73 @@ def test_separator_model_and_stem_are_pinned():
     # §8.3後注: audio-separator 経由で実行する Demucs v4 htdemucs_ft と、書き出す単一stem(vocals)。
     assert SEPARATOR_CONFIG.model_filename == "htdemucs_ft.yaml"
     assert SEPARATOR_CONFIG.output_single_stem == "vocals"
+
+
+@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
+def test_sofa_aligner_config_stores_user_provided_paths():
+    from vocal_analysis import SofaAlignerConfig
+
+    # sofa_python・sofa_root・checkpoint_path はいずれも利用者提供の必須値(§2.3・§8.3。既定値なし)。
+    config = SofaAlignerConfig(
+        sofa_python=Path("/tmp/sofa-venv/python"),
+        sofa_root=Path("/tmp/SOFA"),
+        checkpoint_path=Path("/tmp/checkpoint.ckpt"),
+    )
+    assert config.sofa_python == Path("/tmp/sofa-venv/python")
+    assert config.sofa_root == Path("/tmp/SOFA")
+    assert config.checkpoint_path == Path("/tmp/checkpoint.ckpt")
+
+
+@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
+def test_sofa_aligner_config_timeout_defaults_to_300_seconds():
+    from vocal_analysis import SofaAlignerConfig
+
+    # timeout_sec のみ実装が定める既定値(300.0秒、float型)を持つ(§8.3)。
+    config = SofaAlignerConfig(
+        sofa_python=Path("/tmp/sofa-venv/python"),
+        sofa_root=Path("/tmp/SOFA"),
+        checkpoint_path=Path("/tmp/checkpoint.ckpt"),
+    )
+    assert config.timeout_sec == 300.0
+    assert isinstance(config.timeout_sec, float)
+
+    type_hints = typing.get_type_hints(SofaAlignerConfig)
+    assert type_hints["timeout_sec"] is float
+    default = {f.name: f for f in dataclasses.fields(SofaAlignerConfig)}["timeout_sec"].default
+    assert default == 300.0
+    assert isinstance(default, float)
+
+
+@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
+def test_sofa_aligner_config_required_fields_have_no_default():
+    from vocal_analysis import SofaAlignerConfig
+
+    # 本プロジェクトはSOFAのチェックポイント・実行環境の既定値を一切持たない(利用者保護の方針。§8.3)。
+    with pytest.raises(TypeError):
+        SofaAlignerConfig()
+
+    # 3フィールドそれぞれが個別に既定値を持たないことを確認する(いずれか1つにだけ既定値があっても
+    # 上記の引数なし呼び出しはTypeErrorのままなので、フィールド単位の確認が別途要る)。
+    field_by_name = {f.name: f for f in dataclasses.fields(SofaAlignerConfig)}
+    type_hints = typing.get_type_hints(SofaAlignerConfig)
+    for name in ("sofa_python", "sofa_root", "checkpoint_path"):
+        field = field_by_name[name]
+        assert field.default is dataclasses.MISSING
+        assert field.default_factory is dataclasses.MISSING
+        assert type_hints[name] is Path
+
+
+@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
+def test_sofa_aligner_config_is_frozen():
+    from vocal_analysis import SofaAlignerConfig
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("/tmp/sofa-venv/python"),
+        sofa_root=Path("/tmp/SOFA"),
+        checkpoint_path=Path("/tmp/checkpoint.ckpt"),
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        config.timeout_sec = 60.0
 
 
 def test_configs_are_frozen():
