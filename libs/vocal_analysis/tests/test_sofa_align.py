@@ -2,8 +2,9 @@
 
 SOFA(Singing-Oriented Forced Aligner)は実インストール・専用venvを要するため、通常のpytestスイート
 では subprocess をモックした決定論的単体テストで検証する。ここでは入力の書き出し・サブプロセス起動・
-終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力(100ナノ秒単位)の秒への変換を扱う。
-Segment契約(隙間なく連続・非重複)の検証・非ASCIIパス拒否・IPA写像は別ファイルで扱う。
+終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力(100ナノ秒単位)の秒への変換・
+Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証と許容誤差スナップを扱う。非ASCIIパス拒否・
+単語単位分割・IPA写像は別ファイルで扱う。
 """
 
 import subprocess
@@ -333,3 +334,121 @@ def test_parse_htk_label_file_converts_100ns_units_to_seconds(tmp_path):
     path.write_text("0 5000000 pau\n5000000 12345000 a\n", encoding="utf-8")
 
     assert _parse_htk_label_file(path) == [(0.0, 0.5, "pau"), (0.5, 1.2345, "a")]
+
+
+_SEGMENT_CONTRACT_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align segment contract validation", strict=True)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_passes_through_exact_input():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    segments = [(0.0, 0.5, "pau"), (0.5, 1.0, "a")]
+    assert _validate_and_normalize_segments(segments, trim_duration_sec=1.0) == segments
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_snaps_within_tolerance_to_exact_values():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # 先頭・末尾・境界ともに1ミリ秒以内のずれ(SOFAの100ナノ秒単位からの変換誤差を模す)。
+    # 正規化は先頭のstart→0.0、末尾のend→trim_duration_sec、後続の各startを先行のend(元の値)へ
+    # それぞれ上書きする。境界の基準は先行セグメントのend側(0.4995)であり、後続のstart側(0.5003)
+    # ではない。
+    segments = [(0.0002, 0.4995, "pau"), (0.5003, 0.9997, "a")]
+    result = _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+    assert result == [(0.0, 0.4995, "pau"), (0.4995, 1.0, "a")]
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_start_after_end():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    # (b)(c)(d)はいずれも許容誤差1ミリ秒以内で通過し、2件目のみ(a) start<=end に単独で違反する
+    # (0.5008 > 0.5001)。(b)(c)(d)しか検証しない誤実装でもこの入力を通してしまわないことを確認する。
+    segments = [(0.0, 0.5, "pau"), (0.5008, 0.5001, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=0.5001)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_non_adjacent_boundary():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    # 境界の差が許容誤差1ミリ秒を超える(隙間: 次の開始が先行の終了より後ろに離れている)。
+    segments = [(0.0, 0.5, "pau"), (0.503, 1.0, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_overlapping_boundary():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    # 境界の差が許容誤差1ミリ秒を超える(重複: 次の開始が先行の終了より前にある)。絶対差での判定
+    # なので、隙間方向だけでなく重複方向も同じしきい値で拒否されることを確認する。
+    segments = [(0.0, 0.5, "pau"), (0.495, 1.0, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_first_start_far_from_zero():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    segments = [(0.05, 0.5, "pau"), (0.5, 1.0, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_last_end_far_from_trim_duration():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    # 全長に不足する方向(0.9 < 1.0)。
+    segments = [(0.0, 0.5, "pau"), (0.5, 0.9, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_last_end_exceeding_trim_duration():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    # 全長を超過する方向(1.1 > 1.0)。絶対差での判定なので、不足方向だけでなく超過方向も同じ
+    # しきい値で拒否されることを確認する。
+    segments = [(0.0, 0.5, "pau"), (0.5, 1.1, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_empty_list():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments([], trim_duration_sec=1.0)
+
+
+@_SEGMENT_CONTRACT_XFAIL
+def test_validate_and_normalize_segments_rejects_new_violation_created_by_snapping():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+    from vocal_analysis.phonemes import RecognitionError
+
+    # 一次検証(許容誤差1ミリ秒)は通るが、正規化(後続の開始時刻を先行の終了時刻へ上書き)により
+    # 新たな逆順(start > end)を生む例。極端に短い2件目のセグメント(終了時刻1.0001)へ、1件目の
+    # 終了時刻1.0009が上書きされ、上書き後は1.0009 > 1.0001になる
+    # (vocal_analysis.md §5.3「Segment契約の検証」が現象として述べる「極端に短い隣接セグメントが
+    # 正規化の上書きにより新たな逆順を生む場合がある」の具体例。数値そのものは仕様書には無くこの
+    # テストが独自に構成した)。
+    segments = [(0.0, 1.0009, "pau"), (1.0000, 1.0001, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0001)
