@@ -23,20 +23,33 @@ from .phonemes import _BLANK_G2P_SYMBOLS, _MIN_WORD_DURATION_SEC, RecognitionErr
 from .types import Segment
 
 
+# SOFAの語彙(チェックポイント学習時の音素セット)は無声化母音の専用記号を持たず、通常の母音記号
+# (i/u)のみを認識する。pyopenjtalk-plus由来のG2P記号列に含まれる無声化マーカーI/Uは、SOFAへ渡す
+# 直前にこの写像で正規化する(5.2手順6の「G2P記号→音素モデル語彙の写像表」がI→i・U→ɯのIPA記号へ
+# 既に集約しているのと同じ対応関係で、Segmentの最終的なphoneme値には影響しない)。
+_SOFA_VOCAB_SYMBOL_NORMALIZE: dict[str, str] = {"I": "i", "U": "u"}
+
+
+def _normalize_for_sofa_vocab(symbol: str) -> str:
+    return _SOFA_VOCAB_SYMBOL_NORMALIZE.get(symbol, symbol)
+
+
 def _write_sofa_inputs(
     work_dir: Path, targets: list[tuple[np.ndarray, int, list[str]]]
 ) -> list[str]:
     """targets(音声サンプル・サンプルレート・G2P音素記号列の組)をASCII固定名で書き出す。
 
-    basenameは0始まりの4桁ゼロ埋め連番(segment_0000, segment_0001, ...)。音素記号列は空白区切りで
-    そのまま.labへ書き出し、SOFA自身のテキスト→音素変換を経由しない。書き出した順のbasename列を返す。
+    basenameは0始まりの4桁ゼロ埋め連番(segment_0000, segment_0001, ...)。音素記号列は
+    _normalize_for_sofa_vocab で無声化母音マーカーを正規化してから空白区切りで.labへ書き出し、
+    SOFA自身のテキスト→音素変換を経由しない。書き出した順のbasename列を返す。
     """
     basenames = []
     for i, (samples, sample_rate, phoneme_symbols) in enumerate(targets):
         basename = f"segment_{i:04d}"
         basenames.append(basename)
         sf.write(work_dir / f"{basename}.wav", samples, sample_rate)
-        (work_dir / f"{basename}.lab").write_text(" ".join(phoneme_symbols), encoding="utf-8")
+        normalized = " ".join(_normalize_for_sofa_vocab(p) for p in phoneme_symbols)
+        (work_dir / f"{basename}.lab").write_text(normalized, encoding="utf-8")
     return basenames
 
 

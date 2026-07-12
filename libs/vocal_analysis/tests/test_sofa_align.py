@@ -149,7 +149,6 @@ def test_align_batch_writes_space_separated_phonemes_to_lab_input(tmp_path, monk
     assert written_lab_texts["segment_0001"].strip() == "pau"
 
 
-@pytest.mark.xfail(reason="impl pending: sofa vocab devoiced vowel normalization")
 def test_align_batch_normalizes_devoiced_vowels_for_sofa_vocab(tmp_path, monkeypatch):
     """SOFAの語彙(vocab.yaml)は無声化母音の専用記号(pyopenjtalk-plus由来のI/U)を持たず、
     通常の母音記号(i/u)のみを認識する。G2P出力に含まれるI/Uをそのまま.labへ書き出すと、
