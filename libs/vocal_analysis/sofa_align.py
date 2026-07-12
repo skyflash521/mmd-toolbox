@@ -130,7 +130,7 @@ def _parse_htk_label_file(path: Path) -> list[tuple[float, float, str]]:
     return segments
 
 
-_SEGMENT_CONTRACT_TOLERANCE_SEC = 1e-3  # SOFAの100ナノ秒単位からの変換誤差を許容する一次検証の許容誤差
+_SEGMENT_CONTRACT_TOLERANCE_SEC = 0.05  # 一次検証の許容誤差(§5.3確定。SOFA内部リサンプリング由来の丸め誤差を含む)
 
 
 def _check_segment_contract(
@@ -192,7 +192,7 @@ def _validate_and_normalize_segments(
 ) -> list[tuple[float, float, str]]:
     """Segment契約を検証し、厳密値へ正規化した上で返す(§5.3「Segment契約の検証」)。
 
-    一次検証(許容誤差1ミリ秒以内)→正規化→再検証(許容誤差なしの厳密な等号/不等号)の2段構成。
+    一次検証(許容誤差50ミリ秒以内)→正規化→再検証(許容誤差なしの厳密な等号/不等号)の2段構成。
     再検証で1件でも違反すれば、一次検証の許容誤差設定がその音声には不適切だったとみなし
     `RecognitionError`にする(値を調整して通さず失敗として扱う)。
     """
