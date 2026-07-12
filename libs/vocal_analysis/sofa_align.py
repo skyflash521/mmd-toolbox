@@ -3,7 +3,7 @@
 利用者提供の専用venv・SOFAリポジトリ・チェックポイントをサブプロセスとして呼び、既知の音素記号列を
 音声へ時刻合わせする。SOFA本体のコード・チェックポイントは本モジュールに一切同梱しない。ここでは
 入力の書き出し・サブプロセス起動・終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力
-(100ナノ秒単位)の秒への変換を扱う。Segment契約の検証・非ASCIIパス拒否・単語単位分割・IPA写像は
+(100ナノ秒単位)の秒への変換・Segment契約の検証・非ASCIIパスの拒否を扱う。単語単位分割・IPA写像は
 別の関数(このモジュールの他の関数、または呼び出し元)が担う。
 """
 
@@ -71,6 +71,20 @@ def _kill_process_tree(pid: int) -> None:
         )
     else:
         os.killpg(os.getpgid(pid), signal.SIGKILL)
+
+
+def _check_ascii_paths(work_dir: Path, config: SofaAlignerConfig) -> None:
+    """SOFA自身が非ASCIIパスを扱えない技術的制約により、一時ディレクトリ・sofa_root・
+    checkpoint_pathのいずれかに非ASCII文字が含まれる場合はSOFAを起動せず`RecognitionError`にする
+    (cli-interface.md §10の外部プロセス連携の例外規定に基づく)。`sofa_python`は検証対象に含まない。
+    """
+    for label, path in (
+        ("一時ディレクトリ", work_dir),
+        ("sofa_root", config.sofa_root),
+        ("checkpoint_path", config.checkpoint_path),
+    ):
+        if not str(path).isascii():
+            raise RecognitionError(f"{label}のパスに非ASCII文字が含まれています: {path}")
 
 
 def _run_sofa_subprocess(basenames: list[str], config: SofaAlignerConfig, work_dir: Path) -> None:
@@ -191,7 +205,8 @@ def _align_batch(
 ) -> dict[str, list[tuple[float, float, str]]]:
     """targetsをまとめて1回のSOFA呼び出しで処理し、basenameごとの生セグメント列を返す。
 
-    Segment契約の検証・IPA写像・非ASCIIパス拒否は含まない(呼び出し元が別途行う)。targetsが空なら
+    Segment契約の検証・IPA写像は含まない(呼び出し元が別途`_validate_and_normalize_segments`等で
+    行う)。非ASCIIパスの拒否(`_check_ascii_paths`)は本関数がSOFA起動前に行う。targetsが空なら
     サブプロセスを起動せず空の結果を返す。
     """
     if not targets:
@@ -199,6 +214,7 @@ def _align_batch(
 
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
+        _check_ascii_paths(work_dir, config)
         basenames = _write_sofa_inputs(work_dir, targets)
         _run_sofa_subprocess(basenames, config, work_dir)
         return {

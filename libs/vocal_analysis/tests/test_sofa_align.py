@@ -441,9 +441,6 @@ def test_validate_and_normalize_segments_rejects_new_violation_created_by_snappi
         _validate_and_normalize_segments(segments, trim_duration_sec=1.0001)
 
 
-_ASCII_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align ascii path validation", strict=True)
-
-
 def _make_ascii_config():
     """`_check_ascii_paths`はパス文字列を判定するだけでファイルへアクセスしないため、実在しない
     固定のASCII専用パスで足りる(pytestの`tmp_path`自体が非ASCIIユーザー名配下になりうる環境依存を
@@ -458,7 +455,6 @@ def _make_ascii_config():
     )
 
 
-@_ASCII_XFAIL
 def test_check_ascii_paths_accepts_all_ascii_paths():
     from vocal_analysis.sofa_align import _check_ascii_paths
 
@@ -466,7 +462,6 @@ def test_check_ascii_paths_accepts_all_ascii_paths():
     _check_ascii_paths(Path("ascii_root") / "work_dir", config)  # 例外が出なければ合格
 
 
-@_ASCII_XFAIL
 def test_check_ascii_paths_rejects_non_ascii_work_dir():
     from vocal_analysis.sofa_align import _check_ascii_paths
     from vocal_analysis.phonemes import RecognitionError
@@ -476,7 +471,6 @@ def test_check_ascii_paths_rejects_non_ascii_work_dir():
         _check_ascii_paths(Path("ascii_root") / "作業ディレクトリ", config)
 
 
-@_ASCII_XFAIL
 def test_check_ascii_paths_rejects_non_ascii_sofa_root():
     from vocal_analysis import SofaAlignerConfig
     from vocal_analysis.sofa_align import _check_ascii_paths
@@ -491,7 +485,6 @@ def test_check_ascii_paths_rejects_non_ascii_sofa_root():
         _check_ascii_paths(Path("ascii_root") / "work_dir", config)
 
 
-@_ASCII_XFAIL
 def test_check_ascii_paths_rejects_non_ascii_checkpoint_path():
     from vocal_analysis import SofaAlignerConfig
     from vocal_analysis.sofa_align import _check_ascii_paths
@@ -506,7 +499,6 @@ def test_check_ascii_paths_rejects_non_ascii_checkpoint_path():
         _check_ascii_paths(Path("ascii_root") / "work_dir", config)
 
 
-@_ASCII_XFAIL
 def test_check_ascii_paths_rejects_non_ascii_in_intermediate_component():
     """末端要素だけでなく、パス中間の要素の非ASCIIも拒否対象(パス文字列全体を判定する)。"""
     from vocal_analysis import SofaAlignerConfig
@@ -522,7 +514,6 @@ def test_check_ascii_paths_rejects_non_ascii_in_intermediate_component():
         _check_ascii_paths(Path("ascii_root") / "work_dir", config)
 
 
-@_ASCII_XFAIL
 def test_check_ascii_paths_does_not_check_sofa_python():
     """sofa_pythonは非ASCII検証の対象外(確定。一時ディレクトリ・sofa_root・checkpoint_pathの3つのみ)。"""
     from vocal_analysis import SofaAlignerConfig
@@ -551,7 +542,6 @@ class _FakeTemporaryDirectory:
         return False
 
 
-@_ASCII_XFAIL
 def test_align_batch_non_ascii_checkpoint_path_does_not_start_subprocess(monkeypatch):
     from vocal_analysis import SofaAlignerConfig, sofa_align
     from vocal_analysis.phonemes import RecognitionError
@@ -576,7 +566,6 @@ def test_align_batch_non_ascii_checkpoint_path_does_not_start_subprocess(monkeyp
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
 
-@_ASCII_XFAIL
 def test_align_batch_non_ascii_work_dir_does_not_start_subprocess(monkeypatch):
     """SOFA自身が扱えないのは実行時に生成する一時ディレクトリのパスも同様。tempfile.mkdtempが
     非ASCIIパスを返す場合(利用者環境の一時領域自体に非ASCII文字が含まれる場合)を模す。configは
