@@ -15,14 +15,10 @@ import soundfile as sf
 from scipy.signal import resample_poly
 
 from .config import DEFAULT_CONTENT_RECOGNIZER_MODEL, KANA_PROMPT, RECOGNIZER_CONFIG, ContentRecognizerModel
-from .phonemes import _BLANK_G2P_SYMBOLS, _classify_symbol, _G2P_TO_VOCAB_SYMBOL
+from .phonemes import _BLANK_G2P_SYMBOLS, RecognitionError, _classify_symbol, _G2P_TO_VOCAB_SYMBOL
 from .types import Segment
 
 FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
-
-
-class RecognitionError(Exception):
-    """S2 の認識失敗(transformers 未導入、写像表に無い記号、強制アライメント失敗など)。"""
 
 
 # --- §5.2 手順1・2: 無音検出による区間分割 ---
