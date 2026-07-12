@@ -3,8 +3,8 @@
 SOFA(Singing-Oriented Forced Aligner)は実インストール・専用venvを要するため、通常のpytestスイート
 では subprocess をモックした決定論的単体テストで検証する。ここでは入力の書き出し・サブプロセス起動・
 終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力(100ナノ秒単位)の秒への変換・
-Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証と許容誤差スナップ・非ASCIIパスの拒否を
-扱う。単語単位分割・IPA写像は別ファイルで扱う。
+Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証と許容誤差スナップ・非ASCIIパスの拒否・
+単語単位分割(有効な単語列の確定・gapの確定)を扱う。IPA写像は別ファイルで扱う。
 """
 
 import subprocess
@@ -587,3 +587,154 @@ def test_align_batch_non_ascii_work_dir_does_not_start_subprocess(monkeypatch):
     samples = np.zeros(16000, dtype=np.float32)
     with pytest.raises(RecognitionError):
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+
+_WORD_SPLIT_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align word-level splitting", strict=True)
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_passes_through_non_overlapping_words():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    words = [(["k", "a"], 0.5, 1.0), (["i"], 1.0, 1.5)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == words
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_clamps_end_to_trim_duration():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語の終了時刻がトリム後区間の全長(1.0)を超えている(手順0の再クランプ)。
+    words = [(["a"], 0.5, 1.5)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=1.0) == [(["a"], 0.5, 1.0)]
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_clamps_overlap_to_cursor():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語Bの開始(0.8)が単語Aの終了(1.0)より前で重複する。Bの開始はcursor(=Aの終了1.0)へ
+    # クランプされ、[1.0, 1.2)として有効になる(区間長0.2は最小長0.05以上)。
+    words = [(["a"], 0.5, 1.0), (["i"], 0.8, 1.2)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["i"], 1.0, 1.2),
+    ]
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_invalidates_words_fully_covered_by_cursor():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語B・Cが単語Aに完全に包含される。Aが有効化されcursor=2.0(Aの終了)になった後、
+    # B(クランプ後start=2.0 > end=0.9)・C(クランプ後start=2.0 > end=1.2)とも負長になり
+    # 無効化される。無効化された単語を挟んでも、cursorはAの終了(2.0)のまま変化しない。
+    words = [(["a"], 0.5, 2.0), (["i"], 0.8, 0.9), (["u"], 1.0, 1.2)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [(["a"], 0.5, 2.0)]
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_invalidates_word_already_shorter_than_minimum():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語Bは元の区間長(0.04秒)自体が既に最小長(0.05)未満で無効化される(クランプの影響を
+    # 受けない単純ケース)。cursorは更新されない(単語Aの終了1.0のまま)。
+    words = [(["a"], 0.5, 1.0), (["i"], 0.98, 1.02), (["u"], 1.05, 1.3)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["u"], 1.05, 1.3),
+    ]
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_invalidates_word_shrunk_below_minimum_by_clamp():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語Bは元の区間長(0.06秒。最小長0.05以上)自体は無効化条件を満たさないが、クランプで
+    # start が 0.97→1.0(=cursor)へ引き上げられた結果、区間長が0.03秒に縮み無効化される。
+    # 「元の区間長」だけを見る誤実装ではこの単語は有効判定されてしまうため、クランプ後の区間長で
+    # 判定することを単独で固定する。
+    words = [(["a"], 0.5, 1.0), (["i"], 0.97, 1.03)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [(["a"], 0.5, 1.0)]
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_cursor_persists_through_consecutive_invalid_words():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # A有効(cursor=1.0)→B・C連続無効→D有効、という並び。cursorが「無効化された単語のクランプ後
+    # 終了時刻」で誤って更新される実装(例: max(cursor, 無効単語のクランプ後end))だと、Bの無効化時に
+    # cursorが1.02へ、Cの無効化時に1.02のまま(1.01<1.02)進み、Dの開始は max(0.9, 1.02)=1.02 と
+    # 誤ってクランプされてしまう。正しい実装ではcursorはAの終了(1.0)のまま変化せず、Dの開始は
+    # max(0.9, 1.0)=1.0 になる。
+    words = [
+        (["a"], 0.5, 1.0),
+        (["i"], 0.9, 1.02),
+        (["u"], 0.95, 1.01),
+        (["e"], 0.9, 1.4),
+    ]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["e"], 1.0, 1.4),
+    ]
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_invalidates_empty_phoneme_symbols():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 空の音素記号列を持つ単語はSOFA対象として意味を成さないため、区間長に関わらず無効とする
+    # (vocal_analysis.md §5.3「有効な単語列の確定」に確定)。cursorも他の無効化と同様に更新しない
+    # (単語Bの区間長自体は最小長以上だが、空の音素記号列だけを理由に無効化されることを確認する)。
+    words = [(["a"], 0.5, 1.0), ([], 1.0, 1.5), (["i"], 1.2, 2.0)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["i"], 1.2, 2.0),
+    ]
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_all_invalid_returns_empty():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    words = [([], 0.0, 0.01)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=1.0) == []
+
+
+@_WORD_SPLIT_XFAIL
+def test_clamp_words_to_valid_list_empty_input_returns_empty():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    assert _clamp_words_to_valid_list([], trim_duration_sec=1.0) == []
+
+
+@_WORD_SPLIT_XFAIL
+def test_determine_word_gaps_no_valid_words_covers_whole_trim_duration():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    assert _determine_word_gaps([], trim_duration_sec=1.5) == [(0.0, 1.5)]
+
+
+@_WORD_SPLIT_XFAIL
+def test_determine_word_gaps_no_gaps_when_words_cover_whole_duration():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    words = [(["a"], 0.0, 0.5), (["i"], 0.5, 1.0)]
+    assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
+
+
+@_WORD_SPLIT_XFAIL
+def test_determine_word_gaps_before_between_and_after():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    words = [(["a"], 0.2, 0.5), (["i"], 0.8, 1.0)]
+    assert _determine_word_gaps(words, trim_duration_sec=1.5) == [(0.0, 0.2), (0.5, 0.8), (1.0, 1.5)]
+
+
+@_WORD_SPLIT_XFAIL
+def test_determine_word_gaps_does_not_emit_zero_length_gap():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    # 単語がトリム後区間の先頭からちょうど始まる場合、先頭側に長さ0のgapを生成しない。
+    words = [(["a"], 0.0, 1.0)]
+    assert _determine_word_gaps(words, trim_duration_sec=1.0) == []

@@ -3,8 +3,8 @@
 認識器・vpr が返す音素記号を日本語の5母音 a/i/u/e/o へ写像する規則を提供する。系統の違う2つの入力
 記号系(espeak IPA・VOCALOID X-SAMPA)を扱うため、写像も2つに分ける。加えて、S2の複数アダプタ
 (wav2vec2 CTC経路・SOFA経路。§5.2・§5.3)が共有する「G2P記号→音素モデル語彙の写像表」「IPA記号の
-母音/子音分類」「blank/gap記号集合」「認識失敗時の例外型」もここに置く(両アダプタから参照でき、
-アダプタ実装同士の循環importを避けるため)。
+母音/子音分類」「blank/gap記号集合」「認識失敗時の例外型」「単語タイムスタンプの最小長」もここに
+置く(両アダプタから参照でき、アダプタ実装同士の循環importを避けるため)。
 """
 
 import unicodedata
@@ -17,6 +17,9 @@ class RecognitionError(Exception):
     wav2vec2 CTC経路(§5.2)・SOFA経路(§5.3)の両アダプタが共通して送出する(§8.1のRecognizer契約は
     forced_aligner の選択に関わらず不変)。
     """
+
+
+_MIN_WORD_DURATION_SEC = 0.05  # §5.2手順3: 単語タイムスタンプ単調化の最小長。§5.3のcursorクランプも使う
 
 
 # §7.1: espeak(wav2vec2)が返す母音セグメントの IPA を5母音へ完全一致のテーブル参照でバケット化する。

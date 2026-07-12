@@ -15,7 +15,13 @@ import soundfile as sf
 from scipy.signal import resample_poly
 
 from .config import DEFAULT_CONTENT_RECOGNIZER_MODEL, KANA_PROMPT, RECOGNIZER_CONFIG, ContentRecognizerModel
-from .phonemes import _BLANK_G2P_SYMBOLS, RecognitionError, _classify_symbol, _G2P_TO_VOCAB_SYMBOL
+from .phonemes import (
+    _BLANK_G2P_SYMBOLS,
+    _MIN_WORD_DURATION_SEC,
+    RecognitionError,
+    _classify_symbol,
+    _G2P_TO_VOCAB_SYMBOL,
+)
 from .types import Segment
 
 FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
@@ -713,9 +719,6 @@ def _g2p(text: str) -> list[str]:
     import pyopenjtalk
 
     return pyopenjtalk.g2p(text, kana=False, join=False)
-
-
-_MIN_WORD_DURATION_SEC = 0.05  # §5.2手順3: 単語タイムスタンプ単調化の最小長
 
 
 def _sanitize_word_timestamps(
