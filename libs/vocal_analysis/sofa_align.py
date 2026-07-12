@@ -4,7 +4,7 @@
 音声へ時刻合わせする。SOFA本体のコード・チェックポイントは本モジュールに一切同梱しない。ここでは
 入力の書き出し・サブプロセス起動・終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力
 (100ナノ秒単位)の秒への変換・Segment契約の検証・非ASCIIパスの拒否・単語単位分割(有効な単語列の
-確定・gapの確定)を扱う。IPA写像は呼び出し元が担う。
+確定・gapの確定)・IPA写像(SOFA出力記号のSegment化)を扱う。
 """
 
 import os
@@ -13,12 +13,14 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import soundfile as sf
 
 from .config import SofaAlignerConfig
-from .phonemes import _MIN_WORD_DURATION_SEC, RecognitionError
+from .phonemes import _BLANK_G2P_SYMBOLS, _MIN_WORD_DURATION_SEC, RecognitionError, _classify_symbol, _G2P_TO_VOCAB_SYMBOL
+from .types import Segment
 
 
 def _write_sofa_inputs(
@@ -266,3 +268,30 @@ def _determine_word_gaps(
     if cursor < trim_duration_sec:
         gaps.append((cursor, trim_duration_sec))
     return gaps
+
+
+def _map_symbol_to_segment_fields(symbol: str) -> tuple[Literal["vowel", "consonant", "gap"], str | None]:
+    """SOFAが返す生の音素記号(G2P由来。AP/SP挿入を含む)をSegmentのtype・phonemeへ変換する(§5.3)。
+
+    pau・cl(§5.2手順6と同じblank記号)・AP(吸気音・呼吸音)・SP(無音)はいずれもgapへ倒す。
+    それ以外は5.2手順6の「G2P記号→音素モデル語彙の写像表」でIPA記号へ変換してから、5.1の分類基準
+    (写像後のIPA記号が対象)でtypeを定める。写像表に無い記号は`RecognitionError`にする(黙って
+    捨てない。5.2手順6と同じ方針)。
+    """
+    if symbol in _BLANK_G2P_SYMBOLS or symbol in ("AP", "SP"):
+        return "gap", None
+    vocab_symbol = _G2P_TO_VOCAB_SYMBOL.get(symbol)
+    if vocab_symbol is None:
+        raise RecognitionError(f"SOFA出力記号 '{symbol}' の音素モデル語彙への写像が未定義です(§5.2写像表)")
+    return _classify_symbol(vocab_symbol), vocab_symbol
+
+
+def _segments_from_raw(raw_segments: list[tuple[float, float, str]]) -> list[Segment]:
+    """SOFA出力の生セグメント列(秒・生記号)をSegment列へ変換する(IPA写像を適用)。"""
+    segments = []
+    for start, end, symbol in raw_segments:
+        seg_type, phoneme = _map_symbol_to_segment_fields(symbol)
+        segments.append(
+            Segment(type=seg_type, start_sec=start, end_sec=end, phoneme=phoneme, confidence=None)
+        )
+    return segments

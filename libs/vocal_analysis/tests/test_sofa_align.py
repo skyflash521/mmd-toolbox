@@ -723,10 +723,6 @@ def test_determine_word_gaps_does_not_emit_zero_length_gap():
     assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
 
 
-_IPA_MAPPING_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align ipa mapping", strict=True)
-
-
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_vowel():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
@@ -734,7 +730,6 @@ def test_map_symbol_to_segment_fields_vowel():
     assert _map_symbol_to_segment_fields("a") == ("vowel", "a")
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_consonant():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
@@ -742,7 +737,6 @@ def test_map_symbol_to_segment_fields_consonant():
     assert _map_symbol_to_segment_fields("k") == ("consonant", "k")
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_g2p_symbol_consonant():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
@@ -752,7 +746,6 @@ def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_
     assert _map_symbol_to_segment_fields("y") == ("consonant", "j")
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_g2p_symbol_vowel():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
@@ -762,7 +755,6 @@ def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_
     assert _map_symbol_to_segment_fields("I") == ("vowel", "i")
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_vowel_with_ipa_conversion():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
@@ -770,21 +762,18 @@ def test_map_symbol_to_segment_fields_vowel_with_ipa_conversion():
     assert _map_symbol_to_segment_fields("u") == ("vowel", "ɯ")
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_pau_is_gap():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
     assert _map_symbol_to_segment_fields("pau") == ("gap", None)
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_cl_is_gap():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
     assert _map_symbol_to_segment_fields("cl") == ("gap", None)
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_ap_is_gap():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
@@ -792,14 +781,12 @@ def test_map_symbol_to_segment_fields_ap_is_gap():
     assert _map_symbol_to_segment_fields("AP") == ("gap", None)
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_sp_is_gap():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
     assert _map_symbol_to_segment_fields("SP") == ("gap", None)
 
 
-@_IPA_MAPPING_XFAIL
 def test_map_symbol_to_segment_fields_unmapped_symbol_raises():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
     from vocal_analysis.phonemes import RecognitionError
@@ -808,7 +795,6 @@ def test_map_symbol_to_segment_fields_unmapped_symbol_raises():
         _map_symbol_to_segment_fields("xyz_unknown")
 
 
-@_IPA_MAPPING_XFAIL
 def test_segments_from_raw_converts_all_fields():
     from vocal_analysis.sofa_align import _segments_from_raw
     from vocal_analysis.types import Segment
@@ -821,14 +807,12 @@ def test_segments_from_raw_converts_all_fields():
     ]
 
 
-@_IPA_MAPPING_XFAIL
 def test_segments_from_raw_empty_input_returns_empty():
     from vocal_analysis.sofa_align import _segments_from_raw
 
     assert _segments_from_raw([]) == []
 
 
-@_IPA_MAPPING_XFAIL
 def test_segments_from_raw_propagates_unmapped_symbol_error():
     from vocal_analysis.sofa_align import _segments_from_raw
     from vocal_analysis.phonemes import RecognitionError
