@@ -84,6 +84,30 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["model_name"] == ""
     assert kwargs["progress"] is not None
     assert kwargs["keep_intermediate_dir"] is None
+    assert kwargs["forced_aligner"] == "wav2vec2-ctc-forcedalign"
+    assert kwargs["sofa_aligner"] is None
+
+
+def test_run_builds_sofa_aligner_config_from_cli_options(tmp_path, monkeypatch):
+    """--forced-aligner sofa-forcedalign選択時、--sofa-*からSofaAlignerConfigが組み立てられる。"""
+    from pathlib import Path
+
+    from vocal_analysis import SofaAlignerConfig
+
+    src = _touch(tmp_path / "in.wav")
+    captured = _capture_run_kwargs(monkeypatch)
+
+    rc = cli.main([
+        src, "--forced-aligner", "sofa-forcedalign",
+        "--sofa-python", "/venv/python", "--sofa-root", "/sofa",
+        "--sofa-checkpoint", "/ckpt.ckpt", "--sofa-timeout", "120", "--dry-run",
+    ])
+    assert rc == 0
+    kwargs = captured["kwargs"]
+    assert kwargs["forced_aligner"] == "sofa-forcedalign"
+    assert kwargs["sofa_aligner"] == SofaAlignerConfig(
+        sofa_python=Path("/venv/python"), sofa_root=Path("/sofa"),
+        checkpoint_path=Path("/ckpt.ckpt"), timeout_sec=120.0)
 
 
 def test_keep_intermediate_resolves_to_output_path_plus_suffix(tmp_path, monkeypatch):
@@ -322,6 +346,24 @@ def test_recognizer_model_revision_without_id_machine_mode_emits_bad_argument(tm
     assert events[0]["type"] == "error"
     assert events[0]["code"] == "bad_argument"
     assert events[0]["field"] == "--recognizer-model-revision"
+    assert events[0]["exit_code"] == 2
+
+
+def test_forced_aligner_sofa_all_missing_machine_mode_reports_only_first_field(
+    tmp_path, monkeypatch, capsysbinary
+):
+    """sofa-python・sofa-root・sofa-checkpointが全て欠落していても、走査順で最初の1件だけ報告する
+    (song2vmd.md 12.3。複数欠落を1つのエラーへまとめて返す設計は採らない)。"""
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch)
+
+    rc = cli.main([src, "--forced-aligner", "sofa-forcedalign", "--machine", "--dry-run"])
+    assert rc == 2
+    events = _events_of(capsysbinary)
+    assert len(events) == 1
+    assert events[0]["type"] == "error"
+    assert events[0]["code"] == "bad_argument"
+    assert events[0]["field"] == "--sofa-python"
     assert events[0]["exit_code"] == 2
 
 

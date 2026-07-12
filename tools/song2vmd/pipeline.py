@@ -129,13 +129,15 @@ def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
 
 def run(input_path, *, separate_vocals, separator_name, content_recognizer_model, max_duration_sec,
         use_n_morph, intensity_curve, silence_on, openness, style_gen,
-        style_name, model_name, keep_intermediate_dir=None, progress=None):
+        style_name, model_name, forced_aligner, sofa_aligner,
+        keep_intermediate_dir=None, progress=None):
     """song2vmd の音声→VMDパイプラインを実行する(song2vmd.md 4章・6章)。
 
     content_recognizer_model は vocal_analysis.recognizer.recognize が受け取る
-    ContentRecognizerModel(vocal_analysis.md §5.2・§8.3)。keep_intermediate_dir を渡すと
-    中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)をそのディレクトリへ保存する(5.2の
-    --keep-intermediate)。省略時(既定None)は何も保存しない。
+    ContentRecognizerModel(vocal_analysis.md §5.2・§8.3)。forced_aligner・sofa_aligner は同じ
+    recognize が受け取るS2強制アライメント段のバックエンド選択(vocal_analysis.md §5.3・§8.3)。
+    keep_intermediate_dir を渡すと中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)をその
+    ディレクトリへ保存する(5.2の--keep-intermediate)。省略時(既定None)は何も保存しない。
     """
     _report_stage(progress, "load")
     pcm = _va_io.load_audio(input_path)
@@ -143,10 +145,11 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
 
     if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
         segments, rms_envelope, vocal_pcm = _run_single(
-            pcm, separate_vocals, content_recognizer_model, progress)
+            pcm, separate_vocals, content_recognizer_model, forced_aligner, sofa_aligner, progress)
     else:
         segments, rms_envelope, vocal_pcm = _run_chunked(
-            pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec, progress)
+            pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec,
+            forced_aligner, sofa_aligner, progress)
 
     if keep_intermediate_dir is not None:
         _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments)
@@ -163,7 +166,8 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
 
     diagnostics = report.build_diagnostics(
         segments=segments, mouth_events=mouth_events, event_diagnostics=event_diag,
-        backends={"separator": separator_name, "recognizer": content_recognizer_model.model_id},
+        backends={"separator": separator_name, "recognizer": content_recognizer_model.model_id,
+                  "forced_aligner": forced_aligner},
         style=style_name, separated=(separate_vocals != "never"), duration_sec=duration_sec,
         keys=len(document.morph))
 
@@ -172,19 +176,22 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         channels=pcm.samples.shape[1])
 
 
-def _run_single(pcm, separate_vocals, content_recognizer_model, progress):
+def _run_single(pcm, separate_vocals, content_recognizer_model, forced_aligner, sofa_aligner, progress):
     """長尺分割なしの単一実行(song2vmd.md 6.6の対象外の通常経路)。"""
     _report_stage(progress, "separate")
     vocal_path = _va_separator.separate(pcm, separate_vocals)
     _report_stage(progress, "recognize")
-    segments = _va_recognizer.recognize(vocal_path, content_recognizer_model=content_recognizer_model)
+    segments = _va_recognizer.recognize(
+        vocal_path, content_recognizer_model=content_recognizer_model,
+        forced_aligner=forced_aligner, sofa_aligner=sofa_aligner)
     _report_stage(progress, "rms")
     vocal_pcm = _va_io.load_audio(vocal_path)
     rms_envelope = _va_rms.compute_rms(vocal_pcm)
     return segments, rms_envelope, vocal_pcm
 
 
-def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec, progress):
+def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec,
+                  forced_aligner, sofa_aligner, progress):
     """長尺分割ありの実行(song2vmd.md 6.6)。境界決定は分離前の生音声RMSを使う。"""
     raw_rms = _va_rms.compute_rms(pcm)
     boundaries = chunking.find_chunk_boundaries(
@@ -208,7 +215,9 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model, m
         vocal_path = _va_separator.separate(chunk_pcm, separate_vocals)
         _report_stage(progress, "recognize", done=i, total=n)
         chunk_segments_list.append(
-            _va_recognizer.recognize(vocal_path, content_recognizer_model=content_recognizer_model))
+            _va_recognizer.recognize(
+                vocal_path, content_recognizer_model=content_recognizer_model,
+                forced_aligner=forced_aligner, sofa_aligner=sofa_aligner))
 
         chunk_vocal_pcm = _read_pcm_raw(vocal_path)
         vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))

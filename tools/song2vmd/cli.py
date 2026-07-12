@@ -18,6 +18,7 @@ import argparse
 import math
 import os
 import sys
+from pathlib import Path
 
 from cli_events import (
     ArgumentParseError,
@@ -26,7 +27,12 @@ from cli_events import (
     argparse_error_field,
     error_event,
 )
-from vocal_analysis import ContentRecognizerModel, DEFAULT_CONTENT_RECOGNIZER_MODEL
+from vocal_analysis import (
+    ContentRecognizerModel,
+    DEFAULT_CONTENT_RECOGNIZER_MODEL,
+    DEFAULT_FORCED_ALIGNER,
+    SofaAlignerConfig,
+)
 from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
 from vocal_analysis.separator import SeparationError
@@ -49,6 +55,10 @@ SEPARATE_VOCALS_MODES = ("auto", "always", "never")
 # §8.3 を先に更新してから、この一覧を追随させる)。S2内容認識モデルは安定idでなく
 # `--recognizer-model-id`/`--recognizer-model-revision`(ContentRecognizerModel。5.2)で選ぶ。
 SEPARATOR_NAMES = ("audio-separator-htdemucs-ft",)
+
+# S2強制アライメント段の登録アダプタの安定id(vocal_analysis.md §8.2・§8.3が正本)。既定は
+# DEFAULT_FORCED_ALIGNER(wav2vec2-ctc-forcedalign)で、SOFA選択時のみ--sofa-*系が必須になる。
+FORCED_ALIGNER_NAMES = ("wav2vec2-ctc-forcedalign", "sofa-forcedalign")
 
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS(song2vmd.md 5.2・9章)。
 _MODEL_NAME_MAX_BYTES = 20
@@ -183,6 +193,18 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    help="--recognizer-model-id のリビジョン指定(組で使う。--recognizer-model-id "
                         "指定時にこれを省略すると最新リビジョンを使う。--recognizer-model-id 自体を"
                         "省略した場合は本オプションは無視されず引数エラーになる)")
+    p.add_argument("--forced-aligner", dest="forced_aligner", choices=FORCED_ALIGNER_NAMES,
+                   default=DEFAULT_FORCED_ALIGNER,
+                   help="S2強制アライメント段のバックエンド選択(vocal_analysisの登録アダプタ安定id)。"
+                        "sofa-forcedalign選択時は--sofa-python/--sofa-root/--sofa-checkpointが必須")
+    p.add_argument("--sofa-python", dest="sofa_python", default=None,
+                   help="SOFA専用venvのPython実行ファイルパス(--forced-aligner sofa-forcedalign時に必須)")
+    p.add_argument("--sofa-root", dest="sofa_root", default=None,
+                   help="SOFAリポジトリのルートパス(--forced-aligner sofa-forcedalign時に必須)")
+    p.add_argument("--sofa-checkpoint", dest="checkpoint_path", default=None,
+                   help="SOFAチェックポイント(.ckpt)ファイルパス(--forced-aligner sofa-forcedalign時に必須)")
+    p.add_argument("--sofa-timeout", dest="sofa_timeout", type=_positive_float, default=300.0,
+                   help="SOFAサブプロセス1回あたりのタイムアウト秒数")
     # --n-morph / --no-n-morph は既定 on の対(song2vmd.md 5.2)。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
                    help="撥音「ん」に「ん」モーフを使う(既定on)。--no-n-morphの対の明示形")
@@ -253,6 +275,11 @@ _D_TYPE = {
     "separator": ("enum", {"choices": list(SEPARATOR_NAMES)}),
     "recognizer_model_id": ("str", None),
     "recognizer_model_revision": ("str", None),
+    "forced_aligner": ("enum", {"choices": list(FORCED_ALIGNER_NAMES)}),
+    "sofa_python": ("str", None),
+    "sofa_root": ("str", None),
+    "checkpoint_path": ("str", None),
+    "sofa_timeout": ("float", _D_POS_FLOAT),
     "n_morph": ("flag", None),
     "vowel_gain": ("compound", _D_COMPOUND["vowel_gain"]),
     "open_max": ("float", _D_UNIT),
@@ -379,6 +406,19 @@ def main(argv=None) -> int:
     if args.input is None:
         return fail("bad_argument", "入力音声(input)が必要です", 2, field="input")
 
+    # --forced-aligner sofa-forcedalign 選択時のみ --sofa-* を必須検証する(既定のwav2vec2経路は
+    # --sofa-* が一切不要。song2vmd.md 5.2)。順序どおり走査し最初に見つかったNoneだけを報告する
+    # (--recognizer-model-revision の組み合わせ検証と同じ「1回の呼び出しにつき最初の1件のみ報告」方式)。
+    if args.forced_aligner == "sofa-forcedalign":
+        for field, dest in (
+            ("--sofa-python", "sofa_python"),
+            ("--sofa-root", "sofa_root"),
+            ("--sofa-checkpoint", "checkpoint_path"),
+        ):
+            if getattr(args, dest) is None:
+                return fail("bad_argument", f"{field} は --forced-aligner sofa-forcedalign 時に必須です",
+                            2, field=field)
+
     # 引数解析後の本体。KeyboardInterrupt(Ctrl-C 等)は協調的な中断(cancelled/130)として畳み、それ以外の
     # 想定外例外はトレースバックを漏らさず internal_error(理由1行 + 終了コード1)へ畳む(11章・12.3)。
     try:
@@ -396,6 +436,18 @@ def _resolve_content_recognizer_model(args):
         return DEFAULT_CONTENT_RECOGNIZER_MODEL
     return ContentRecognizerModel(
         model_id=args.recognizer_model_id, model_revision=args.recognizer_model_revision)
+
+
+def _resolve_sofa_aligner_config(args):
+    """--sofa-* から SofaAlignerConfig を組み立てる(song2vmd.md 5.2)。
+
+    --forced-aligner が sofa-forcedalign 以外のときは None を返す(SofaAlignerConfig不要)。
+    """
+    if args.forced_aligner != "sofa-forcedalign":
+        return None
+    return SofaAlignerConfig(
+        sofa_python=Path(args.sofa_python), sofa_root=Path(args.sofa_root),
+        checkpoint_path=Path(args.checkpoint_path), timeout_sec=args.sofa_timeout)
 
 
 def _report_params(args, openness, style_gen):
@@ -442,6 +494,7 @@ def _run(args, emitter, fail) -> int:
             use_n_morph=args.n_morph, intensity_curve=args.intensity_curve,
             silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
             style_name=args.style, model_name=args.model_name,
+            forced_aligner=args.forced_aligner, sofa_aligner=_resolve_sofa_aligner_config(args),
             keep_intermediate_dir=keep_intermediate_dir, progress=progress_reporter)
     except AudioLoadError as e:
         return fail("decoder_missing", str(e), 4, field="input")

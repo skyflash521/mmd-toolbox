@@ -174,6 +174,69 @@ def test_recognizer_model_revision_without_model_id_is_arg_error(tmp_path):
     assert cli.main([src, "--recognizer-model-revision", "abc123", "--dry-run"]) == 2
 
 
+def test_forced_aligner_default_needs_no_sofa_args(tmp_path):
+    """--forced-aligner既定(wav2vec2-ctc-forcedalign)は--sofa-*が一切無くても成功する。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--dry-run"]) == 0
+
+
+def test_forced_aligner_sofa_without_sofa_python_is_arg_error(tmp_path):
+    """--forced-aligner sofa-forcedalign選択時、--sofa-python欠落は引数エラー(最初の欠落を報告)。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([
+        src, "--forced-aligner", "sofa-forcedalign",
+        "--sofa-root", "/sofa", "--sofa-checkpoint", "/ckpt.ckpt", "--dry-run",
+    ]) == 2
+
+
+def test_forced_aligner_sofa_without_sofa_root_is_arg_error(tmp_path):
+    """--sofa-pythonがあっても--sofa-root欠落は引数エラー。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([
+        src, "--forced-aligner", "sofa-forcedalign",
+        "--sofa-python", "/venv/python", "--sofa-checkpoint", "/ckpt.ckpt", "--dry-run",
+    ]) == 2
+
+
+def test_forced_aligner_sofa_without_checkpoint_is_arg_error(tmp_path):
+    """--sofa-python・--sofa-rootがあっても--sofa-checkpoint欠落は引数エラー。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([
+        src, "--forced-aligner", "sofa-forcedalign",
+        "--sofa-python", "/venv/python", "--sofa-root", "/sofa", "--dry-run",
+    ]) == 2
+
+
+def test_forced_aligner_sofa_with_all_sofa_args_is_accepted(tmp_path):
+    """--forced-aligner sofa-forcedalign選択時、--sofa-*3つが揃えば成功する(--sofa-timeoutは既定値可)。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([
+        src, "--forced-aligner", "sofa-forcedalign",
+        "--sofa-python", "/venv/python", "--sofa-root", "/sofa",
+        "--sofa-checkpoint", "/ckpt.ckpt", "--dry-run",
+    ]) == 0
+
+
+def test_forced_aligner_sofa_timeout_zero_is_arg_error(tmp_path):
+    """--sofa-timeoutは正の数値のみ(0以下は無意味)。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([
+        src, "--forced-aligner", "sofa-forcedalign",
+        "--sofa-python", "/venv/python", "--sofa-root", "/sofa",
+        "--sofa-checkpoint", "/ckpt.ckpt", "--sofa-timeout", "0", "--dry-run",
+    ]) == 2
+
+
+def test_forced_aligner_unknown_choice_is_arg_error(tmp_path):
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--forced-aligner", "unknown-aligner", "--dry-run"]) == 2
+
+
+def test_describe_succeeds_without_forced_aligner_specified():
+    """--describeは--forced-aligner未指定・--sofa-*無しでも成功する(音声を読まない自己記述)。"""
+    assert cli.main(["--describe"]) == 0
+
+
 @pytest.mark.parametrize("opt", ["--open-max", "--intensity-curve", "--max-duration"])
 def test_float_option_non_numeric_is_arg_error(tmp_path, opt):
     src = _touch(tmp_path / "in.wav")

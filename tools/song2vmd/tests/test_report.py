@@ -117,7 +117,8 @@ def test_render_report_text_includes_backends_style_params_and_stats():
     diag = diag_of(
         segments=[seg("vowel", 0.0, 0.5)], mouth_events=[mev(MouthShape.A, 0, 15, 0.6)],
         event_diagnostics=events.EventDiagnostics(weak_vowels=1, low_dynamics=False, merged_morae=2),
-        backends={"separator": "sep-x", "recognizer": "rec-y"}, style="ballad", separated=True,
+        backends={"separator": "sep-x", "recognizer": "rec-y", "forced_aligner": "aligner-z"},
+        style="ballad", separated=True,
         duration_sec=0.5, keys=4,
     )
     text = report.render_report_text(diag, {"open_lo": 0.2, "open_hi": 0.55})
@@ -130,7 +131,8 @@ def test_render_report_text_includes_backends_style_params_and_stats():
         return next(i for i, line in enumerate(lines) if substring in line)
 
     order = [
-        "separator: sep-x", "recognizer: rec-y", "style: ballad", "open_lo: 0.2", "open_hi: 0.55",
+        "separator: sep-x", "recognizer: rec-y", "forced_aligner: aligner-z", "style: ballad",
+        "open_lo: 0.2", "open_hi: 0.55",
         "separated: True", "phonemes: 1", "morae: 1", "coverage: 1.0000",
         "mora[1]: shape=a open_amount=0.6000 hold_frames=15.00", "merged_morae: 2", "closed_ranges: 0",
         "max_opening: 0.6000", "keys: 4", "duration_sec: 0.500",

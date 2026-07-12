@@ -78,6 +78,7 @@ def render_report_text(diag: Diagnostics, params: dict) -> str:
     lines = [
         f"separator: {diag.backends.get('separator')}",
         f"recognizer: {diag.backends.get('recognizer')}",
+        f"forced_aligner: {diag.backends.get('forced_aligner')}",
         f"style: {diag.style}",
     ]
     for name, value in params.items():
