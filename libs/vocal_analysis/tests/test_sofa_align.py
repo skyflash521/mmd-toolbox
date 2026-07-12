@@ -730,6 +730,47 @@ def test_determine_word_gaps_no_valid_words_covers_whole_trim_duration():
     assert _determine_word_gaps([], trim_duration_sec=1.5) == [(0.0, 1.5)]
 
 
+def test_covered_invalid_words_produce_no_gap_and_intervals_tile_whole_duration():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list, _determine_word_gaps
+
+    # 単語B・Cが単語Aに完全に包含されるとき、B・Cの元の時間範囲([0.8, 0.9)・[1.0, 1.2))へ
+    # 個別のgapが生成されないこと(Aの結果がその範囲を被覆するため。重ねて置くとSegment契約の
+    # 非重複性を破る)、および有効単語とgapを合わせた区間列がトリム後区間全体を隙間なく非重複で
+    # 被覆することを、クランプ→gap確定の連結で確認する(vocal_analysis.md §5.3「gapの確定」)。
+    words = [(["a"], 0.5, 2.0), (["i"], 0.8, 0.9), (["u"], 1.0, 1.2)]
+    trim_duration_sec = 2.5
+
+    valid_words = _clamp_words_to_valid_list(words, trim_duration_sec=trim_duration_sec)
+    gaps = _determine_word_gaps(valid_words, trim_duration_sec=trim_duration_sec)
+
+    assert valid_words == [(["a"], 0.5, 2.0)]
+    # gapは有効単語列の隙間(先頭〜A・A〜終端)だけ。B・Cの範囲に対応する個別gapは無い。
+    assert gaps == [(0.0, 0.5), (2.0, 2.5)]
+
+    intervals = sorted(
+        [(start, end) for _, start, end in valid_words] + gaps, key=lambda iv: iv[0])
+    assert intervals[0][0] == 0.0
+    assert intervals[-1][1] == trim_duration_sec
+    for (_, prev_end), (next_start, _) in zip(intervals, intervals[1:]):
+        assert prev_end == next_start
+
+
+def test_all_words_invalidated_confirms_whole_duration_as_single_gap():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list, _determine_word_gaps
+
+    # 単語タイムスタンプ自体は取得できたが、短い単語が密集しcursorクランプ・最小長判定で全て
+    # 無効化され「有効な単語列」が0件になるケース。トリム後区間全体が単一のgapとして確定する
+    # (vocal_analysis.md §5.3「有効な単語列が0件になった場合」)。
+    words = [(["a"], 0.00, 0.04), (["i"], 0.02, 0.05), (["u"], 0.04, 0.07)]
+    trim_duration_sec = 1.0
+
+    valid_words = _clamp_words_to_valid_list(words, trim_duration_sec=trim_duration_sec)
+    gaps = _determine_word_gaps(valid_words, trim_duration_sec=trim_duration_sec)
+
+    assert valid_words == []
+    assert gaps == [(0.0, 1.0)]
+
+
 def test_determine_word_gaps_no_gaps_when_words_cover_whole_duration():
     from vocal_analysis.sofa_align import _determine_word_gaps
 

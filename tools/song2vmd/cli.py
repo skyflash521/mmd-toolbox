@@ -97,7 +97,7 @@ def _unit_float(text: str) -> float:
 
 
 def _positive_float(text: str) -> float:
-    """正の有限 float(--intensity-curve)。強弱→開き量の累乗指数は 0 以下になり得ない。"""
+    """正の有限 float(--intensity-curve・--sofa-timeout)。累乗指数もタイムアウト秒数も 0 以下は無意味。"""
     v = _finite_float(text)
     if v <= 0.0:
         raise argparse.ArgumentTypeError(f"正の数値が必要: {text!r}")

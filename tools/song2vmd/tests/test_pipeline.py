@@ -222,7 +222,7 @@ def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeyp
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
-    given_model = ContentRecognizerModel(model_id="whisper-ctc-forcedalign", model_revision="rev1")
+    given_model = ContentRecognizerModel(model_id="org/custom-recognizer", model_revision="rev1")
     given_sofa_config = object()
     pipeline.run(input_path, **_common_kwargs(
         content_recognizer_model=given_model, forced_aligner="sofa-forcedalign",
