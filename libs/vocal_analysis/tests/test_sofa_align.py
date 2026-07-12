@@ -589,10 +589,6 @@ def test_align_batch_non_ascii_work_dir_does_not_start_subprocess(monkeypatch):
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
 
-_WORD_SPLIT_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align word-level splitting", strict=True)
-
-
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_passes_through_non_overlapping_words():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -600,7 +596,6 @@ def test_clamp_words_to_valid_list_passes_through_non_overlapping_words():
     assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == words
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_clamps_end_to_trim_duration():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -609,7 +604,6 @@ def test_clamp_words_to_valid_list_clamps_end_to_trim_duration():
     assert _clamp_words_to_valid_list(words, trim_duration_sec=1.0) == [(["a"], 0.5, 1.0)]
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_clamps_overlap_to_cursor():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -622,7 +616,6 @@ def test_clamp_words_to_valid_list_clamps_overlap_to_cursor():
     ]
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_invalidates_words_fully_covered_by_cursor():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -633,7 +626,6 @@ def test_clamp_words_to_valid_list_invalidates_words_fully_covered_by_cursor():
     assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [(["a"], 0.5, 2.0)]
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_invalidates_word_already_shorter_than_minimum():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -646,7 +638,6 @@ def test_clamp_words_to_valid_list_invalidates_word_already_shorter_than_minimum
     ]
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_invalidates_word_shrunk_below_minimum_by_clamp():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -658,7 +649,6 @@ def test_clamp_words_to_valid_list_invalidates_word_shrunk_below_minimum_by_clam
     assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [(["a"], 0.5, 1.0)]
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_cursor_persists_through_consecutive_invalid_words():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -679,7 +669,6 @@ def test_clamp_words_to_valid_list_cursor_persists_through_consecutive_invalid_w
     ]
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_invalidates_empty_phoneme_symbols():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -693,7 +682,6 @@ def test_clamp_words_to_valid_list_invalidates_empty_phoneme_symbols():
     ]
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_all_invalid_returns_empty():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
@@ -701,21 +689,18 @@ def test_clamp_words_to_valid_list_all_invalid_returns_empty():
     assert _clamp_words_to_valid_list(words, trim_duration_sec=1.0) == []
 
 
-@_WORD_SPLIT_XFAIL
 def test_clamp_words_to_valid_list_empty_input_returns_empty():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
     assert _clamp_words_to_valid_list([], trim_duration_sec=1.0) == []
 
 
-@_WORD_SPLIT_XFAIL
 def test_determine_word_gaps_no_valid_words_covers_whole_trim_duration():
     from vocal_analysis.sofa_align import _determine_word_gaps
 
     assert _determine_word_gaps([], trim_duration_sec=1.5) == [(0.0, 1.5)]
 
 
-@_WORD_SPLIT_XFAIL
 def test_determine_word_gaps_no_gaps_when_words_cover_whole_duration():
     from vocal_analysis.sofa_align import _determine_word_gaps
 
@@ -723,7 +708,6 @@ def test_determine_word_gaps_no_gaps_when_words_cover_whole_duration():
     assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
 
 
-@_WORD_SPLIT_XFAIL
 def test_determine_word_gaps_before_between_and_after():
     from vocal_analysis.sofa_align import _determine_word_gaps
 
@@ -731,7 +715,6 @@ def test_determine_word_gaps_before_between_and_after():
     assert _determine_word_gaps(words, trim_duration_sec=1.5) == [(0.0, 0.2), (0.5, 0.8), (1.0, 1.5)]
 
 
-@_WORD_SPLIT_XFAIL
 def test_determine_word_gaps_does_not_emit_zero_length_gap():
     from vocal_analysis.sofa_align import _determine_word_gaps
 

@@ -3,8 +3,8 @@
 利用者提供の専用venv・SOFAリポジトリ・チェックポイントをサブプロセスとして呼び、既知の音素記号列を
 音声へ時刻合わせする。SOFA本体のコード・チェックポイントは本モジュールに一切同梱しない。ここでは
 入力の書き出し・サブプロセス起動・終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力
-(100ナノ秒単位)の秒への変換・Segment契約の検証・非ASCIIパスの拒否を扱う。単語単位分割・IPA写像は
-別の関数(このモジュールの他の関数、または呼び出し元)が担う。
+(100ナノ秒単位)の秒への変換・Segment契約の検証・非ASCIIパスの拒否・単語単位分割(有効な単語列の
+確定・gapの確定)を扱う。IPA写像は呼び出し元が担う。
 """
 
 import os
@@ -18,7 +18,7 @@ import numpy as np
 import soundfile as sf
 
 from .config import SofaAlignerConfig
-from .phonemes import RecognitionError
+from .phonemes import _MIN_WORD_DURATION_SEC, RecognitionError
 
 
 def _write_sofa_inputs(
@@ -221,3 +221,48 @@ def _align_batch(
             basename: _parse_htk_label_file(work_dir / "htk" / "phones" / f"{basename}.lab")
             for basename in basenames
         }
+
+
+def _clamp_words_to_valid_list(
+    words: list[tuple[list[str], float, float]], trim_duration_sec: float
+) -> list[tuple[list[str], float, float]]:
+    """単語タイムスタンプ列から「有効な単語列」を確定する(cursorベースの逐次クランプ。§5.3)。
+
+    各wordは(音素記号列, 開始秒, 終了秒)。(1)各単語の終了時刻をトリム後区間の全長以下へ再クランプ
+    する。(2) `cursor`を0.0で初期化し単語を時系列順に処理する。各単語の開始時刻を
+    `max(元の開始時刻, cursor)`へクランプし、クランプ後の区間長が最小単語長未満(ゼロ・負長を含む)、
+    または音素記号列が空の場合はその単語を無効とする(`cursor`は更新しない)。そうでなければ有効とし
+    `cursor`をクランプ後の終了時刻へ更新する。
+    """
+    cursor = 0.0
+    valid_words: list[tuple[list[str], float, float]] = []
+    for phoneme_symbols, start, end in words:
+        clamped_end = min(end, trim_duration_sec)
+        clamped_start = max(start, cursor)
+        if not phoneme_symbols or (clamped_end - clamped_start) < _MIN_WORD_DURATION_SEC:
+            continue
+        valid_words.append((phoneme_symbols, clamped_start, clamped_end))
+        cursor = clamped_end
+    return valid_words
+
+
+def _determine_word_gaps(
+    valid_words: list[tuple[list[str], float, float]], trim_duration_sec: float
+) -> list[tuple[float, float]]:
+    """「有効な単語列」の隙間からgap区間を確定する(§5.3「gapの確定」)。
+
+    先頭から最初の有効単語まで・有効単語同士の間・最後の有効単語からトリム後区間の終端まで、の
+    3種類。長さ0の隙間は生成しない。有効な単語列が空なら、トリム後区間全体を単一のgapとする。
+    """
+    if not valid_words:
+        return [(0.0, trim_duration_sec)]
+
+    gaps: list[tuple[float, float]] = []
+    cursor = 0.0
+    for _, start, end in valid_words:
+        if start > cursor:
+            gaps.append((cursor, start))
+        cursor = end
+    if cursor < trim_duration_sec:
+        gaps.append((cursor, trim_duration_sec))
+    return gaps
