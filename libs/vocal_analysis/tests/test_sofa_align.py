@@ -12,8 +12,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align subprocess core", strict=True)
-
 
 def _make_config(tmp_path):
     from vocal_analysis import SofaAlignerConfig
@@ -71,7 +69,6 @@ def _write_htk_label(folder, basename, rows):
     (phones_dir / f"{basename}.lab").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-@_XFAIL
 def test_align_batch_happy_path_parses_htk_output_as_seconds(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
@@ -95,7 +92,6 @@ def test_align_batch_happy_path_parses_htk_output_as_seconds(tmp_path, monkeypat
     assert result == {"segment_0000": [(0.0, 0.5, "pau"), (0.5, 1.0, "a")]}
 
 
-@_XFAIL
 def test_align_batch_writes_ascii_fixed_width_basenames_for_multiple_targets(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
@@ -124,7 +120,6 @@ def test_align_batch_writes_ascii_fixed_width_basenames_for_multiple_targets(tmp
     assert set(result.keys()) == {"segment_0000", "segment_0001", "segment_0002"}
 
 
-@_XFAIL
 def test_align_batch_writes_space_separated_phonemes_to_lab_input(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
@@ -153,7 +148,6 @@ def test_align_batch_writes_space_separated_phonemes_to_lab_input(tmp_path, monk
     assert written_lab_texts["segment_0001"].strip() == "pau"
 
 
-@_XFAIL
 def test_align_batch_empty_targets_does_not_start_subprocess(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
@@ -167,7 +161,6 @@ def test_align_batch_empty_targets_does_not_start_subprocess(tmp_path, monkeypat
     assert sofa_align._align_batch([], config) == {}
 
 
-@_XFAIL
 def test_align_batch_nonzero_exit_code_raises_recognition_error(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
     from vocal_analysis.phonemes import RecognitionError
@@ -184,7 +177,6 @@ def test_align_batch_nonzero_exit_code_raises_recognition_error(tmp_path, monkey
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
 
-@_XFAIL
 def test_align_batch_missing_output_file_raises_recognition_error(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
     from vocal_analysis.phonemes import RecognitionError
@@ -202,7 +194,6 @@ def test_align_batch_missing_output_file_raises_recognition_error(tmp_path, monk
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
 
-@_XFAIL
 def test_align_batch_empty_output_file_raises_recognition_error(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
     from vocal_analysis.phonemes import RecognitionError
@@ -226,7 +217,6 @@ def test_align_batch_empty_output_file_raises_recognition_error(tmp_path, monkey
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
 
-@_XFAIL
 def test_align_batch_starts_new_process_group_on_windows(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
@@ -258,7 +248,6 @@ def test_align_batch_starts_new_process_group_on_windows(tmp_path, monkeypatch):
     assert captured.get("creationflags") is fake_creationflags
 
 
-@_XFAIL
 def test_align_batch_starts_new_session_on_posix(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
@@ -285,7 +274,6 @@ def test_align_batch_starts_new_session_on_posix(tmp_path, monkeypatch):
     assert captured.get("start_new_session") is True
 
 
-@_XFAIL
 def test_align_batch_timeout_kills_process_tree_on_windows(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
     from vocal_analysis.phonemes import RecognitionError
@@ -310,7 +298,6 @@ def test_align_batch_timeout_kills_process_tree_on_windows(tmp_path, monkeypatch
     assert killed_pids == ["4242"]
 
 
-@_XFAIL
 def test_align_batch_timeout_kills_process_tree_on_posix(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
     from vocal_analysis.phonemes import RecognitionError
@@ -339,7 +326,6 @@ def test_align_batch_timeout_kills_process_tree_on_posix(tmp_path, monkeypatch):
     assert killed == [(4242, fake_sigkill)]
 
 
-@_XFAIL
 def test_parse_htk_label_file_converts_100ns_units_to_seconds(tmp_path):
     from vocal_analysis.sofa_align import _parse_htk_label_file
 
