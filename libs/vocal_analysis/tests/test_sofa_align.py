@@ -149,6 +149,36 @@ def test_align_batch_writes_space_separated_phonemes_to_lab_input(tmp_path, monk
     assert written_lab_texts["segment_0001"].strip() == "pau"
 
 
+@pytest.mark.xfail(reason="impl pending: sofa vocab devoiced vowel normalization")
+def test_align_batch_normalizes_devoiced_vowels_for_sofa_vocab(tmp_path, monkeypatch):
+    """SOFAの語彙(vocab.yaml)は無声化母音の専用記号(pyopenjtalk-plus由来のI/U)を持たず、
+    通常の母音記号(i/u)のみを認識する。G2P出力に含まれるI/Uをそのまま.labへ書き出すと、
+    SOFA側の語彙引き当てで該当区間がKeyErrorになる。書き出し前にI→i・U→uへ正規化しなければならない。
+    """
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+    written_lab_texts = {}
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+        for lab_path in folder.glob("*.lab"):
+            written_lab_texts[lab_path.stem] = lab_path.read_text(encoding="utf-8")
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "pau")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    targets = [(samples, 16000, ["k", "I", "sh", "U"])]
+    sofa_align._align_batch(targets, config)
+
+    assert written_lab_texts["segment_0000"].strip() == "k i sh u"
+
+
 def test_align_batch_empty_targets_does_not_start_subprocess(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
