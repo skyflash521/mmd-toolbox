@@ -147,6 +147,38 @@ vocal_analysis.md §5.2・§8.3 が正本)。内容認識は既定値 `openai/wh
 従う([vocal_analysis.md](vocal_analysis.md) §9)。**Julius は代替**として残す(歌唱品質か速度が問題に
 なれば評価する)。**Allosaurus は GPL-3.0(LICENSE実物が GNU GPL v3)で MIT 本体と非互換のため不採用**。
 
+### 2.3 SOFA(強制アライメント段の選択制代替候補)
+
+SOFA(Singing-Oriented Forced Aligner。<https://github.com/qiuqiao/SOFA>。MIT)は、既知の音素記号列を
+音声へ時刻合わせする強制アライナー本体で、自由音素認識(ASR)機能は持たない。2.1の複合構成のうち
+強制アライメント段(手順5以降相当)だけを置き換える選択肢として、`vocal_analysis.md` §5.3・§8.3の
+`sofa-forcedalign`アダプタとして選択可能である(既定は2.1の複合構成`wav2vec2-ctc-forcedalign`のまま)。
+
+- **単独比較での品質**: 参照ラベル付き歌唱コーパスでの単独比較(検証専用に入手したチェックポイントを
+  使用)では、既定構成(wav2vec2 CTC強制アライメント)より母音一致率・境界時刻精度とも上回った。
+- **フルパイプライン比較での乖離**: 内容認識→G2P→強制アライメント→VMD生成のフルパイプラインで
+  実曲を比較すると、母音一致率等の数値指標では両者が同等以上に見える条件でも、実際にMMD上で
+  目視・耳確認すると既定構成の方が自然に見える乖離が生じた。この乖離が
+  `vocal_analysis.md` §8.3で両アダプタを選択可能なまま維持し既定を変更しない理由の根拠である。
+- **チェックポイントのライセンス(既定値を持たない理由)**: 入手可能な日本語SOFAチェックポイント
+  (Greenleaf2001/SOFA_Models・colstone/SOFA_Models)はいずれも商用利用が制限されている
+  (前者は商用利用不可を明記、後者は訓練データに商用利用に個別相談を要するコーパスを含む)。この2件を
+  含め、チェックポイント(モデル重み)を本リポジトリへ同梱すると重みデータの再配布に当たり上記の
+  ライセンス条件に反するため同梱しない。同梱しない場合でも、商用利用不可・個別相談要のチェックポイントを
+  既定値にすると、素の状態でツールを動かした利用者(商用利用を含む)が制限に気づかないまま使ってしまい
+  意図せずライセンス違反を犯しうるため、`vocal_analysis.md` §8.3のとおりこの2件のいずれも既定値には
+  しない(利用者保護のための方針判断)。
+- **依存非互換とサブプロセス方式の採用理由**: SOFAのPython依存(固定版のnumpy・librosa等)は本リポジトリの
+  実行環境(numpy 2.x系)と非互換のため、同一環境に同居させず、利用者が用意する専用venvをサブプロセス
+  として呼ぶ方式を採る。SOFA本体のコードも同様の依存非互換によりリポジトリへ同梱できない。
+- **既知のトレードオフ**: SOFAの`force`モードは、既定構成の単語窓制約(内容認識が返す単語ごとの推定
+  時刻範囲に余白を加えた到達可能フレーム範囲で状態遷移を制約する仕組み)に相当する外部からの
+  時間的制約注入を持たないため、単語単位で音声チャンクを切り出してアライメントする
+  (`vocal_analysis.md` §5.3)。この単語境界はマージン無しの物理的な音声チャンク境界になり、
+  既定構成の余白(マージン)付き到達可能窓より単語境界での協調調音・語尾の伸びを吸収する柔軟性が
+  低い。また15ms未満の極端に短い音素セグメントを既定構成より多く出力する傾向がある(利用先の
+  後処理である程度吸収されるが完全に無害とは確認できていない)。
+
 ---
 
 ## 3. S0 入力読み込み(ffmpeg の扱い)
@@ -180,16 +212,18 @@ ffmpeg 自体が不要なことも多い。
 
 ## 4. 採用ツールと選定理由
 
-各ステージのアダプタは1つ(採用ツールの正本は [vocal_analysis.md](vocal_analysis.md) §8.3)。
-S2 のみ、内容認識モデルを `content_recognizer_model` 引数(既定値・候補値・任意指定。
-vocal_analysis.md §5.2)で
-選べる。アダプタの登録と選択の扱いは [vocal_analysis.md](vocal_analysis.md) §8.2 に従う。
+S0・S1のアダプタは1つ(採用ツールの正本は [vocal_analysis.md](vocal_analysis.md) §8.3)。S2は
+強制アライメント段のアダプタを`forced_aligner`引数で選択できる(既定アダプタ`wav2vec2-ctc-forcedalign`・
+選択制アダプタ`sofa-forcedalign`)。既定アダプタを選んだ場合はさらに、内容認識モデルを
+`content_recognizer_model` 引数(既定値・候補値・任意指定。vocal_analysis.md §5.2)で選べる。
+アダプタの登録と選択の扱いは [vocal_analysis.md](vocal_analysis.md) §8.2 に従う。
 
 | ステージ | 採用ツール | 呼び出し方 | 選定理由 | 代替候補 |
 |---|---|---|---|---|
 | S0 入力読み込み | **soundfile 優先(mp3も可)+ 自動検出ffmpegにフォールバック**(リポジトリに同梱しない) | 内部ライブラリ/サブプロセス | soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等の同梱配布は不採用) |
 | S1 ボーカル抽出 | **Demucs v4 htdemucs_ft**(audio-separator 経由・`shifts=0`) | `audio_separator.separator.Separator`(in-process) | 高品質・MIT・ライブラリ呼び出し可・GPU不要でも動作。生 `demucs.api` は `torchaudio<2.2` 固定で新しい Python 向けビルドが無く不採用 | audio-separator の他モデル(Roformer系等。ライセンス個別確認要) / Spleeter / 分離なし |
-| S2 音素・母音認識 | **複合構成(内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用**。内容認識は既定値 `openai/whisper-medium`、候補値 `kana-whisper`(いずれもかな限定プロンプトを渡す。単段の自由CTC認識は歌唱で不成立と実測済み。§2。id・モデル・revision の固定は vocal_analysis.md §5.2・§8.3 が正本) | transformers + pyopenjtalk-plus(in-process) | 既定値は歌唱で検証済み・高速。候補値は語彙置換による母音破綻が起きにくい。いずれもin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素・母音認識(既定アダプタ) | **複合構成(内容認識 + G2P + wav2vec2 CTC 強制アライメント)を採用**。内容認識は既定値 `openai/whisper-medium`、候補値 `kana-whisper`(いずれもかな限定プロンプトを渡す。単段の自由CTC認識は歌唱で不成立と実測済み。§2。id・モデル・revision の固定は vocal_analysis.md §5.2・§8.3 が正本) | transformers + pyopenjtalk-plus(in-process) | 既定値は歌唱で検証済み・高速。候補値は語彙置換による母音破綻が起きにくい。いずれもin-process・torch/transformersは既存と共有・ライセンス清浄 | Julius 音素認識(phone-loop構成が必要)。Allosaurusは GPL-3.0 で不可 |
+| S2 音素・母音認識(選択制アダプタ) | **SOFA(単語単位アライメント)。利用者提供の専用venv・チェックポイントが必須(既定値なし。§2.3)** | 利用者提供の専用venvをサブプロセス呼び出し | 単独指標だけではフルパイプラインの最終品質の優劣を判定できないため、既定アダプタと並ぶ選択肢として提供する(§2.3) | ―(SOFA自体が既定アダプタへの代替候補) |
 
 S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterface(Separator / Recognizer)を満たせば
 差し替え可能。S0 は固定の内部処理。外部ツールは `vocal_analysis` が内部で呼び、依存は `vocal_analysis` 側に
@@ -206,6 +240,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 | ffmpeg(自動検出) | 復号したWAV | 復号PCM(チャンネル/サンプルレート保持)のパス。レベル正規化は S0 が施す([vocal_analysis.md](vocal_analysis.md) §3) |
 | audio-separator(`Separator.separate`) | API が返す出力ファイルパス(Demucs v4 htdemucs_ft の分離stem) | ボーカルWAVのパス(APIの戻り値を使い、命名を推測しない) |
 | 複合構成(内容認識 + G2P + CTC強制アライメント。既定値=whisper-medium・候補値=kana-whisper) | 内容認識: テキスト(既定値はかな化されない場合あり、候補値は常にかな) / G2P: 音素列 / アライメント: 音素ごとの開始位置(CTCスパイク) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル+任意の信頼度)。テキストと音素列はアダプタ内部にとどめ、共有出力に含めない。母音の終端(閉じ側)はスパイク位置からの近似で、確定は利用先(S3のRMS併用) |
+| SOFA(単語単位アライメント。選択制) | HTK形式の音素ごとの開始/終了時刻(100ナノ秒単位)。AP(呼吸音)・SP(無音)ラベルを含む | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル(IPA)+任意の信頼度)。100ナノ秒単位の時刻を秒へ変換し、Segment契約(隙間なく連続・非重複で全時間軸を被覆)を検証してから正規化する。AP・SPはgapへ写像する(vocal_analysis.md §5.3) |
 | wav2vec2 phoneme(単段自由認識) | フレームごとのCTC音素列(IPA) | 全時間軸被覆のセグメント列(母音/子音/gap+音素ラベル(IPA)+任意の信頼度。IPA→5母音写像は vocal_analysis が提供(RMS不要)、gap の無音/継続判定・無音/閉口の確定は利用先がS3のRMS併用で行い、両唇閉鎖判定は音素から利用先が行う) |
 | Julius 音素認識 | アライメント(開始/終了フレーム・音素) | 全時間軸被覆のセグメント列 |
 
@@ -224,6 +259,9 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
   配布)MIT / Whisper モデル(Hugging Face 配布)Apache-2.0 / pyopenjtalk-plus MIT(内包の
   OpenJTalk・hts_engine は修正BSD系) / 代替候補: Spleeter MIT・Julius エンジン 修正BSD /
   **Allosaurus GPL-3.0=不採用**。
+- SOFA本体(<https://github.com/qiuqiao/SOFA>)MIT。SOFAチェックポイント(モデル重み)は本リポジトリへ
+  同梱しない(§2.3)。同梱しないチェックポイント自体のライセンス条件の遵守は、チェックポイントを
+  指定する利用者自身の選択・責任の範囲。
 - ffmpeg は同梱・再配布しない(§3)ため、そのビルドのライセンス(LGPL/GPL)による義務は生じない。
 - Julius を採用する場合のみ、その音響モデルの個別ライセンスを確認する。
 
@@ -240,6 +278,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 - kana-whisper: <https://huggingface.co/sbintuitions/kana-whisper>
 - pyopenjtalk-plus(G2P): <https://github.com/tsukumijima/pyopenjtalk-plus>
 - Julius(音素認識): <https://github.com/julius-speech/julius>
+- SOFA(Singing-Oriented Forced Aligner): <https://github.com/qiuqiao/SOFA>
 - imageio-ffmpeg: <https://github.com/imageio/imageio-ffmpeg>
 - soundfile: <https://github.com/bastibe/python-soundfile>
 - 歌唱ASRの課題(WER比較・ハルシネーション): <https://arxiv.org/abs/2506.15514> ・ <https://arxiv.org/pdf/2403.09298>
