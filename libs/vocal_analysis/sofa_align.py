@@ -114,6 +114,78 @@ def _parse_htk_label_file(path: Path) -> list[tuple[float, float, str]]:
     return segments
 
 
+_SEGMENT_CONTRACT_TOLERANCE_SEC = 1e-3  # SOFAの100ナノ秒単位からの変換誤差を許容する一次検証の許容誤差
+
+
+def _check_segment_contract(
+    segments: list[tuple[float, float, str]], trim_duration_sec: float, tolerance: float
+) -> None:
+    """Segment契約(2章・8.1: 隙間なく連続・非重複で全時間軸を被覆)の(a)〜(d)を検証する。
+
+    (b)(c)(d)の一致判定は`tolerance`以内の絶対差で行う(呼び出し元が一次検証は許容誤差付き、
+    再検証は0.0=厳密一致で使い分ける)。
+    """
+    if not segments:
+        raise RecognitionError("SOFA出力のSegment列が空です(全時間軸を被覆できません)")
+
+    for start, end, _ in segments:
+        if start > end:
+            raise RecognitionError(f"Segmentの開始時刻が終了時刻より後です: start={start}, end={end}")
+
+    for (_, prev_end, _), (next_start, _, _) in zip(segments, segments[1:]):
+        if abs(prev_end - next_start) > tolerance:
+            raise RecognitionError(
+                f"隣接するSegmentの境界が一致しません: {prev_end} != {next_start}"
+            )
+
+    first_start = segments[0][0]
+    if abs(first_start - 0.0) > tolerance:
+        raise RecognitionError(f"先頭Segmentの開始時刻が0.0と一致しません: {first_start}")
+
+    last_end = segments[-1][1]
+    if abs(last_end - trim_duration_sec) > tolerance:
+        raise RecognitionError(
+            f"末尾Segmentの終了時刻がトリム後区間の全長と一致しません: {last_end} != {trim_duration_sec}"
+        )
+
+
+def _normalize_segments(
+    segments: list[tuple[float, float, str]], trim_duration_sec: float
+) -> list[tuple[float, float, str]]:
+    """許容誤差を残さない厳密値へ正規化する(先頭の開始時刻を0.0へ、末尾の終了時刻をトリム後区間の
+    全長へ、各隣接ペアの後続の開始時刻を先行の終了時刻へそれぞれ上書きする)。
+    """
+    normalized = list(segments)
+
+    start0, end0, label0 = normalized[0]
+    normalized[0] = (0.0, end0, label0)
+
+    for i in range(len(normalized) - 1):
+        _, prev_end, _ = normalized[i]
+        _, next_end, next_label = normalized[i + 1]
+        normalized[i + 1] = (prev_end, next_end, next_label)
+
+    last_start, _, last_label = normalized[-1]
+    normalized[-1] = (last_start, trim_duration_sec, last_label)
+
+    return normalized
+
+
+def _validate_and_normalize_segments(
+    segments: list[tuple[float, float, str]], trim_duration_sec: float
+) -> list[tuple[float, float, str]]:
+    """Segment契約を検証し、厳密値へ正規化した上で返す(§5.3「Segment契約の検証」)。
+
+    一次検証(許容誤差1ミリ秒以内)→正規化→再検証(許容誤差なしの厳密な等号/不等号)の2段構成。
+    再検証で1件でも違反すれば、一次検証の許容誤差設定がその音声には不適切だったとみなし
+    `RecognitionError`にする(値を調整して通さず失敗として扱う)。
+    """
+    _check_segment_contract(segments, trim_duration_sec, tolerance=_SEGMENT_CONTRACT_TOLERANCE_SEC)
+    normalized = _normalize_segments(segments, trim_duration_sec)
+    _check_segment_contract(normalized, trim_duration_sec, tolerance=0.0)
+    return normalized
+
+
 def _align_batch(
     targets: list[tuple[np.ndarray, int, list[str]]], config: SofaAlignerConfig
 ) -> dict[str, list[tuple[float, float, str]]]:

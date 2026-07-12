@@ -336,10 +336,6 @@ def test_parse_htk_label_file_converts_100ns_units_to_seconds(tmp_path):
     assert _parse_htk_label_file(path) == [(0.0, 0.5, "pau"), (0.5, 1.2345, "a")]
 
 
-_SEGMENT_CONTRACT_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align segment contract validation", strict=True)
-
-
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_passes_through_exact_input():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
@@ -347,7 +343,6 @@ def test_validate_and_normalize_segments_passes_through_exact_input():
     assert _validate_and_normalize_segments(segments, trim_duration_sec=1.0) == segments
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_snaps_within_tolerance_to_exact_values():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
@@ -361,7 +356,6 @@ def test_validate_and_normalize_segments_snaps_within_tolerance_to_exact_values(
     assert result == [(0.0, 0.4995, "pau"), (0.4995, 1.0, "a")]
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_start_after_end():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
@@ -373,7 +367,6 @@ def test_validate_and_normalize_segments_rejects_start_after_end():
         _validate_and_normalize_segments(segments, trim_duration_sec=0.5001)
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_non_adjacent_boundary():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
@@ -384,7 +377,6 @@ def test_validate_and_normalize_segments_rejects_non_adjacent_boundary():
         _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_overlapping_boundary():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
@@ -396,7 +388,6 @@ def test_validate_and_normalize_segments_rejects_overlapping_boundary():
         _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_first_start_far_from_zero():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
@@ -406,7 +397,6 @@ def test_validate_and_normalize_segments_rejects_first_start_far_from_zero():
         _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_last_end_far_from_trim_duration():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
@@ -417,7 +407,6 @@ def test_validate_and_normalize_segments_rejects_last_end_far_from_trim_duration
         _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_last_end_exceeding_trim_duration():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
@@ -429,7 +418,6 @@ def test_validate_and_normalize_segments_rejects_last_end_exceeding_trim_duratio
         _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_empty_list():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
@@ -438,7 +426,6 @@ def test_validate_and_normalize_segments_rejects_empty_list():
         _validate_and_normalize_segments([], trim_duration_sec=1.0)
 
 
-@_SEGMENT_CONTRACT_XFAIL
 def test_validate_and_normalize_segments_rejects_new_violation_created_by_snapping():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
