@@ -4,7 +4,7 @@ SOFA(Singing-Oriented Forced Aligner)は実インストール・専用venvを要
 では subprocess をモックした決定論的単体テストで検証する。ここでは入力の書き出し・サブプロセス起動・
 終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力(100ナノ秒単位)の秒への変換・
 Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証と許容誤差スナップ・非ASCIIパスの拒否・
-単語単位分割(有効な単語列の確定・gapの確定)を扱う。IPA写像は別ファイルで扱う。
+単語単位分割(有効な単語列の確定・gapの確定)・IPA写像(SOFA出力記号のSegment化)を扱う。
 """
 
 import subprocess
@@ -721,3 +721,117 @@ def test_determine_word_gaps_does_not_emit_zero_length_gap():
     # 単語がトリム後区間の先頭からちょうど始まる場合、先頭側に長さ0のgapを生成しない。
     words = [(["a"], 0.0, 1.0)]
     assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
+
+
+_IPA_MAPPING_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align ipa mapping", strict=True)
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_vowel():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "a" は音素モデル語彙でも "a"(母音)。
+    assert _map_symbol_to_segment_fields("a") == ("vowel", "a")
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_consonant():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "k" は音素モデル語彙でも "k"(子音)。
+    assert _map_symbol_to_segment_fields("k") == ("consonant", "k")
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_g2p_symbol_consonant():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "y" 自体はIPA母音記号の基準集合に含まれ母音判定になってしまうが、写像先の音素モデル
+    # 語彙記号 "j" は子音判定になる。分類が「写像後のIPA記号」に対して行われることを、写像前後で
+    # 判定が割れるこの記号で固定する(写像前のG2P記号を誤って分類する実装を検出する)。
+    assert _map_symbol_to_segment_fields("y") == ("consonant", "j")
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_g2p_symbol_vowel():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "I"(無声化母音、大文字)自体は母音記号基準集合に無く子音判定になってしまうが、
+    # 写像先の音素モデル語彙記号 "i"(小文字)は母音判定になる。上のテストと逆方向(母音→子音では
+    # なく子音→母音)で写像順序を固定する。
+    assert _map_symbol_to_segment_fields("I") == ("vowel", "i")
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_vowel_with_ipa_conversion():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "u" は音素モデル語彙で "ɯ"(母音)。写像を経ることを確認する。
+    assert _map_symbol_to_segment_fields("u") == ("vowel", "ɯ")
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_pau_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    assert _map_symbol_to_segment_fields("pau") == ("gap", None)
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_cl_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    assert _map_symbol_to_segment_fields("cl") == ("gap", None)
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_ap_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # AP(吸気音・呼吸音)は無音ではないが、3分類に区分が無いためgapへ倒す。
+    assert _map_symbol_to_segment_fields("AP") == ("gap", None)
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_sp_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    assert _map_symbol_to_segment_fields("SP") == ("gap", None)
+
+
+@_IPA_MAPPING_XFAIL
+def test_map_symbol_to_segment_fields_unmapped_symbol_raises():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+    from vocal_analysis.phonemes import RecognitionError
+
+    with pytest.raises(RecognitionError):
+        _map_symbol_to_segment_fields("xyz_unknown")
+
+
+@_IPA_MAPPING_XFAIL
+def test_segments_from_raw_converts_all_fields():
+    from vocal_analysis.sofa_align import _segments_from_raw
+    from vocal_analysis.types import Segment
+
+    raw = [(0.0, 0.5, "pau"), (0.5, 0.7, "k"), (0.7, 1.0, "a")]
+    assert _segments_from_raw(raw) == [
+        Segment(type="gap", start_sec=0.0, end_sec=0.5, phoneme=None, confidence=None),
+        Segment(type="consonant", start_sec=0.5, end_sec=0.7, phoneme="k", confidence=None),
+        Segment(type="vowel", start_sec=0.7, end_sec=1.0, phoneme="a", confidence=None),
+    ]
+
+
+@_IPA_MAPPING_XFAIL
+def test_segments_from_raw_empty_input_returns_empty():
+    from vocal_analysis.sofa_align import _segments_from_raw
+
+    assert _segments_from_raw([]) == []
+
+
+@_IPA_MAPPING_XFAIL
+def test_segments_from_raw_propagates_unmapped_symbol_error():
+    from vocal_analysis.sofa_align import _segments_from_raw
+    from vocal_analysis.phonemes import RecognitionError
+
+    with pytest.raises(RecognitionError):
+        _segments_from_raw([(0.0, 0.5, "xyz_unknown")])
