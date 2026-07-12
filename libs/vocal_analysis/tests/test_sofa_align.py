@@ -3,8 +3,8 @@
 SOFA(Singing-Oriented Forced Aligner)は実インストール・専用venvを要するため、通常のpytestスイート
 では subprocess をモックした決定論的単体テストで検証する。ここでは入力の書き出し・サブプロセス起動・
 終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力(100ナノ秒単位)の秒への変換・
-Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証と許容誤差スナップを扱う。非ASCIIパス拒否・
-単語単位分割・IPA写像は別ファイルで扱う。
+Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証と許容誤差スナップ・非ASCIIパスの拒否を
+扱う。単語単位分割・IPA写像は別ファイルで扱う。
 """
 
 import subprocess
@@ -439,3 +439,162 @@ def test_validate_and_normalize_segments_rejects_new_violation_created_by_snappi
     segments = [(0.0, 1.0009, "pau"), (1.0000, 1.0001, "a")]
     with pytest.raises(RecognitionError):
         _validate_and_normalize_segments(segments, trim_duration_sec=1.0001)
+
+
+_ASCII_XFAIL = pytest.mark.xfail(reason="impl pending: sofa_align ascii path validation", strict=True)
+
+
+def _make_ascii_config():
+    """`_check_ascii_paths`はパス文字列を判定するだけでファイルへアクセスしないため、実在しない
+    固定のASCII専用パスで足りる(pytestの`tmp_path`自体が非ASCIIユーザー名配下になりうる環境依存を
+    避ける)。
+    """
+    from vocal_analysis import SofaAlignerConfig
+
+    return SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "checkpoint.ckpt",
+    )
+
+
+@_ASCII_XFAIL
+def test_check_ascii_paths_accepts_all_ascii_paths():
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = _make_ascii_config()
+    _check_ascii_paths(Path("ascii_root") / "work_dir", config)  # 例外が出なければ合格
+
+
+@_ASCII_XFAIL
+def test_check_ascii_paths_rejects_non_ascii_work_dir():
+    from vocal_analysis.sofa_align import _check_ascii_paths
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_ascii_config()
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "作業ディレクトリ", config)
+
+
+@_ASCII_XFAIL
+def test_check_ascii_paths_rejects_non_ascii_sofa_root():
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.sofa_align import _check_ascii_paths
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFAリポジトリ",
+        checkpoint_path=Path("ascii_root") / "checkpoint.ckpt",
+    )
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "work_dir", config)
+
+
+@_ASCII_XFAIL
+def test_check_ascii_paths_rejects_non_ascii_checkpoint_path():
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.sofa_align import _check_ascii_paths
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "チェックポイント.ckpt",
+    )
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "work_dir", config)
+
+
+@_ASCII_XFAIL
+def test_check_ascii_paths_rejects_non_ascii_in_intermediate_component():
+    """末端要素だけでなく、パス中間の要素の非ASCIIも拒否対象(パス文字列全体を判定する)。"""
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.sofa_align import _check_ascii_paths
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "日本語" / "checkpoint.ckpt",
+    )
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "work_dir", config)
+
+
+@_ASCII_XFAIL
+def test_check_ascii_paths_does_not_check_sofa_python():
+    """sofa_pythonは非ASCII検証の対象外(確定。一時ディレクトリ・sofa_root・checkpoint_pathの3つのみ)。"""
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "専用venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "checkpoint.ckpt",
+    )
+    _check_ascii_paths(Path("ascii_root") / "work_dir", config)  # 例外が出なければ合格
+
+
+class _FakeTemporaryDirectory:
+    """tempfile.TemporaryDirectory()の代替。固定パス(実在しなくてよい。ASCII検証は書き出し前に行う
+    設計なので、検証で弾かれるテストでは実際のファイルI/Oへ到達しない)を返す。
+    """
+
+    def __init__(self, path):
+        self._path = path
+
+    def __enter__(self):
+        return self._path
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+@_ASCII_XFAIL
+def test_align_batch_non_ascii_checkpoint_path_does_not_start_subprocess(monkeypatch):
+    from vocal_analysis import SofaAlignerConfig, sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    ascii_config = _make_ascii_config()
+    config = SofaAlignerConfig(
+        sofa_python=ascii_config.sofa_python,
+        sofa_root=ascii_config.sofa_root,
+        checkpoint_path=Path("ascii_root") / "チェックポイント.ckpt",
+    )
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("非ASCIIパスが含まれる場合はSOFAを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+    monkeypatch.setattr(
+        sofa_align.tempfile, "TemporaryDirectory", lambda: _FakeTemporaryDirectory("ascii_root/work_dir")
+    )
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+
+@_ASCII_XFAIL
+def test_align_batch_non_ascii_work_dir_does_not_start_subprocess(monkeypatch):
+    """SOFA自身が扱えないのは実行時に生成する一時ディレクトリのパスも同様。tempfile.mkdtempが
+    非ASCIIパスを返す場合(利用者環境の一時領域自体に非ASCII文字が含まれる場合)を模す。configは
+    全フィールドASCIIにし、work_dir単体の非ASCIIが検出されることを固定する。
+    """
+    from vocal_analysis import sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_ascii_config()
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("非ASCIIパスが含まれる場合はSOFAを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+    monkeypatch.setattr(
+        sofa_align.tempfile, "TemporaryDirectory", lambda: _FakeTemporaryDirectory("ascii_root/一時ディレクトリ")
+    )
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
