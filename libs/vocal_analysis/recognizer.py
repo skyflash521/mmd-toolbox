@@ -1,10 +1,11 @@
-"""S2 音素/母音認識(vocal_analysis.md §5・§5.1・§5.2・§8.1・§8.3)。
+"""S2 音素/母音認識(vocal_analysis.md §5・§5.1・§5.2・§5.3・§8.1・§8.3)。
 
-無音検出による区間分割・内容認識・G2P(pyopenjtalk-plus)・音素モデルのCTC強制アライメント(§5.2)を
-組み合わせた複合構成で、母音/子音/gap を区別したセグメント列を生成する。公開関数
-recognize(vocal_wav_path, content_recognizer_model) -> list[Segment] が唯一の公開面(Recognizer
-アダプタ契約。§8.1)。内容認識モデルは `content_recognizer_model`(`ContentRecognizerModel`。§5.2)で
-指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・候補値 `KANA_WHISPER_MODEL`・任意指定も可)。
+無音検出による区間分割・内容認識・G2P(pyopenjtalk-plus)は経路共通(§5.2手順1〜4)。強制アライメント段は
+`forced_aligner`引数で選択できる: 既定のwav2vec2 CTC強制アライメント(§5.2)と、SOFA経路(§5.3。
+`sofa_align`モジュールへ委譲)。公開関数 recognize() が唯一の公開面(Recognizerアダプタ契約。§8.1。
+契約は`forced_aligner`の選択に関わらず不変)。内容認識モデルは `content_recognizer_model`
+(`ContentRecognizerModel`。§5.2)で指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・候補値
+`KANA_WHISPER_MODEL`・任意指定も可)。
 """
 
 import math
@@ -14,7 +15,16 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 
-from .config import DEFAULT_CONTENT_RECOGNIZER_MODEL, KANA_PROMPT, RECOGNIZER_CONFIG, ContentRecognizerModel
+from . import sofa_align
+from .config import (
+    DEFAULT_CONTENT_RECOGNIZER_MODEL,
+    DEFAULT_FORCED_ALIGNER,
+    KANA_PROMPT,
+    RECOGNIZER_CONFIG,
+    ContentRecognizerModel,
+    ForcedAlignerId,
+    SofaAlignerConfig,
+)
 from .phonemes import (
     _BLANK_G2P_SYMBOLS,
     _MIN_WORD_DURATION_SEC,
@@ -516,12 +526,25 @@ def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
 def recognize(
     vocal_wav_path: Path,
     content_recognizer_model: ContentRecognizerModel = DEFAULT_CONTENT_RECOGNIZER_MODEL,
+    *,
+    forced_aligner: ForcedAlignerId = DEFAULT_FORCED_ALIGNER,
+    sofa_aligner: SofaAlignerConfig | None = None,
 ) -> list[Segment]:
-    """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2複合構成)。
+    """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2・§5.3)。
 
-    content_recognizer_model で内容認識モデルを指定する(既定値・候補値・任意指定。§5.2)。
-    後段のG2P・強制アライメントはどのモデルでも共通。
+    content_recognizer_model で内容認識モデルを指定する(既定値・候補値・任意指定。§5.2)。内容認識・
+    G2Pはどのモデル・どの強制アライメント経路でも共通。forced_aligner で強制アライメント段を選択する
+    (既定`wav2vec2-ctc-forcedalign`。§5.2)。`forced_aligner="sofa-forcedalign"`を選ぶ場合は
+    sofa_aligner(`SofaAlignerConfig`)が必須で、省略(`None`)すると`RecognitionError`にする
+    (黙ってwav2vec2へフォールバックしない)。
     """
+    if forced_aligner not in ("wav2vec2-ctc-forcedalign", "sofa-forcedalign"):
+        raise RecognitionError(f"未知の forced_aligner です: {forced_aligner!r}")
+    if forced_aligner == "sofa-forcedalign" and sofa_aligner is None:
+        raise RecognitionError(
+            "forced_aligner='sofa-forcedalign' を指定する場合は sofa_aligner(SofaAlignerConfig)が必須です"
+        )
+
     samples, sample_rate = sf.read(vocal_wav_path, dtype="float32", always_2d=True)
     mono = _downmix_to_mono(samples)
     resampled = _resample_to_target(mono, sample_rate, RECOGNIZER_CONFIG.sample_rate)
@@ -540,6 +563,10 @@ def recognize(
     # 使い回す(区間ごとの再ロードによるモデル転送コスト(特にGPU使用時)の浪費を避ける)。
     processor = model = vocab = blank_token_id = None
     content_pipeline = None
+    # SOFA経路(§5.3)専用: 対象区間・対象単語をここへ積み、recognize()呼び出し全体で1回だけ
+    # SOFAへまとめて渡す(ループの外、全区間処理後)。各要素は
+    # (音声サンプル, サンプルレート, G2P音素記号列, 絶対オフセット秒, 相対長さ秒)。
+    pending_sofa_targets: list[tuple[np.ndarray, int, list[str], float, float]] = []
 
     all_segments: list[Segment] = []
     for start_sec, end_sec in segment_bounds:
@@ -623,78 +650,135 @@ def recognize(
                 )
             continue
 
-        if processor is None:
-            try:
-                processor, model = _load_model_and_processor()
-            except ImportError as e:
-                raise RecognitionError(
-                    "transformers または torch が見つかりません。導入してください"
-                    "(vocal-analysis extra で両方導入されます)。"
-                ) from e
-            except OSError as e:
-                raise RecognitionError(
-                    f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
-                    "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
-                ) from e
-            vocab = processor.tokenizer.get_vocab()
-            blank_token_id = processor.tokenizer.pad_token_id
+        if forced_aligner == "wav2vec2-ctc-forcedalign":
+            if processor is None:
+                try:
+                    processor, model = _load_model_and_processor()
+                except ImportError as e:
+                    raise RecognitionError(
+                        "transformers または torch が見つかりません。導入してください"
+                        "(vocal-analysis extra で両方導入されます)。"
+                    ) from e
+                except OSError as e:
+                    raise RecognitionError(
+                        f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
+                        "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
+                    ) from e
+                vocab = processor.tokenizer.get_vocab()
+                blank_token_id = processor.tokenizer.pad_token_id
 
-        # §5.2手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ
-        # (単語分割していない一括の)音素記号列の前後にpauを補うだけにする。
-        if words_phonemes is not None:
-            seq, windows_sec = _assemble_with_word_windows(words_phonemes, _WORD_WINDOW_MARGIN_SEC, trim_duration_sec)
-        else:
-            seq = _assemble_phoneme_sequence([phonemes])
-            windows_sec = None
+            # §5.2手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ
+            # (単語分割していない一括の)音素記号列の前後にpauを補うだけにする。
+            if words_phonemes is not None:
+                seq, windows_sec = _assemble_with_word_windows(
+                    words_phonemes, _WORD_WINDOW_MARGIN_SEC, trim_duration_sec
+                )
+            else:
+                seq = _assemble_phoneme_sequence([phonemes])
+                windows_sec = None
 
-        token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
-        log_probs = _compute_log_probs(processor, model, chunk_samples)
-        # §5.2手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
-        # 非blankトークンをサブ状態へ展開してアライメントし、経路を元トークンindexへ戻してから
-        # Segment化する。
-        log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
+            token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
+            log_probs = _compute_log_probs(processor, model, chunk_samples)
+            # §5.2手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
+            # 非blankトークンをサブ状態へ展開してアライメントし、経路を元トークンindexへ戻してから
+            # Segment化する。
+            log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
 
-        # §5.2手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
-        # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。単語窓がある場合、
-        # 最小滞在は単語ごとの局所適応(_expand_min_stay_local)を使う。局所適応でも窓制約が
-        # 到達不能ならチャンク全体の最小滞在(_expand_min_stay)へ計算し直し、位置バンド制限を使う。
-        if windows_sec is not None:
-            sub_token_ids, sub_to_token = _expand_min_stay_local(token_ids, words_phonemes, blank_token_id)
-            sub_windows = [windows_sec[i] for i in sub_to_token]
-            try:
-                sub_path = _forced_align_windowed(log_probs, sub_token_ids, sub_windows)
-            except RecognitionError:
+            # §5.2手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
+            # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。単語窓がある場合、
+            # 最小滞在は単語ごとの局所適応(_expand_min_stay_local)を使う。局所適応でも窓制約が
+            # 到達不能ならチャンク全体の最小滞在(_expand_min_stay)へ計算し直し、位置バンド制限を使う。
+            if windows_sec is not None:
+                sub_token_ids, sub_to_token = _expand_min_stay_local(token_ids, words_phonemes, blank_token_id)
+                sub_windows = [windows_sec[i] for i in sub_to_token]
+                try:
+                    sub_path = _forced_align_windowed(log_probs, sub_token_ids, sub_windows)
+                except RecognitionError:
+                    sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
+                    sub_path = _forced_align(log_probs, sub_token_ids)
+            else:
                 sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
                 sub_path = _forced_align(log_probs, sub_token_ids)
-        else:
-            sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
-            sub_path = _forced_align(log_probs, sub_token_ids)
 
-        path = [sub_to_token[s] for s in sub_path]
-        local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
-        # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
-        # 使わず、トリム後区間の真の終端(trim_hi_sec - trim_lo_sec)へ強制的に揃える(フレーム数
-        # 計算の丸め等で区間境界とわずかにずれ、隣接区間との欠落・重複を生むことを防ぐ)。
-        if local_segments:
-            last = local_segments[-1]
-            local_segments[-1] = Segment(
-                type=last.type, start_sec=last.start_sec, end_sec=trim_hi_sec - trim_lo_sec,
-                phoneme=last.phoneme, confidence=None,
-            )
-        for seg in local_segments:
-            all_segments.append(
-                Segment(
-                    type=seg.type,
-                    start_sec=seg.start_sec + trim_lo_sec,
-                    end_sec=seg.end_sec + trim_lo_sec,
-                    phoneme=seg.phoneme,
-                    confidence=None,
+            path = [sub_to_token[s] for s in sub_path]
+            local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
+            # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
+            # 使わず、トリム後区間の真の終端(trim_hi_sec - trim_lo_sec)へ強制的に揃える(フレーム数
+            # 計算の丸め等で区間境界とわずかにずれ、隣接区間との欠落・重複を生むことを防ぐ)。
+            if local_segments:
+                last = local_segments[-1]
+                local_segments[-1] = Segment(
+                    type=last.type, start_sec=last.start_sec, end_sec=trim_hi_sec - trim_lo_sec,
+                    phoneme=last.phoneme, confidence=None,
                 )
-            )
+            for seg in local_segments:
+                all_segments.append(
+                    Segment(
+                        type=seg.type,
+                        start_sec=seg.start_sec + trim_lo_sec,
+                        end_sec=seg.end_sec + trim_lo_sec,
+                        phoneme=seg.phoneme,
+                        confidence=None,
+                    )
+                )
+        else:
+            # forced_aligner == "sofa-forcedalign"(関数入口でこの2値のいずれかであることを検証済み。
+            # §5.3): 単語単位分割してSOFA対象を積み、gapはここで直接確定する。実際のSOFA呼び出しは
+            # recognize()呼び出し全体で1回にまとめる(全区間処理後にまとめて行う。バッチ単位の確定)。
+            if words_phonemes is not None:
+                valid_words = sofa_align._clamp_words_to_valid_list(words_phonemes, trim_duration_sec)
+                for gap_start, gap_end in sofa_align._determine_word_gaps(valid_words, trim_duration_sec):
+                    all_segments.append(
+                        Segment(
+                            type="gap",
+                            start_sec=trim_lo_sec + gap_start,
+                            end_sec=trim_lo_sec + gap_end,
+                            phoneme=None,
+                            confidence=None,
+                        )
+                    )
+                for word_phonemes, w_start, w_end in valid_words:
+                    w_start_index = round(w_start * RECOGNIZER_CONFIG.sample_rate)
+                    w_end_index = round(w_end * RECOGNIZER_CONFIG.sample_rate)
+                    pending_sofa_targets.append(
+                        (
+                            chunk_samples[w_start_index:w_end_index],
+                            RECOGNIZER_CONFIG.sample_rate,
+                            word_phonemes,
+                            trim_lo_sec + w_start,
+                            w_end - w_start,
+                        )
+                    )
+            else:
+                pending_sofa_targets.append(
+                    (chunk_samples, RECOGNIZER_CONFIG.sample_rate, phonemes, trim_lo_sec, trim_duration_sec)
+                )
+
         if trimmed_tail:
             all_segments.append(
                 Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
             )
+
+    if forced_aligner == "sofa-forcedalign":
+        # §5.3「バッチ単位」: 積んだ対象をrecognize()呼び出し1回につき1回だけSOFAへまとめて渡す
+        # (対象が0件ならsofa_align._align_batchがサブプロセスの起動自体を省略する)。
+        raw_by_basename = sofa_align._align_batch(
+            [(samples, sr, ph) for samples, sr, ph, _, _ in pending_sofa_targets], sofa_aligner
+        )
+        for i, (_, _, _, offset_sec, rel_duration_sec) in enumerate(pending_sofa_targets):
+            raw_segments = raw_by_basename[f"segment_{i:04d}"]
+            validated = sofa_align._validate_and_normalize_segments(raw_segments, rel_duration_sec)
+            for seg in sofa_align._segments_from_raw(validated):
+                all_segments.append(
+                    Segment(
+                        type=seg.type,
+                        start_sec=seg.start_sec + offset_sec,
+                        end_sec=seg.end_sec + offset_sec,
+                        phoneme=seg.phoneme,
+                        confidence=None,
+                    )
+                )
+        all_segments.sort(key=lambda seg: (seg.start_sec, seg.end_sec))
 
     return _merge_adjacent_segments(all_segments)
 

@@ -1107,3 +1107,199 @@ def test_recognize_content_recognizer_model_fetch_failure_names_that_model(tmp_p
 
     assert "deadbeef" in str(excinfo.value)
     assert excinfo.value.__cause__ is original_error
+
+
+def _make_sofa_config(tmp_path):
+    from vocal_analysis import SofaAlignerConfig
+
+    return SofaAlignerConfig(
+        sofa_python=tmp_path / "sofa-venv" / "python",
+        sofa_root=tmp_path / "SOFA",
+        checkpoint_path=tmp_path / "checkpoint.ckpt",
+    )
+
+
+def test_recognize_sofa_without_config_raises_recognition_error(tmp_path):
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(16000), 16000)
+
+    with pytest.raises(recognizer_module.RecognitionError):
+        recognizer_module.recognize(wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=None)
+
+
+def test_recognize_unknown_forced_aligner_raises_recognition_error(tmp_path):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # ForcedAlignerId(Literal)の静的検査をすり抜けた未知の値(例: 誤字)を渡しても、黙って
+    # SOFA経路へ落ちたりwav2vec2経路を使ったりせず、明示的にRecognitionErrorにする。関数入口
+    # (音声読み込みより前)で検証するため、音声を無音・全区間gap確定にしても検出できる
+    # (実在しないパスでも到達前に失敗することを、あえてダミーの存在しないパスで確認する)。
+    with pytest.raises(recognizer_module.RecognitionError):
+        recognizer_module.recognize(tmp_path / "does_not_exist.wav", forced_aligner="unknown-aligner")
+
+
+def test_recognize_default_forced_aligner_does_not_call_sofa(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis.config import DEFAULT_FORCED_ALIGNER
+
+    assert DEFAULT_FORCED_ALIGNER == "wav2vec2-ctc-forcedalign"
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((16000, 1), dtype=np.float32), 16000)
+
+    def fail_if_called(targets, config):
+        raise AssertionError("既定のforced_alignerでSOFAを呼び出してはならない")
+
+    monkeypatch.setattr(recognizer_module.sofa_align, "_align_batch", fail_if_called)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert len(segments) == 1
+    assert segments[0].type == "gap"
+
+
+def test_recognize_sofa_path_splits_words_and_reassembles_segments(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 0.4秒・全区間有声(トリムなし)。単語2件「か」[0.1,0.2)・「き」[0.25,0.35)を内容認識が
+    # 返す(モック)。有効な単語列確定(cursorクランプ)・gap確定・SOFAへの一括バッチ呼び出し・
+    # Segment契約検証・IPA写像・絶対時刻への復元、のすべてを実コードで通す(SOFAサブプロセス
+    # 自体だけをモックする)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(6400), 16000)
+    config = _make_sofa_config(tmp_path)
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model: object(),
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_transcribe_segment",
+        lambda pipeline, samples: ("かき", [("か", 0.1, 0.2), ("き", 0.25, 0.35)]),
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_g2p", lambda text: {"か": ["k", "a"], "き": ["k", "i"]}[text]
+    )
+
+    align_batch_calls = []
+
+    def fake_align_batch(targets, sofa_aligner_config):
+        align_batch_calls.append((targets, sofa_aligner_config))
+        return {
+            "segment_0000": [(0.0, 0.05, "k"), (0.05, 0.1, "a")],
+            "segment_0001": [(0.0, 0.04, "k"), (0.04, 0.1, "i")],
+        }
+
+    monkeypatch.setattr(recognizer_module.sofa_align, "_align_batch", fake_align_batch)
+
+    segments = recognizer_module.recognize(
+        wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=config
+    )
+
+    # SOFAへは1回のrecognize()呼び出しにつき1回だけ、2単語分をまとめて渡す(バッチ単位。§5.3)。
+    assert len(align_batch_calls) == 1
+    targets, passed_config = align_batch_calls[0]
+    assert passed_config is config
+    assert len(targets) == 2
+    assert targets[0][2] == ["k", "a"]
+    assert targets[1][2] == ["k", "i"]
+
+    expected = [
+        ("gap", None, 0.0, 0.1),
+        ("consonant", "k", 0.1, 0.15),
+        ("vowel", "a", 0.15, 0.2),
+        ("gap", None, 0.2, 0.25),
+        ("consonant", "k", 0.25, 0.29),
+        ("vowel", "i", 0.29, 0.35),
+        ("gap", None, 0.35, 0.4),
+    ]
+    assert len(segments) == len(expected)
+    for seg, (exp_type, exp_phoneme, exp_start, exp_end) in zip(segments, expected):
+        assert seg.type == exp_type
+        assert seg.phoneme == exp_phoneme
+        assert seg.start_sec == pytest.approx(exp_start)
+        assert seg.end_sec == pytest.approx(exp_end)
+
+
+def test_recognize_sofa_path_uses_whole_region_when_no_word_timestamps(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 単語タイムスタンプが取得できない場合(§5.2手順3のフォールバック対象)は、区間全体を
+    # 1つのSOFA対象とする(単語単位分割をしない)。
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(3200), 16000)
+    config = _make_sofa_config(tmp_path)
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model: object(),
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+
+    align_batch_calls = []
+
+    def fake_align_batch(targets, sofa_aligner_config):
+        align_batch_calls.append(targets)
+        return {"segment_0000": [(0.0, 0.2, "a")]}
+
+    monkeypatch.setattr(recognizer_module.sofa_align, "_align_batch", fake_align_batch)
+
+    segments = recognizer_module.recognize(
+        wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=config
+    )
+
+    assert len(align_batch_calls) == 1
+    assert len(align_batch_calls[0]) == 1
+    assert align_batch_calls[0][0][2] == ["a"]
+
+    assert len(segments) == 1
+    assert segments[0].type == "vowel"
+    assert segments[0].phoneme == "a"
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(0.2)
+
+
+def test_recognize_sofa_path_never_loads_wav2vec2_model(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(3200), 16000)
+    config = _make_sofa_config(tmp_path)
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model: object(),
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module.sofa_align, "_align_batch", lambda targets, cfg: {"segment_0000": [(0.0, 0.2, "a")]})
+
+    def fail_if_called():
+        raise AssertionError("SOFA経路でwav2vec2の音素モデルをロードしてはならない")
+
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fail_if_called)
+
+    recognizer_module.recognize(wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=config)
+
+
+def test_recognize_sofa_path_silent_input_does_not_call_align_batch_with_targets(tmp_path, monkeypatch):
+    from vocal_analysis import recognizer as recognizer_module
+
+    # 音声全体が無音の場合、SOFA対象は1件も積まれない。sofa_align._align_batch自体は
+    # (targets=[]で)呼ばれてもよいが、空リストならサブプロセスを起動しないのはsofa_align側の
+    # 責務であり、ここではrecognize()が空targetsで呼ぶことだけを確認する。
+    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((16000, 1), dtype=np.float32), 16000)
+    config = _make_sofa_config(tmp_path)
+
+    calls = []
+
+    def fake_align_batch(targets, cfg):
+        calls.append(targets)
+        return {}
+
+    monkeypatch.setattr(recognizer_module.sofa_align, "_align_batch", fake_align_batch)
+
+    segments = recognizer_module.recognize(wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=config)
+
+    assert len(calls) == 1
+    assert calls[0] == []
+    assert len(segments) == 1
+    assert segments[0].type == "gap"

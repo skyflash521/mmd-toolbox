@@ -14,6 +14,7 @@ S2 アダプタの変換/推論の実装内部で確定する(採用ライブラ
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,10 @@ class SeparatorConfig:
     model_filename: str = "htdemucs_ft.yaml"
     output_single_stem: str = "vocals"  # ボーカルstem以外を書き出させない(§8.3後注)
     shifts: int = 0  # shift 平均(非決定要素)を無効化
+
+
+ForcedAlignerId = Literal["wav2vec2-ctc-forcedalign", "sofa-forcedalign"]
+DEFAULT_FORCED_ALIGNER: ForcedAlignerId = "wav2vec2-ctc-forcedalign"
 
 
 @dataclass(frozen=True)
