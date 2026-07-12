@@ -13,6 +13,7 @@ S2 アダプタの変換/推論の実装内部で確定する(採用ライブラ
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,18 @@ class SeparatorConfig:
     model_filename: str = "htdemucs_ft.yaml"
     output_single_stem: str = "vocals"  # ボーカルstem以外を書き出させない(§8.3後注)
     shifts: int = 0  # shift 平均(非決定要素)を無効化
+
+
+@dataclass(frozen=True)
+class SofaAlignerConfig:
+    """S2 SOFA経路(§5.3)の実行環境指定。既定値・同梱チェックポイントは一切持たない(§2.3・§8.3。
+    利用者保護のための方針判断。商用利用が制限されたチェックポイントを既定値にしない)。
+    """
+
+    sofa_python: Path  # 利用者が用意した専用venvのPython実行ファイルパス
+    sofa_root: Path  # SOFAリポジトリのルート(infer.py実行時のcwdに使う)
+    checkpoint_path: Path  # 利用者提供のSOFAチェックポイント(.ckptファイル)パス
+    timeout_sec: float = 300.0  # 1回のSOFA呼び出しあたりのサブプロセスタイムアウト秒数
 
 
 RECOGNIZER_CONFIG = RecognizerConfig()

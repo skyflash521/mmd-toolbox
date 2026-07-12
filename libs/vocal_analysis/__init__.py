@@ -7,6 +7,7 @@ from .config import (
     ContentRecognizerModel,
     RecognizerConfig,
     SeparatorConfig,
+    SofaAlignerConfig,
 )
 from .types import AnalysisResult, AudioPcm, RmsEnvelope, Segment
 
@@ -23,4 +24,5 @@ __all__ = [
     "ContentRecognizerModel",
     "RecognizerConfig",
     "SeparatorConfig",
+    "SofaAlignerConfig",
 ]

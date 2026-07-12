@@ -87,7 +87,6 @@ def test_separator_model_and_stem_are_pinned():
     assert SEPARATOR_CONFIG.output_single_stem == "vocals"
 
 
-@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
 def test_sofa_aligner_config_stores_user_provided_paths():
     from vocal_analysis import SofaAlignerConfig
 
@@ -102,7 +101,6 @@ def test_sofa_aligner_config_stores_user_provided_paths():
     assert config.checkpoint_path == Path("/tmp/checkpoint.ckpt")
 
 
-@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
 def test_sofa_aligner_config_timeout_defaults_to_300_seconds():
     from vocal_analysis import SofaAlignerConfig
 
@@ -122,7 +120,6 @@ def test_sofa_aligner_config_timeout_defaults_to_300_seconds():
     assert isinstance(default, float)
 
 
-@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
 def test_sofa_aligner_config_required_fields_have_no_default():
     from vocal_analysis import SofaAlignerConfig
 
@@ -141,7 +138,6 @@ def test_sofa_aligner_config_required_fields_have_no_default():
         assert type_hints[name] is Path
 
 
-@pytest.mark.xfail(reason="impl pending: 4.2 SofaAlignerConfig追加", strict=True)
 def test_sofa_aligner_config_is_frozen():
     from vocal_analysis import SofaAlignerConfig
 
