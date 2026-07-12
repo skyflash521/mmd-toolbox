@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: auto-approve the codex-review-loop watchdog.sh launch.
+"""PreToolUse hook: auto-approve the codex-watchdog watchdog.sh launch.
 
 watchdog.sh is a committed, read-only script (find/stat/grep/sleep over the codex
-job-state dir). Its `bash <script> <args>` launch matches the settings allow glob, but
-Claude Code can still down-grade an allow-matched `bash <script>` command to an
-un-overridable "ask" inside the permission pipeline, so the loop prompts anyway. A
+job-state dir), shared by any skill that launches codex:codex-rescue (codex-review-loop,
+codex-consult, ...). Its `bash <script> <args>` launch matches the settings allow glob,
+but Claude Code can still down-grade an allow-matched `bash <script>` command to an
+un-overridable "ask" inside the permission pipeline, so the caller prompts anyway. A
 PreToolUse "allow" decision is returned directly as behavior:allow and overrides that,
 so this hook approves exactly the single, un-chained watchdog invocation and passes
 everything else through to the normal permission flow (it never denies).
 
-Safety: only a lone `bash .claude/skills/codex-review-loop/watchdog.sh ...` with no
+Safety: only a lone `bash .claude/skills/codex-watchdog/watchdog.sh ...` with no
 chaining/expansion/redirect is approved, so the approval cannot smuggle a second
 command. Anything else prints nothing and exits 0 (pass-through), so a bug here can only
 re-introduce a prompt, never wrongly approve.
@@ -21,7 +22,7 @@ import re
 import shlex
 import sys
 
-WATCHDOG = ".claude/skills/codex-review-loop/watchdog.sh"
+WATCHDOG = ".claude/skills/codex-watchdog/watchdog.sh"
 
 
 def is_watchdog(cmd):
@@ -70,7 +71,7 @@ def _selftest():
         (w + " $(rm x)", False),
         (w + " `rm x`", False),
         ("bash .claude/skills/other.sh", False),
-        ("bash /abs/.claude/skills/codex-review-loop/watchdog.sh", False),
+        ("bash /abs/.claude/skills/codex-watchdog/watchdog.sh", False),
         ("cat README.md", False),
         ("", False),
     ]

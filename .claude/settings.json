@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bash .claude/skills/codex-review-loop/watchdog.sh*)",
+      "Bash(bash .claude/skills/codex-watchdog/watchdog.sh*)",
       "Bash(git add *)",
       "Bash(git blame *)",
       "Bash(git branch --list *)",

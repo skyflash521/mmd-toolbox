@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# codex-review-loop watchdog — read-only. Watches the codex companion job log for
-# THIS round and exits with a code describing codex's fate. Performs NO writes
-# (safe to allowlist as one command, so the loop runs without permission prompts).
+# codex-watchdog — read-only. Shared by any skill that launches the codex:codex-rescue
+# agent (codex-review-loop, codex-consult, ...) and must not wait on it forever. Watches
+# the codex companion job log for THIS round and exits with a code describing codex's
+# fate. Performs NO writes (safe to allowlist as one command, so callers run without
+# permission prompts).
 #
 #   exit 0  normal end    (companion logged "Turn completed." or a "Final output" line)
 #   exit 2  failure        (companion logged "Turn failed.")
@@ -26,7 +28,7 @@
 # Identifying THIS round's log — two modes:
 #
 #   (A) RUNID mode ($5 set): the caller embeds a unique token (RUNID) at the very top of the
-#       review prompt; the companion records the prompt opening in the job's ".json" metadata
+#       task prompt; the companion records the prompt opening in the job's ".json" metadata
 #       (the "summary" field), so this round's log is the one whose sibling "task-*.json" (or, as
 #       a fallback, the ".log" body) contains the RUNID. This identifies the round by CONTENT, not
 #       by time or launch order, so concurrent rounds — even two checkouts of a same-named repo —
@@ -114,15 +116,15 @@ list_logs() {
 in_baseline() { printf '%s\n' "$baseline" | awk -v k="$1" '$0==k{f=1} END{exit !f}'; }
 
 # True if the log $1 belongs to THIS round, identified by the RUNID embedded at the top of the
-# review prompt. The companion saves the prompt opening into the job's sibling "task-*.json"
+# task prompt. The companion saves the prompt opening into the job's sibling "task-*.json"
 # ("summary" field), so the ".json" is authoritative when present; only when it is absent do we
-# fall back to the ".log" body. The match is the full "REVIEW-RUNID: <RUNID>" marker bounded by a
+# fall back to the ".log" body. The match is the full "TASK-RUNID: <RUNID>" marker bounded by a
 # non-token character or end of line, so one token is never a substring-match of a longer token
-# (e.g. RUNID "abc" must not match "...REVIEW-RUNID: abc1"). RUNID is charset-validated to alnum/
+# (e.g. RUNID "abc" must not match "...TASK-RUNID: abc1"). RUNID is charset-validated to alnum/
 # `_`/`-` above, so it is a literal ERE fragment with no metacharacters.
 has_runid() {
   local lg="$1" js="${1%.log}.json" pat
-  pat='REVIEW-RUNID:[[:space:]]*'"${RUNID}"'([^A-Za-z0-9_-]|$)'
+  pat='TASK-RUNID:[[:space:]]*'"${RUNID}"'([^A-Za-z0-9_-]|$)'
   if [ -f "$js" ]; then
     grep -Eq -- "$pat" "$js" 2>/dev/null   # .json present -> its verdict is final
     return
@@ -160,19 +162,22 @@ pick_active() {
   printf '%s' "$best"
 }
 
-# Select this round's log, preferring the RUNID-tagged one. The codex rescue agent rebuilds the
-# review prompt when it composes the companion task, so the RUNID marker placed at the top of the
-# prompt can be ABSENT from the job summary/log. When no RUNID-tagged log exists, fall back to
-# baseline selection (newest log not present at the snapshot) so detection still works in a single
-# session. RUNID stays preferred within each poll, so its concurrent-safety holds whenever the
-# marker survives and is present by the time a log is first selected. Accepted limitation: in
-# concurrent same-repo sessions where this round's RUNID-tagged log appears later than another
-# session's new log, baseline may pin the other log first; like baseline mode in general this
-# degrades to a caller retry (the agent response is the primary result channel), never a wrong fix.
+# Select this round's log. When RUNID is set, use ONLY the RUNID-tagged match — never fall back to
+# baseline selection. Falling back on every poll before a RUNID-tagged log appeared used to let a
+# concurrent session's own new log be mistaken for this round's (observed in practice: an unrelated
+# session's log was picked up as "completed" while this round's own job was still starting). RUNID
+# mode is now exactly what the header already claims ("removes this limitation entirely"): if the
+# marker never reaches the job log (e.g. dropped somewhere before logging), this round simply times
+# out at STARTUP_GRACE_SECS/WALL_CAP_SECS like a genuine no-start/stall — a safe degrade to a caller
+# retry, never a wrong log selection. Baseline mode (RUNID unset) is unchanged: backward-compatible,
+# single-session only, with the same-name-repo limitation noted above.
 select_log() {
   local lg=""
-  [ -n "$RUNID" ] && lg=$(pick_active runid)
-  [ -z "$lg" ] && lg=$(pick_active baseline)
+  if [ -n "$RUNID" ]; then
+    lg=$(pick_active runid)
+  else
+    lg=$(pick_active baseline)
+  fi
   printf '%s' "$lg"
 }
 
