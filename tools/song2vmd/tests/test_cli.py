@@ -174,6 +174,12 @@ def test_recognizer_model_revision_without_model_id_is_arg_error(tmp_path):
     assert cli.main([src, "--recognizer-model-revision", "abc123", "--dry-run"]) == 2
 
 
+def test_explicit_recognizer_retry_flag_is_accepted(tmp_path):
+    """既定onの明示形 --recognizer-retry は単独で受理される。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--recognizer-retry", "--dry-run"]) == 0
+
+
 def test_forced_aligner_default_needs_no_sofa_args(tmp_path):
     """--forced-aligner既定(wav2vec2-ctc-forcedalign)は--sofa-*が一切無くても成功する。"""
     src = _touch(tmp_path / "in.wav")

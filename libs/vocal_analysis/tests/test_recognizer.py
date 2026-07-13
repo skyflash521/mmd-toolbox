@@ -232,6 +232,196 @@ def test_is_hallucinated_phoneme_density_zero_duration_is_not_hallucinated():
     assert _is_hallucinated_phoneme_density(phoneme_count=100, duration_sec=0.0) is False
 
 
+# --- プロンプト文エコーの除去 ---
+
+
+def test_strip_prompt_echo_removes_exact_prompt_sentences():
+    from vocal_analysis.recognizer import _strip_prompt_echo
+
+    text, removed = _strip_prompt_echo("かんじは つかわないでください。" * 24)
+    assert text == ""
+    assert removed is True
+
+
+def test_strip_prompt_echo_removes_trailing_fragment_after_echo():
+    from vocal_analysis.recognizer import _strip_prompt_echo
+
+    # 区間末尾で切れたエコーの断片(プロンプト文と共通接頭辞5文字以上)は、エコー除去が起きた
+    # 場合に限り除去される。
+    text, removed = _strip_prompt_echo("かんじは つかわないでください。かんじは つかん")
+    assert text == ""
+    assert removed is True
+
+
+def test_strip_prompt_echo_keeps_normal_text_untouched():
+    from vocal_analysis.recognizer import _strip_prompt_echo
+
+    original = "きょうは あさから あめが ふっていて さんぽに いけなかった。"
+    text, removed = _strip_prompt_echo(original)
+    assert text == original
+    assert removed is False
+
+
+def test_strip_prompt_echo_keeps_real_sentences_between_echoes():
+    from vocal_analysis.recognizer import _strip_prompt_echo
+
+    text, removed = _strip_prompt_echo("かんじは つかわないでください。きょうはてんきがいい。")
+    assert text == "きょうはてんきがいい。"
+    assert removed is True
+
+
+def test_strip_prompt_echo_keeps_short_prefix_fragment_without_echo():
+    from vocal_analysis.recognizer import _strip_prompt_echo
+
+    # エコー除去が起きていないテキストの通常文は、プロンプト文と接頭辞が重なっても除去しない。
+    original = "かんじはじめた こころ"
+    text, removed = _strip_prompt_echo(original)
+    assert text == original
+    assert removed is False
+
+
+# --- 末尾反復の検出と救済 ---
+
+
+def test_find_suffix_repetition_detects_trailing_unit_run():
+    from vocal_analysis.recognizer import _find_suffix_repetition
+
+    result = _find_suffix_repetition("ハテシナイミチノムコウデ" + "ラ" * 300)
+    assert result is not None
+    unit, count, head = result
+    assert unit == "ラ"
+    assert count == 300
+    assert head == "ハテシナイミチノムコウデ"
+
+
+def test_find_suffix_repetition_detects_whole_text_repetition():
+    from vocal_analysis.recognizer import _find_suffix_repetition
+
+    result = _find_suffix_repetition("ララ" * 200)
+    assert result is not None
+    unit, count, head = result
+    assert head == ""
+    assert unit * count == "ララ" * 200
+
+
+def test_find_suffix_repetition_ignores_short_runs():
+    from vocal_analysis.recognizer import _find_suffix_repetition
+
+    # 繰り返し数3未満・総長8文字未満は反復として検出しない(実在の歌詞の軽い反復を巻き込まない)。
+    assert _find_suffix_repetition("たのしいね たのしいね") is None
+
+
+# --- 書き起こしの後処理(エコー除去→トリガ式リトライ→反復救済) ---
+
+
+def _resolve(monkeypatch, text, words=None, duration=10.0, retry_result=None, retry_enabled=True,
+             g2p=None, transcribe_calls=None, text_only_result=None, text_only_calls=None):
+    """_resolve_transcription をモック済み依存で呼ぶ共通ハーネス。
+
+    retry_result が None のとき _transcribe_segment 呼び出し(_resolve_transcription は本来
+    呼ばない。呼んだら実装退行)が起きたら失敗させる。text_only_result が None のとき
+    トリガ式リトライ(_transcribe_text_only)呼び出しが起きたら失敗させる。
+    g2p 省略時は「空白以外の1文字=1音素(母音扱い)」の決定的な模擬。
+    """
+    from vocal_analysis import recognizer as R
+
+    primary = R.DEFAULT_CONTENT_RECOGNIZER_MODEL
+
+    def fake_transcribe(pipeline, samples):
+        if transcribe_calls is not None:
+            transcribe_calls.append(pipeline)
+        if retry_result is None:
+            raise AssertionError("リトライが呼ばれてはならないケースで _transcribe_segment が呼ばれた")
+        return retry_result
+
+    def fake_transcribe_text_only(samples, model):
+        if text_only_calls is not None:
+            text_only_calls.append(model)
+        if text_only_result is None:
+            raise AssertionError("リトライが呼ばれてはならないケースで _transcribe_text_only が呼ばれた")
+        return text_only_result
+
+    monkeypatch.setattr(R, "_transcribe_segment", fake_transcribe)
+    monkeypatch.setattr(R, "_transcribe_text_only", fake_transcribe_text_only)
+    monkeypatch.setattr(R, "_g2p", g2p or (lambda t: ["a"] * len(t.replace(" ", ""))))
+    return R._resolve_transcription(
+        np.zeros(16000, dtype=np.float32), duration, text, words, primary, retry_enabled)
+
+
+def test_resolve_transcription_retries_when_echo_leaves_empty_text(monkeypatch):
+    calls = []
+    text, words = _resolve(
+        monkeypatch, "かんじは つかわないでください。",
+        words=[("かんじは", 0.0, 1.0)], duration=15.0,
+        text_only_result="げんきです", text_only_calls=calls)
+    from vocal_analysis.recognizer import DEFAULT_CONTENT_RECOGNIZER_MODEL
+
+    assert text == "げんきです"
+    assert words is None
+    # トリガ式リトライは主モデルへ・プロンプト無し・タイムスタンプ無し・1回だけ。
+    assert len(calls) == 1
+    assert calls[0] is DEFAULT_CONTENT_RECOGNIZER_MODEL
+
+
+def test_resolve_transcription_does_not_retry_on_ascii_words(monkeypatch):
+    # ASCII英字はリトライ条件に含めない(リトライ条件はエコー幻覚と反復幻覚のみ)。
+    # text_only_result=None のためリトライ呼び出しが起きればハーネスが失敗させる。
+    text, _words = _resolve(
+        monkeypatch, "hello world つづける", duration=10.0,
+        retry_result=None, text_only_result=None)
+    assert text == "hello world つづける"
+
+
+def test_resolve_transcription_retries_on_high_density(monkeypatch):
+    # 反復幻覚(密度超過)はリトライのトリガ。密度: 模擬G2Pは空白以外1文字=1音素。
+    # 40文字/1.0秒=40音素/秒 > 20。
+    text, _words = _resolve(
+        monkeypatch, "あ" * 40, duration=1.0,
+        text_only_result="あいうえお")
+    assert text == "あいうえお"
+
+
+def test_resolve_transcription_does_not_retry_normal_text(monkeypatch):
+    text, words = _resolve(
+        monkeypatch, "てんきがいいですね", words=[("てんきが", 0.0, 1.0)], duration=10.0,
+        retry_result=None)
+    assert text == "てんきがいいですね"
+    assert words == [("てんきが", 0.0, 1.0)]
+
+
+def test_resolve_transcription_disabled_retry_rescues_suffix_repetition(monkeypatch):
+    # retry=False でも反復救済(密度超過ゲート)は効く。先頭部が残る形は先頭部だけを採用する。
+    text, _words = _resolve(
+        monkeypatch, "アイウエオカキクケコ" + "ラ" * 90, duration=1.0,
+        retry_result=None, retry_enabled=False)
+    assert text == "アイウエオカキクケコ"
+
+
+def test_resolve_transcription_normalizes_whole_text_repetition(monkeypatch):
+    # 全文反復は 区間長×3.5モーラ/秒÷単位モーラ数 へ個数正規化する。
+    # 模擬G2P: 1文字=1音素(母音扱い)→ 単位「ラ」=1モーラ。10秒×3.5=35個。
+    from vocal_analysis import recognizer as R
+
+    def g2p(t):
+        return ["a"] * len(t.replace(" ", ""))
+
+    monkeypatch.setattr(R, "_g2p", g2p)
+    text, words = R._resolve_transcription(
+        np.zeros(16000, dtype=np.float32), 10.0, "ラ" * 400, None,
+        R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False)
+    assert text == "ラ" * 35
+    assert words is None
+
+
+def test_resolve_transcription_rescue_keeps_normal_density_text(monkeypatch):
+    # 密度がしきい値以下のテキストには反復救済を一切適用しない(実在の歌詞の反復を守る)。
+    text, words = _resolve(
+        monkeypatch, "すき すき すき", words=[("すき", 0.0, 0.5)], duration=10.0,
+        retry_result=None, retry_enabled=False)
+    assert text == "すき すき すき"
+    assert words == [("すき", 0.0, 0.5)]
+
+
 def test_voiced_trim_bounds_trims_leading_and_trailing_silence_with_margin():
     from vocal_analysis.recognizer import _voiced_trim_bounds
 
@@ -608,7 +798,7 @@ def test_expand_min_stay_local_varies_per_word_within_same_chunk():
 def test_expand_min_stay_local_clamps_to_global_max_stay():
     from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay_local
 
-    # 実時間が長く音素数が少ない単語でも、最小滞在は _MIN_STAY_FRAMES(6)を超えない。
+    # 実時間が長く音素数が少ない単語でも、最小滞在は _MIN_STAY_FRAMES を超えない。
     words_phonemes = [(["a"], 0.0, 2.0)]  # 100フレーム分の実時間・音素1個
     sub_ids, _ = _expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
 
@@ -680,16 +870,17 @@ def test_min_stay_expansion_forces_phoneme_to_occupy_expanded_frames():
 
     # blankが全面的に優勢で音素(id=1)は1フレームしか優勢でない放出確率。展開なしなら
     # 音素に1フレームだけ滞在する経路が最尤になる構成だが、サブ状態連鎖(展開後は
-    # blank2個+音素_MIN_STAY_FRAMES個で10フレームに経路の自由度が残る)により
-    # 元トークンの滞在は最小滞在フレーム数以上になる。
+    # blank2個+音素_MIN_STAY_FRAMES個の合計フレームに経路の自由度が残る。フレーム総数は
+    # _MIN_STAY_FRAMES より十分大きく取り、(フレーム数-blank数)がボトルネックにならないようにする)
+    # により元トークンの滞在は最小滞在フレーム数以上になる。
+    num_frames = _MIN_STAY_FRAMES + 4
     log_probs = np.array(
-        [[5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [-5.0, 5.0],
-         [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0], [5.0, -5.0]]
+        [[5.0, -5.0]] * 4 + [[-5.0, 5.0]] + [[5.0, -5.0]] * (num_frames - 5)
     )
     plain_path = _forced_align(log_probs, [0, 1, 0])
     assert sum(1 for s in plain_path if s == 1) == 1  # 展開なしでは1フレーム通過が最尤
 
-    sub_ids, sub_to_token = _expand_min_stay([0, 1, 0], blank_token_id=0, num_frames=10)
+    sub_ids, sub_to_token = _expand_min_stay([0, 1, 0], blank_token_id=0, num_frames=num_frames)
     sub_path = _forced_align(log_probs, sub_ids)
     path = [sub_to_token[s] for s in sub_path]
 

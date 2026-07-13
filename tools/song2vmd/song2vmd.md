@@ -163,6 +163,7 @@ song2vmd INPUT [options]
 | `--separator NAME` | vocal_analysis の既定アダプタ | S1ボーカル分離バックエンドの選択(7章)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3) |
 | `--recognizer-model-id ID` | vocal_analysis の既定内容認識モデル(`ContentRecognizerModel.model_id`) | S2内容認識モデルの指定(vocal_analysis.md §5.2・§8.3)。未指定時は vocal_analysis の既定モデルを使う |
 | `--recognizer-model-revision REV` | 既定モデルのリビジョン(`--recognizer-model-id` 未指定時)。`--recognizer-model-id` 指定時は未指定なら最新リビジョン | S2内容認識モデルのリビジョン指定(`ContentRecognizerModel.model_revision`)。`--recognizer-model-id` と組で使う。`--recognizer-model-id` を指定せず本引数だけを指定するのは対象が無く無意味なため引数エラー(11章・12.3) |
+| `--no-recognizer-retry` | off(既定でリトライ有効) | S2内容認識のトリガ式リトライ(エコー幻覚・反復幻覚。主モデル自身をプロンプト無しで再認識する。vocal_analysis.md §5.2手順3)を無効にする。既定onの明示形 `--recognizer-retry` も受理する |
 | `--forced-aligner NAME` | `wav2vec2-ctc-forcedalign` | S2強制アライメント段のバックエンド選択(vocal_analysis.md §5.3・§8.3)。値・選択肢は vocal_analysis の登録アダプタの安定id。既定のままなら以下の `--sofa-*` 系は一切不要で追加設定無しに現行どおり動く |
 | `--sofa-python PATH` | 無し(必須) | SOFA専用venvのPython実行ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定(`wav2vec2-ctc-forcedalign`)時は指定しても未使用 |
 | `--sofa-root PATH` | 無し(必須) | SOFAリポジトリのルートパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
@@ -443,9 +444,10 @@ interface(Separator / Recognizer)、正規化中間形式、アダプタの登�
 - 利用者は `song2vmd INPUT` の1コマンドだけを実行する。音声前段の外部ツール(分離・認識・復号)は
   `vocal_analysis` が内部で呼び、利用者がそれらを手で実行することはない。
 - バックエンドの選択(`--separator` / `--recognizer-model-id` / `--recognizer-model-revision` /
+  `--no-recognizer-retry` /
   `--separate-vocals` / `--forced-aligner` / `--sofa-python` / `--sofa-root` / `--sofa-checkpoint` /
   `--sofa-timeout`)は `song2vmd` の CLI で公開する(5.2)。アダプタの追加・切り替えや内容認識
-  モデルの既定値・候補値の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
+  モデルの既定値・候補値・リトライ既定の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
 - 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、本リポジトリ本体の
   必須依存は `numpy/scipy` のまま保つ。
 
@@ -682,9 +684,9 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
   実装の引数検証から機械導出し、手書きで複製しない。
 - `default`: 解決後の既定値。プリセット由来の既定(`--open-max`/`--coarticulation`/`--anticipation`/
   `--min-hold`)と入力名由来の `--output` は単一リテラルで表せないため `null`(算出規則は `help` に記す。
-  プリセット由来の値は `presets` 側に載る)。`--recognizer-model-id`/`--recognizer-model-revision` も
-  同様に `null`(実際の既定値は vocal_analysis の既定内容認識モデルが持つ `model_id`/`model_revision`
-  の組であり、`--recognizer-model-revision` の実質的な既定は `--recognizer-model-id` の指定有無に
+  プリセット由来の値は `presets` 側に載る)。`--recognizer-model-id`/`--recognizer-model-revision`も
+  同様に `null`(実際の既定値は vocal_analysis の既定内容認識モデルが持つ
+  `model_id`/`model_revision` の組であり、revision の実質的な既定は id の指定有無に
   依存するため、単一リテラルで表せない。算出規則は `help` に記す)。プリセットに依らない共通既定を持つ
   `--vowel-gain`/`--intensity-curve`/`--silence-threshold` は、その既定(8.1)をリテラルで載せる。
 - `help`: 人間向け説明(5.2 の各引数説明)。
@@ -701,7 +703,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 | 事象 | `code` | `field` | `exit_code` |
 |---|---|---|---|
 | 入力を音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
-| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。`--recognizer-model-id` を指定せず `--recognizer-model-revision` だけを指定した場合、`--forced-aligner sofa-forcedalign` 選択時に `--sofa-python`/`--sofa-root`/`--sofa-checkpoint` のいずれかが欠落した場合(いずれも組み合わせ検証。5.2)も含む | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は対象引数の長形式フラグ名(SOFA必須検証は `--sofa-python`→`--sofa-root`→`--sofa-checkpoint` の順で最初に見つかった欠落1件のみ) | 2 |
+| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。組み合わせ検証(5.2)も含む: `--recognizer-model-id` を指定せず `--recognizer-model-revision` だけを指定した場合、`--forced-aligner sofa-forcedalign` 選択時に `--sofa-python`/`--sofa-root`/`--sofa-checkpoint` のいずれかが欠落した場合 | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は対象引数の長形式フラグ名(SOFA必須検証は `--sofa-python`→`--sofa-root`→`--sofa-checkpoint` の順で最初に見つかった欠落1件のみ) | 2 |
 | 出力先が入力と同一パス・`--overwrite` 未指定(5.3) | `output_overwrites_input` | `"--output"` | 2 |
 | 出力書き込み失敗、または `--keep-intermediate` 指定時の中間生成物書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"` または `"--keep-intermediate"`(+ `path`) | 3 |
 | 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない(vocal_analysis.md §3) | `decoder_missing` | `"input"` | 4 |

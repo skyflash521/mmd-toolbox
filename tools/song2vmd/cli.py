@@ -193,6 +193,12 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    help="--recognizer-model-id のリビジョン指定(組で使う。--recognizer-model-id "
                         "指定時にこれを省略すると最新リビジョンを使う。--recognizer-model-id 自体を"
                         "省略した場合は本オプションは無視されず引数エラーになる)")
+    # --recognizer-retry / --no-recognizer-retry は既定 on の対。dest=recognizer_retry を共有する。
+    p.add_argument("--recognizer-retry", dest="recognizer_retry", action="store_true", default=True,
+                   help="S2内容認識のトリガ式リトライ(エコー幻覚・反復幻覚。主モデル自身をプロンプト無しで"
+                        "再認識する)を有効にする(既定on)。--no-recognizer-retryの対の明示形")
+    p.add_argument("--no-recognizer-retry", dest="recognizer_retry", action="store_false",
+                   help="S2内容認識のリトライを無効にする。--recognizer-retryの対")
     p.add_argument("--forced-aligner", dest="forced_aligner", choices=FORCED_ALIGNER_NAMES,
                    default=DEFAULT_FORCED_ALIGNER,
                    help="S2強制アライメント段のバックエンド選択(vocal_analysisの登録アダプタ安定id)。"
@@ -275,6 +281,7 @@ _D_TYPE = {
     "separator": ("enum", {"choices": list(SEPARATOR_NAMES)}),
     "recognizer_model_id": ("str", None),
     "recognizer_model_revision": ("str", None),
+    "recognizer_retry": ("flag", None),
     "forced_aligner": ("enum", {"choices": list(FORCED_ALIGNER_NAMES)}),
     "sofa_python": ("str", None),
     "sofa_root": ("str", None),
@@ -490,7 +497,9 @@ def _run(args, emitter, fail) -> int:
     try:
         result = _pipeline.run(
             args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
-            content_recognizer_model=content_recognizer_model, max_duration_sec=args.max_duration,
+            content_recognizer_model=content_recognizer_model,
+            retry=args.recognizer_retry,
+            max_duration_sec=args.max_duration,
             use_n_morph=args.n_morph, intensity_curve=args.intensity_curve,
             silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
             style_name=args.style, model_name=args.model_name,

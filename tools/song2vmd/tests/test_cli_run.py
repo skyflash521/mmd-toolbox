@@ -132,6 +132,24 @@ def test_run_builds_custom_content_recognizer_model_from_cli_options(tmp_path, m
     assert model == ContentRecognizerModel(model_id="org/model", model_revision="rev1")
 
 
+def test_run_passes_default_retry_enabled(tmp_path, monkeypatch):
+    src = _touch(tmp_path / "in.wav")
+    captured = _capture_run_kwargs(monkeypatch)
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 0
+    assert captured["kwargs"]["retry"] is True
+
+
+def test_no_recognizer_retry_passes_false(tmp_path, monkeypatch):
+    src = _touch(tmp_path / "in.wav")
+    captured = _capture_run_kwargs(monkeypatch)
+
+    rc = cli.main([src, "--no-recognizer-retry", "--dry-run"])
+    assert rc == 0
+    assert captured["kwargs"]["retry"] is False
+
+
 def test_run_passes_preset_overrides_through(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)

@@ -271,8 +271,9 @@ def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatc
     from vocal_analysis import recognizer as recognizer_module
 
     # 2.0秒の有声区間に対しG2Pが100音素(密度50/秒。§5.2手順4のしきい値20/秒を大幅に超える)を
-    # 返すケース(内容認識の反復幻覚を模す)。誤った音素列で強制アライメントを試みず、区間全体を
-    # gapとして確定し、音素モデルも一度もロードしない。
+    # 返すケース(内容認識の反復幻覚を模す。リトライも同じ結果を返し、テキストに末尾反復が無いため
+    # 反復救済も適用されない)。誤った音素列で強制アライメントを試みず、区間全体をgapとして確定し、
+    # 音素モデルも一度もロードしない。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)  # 2.0秒・無音区間なし
 
     monkeypatch.setattr(
@@ -281,7 +282,10 @@ def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatc
     )
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment",
-        lambda pipeline, samples: ("かんじは つかわないでください。" * 20, None))
+        lambda pipeline, samples: ("あいうえおかきくけこさしすせそ", None))
+    monkeypatch.setattr(
+        recognizer_module, "_transcribe_text_only",
+        lambda samples, content_recognizer_model: "あいうえおかきくけこさしすせそ")
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"] * 100)
 
     def fail_if_called():
@@ -507,7 +511,9 @@ def test_recognize_places_multiple_words_via_per_word_g2p_and_inter_word_window(
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"], "い": ["i"]}[text])
+    # 全文("あ い"。トリガ判定の密度算出に使う)と単語ごとの両方の呼び出しに応える。
+    monkeypatch.setattr(
+        recognizer_module, "_g2p", lambda text: {"あ": ["a"], "い": ["i"], "あ い": ["a", "i"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -878,6 +884,7 @@ def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypa
     transformers = pytest.importorskip("transformers")
     torch = pytest.importorskip("torch")
     from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL
+    from vocal_analysis import recognizer as recognizer_module
     from vocal_analysis.recognizer import _load_content_recognizer_pipeline
 
     captured = {}
@@ -891,6 +898,8 @@ def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypa
 
     monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    # プロセス内キャッシュを空に差し替え、他テストのロード結果を再利用させない(必ずロードさせる)。
+    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
 
     _load_content_recognizer_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
 
@@ -906,6 +915,7 @@ def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
     transformers = pytest.importorskip("transformers")
     torch = pytest.importorskip("torch")
     from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL
+    from vocal_analysis import recognizer as recognizer_module
     from vocal_analysis.recognizer import _load_content_recognizer_pipeline
 
     captured = {}
@@ -916,11 +926,51 @@ def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
 
     monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    # プロセス内キャッシュを空に差し替え、他テストのロード結果を再利用させない(必ずロードさせる)。
+    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
 
     _load_content_recognizer_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
 
     # §5.1: GPUが利用可能なら自動的にGPUを使う(強制アライメント用音素モデルはCPU固定のまま)。
     assert captured["device"] == "cuda"
+
+
+def test_load_content_recognizer_pipeline_evicts_previous_model_before_loading_next(monkeypatch):
+    """異なるモデルへ切り替える際、新モデルのロードを始める時点で直前のパイプラインが実際に
+    解放可能(参照を一切保持していない)になっている(グローバル変数がNoneというだけでなく、
+    関数内のローカル変数に旧パイプラインへの強参照が残っていないことを、弱参照で確認する)。"""
+    transformers = pytest.importorskip("transformers")
+    import gc
+    import weakref
+
+    from vocal_analysis import ContentRecognizerModel
+    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis.recognizer import _load_content_recognizer_pipeline
+
+    model_a = ContentRecognizerModel(model_id="org/model-a")
+    model_b = ContentRecognizerModel(model_id="org/model-b")
+    observed = {}
+
+    class _Pipeline:
+        """object() は弱参照を作れないため、素の object の代わりに使う。"""
+
+    def fake_pipeline(task, model=None, revision=None, device=None, **kwargs):
+        if model == model_b.model_id:
+            gc.collect()
+            observed["model_a_pipeline_alive"] = observed["model_a_pipeline_ref"]() is not None
+        return _Pipeline()
+
+    monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
+    monkeypatch.setattr(recognizer_module, "_select_content_recognizer_device", lambda: "cpu")
+    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
+
+    model_a_pipeline = _load_content_recognizer_pipeline(model_a)
+    observed["model_a_pipeline_ref"] = weakref.ref(model_a_pipeline)
+    del model_a_pipeline
+
+    _load_content_recognizer_pipeline(model_b)
+
+    assert observed["model_a_pipeline_alive"] is False
 
 
 def test_transcribe_segment_extracts_word_timestamps_from_chunks(monkeypatch):
@@ -1176,8 +1226,10 @@ def test_recognize_sofa_path_splits_words_and_reassembles_segments(tmp_path, mon
         recognizer_module, "_transcribe_segment",
         lambda pipeline, samples: ("かき", [("か", 0.1, 0.2), ("き", 0.25, 0.35)]),
     )
+    # 全文("かき"。トリガ判定の密度算出に使う)と単語ごとの両方の呼び出しに応える。
     monkeypatch.setattr(
-        recognizer_module, "_g2p", lambda text: {"か": ["k", "a"], "き": ["k", "i"]}[text]
+        recognizer_module, "_g2p",
+        lambda text: {"か": ["k", "a"], "き": ["k", "i"], "かき": ["k", "a", "k", "i"]}[text]
     )
 
     align_batch_calls = []

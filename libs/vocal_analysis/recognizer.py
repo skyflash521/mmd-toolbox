@@ -5,10 +5,12 @@
 `sofa_align`モジュールへ委譲)。公開関数 recognize() が唯一の公開面(Recognizerアダプタ契約。§8.1。
 契約は`forced_aligner`の選択に関わらず不変)。内容認識モデルは `content_recognizer_model`
 (`ContentRecognizerModel`。§5.2)で指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・候補値
-`KANA_WHISPER_MODEL`・任意指定も可)。
+`KANA_WHISPER_MODEL`・任意指定も可)。`retry` はエコー幻覚・反復幻覚へのトリガ式リトライの
+有効/無効を切り替える(既定True。主モデル自身をプロンプト無しで再認識する。別モデルは使わない)。
 """
 
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -153,6 +155,21 @@ def _voiced_trim_bounds(segment_samples: np.ndarray, sample_rate: int, threshold
 # --- §5.2 手順4以降: 内容認識+G2P+強制アライメントの区間化 ---
 
 _HALLUCINATION_PHONEME_RATE = 20.0  # §5.2手順4: 反復幻覚を疑う音素密度のしきい値(音素/秒)
+_ECHO_FRAGMENT_PREFIX_LEN = 5  # エコー断片とみなすプロンプト文との共通接頭辞の最小文字数
+_REPEAT_MIN_COUNT = 3  # 末尾反復として検出する最小繰り返し数
+_REPEAT_MIN_TOTAL_CHARS = 8  # 末尾反復として検出する最小総長(文字)
+_REPEAT_NORMALIZE_MORA_RATE = 3.5  # 全文反復の個数正規化レート(モーラ/秒)
+_MORA_G2P_SYMBOLS = frozenset({"a", "i", "u", "e", "o", "I", "U", "N"})
+
+
+def _normalize_sentence(sentence: str) -> str:
+    """文の照合用正規化(空白・句読点を除去)。エコー除去の照合に使う。"""
+    return re.sub(r"[\s、。,.]", "", sentence)
+
+
+_PROMPT_SENTENCES = frozenset(
+    normalized for normalized in (_normalize_sentence(part) for part in KANA_PROMPT.split("。")) if normalized
+)
 
 
 def _is_hallucinated_phoneme_density(phoneme_count: int, duration_sec: float) -> bool:
@@ -160,6 +177,123 @@ def _is_hallucinated_phoneme_density(phoneme_count: int, duration_sec: float) ->
     if duration_sec <= 0:
         return False
     return phoneme_count / duration_sec > _HALLUCINATION_PHONEME_RATE
+
+
+def _strip_prompt_echo(text: str) -> tuple[str, bool]:
+    """かな限定プロンプトの構成文と一致する文(エコー幻覚)を除去する。
+
+    句点で文に分割し、正規化(空白・句読点除去)した各文がプロンプト構成文と一致するものを落とす。
+    1文以上除去した場合、残りの末尾の文がプロンプト構成文と _ECHO_FRAGMENT_PREFIX_LEN 文字以上の
+    共通接頭辞を持てば、区間末尾で切れたエコーの断片として同様に落とす。
+    戻り値は (除去後テキスト, 除去が起きたか)。
+    """
+    parts = re.split(r"(?<=。)", text)
+    kept = [part for part in parts if _normalize_sentence(part) not in _PROMPT_SENTENCES]
+    removed = len(kept) < len(parts)
+    if removed and kept:
+        tail = _normalize_sentence(kept[-1])
+        if tail and any(_common_prefix_len(tail, prompt) >= _ECHO_FRAGMENT_PREFIX_LEN
+                        for prompt in _PROMPT_SENTENCES):
+            kept.pop()
+    return "".join(kept), removed
+
+
+def _common_prefix_len(a: str, b: str) -> int:
+    n = 0
+    for ca, cb in zip(a, b):
+        if ca != cb:
+            break
+        n += 1
+    return n
+
+
+def _find_suffix_repetition(text: str) -> tuple[str, int, str] | None:
+    """テキスト末尾の反復 単位×k を検出する(反復救済に使う)。
+
+    末尾から一致する繰り返しを単位長1文字から順に調べ、繰り返し数が _REPEAT_MIN_COUNT 以上かつ
+    総長が _REPEAT_MIN_TOTAL_CHARS 文字以上の候補のうち総切除長が最大のものを採る。
+    戻り値は (単位, 繰り返し数, 反復を除いた先頭部) か None(反復なし)。
+    """
+    best: tuple[str, int, str] | None = None
+    n = len(text)
+    for unit_len in range(1, n // _REPEAT_MIN_COUNT + 1):
+        unit = text[n - unit_len:]
+        count = 1
+        while n - (count + 1) * unit_len >= 0 and text[n - (count + 1) * unit_len: n - count * unit_len] == unit:
+            count += 1
+        total = unit_len * count
+        if count >= _REPEAT_MIN_COUNT and total >= _REPEAT_MIN_TOTAL_CHARS:
+            if best is None or total > len(best[0]) * best[1]:
+                best = (unit, count, text[: n - total])
+    return best
+
+
+def _text_mora_count(text: str) -> int:
+    """テキストのモーラ数(G2P結果の母音・撥音の数)。反復救済の個数正規化に使う。"""
+    return sum(1 for symbol in _g2p(text) if symbol in _MORA_G2P_SYMBOLS)
+
+
+def _text_phoneme_density(text: str, duration_sec: float) -> float:
+    """テキスト全体をG2Pした音素密度(音素/秒)。エコー・反復のトリガ判定に使う。"""
+    if not text.strip() or duration_sec <= 0:
+        return 0.0
+    return len(_g2p(text)) / duration_sec
+
+
+def _resolve_transcription(
+    chunk_samples: np.ndarray,
+    trim_duration_sec: float,
+    text: str,
+    words: list[tuple[str, float, float]] | None,
+    content_recognizer_model: ContentRecognizerModel,
+    retry_enabled: bool,
+) -> tuple[str, list[tuple[str, float, float]] | None]:
+    """書き起こしの後処理: エコー除去→トリガ式区間リトライ→反復救済。
+
+    採用する (テキスト, 単語タイムスタンプ) を返す。テキストが空になった場合は呼び出し側が
+    区間をgap確定する。エコー除去・トリガ式リトライ・反復救済でテキストが変化した場合、残った文と
+    単語の対応が保証できないため単語タイムスタンプを破棄する(単語窓が無い区間として位置バンド
+    制限で整列するフォールバックに帰着させる)。
+    """
+    text2, echo_removed = _strip_prompt_echo(text)
+    if echo_removed:
+        words = None
+
+    def _needs_retry(candidate: str) -> bool:
+        # トリガ式リトライの条件はエコー幻覚(エコー除去で空になった場合)と反復幻覚(音素密度
+        # 超過)のみ。ASCII英字の残存はリトライ条件から除外済み。
+        if not candidate.strip():
+            # 元から空の書き起こしは既存のgap確定に委ねる。エコー除去で空になった場合のみ再認識する。
+            return echo_removed
+        return _text_phoneme_density(candidate, trim_duration_sec) > _HALLUCINATION_PHONEME_RATE
+
+    if retry_enabled and _needs_retry(text2):
+        # トリガ式リトライは主モデル自身で、プロンプト無し・タイムスタンプ無しに再認識する。
+        # エコーはプロンプト起因の幻覚のため、プロンプトを外すだけで同じモデルでも回復できる。
+        # 別モデルはここには使わない(別モデルを主モデルと同時にGPUへ常駐させるとVRAMを圧迫し
+        # 推論が不安定になり、処理時間を有界にできない)。
+        # 単語タイムスタンプは要求せず破棄する(位置バンド制限で整列するフォールバックへ帰着)。
+        retry_text = _transcribe_text_only(chunk_samples, content_recognizer_model).strip()
+        retry_text, _retry_echo_removed = _strip_prompt_echo(retry_text)
+        text2, words = retry_text, None
+
+    if text2.strip() and _text_phoneme_density(text2, trim_duration_sec) > _HALLUCINATION_PHONEME_RATE:
+        repetition = _find_suffix_repetition(text2)
+        if repetition is not None:
+            unit, count, head = repetition
+            rescued = text2
+            if head.strip():
+                rescued = head
+            else:
+                unit_moras = max(1, _text_mora_count(unit))
+                normalized = max(1, round(trim_duration_sec * _REPEAT_NORMALIZE_MORA_RATE / unit_moras))
+                if normalized < count:
+                    rescued = unit * normalized
+            if rescued != text2:
+                text2 = rescued
+                words = None
+
+    return text2, words
 
 
 def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
@@ -527,14 +661,17 @@ def recognize(
     vocal_wav_path: Path,
     content_recognizer_model: ContentRecognizerModel = DEFAULT_CONTENT_RECOGNIZER_MODEL,
     *,
+    retry: bool = True,
     forced_aligner: ForcedAlignerId = DEFAULT_FORCED_ALIGNER,
     sofa_aligner: SofaAlignerConfig | None = None,
 ) -> list[Segment]:
     """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2・§5.3)。
 
-    content_recognizer_model で内容認識モデルを指定する(既定値・候補値・任意指定。§5.2)。内容認識・
+    content_recognizer_model で内容認識モデルを指定する(既定値・候補値・任意指定)。
+    retry はエコー幻覚・反復幻覚へのトリガ式リトライの有効/無効を切り替える
+    (既定True。主モデル自身をプロンプト無しで再認識する。別モデルは使わない)。内容認識・
     G2Pはどのモデル・どの強制アライメント経路でも共通。forced_aligner で強制アライメント段を選択する
-    (既定`wav2vec2-ctc-forcedalign`。§5.2)。`forced_aligner="sofa-forcedalign"`を選ぶ場合は
+    (既定`wav2vec2-ctc-forcedalign`)。`forced_aligner="sofa-forcedalign"`を選ぶ場合は
     sofa_aligner(`SofaAlignerConfig`)が必須で、省略(`None`)すると`RecognitionError`にする
     (黙ってwav2vec2へフォールバックしない)。
     """
@@ -593,6 +730,8 @@ def recognize(
             )
         chunk_samples = chunk_samples[trim_lo:trim_hi]
 
+        trim_duration_sec = trim_hi_sec - trim_lo_sec
+
         try:
             if content_pipeline is None:
                 content_pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
@@ -609,8 +748,21 @@ def recognize(
                 "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
             ) from e
 
-        # §5.2手順3: 書き起こしが空文字列(単語0個)の区間はG2P・アライメントを試みず、区間全体を
-        # gapとして直接確定する(手順2の無音確定・手順4の音素密度超過確定と同様の扱い)。
+        try:
+            # エコー除去→トリガ式リトライ(主モデル)→反復救済。テキスト変更時は単語タイムスタンプを破棄。
+            text, words = _resolve_transcription(
+                chunk_samples, trim_duration_sec, text, words,
+                content_recognizer_model, retry,
+            )
+        except ImportError as e:
+            raise RecognitionError(
+                "pyopenjtalk-plus または transformers が見つかりません。導入してください"
+                "(vocal-analysis extra で導入されます)。"
+            ) from e
+
+        # 書き起こしが空文字列(単語0個。エコー除去で空になりリトライでも回復しなかった場合を
+        # 含む)の区間はG2P・アライメントを試みず、区間全体をgapとして直接確定する(無音確定・
+        # 音素密度超過確定と同様の扱い)。
         if not text.strip():
             all_segments.append(
                 Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None, confidence=None)
@@ -620,8 +772,6 @@ def recognize(
                     Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
                 )
             continue
-
-        trim_duration_sec = trim_hi_sec - trim_lo_sec
 
         try:
             # §5.2手順4: 単語タイムスタンプが取得できた場合は単語ごとに個別にG2Pし(手順5の窓割り当てに
@@ -637,9 +787,9 @@ def recognize(
                 "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
             ) from e
 
-        # §5.2手順4の音素密度による幻覚検出: 内容認識の反復幻覚(同一文・同一フレーズの繰り返し)は
-        # 区間の実際の発声より著しく多い音素列を生む。書き起こし・G2P・強制アライメントの結果を
-        # 用いず、区間全体をgapとして確定する(利用先のgap解決へ委ねる)。
+        # エコー除去・リトライ・反復救済(_resolve_transcription)を経てなお音素密度がしきい値を
+        # 超える区間は、書き起こし・G2P・強制アライメントの結果を用いず、区間全体をgapとして
+        # 確定する(利用先のgap解決へ委ねる)。
         if _is_hallucinated_phoneme_density(len(phonemes), trim_duration_sec):
             all_segments.append(
                 Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None, confidence=None)
@@ -842,6 +992,25 @@ def _extract_word_timestamps(chunks: list[dict], duration_sec: float) -> list[tu
     return _sanitize_word_timestamps(words, duration_sec)
 
 
+def _transcribe_text_only(samples: np.ndarray, content_recognizer_model: ContentRecognizerModel) -> str:
+    """音声をタイムスタンプ無しで書き起こす(トリガ式リトライの再認識用。主モデル自身を呼ぶ)。
+
+    リトライは区間全体のテキストを丸ごと採用し単語タイムスタンプを使わないため、単語単位の
+    タイムスタンプ抽出(呼び出しコストが増す)は不要。プロンプトは渡さない(プロンプト起因の
+    エコー幻覚を再発させないため)。温度フォールバックも無効化して1呼び出しの所要時間を
+    有界化する(温度0固定の貪欲1パスに限定する)。パイプラインは
+    _load_content_recognizer_pipeline のプロセス内キャッシュを共有する(主モデルと同じ
+    デバイス自動選択・ロード済み再利用が効く)。
+    """
+    pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
+    generate_kwargs = {
+        "language": "japanese", "task": "transcribe",
+        "num_beams": 1, "do_sample": False, "temperature": 0.0,
+    }
+    result = pipeline(samples, generate_kwargs=generate_kwargs)
+    return result["text"]
+
+
 def _transcribe_segment(
     pipeline, samples: np.ndarray
 ) -> tuple[str, list[tuple[str, float, float]] | None]:
@@ -886,19 +1055,40 @@ def _select_content_recognizer_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognizerModel):
-    """内容認識器を content_recognizer_model が指すモデル・revisionでロードする(§5.2・§8.3)。
+_content_recognizer_pipeline_cache: tuple[ContentRecognizerModel, object] | None = None
 
-    実行デバイスは環境から自動選択する(_select_content_recognizer_device。§5.1)。
+
+def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognizerModel):
+    """内容認識器を content_recognizer_model が指すモデル・revisionでロードする。
+
+    実行デバイスは環境から自動選択する(_select_content_recognizer_device)。1呼び出し中は
+    区間ごと・トリガ式リトライごとに同じ content_recognizer_model を使い回すため、直前に
+    ロードした1件だけを保持する単一枠キャッシュで足りる(再ロードを避ける)。別の
+    content_recognizer_model が指定されると、直前のキャッシュは破棄して差し替える(複数の
+    モデルを同時にプロセス内保持しない)。
     """
+    global _content_recognizer_pipeline_cache
+    if _content_recognizer_pipeline_cache is not None:
+        cached_model, cached_pipeline = _content_recognizer_pipeline_cache
+        if cached_model == content_recognizer_model:
+            return cached_pipeline
+        # 新モデルのロードを始める前に、旧パイプラインへの参照(グローバル・ローカルとも)を
+        # 解放する。ローカル変数 cached_pipeline を残したままだと、グローバルキャッシュを
+        # None にしても旧パイプラインが参照されたまま生き続け、新モデルのロード中に新旧
+        # モデルが同時にGPU上へ残る窓ができてしまう。
+        del cached_model, cached_pipeline
+        _content_recognizer_pipeline_cache = None
+
     from transformers import pipeline as transformers_pipeline
 
-    return transformers_pipeline(
+    pipeline = transformers_pipeline(
         "automatic-speech-recognition",
         model=content_recognizer_model.model_id,
         revision=content_recognizer_model.model_revision,
         device=_select_content_recognizer_device(),
     )
+    _content_recognizer_pipeline_cache = (content_recognizer_model, pipeline)
+    return pipeline
 
 
 def _compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:

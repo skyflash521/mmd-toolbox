@@ -46,7 +46,8 @@ def _common_kwargs(**overrides):
     openness, style_gen = presets.resolve("pop")
     kw = dict(
         separate_vocals="auto", separator_name="audio-separator-htdemucs-ft",
-        content_recognizer_model=_TEST_MODEL, max_duration_sec=300.0, use_n_morph=True,
+        content_recognizer_model=_TEST_MODEL, retry=True,
+        max_duration_sec=300.0, use_n_morph=True,
         intensity_curve=0.6, silence_on=0.06,
         openness=openness, style_gen=style_gen, style_name="pop", model_name="",
         forced_aligner="wav2vec2-ctc-forcedalign", sofa_aligner=None,
@@ -213,7 +214,7 @@ def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeyp
 
     received = {}
 
-    def fake_recognize(path, content_recognizer_model, forced_aligner, sofa_aligner):
+    def fake_recognize(path, content_recognizer_model, retry, forced_aligner, sofa_aligner):
         received["content_recognizer_model"] = content_recognizer_model
         received["forced_aligner"] = forced_aligner
         received["sofa_aligner"] = sofa_aligner

@@ -127,15 +127,17 @@ def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
         raise IntermediateWriteError(str(e)) from e
 
 
-def run(input_path, *, separate_vocals, separator_name, content_recognizer_model, max_duration_sec,
+def run(input_path, *, separate_vocals, separator_name, content_recognizer_model,
+        retry, max_duration_sec,
         use_n_morph, intensity_curve, silence_on, openness, style_gen,
         style_name, model_name, forced_aligner, sofa_aligner,
         keep_intermediate_dir=None, progress=None):
     """song2vmd の音声→VMDパイプラインを実行する(song2vmd.md 4章・6章)。
 
-    content_recognizer_model は vocal_analysis.recognizer.recognize が受け取る
-    ContentRecognizerModel(vocal_analysis.md §5.2・§8.3)。forced_aligner・sofa_aligner は同じ
-    recognize が受け取るS2強制アライメント段のバックエンド選択(vocal_analysis.md §5.3・§8.3)。
+    content_recognizer_model は vocal_analysis.recognizer.recognize が受け取る内容認識モデル
+    (ContentRecognizerModel)。retry は同じ recognize が受け取るトリガ式リトライ(エコー幻覚・
+    反復幻覚)の有効/無効。forced_aligner・sofa_aligner は同じ recognize が受け取るS2強制
+    アライメント段のバックエンド選択。
     keep_intermediate_dir を渡すと中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)をその
     ディレクトリへ保存する(5.2の--keep-intermediate)。省略時(既定None)は何も保存しない。
     """
@@ -145,11 +147,12 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
 
     if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
         segments, rms_envelope, vocal_pcm = _run_single(
-            pcm, separate_vocals, content_recognizer_model, forced_aligner, sofa_aligner, progress)
+            pcm, separate_vocals, content_recognizer_model, retry,
+            forced_aligner, sofa_aligner, progress)
     else:
         segments, rms_envelope, vocal_pcm = _run_chunked(
-            pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec,
-            forced_aligner, sofa_aligner, progress)
+            pcm, duration_sec, separate_vocals, content_recognizer_model,
+            retry, max_duration_sec, forced_aligner, sofa_aligner, progress)
 
     if keep_intermediate_dir is not None:
         _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments)
@@ -176,22 +179,23 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         channels=pcm.samples.shape[1])
 
 
-def _run_single(pcm, separate_vocals, content_recognizer_model, forced_aligner, sofa_aligner, progress):
+def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
+                forced_aligner, sofa_aligner, progress):
     """長尺分割なしの単一実行(song2vmd.md 6.6の対象外の通常経路)。"""
     _report_stage(progress, "separate")
     vocal_path = _va_separator.separate(pcm, separate_vocals)
     _report_stage(progress, "recognize")
     segments = _va_recognizer.recognize(
         vocal_path, content_recognizer_model=content_recognizer_model,
-        forced_aligner=forced_aligner, sofa_aligner=sofa_aligner)
+        retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner)
     _report_stage(progress, "rms")
     vocal_pcm = _va_io.load_audio(vocal_path)
     rms_envelope = _va_rms.compute_rms(vocal_pcm)
     return segments, rms_envelope, vocal_pcm
 
 
-def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model, max_duration_sec,
-                  forced_aligner, sofa_aligner, progress):
+def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
+                 retry, max_duration_sec, forced_aligner, sofa_aligner, progress):
     """長尺分割ありの実行(song2vmd.md 6.6)。境界決定は分離前の生音声RMSを使う。"""
     raw_rms = _va_rms.compute_rms(pcm)
     boundaries = chunking.find_chunk_boundaries(
@@ -217,7 +221,7 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model, m
         chunk_segments_list.append(
             _va_recognizer.recognize(
                 vocal_path, content_recognizer_model=content_recognizer_model,
-                forced_aligner=forced_aligner, sofa_aligner=sofa_aligner))
+                retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner))
 
         chunk_vocal_pcm = _read_pcm_raw(vocal_path)
         vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))
