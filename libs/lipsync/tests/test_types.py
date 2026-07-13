@@ -33,6 +33,17 @@ def test_consonant_class_members():
     assert names == {"NONE", "NEUTRAL", "ROUNDED", "SPREAD"}
 
 
+@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
+def test_aperture_class_members():
+    """ApertureClass は NONE/FIRM_CLOSURE/NARROW_CHANNEL/SLIGHT_CLOSURE を持つ。
+
+    ConsonantClass(唇の丸め・横引き方向)とは独立な軸で、母音合成の各モーフ最終重みを一律に
+    減衰させる。両唇閉鎖は MouthShape.BILABIAL で表しここには含めない。
+    """
+    names = {c.name for c in lipsync.ApertureClass}
+    assert names == {"NONE", "FIRM_CLOSURE", "NARROW_CHANNEL", "SLIGHT_CLOSURE"}
+
+
 def test_mouth_event_defaults():
     """MouthEvent は shape/start/end を取り、open_amount 既定 0.0・consonant_class 既定 NONE。"""
     ev = lipsync.MouthEvent(shape=lipsync.MouthShape.A, start=0.0, end=10.0)
@@ -49,6 +60,27 @@ def test_mouth_event_consonant_class_set():
         lipsync.MouthShape.A, 0.0, 10.0, 0.5, lipsync.ConsonantClass.ROUNDED
     )
     assert ev.consonant_class is lipsync.ConsonantClass.ROUNDED
+
+
+@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
+def test_mouth_event_aperture_class_default():
+    """MouthEvent は aperture_class 既定 ApertureClass.NONE を持つ。"""
+    ev = lipsync.MouthEvent(shape=lipsync.MouthShape.A, start=0.0, end=10.0)
+    assert ev.aperture_class is lipsync.ApertureClass.NONE
+
+
+@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
+def test_mouth_event_aperture_class_set():
+    """aperture_class は consonant_class の後に位置引数(既存フィールドの末尾に追加)で渡せる。"""
+    ev = lipsync.MouthEvent(
+        lipsync.MouthShape.A,
+        0.0,
+        10.0,
+        0.5,
+        lipsync.ConsonantClass.ROUNDED,
+        lipsync.ApertureClass.FIRM_CLOSURE,
+    )
+    assert ev.aperture_class is lipsync.ApertureClass.FIRM_CLOSURE
 
 
 def test_generation_params_defaults():

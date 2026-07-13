@@ -130,6 +130,28 @@ def test_short_same_vowel_different_consonant_no_mid_flicker():
     assert env["い"][-1][1] == pytest.approx(0.0)  # 補助はフェードして残留しない
 
 
+@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
+def test_same_vowel_merge_preserves_per_segment_aperture_decay():
+    # 同じ母音(あ)で開き量は同じ(0.4)だが ApertureClass が異なる(FIRM_CLOSURE→NONE)2小区間を連結。
+    # 各小区間の強弱節点は開口減衰まで適用した最終重みになる: 前0.4×0.75=0.3、後0.4×1.0=0.4。
+    # 1つの連続保持区間へ統合され、内部境界(10)に再アタック・閉口を入れない。
+    env = _envelope(
+        [
+            MouthEvent(
+                MouthShape.A, 0.0, 10.0, 0.4, ConsonantClass.NONE,
+                lipsync.ApertureClass.FIRM_CLOSURE,
+            ),
+            MouthEvent(
+                MouthShape.A, 10.0, 20.0, 0.4, ConsonantClass.NONE, lipsync.ApertureClass.NONE
+            ),
+        ]
+    )
+    assert set(env) == {"あ"}
+    _approx_envelope(
+        env["あ"], [(0, 0.0), (2, 0.3), (5, 0.3), (15, 0.4), (18, 0.4), (20, 0.0)]
+    )
+
+
 def test_different_adjacent_vowels_not_merged():
     # あ[0,10]・う[10,20] は母音が異なるので1保持区間へ連結しない。あ は あ区間側で、う は う区間側で
     # それぞれ別モーフの identity を保つ(境界の具体形=閉口か協調調音かは協調調音が決めるため見ない)。

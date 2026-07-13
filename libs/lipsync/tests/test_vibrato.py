@@ -9,7 +9,7 @@
 import pytest
 
 import lipsync
-from lipsync import GenerationParams, MouthEvent, MouthShape
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
 
 def _envelope(events, params=None):
@@ -61,3 +61,40 @@ def test_vibrato_disabled_when_amp_zero():
     # 長い母音でも vibrato_amp=0 なら揺らぎ無効。公称のみ(非適用時と不変)。
     env = _envelope([MouthEvent(MouthShape.A, 0.0, 40.0, 0.5)], GenerationParams(vibrato_amp=0.0))
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (38, 0.5), (40, 0.0)])
+
+
+@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
+def test_vibrato_follows_interpolated_aperture_scale():
+    # あ[0,20]op0.5(ApertureClass.NONE=1.0)・あ[20,40]op0.5(ApertureClass.FIRM_CLOSURE=0.75)を連結。
+    # 開き量は両区間とも0.5で一定(公称開き量 base_open(t) は 0.5 で一定)だが、開口減衰
+    # aperture_v(t) は同じ制御点(plateau_start=2・mid1=10・mid2=30・plateau_end=38)で 1.0→0.75 へ
+    # 線形補間される。揺らぎの極値(t=5.75,13.25,20.75,28.25,35.75。量子化フレーム
+    # 6,13,21,28,36)での最終重みは、公称の揺らぎ(振幅0.05)と aperture_v(t) の補間値の積になる
+    # (既知値。計算根拠はテスト内コメントの式のとおり)。
+    events = [
+        MouthEvent(
+            MouthShape.A, 0.0, 20.0, 0.5, ConsonantClass.NONE, lipsync.ApertureClass.NONE
+        ),
+        MouthEvent(
+            MouthShape.A, 20.0, 40.0, 0.5, ConsonantClass.NONE,
+            lipsync.ApertureClass.FIRM_CLOSURE,
+        ),
+    ]
+    env = _envelope(events)
+    assert set(env) == {"あ"}
+    _approx_envelope(
+        env["あ"],
+        [
+            (0, 0.0),
+            (2, 0.5),  # アタック到達(先頭小区間の最終重み 0.5*1.0)
+            (6, 0.55),  # t=5.75: open_v=0.5+0.05=0.55, aperture_v(5.75)=1.0(mid1手前は一定1.0)
+            (10, 0.5),  # mid1 強弱節点(先頭小区間の最終重み 0.5*1.0)
+            (13, 0.43171875),  # t=13.25: open_v=0.45, aperture_v=0.959375
+            (21, 0.47609375),  # t=20.75: open_v=0.55, aperture_v=0.865625
+            (28, 0.34734375),  # t=28.25: open_v=0.45, aperture_v=0.771875
+            (30, 0.375),  # mid2 強弱節点(後方小区間の最終重み 0.5*0.75)
+            (36, 0.4125),  # t=35.75: open_v=0.55, aperture_v=0.75(mid2以降は一定0.75)
+            (38, 0.375),  # 実効リリース開始(後方小区間の最終重み 0.5*0.75)
+            (40, 0.0),
+        ],
+    )

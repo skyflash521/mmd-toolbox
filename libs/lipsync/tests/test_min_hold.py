@@ -163,6 +163,33 @@ def test_triangle_closes_on_closure_side_only():
         assert _total_open(env, f) > 0.05  # う→え は協調調音で閉口しない
 
 
+@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
+def test_absorb_winner_uses_aperture_decayed_final_weight():
+    # _absorb_winner(_opening 経由)は開口減衰(ApertureClass)まで適用した最終重みの最大値で
+    # 吸収先を選ぶ。前あ op=0.6(ApertureClass.NONE)→最終重み0.6。
+    # 後う op=0.65(ApertureClass.FIRM_CLOSURE=0.75)→最終重み0.65×0.75=0.4875。raw な
+    # open_amount だけを比較する誤実装なら後(0.65)が勝ち後方(う)へ延びるが、正しくは
+    # 最終重みの大きい前(あ)が勝ち前方へ延びる。
+    groups = generate._normalize_groups(
+        [
+            MouthEvent(
+                MouthShape.A, 0.0, 10.0, 0.6, ConsonantClass.NONE, lipsync.ApertureClass.NONE
+            ),
+            MouthEvent(MouthShape.I, 10.0, 11.0, 0.5),
+            MouthEvent(
+                MouthShape.U, 11.0, 21.0, 0.65, ConsonantClass.NONE,
+                lipsync.ApertureClass.FIRM_CLOSURE,
+            ),
+        ],
+        GenerationParams(),
+    )
+    assert len(groups) == 2
+    a_group = next(g for g in groups if g.shape is MouthShape.A)
+    u_group = next(g for g in groups if g.shape is MouthShape.U)
+    assert (a_group.start, a_group.end) == (0.0, 11.0)  # 前(あ)が勝ち い の span を吸収
+    assert (u_group.start, u_group.end) == (11.0, 21.0)  # 後(う)は自身の区間のまま
+
+
 def test_triangle_legato_triangle_bridged_without_closure():
     # 三角形→レガート間隙→三角形(同じ「あ」の繰り返しが間隙で区切られ短く三角形化)。谷で橋渡しし、
     # 有声区間内で閉口しない(間隙の谷でも0に落ちない)。
