@@ -1,4 +1,4 @@
-"""雛形・データ型と vmd 連携のテスト(lipsync.md §3/§4)。
+"""雛形・データ型と vmd 連携のテスト。
 
 公開データ型(MouthShape / MouthEvent / GenerationParams)とコア関数
 generate_morph_keys の契約、および出力モーフキーが vmd の
@@ -12,8 +12,7 @@ from vmd import MorphKey, VmdDocument, read, write
 
 
 def test_mouth_shape_members():
-    """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音＋レガート間隙を持つ
-    (lipsync.md §2.1/§4.7)。
+    """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音＋レガート間隙を持つ。
 
     「ん」は閉口でなく母音と同じ機構を通る母音的口形。LEGATO_GAP は SILENCE と同じく非発音だが、
     生成時は完全閉口でなく谷として描く。
@@ -25,7 +24,7 @@ def test_mouth_shape_members():
 
 
 def test_consonant_class_members():
-    """ConsonantClass は NONE/NEUTRAL/ROUNDED/SPREAD を持つ(lipsync.md §2.1/§4.1)。
+    """ConsonantClass は NONE/NEUTRAL/ROUNDED/SPREAD を持つ。
 
     NONE=子音なし、NEUTRAL=唇を動かさない子音、ROUNDED=唇を丸める子音、SPREAD=い 方向へ寄せる子音。
     両唇閉鎖は MouthShape.BILABIAL で表しここには含めない。
@@ -53,7 +52,7 @@ def test_mouth_event_consonant_class_set():
 
 
 def test_generation_params_defaults():
-    """GenerationParams の既定値が初期目安と一致する(lipsync.md §4.8)。
+    """GenerationParams の既定値が初期目安と一致する。
 
     vowel_scale は母音的口形別(a,i,u,e,o,n)の6要素で既定は全口形 1 倍。
     """

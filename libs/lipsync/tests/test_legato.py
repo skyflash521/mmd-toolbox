@@ -1,4 +1,4 @@
-"""レガート間隙(LEGATO_GAP)の谷橋渡しのテスト(lipsync.md §3/§4.12)。
+"""レガート間隙(LEGATO_GAP)の谷橋渡しのテスト。
 
 母音グループ間に挟まる `MouthShape.LEGATO_GAP` 区間(あ→閉じかけ→う)は、完全閉口(0.0)でなく前後母音の
 境界保持値を谷で繋ぐ。前後母音の通常の 0.0 リリース/アタックキーはこの span で抑制し、谷キー
@@ -7,8 +7,8 @@
 `clamp(shallow − slope·gap_len, deep, shallow)` で、間隙が長いほど深く(d 小)なる。数値(shallow/deep/
 slope)は GenerationParams の初期目安で、視覚で詰める。
 
-注: LEGATO_GAP/SILENCE のどちらを渡すか(間隙分類)は呼び出し側の責務であり、lipsync は確定入力に従う
-(lipsync.md §6)。本テストは確定入力としての LEGATO_GAP に対する谷生成のみを検証する。
+注: LEGATO_GAP/SILENCE のどちらを渡すか(間隙分類)は呼び出し側の責務であり、lipsync は確定入力に従う。
+本テストは確定入力としての LEGATO_GAP に対する谷生成のみを検証する。
 """
 
 import pytest
