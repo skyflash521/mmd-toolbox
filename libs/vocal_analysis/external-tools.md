@@ -179,6 +179,25 @@ SOFA(Singing-Oriented Forced Aligner。<https://github.com/qiuqiao/SOFA>。MIT)�
   低い。また15ms未満の極端に短い音素セグメントを既定構成より多く出力する傾向がある(利用先の
   後処理である程度吸収されるが完全に無害とは確認できていない)。
 
+### 2.4 英語未知語カタカナ化フォールバックの候補([vocal_analysis.md](vocal_analysis.md) §5.2手順4)
+
+G2P(pyopenjtalk-plus)が正しく読めない未知の英単語を、CMUdictの発音記号経由でカタカナへ補完変換する
+候補比較。
+
+| 候補 | ライセンス | 評価 |
+|---|---|---|
+| **arpakana(採用・既定値)** | MIT | ARPAbet音素をルールベースでカタカナへ変換する軽量ライブラリ(生成モデル・GPU不要) |
+| **tinyllama-katakana-converter(採用・選択式)** | Apache-2.0 | TinyLlamaベースの生成モデル。代理データセット27語での目視評価は14語(51.9%)が合格し、当初の運用基準(70%)を下回った。この基準未達を承知の上で、残存リスク(下記)を受容し選択式方式として採用した。出力妥当性検査(ひらがな・カタカナのみで構成されるか)は非かな文字の混入は検出できるが、子音脱落・別の音への置換・原語をたどれない変換であってもかなのみで構成されていれば検査を通過するため、発音として不適切な変換を返す場合がある |
+| 自作ARPAbet→カタカナ変換規則 | ― | 精度保証・保守負担が生じるため不採用 |
+| pyopenjtalkユーザー辞書登録 | ― | 辞書CSVの用意・`.dic`ビルドという登録作業を要する手段は採らない方針のため不採用 |
+| e2k(Patchethium/e2k) | コードはUnlicense・配布モデルの学習データ由来のライセンスが不明瞭 | ライセンス上の懸念が作者自身により解消されていないため不採用 |
+| english2kana(m7142yosuke) | MIT表示 | 依存するTensorFlow系パッケージがプロジェクトのnumpyバージョンと両立せず、依存解決自体が不可能なため不採用 |
+| alkana.py(別名englishToKanaConverter) | GPL-2.0 | 変換品質は良好だがライセンス不適合のため不採用 |
+| alphabet2kana | MIT | 英字を1文字ずつアルファベット名で読む機能のみで、単語の発音近似にならないため不採用 |
+| yokolet/transcript | MIT表示 | CMUdict未収録語を救えず「未知語を救う」目的を満たさない。PyPIに公開されておらずpip installで導入不可 |
+| English2KanaTransliteration(Luigi-Pizzolito) | MIT | Go実装でPythonからのin-process呼び出しに不向き |
+| SudachiDict / mecab-ipadic-NEologd系 | Apache-2.0 | 既存の慣用カタカナ表記の辞書引きのみで、未知語の生成的な変換ができない |
+
 ---
 
 ## 3. S0 入力読み込み(ffmpeg の扱い)
