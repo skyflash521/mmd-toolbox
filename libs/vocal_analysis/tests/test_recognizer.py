@@ -1159,3 +1159,85 @@ def test_g2p_converts_oov_fallback_errors_to_recognition_error(monkeypatch, rais
 
     with pytest.raises(recognizer_module.RecognitionError, match=match):
         recognizer_module._g2p("空を見上げてsky")
+
+
+def _isolated_g2p_len(text):
+    import pyopenjtalk
+
+    return len(pyopenjtalk.g2p(text, kana=False, join=False)) if text else 0
+
+
+def _slice_by_segment_lengths(sequence, fragment_lens, target_lens):
+    pos = 0
+    slices = []
+    for i, fragment_len in enumerate(fragment_lens):
+        slices.append(sequence[pos:pos + fragment_len])
+        pos += fragment_len
+        if i < len(target_lens):
+            pos += target_lens[i]
+    return slices
+
+
+@pytest.mark.parametrize(
+    "text,target_spans",
+    [
+        ("空を見上げてsky", [(6, 9)]),  # 対象語が文末
+        ("skyを見上げて", [(0, 3)]),  # 対象語の後に漢字を含む語が続く
+        ("skyだから", [(0, 3)]),  # 対象語の後に助詞が続く
+        ("愛してるsky", [(4, 7)]),  # 対象語の前に活用語尾が続く
+        ("skyを見上げて空", [(0, 3)]),  # 対象語が文頭
+        ("skyとsky", [(0, 3), (4, 7)]),  # 対象語が2つ
+    ],
+)
+def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text, target_spans):
+    import pyopenjtalk
+
+    import vocal_analysis.english_oov_katakana as oov_module
+    from vocal_analysis.recognizer import _g2p
+
+    # 全文再解析方式(_g2pが対象語をカタカナへ置換した文字列全体をあらためてpyopenjtalk.g2pへ
+    # 渡す設計)が、対象語以外の音素列に影響を与えないことを確認する回帰検証。対象語(sky)を
+    # 除いた各断片・対象語自体をそれぞれ単独でG2Pした音素列長を手がかりに、変換前・変換後それぞれの
+    # 全体音素列から同じ断片番号の音素列を切り出し、両者が完全一致することを確認する。
+
+    # 語ごとの変換結果はプロセス内キャッシュ(_conversion_cache)を経由するため、他のテストで
+    # 既にこのキャッシュに値が残っていると、以下のmonkeypatchが実際には呼ばれず無効化されうる。
+    # このテストが他のテストの実行順序に依存せず、かつこのテスト自身も後続テストへ
+    # キャッシュ内容を漏らさないよう、開始時・終了時(assert失敗時も含めtry/finallyで確実に)の
+    # 両方でキャッシュをクリアする。モックが実際に呼ばれたことも呼び出し記録で直接検証する。
+    oov_module._conversion_cache.clear()
+    try:
+        generate_calls = []
+        monkeypatch.setattr(
+            oov_module, "_generate_katakana",
+            lambda word, phonemes: generate_calls.append(word) or "スカイ",
+        )
+
+        fragments = []
+        cursor = 0
+        for start, end in target_spans:
+            fragments.append(text[cursor:start])
+            cursor = end
+        fragments.append(text[cursor:])
+        fragment_lens = [_isolated_g2p_len(fragment) for fragment in fragments]
+        before_target_lens = [_isolated_g2p_len(text[start:end]) for start, end in target_spans]
+        after_target_lens = [_isolated_g2p_len("スカイ") for _ in target_spans]
+
+        before_full = pyopenjtalk.g2p(text, kana=False, join=False)
+        after_full = _g2p(text)
+
+        # 同じ語が複数回出現しても、語ごとの変換結果キャッシュにより_generate_katakanaは語の
+        # 種類数(このテストではいずれもskyのみ)ぶんしか呼ばれない(出現回数ぶんではない)。
+        assert generate_calls == ["sky"]
+
+        # 単独G2P長の合計が、実際の全体音素列長と一致することを明示的に確認する(この前提が
+        # 崩れていれば、以降の断片切り出し比較は不正な位置を比較してしまい回帰を見逃しうる)。
+        assert sum(fragment_lens) + sum(before_target_lens) == len(before_full)
+        assert sum(fragment_lens) + sum(after_target_lens) == len(after_full)
+
+        before_fragments = _slice_by_segment_lengths(before_full, fragment_lens, before_target_lens)
+        after_fragments = _slice_by_segment_lengths(after_full, fragment_lens, after_target_lens)
+
+        assert before_fragments == after_fragments
+    finally:
+        oov_module._conversion_cache.clear()
