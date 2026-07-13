@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from vmd import MorphKey
 
-from .types import ConsonantClass, GenerationParams, MouthEvent, MouthShape
+from .types import ApertureClass, ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
 # 各母音的口形の主モーフ(目的口形と同名の標準口モーフ)。
 _MAIN_MORPH = {
@@ -43,6 +43,16 @@ _PROFILES: dict[MouthShape, dict[str, float]] = {
 _ROUNDED_U_GAIN = 0.3  # ROUNDED → う 方向の丸め
 _ROUNDED_O_GAIN = 0.0  # ROUNDED → お 方向の丸め(初期は う のみ。視覚で調整)
 _SPREAD_I_GAIN = 0.3  # SPREAD → い 方向の横引き
+
+# 開口減衰(子音がもたらす顎の狭め具合)の係数。合成後総量の比例縮小の後に全モーフへ一律に掛ける
+# (比例縮小より前に掛けると縮小の分子・分母から相殺され効果が消えるため)。視覚で詰める初期値。
+# CLI 公開はせず lipsync 内の定数として持つ。
+_APERTURE_SCALE: dict[ApertureClass, float] = {
+    ApertureClass.NONE: 1.0,
+    ApertureClass.FIRM_CLOSURE: 0.75,
+    ApertureClass.NARROW_CHANNEL: 0.85,
+    ApertureClass.SLIGHT_CLOSURE: 0.92,
+}
 
 
 def _preprofile(shape: MouthShape, consonant_class: ConsonantClass) -> dict[str, float]:
@@ -124,16 +134,25 @@ def _weights_from_hold(
 
 
 def _compose(
-    shape: MouthShape, consonant_class: ConsonantClass, open_amount: float, params: GenerationParams
+    shape: MouthShape,
+    consonant_class: ConsonantClass,
+    aperture_class: ApertureClass,
+    open_amount: float,
+    params: GenerationParams,
 ) -> dict[str, float]:
     """母音の合成プロファイルから各口モーフの重みを求める。
 
     手順: (1)母音＋子音種別のプロファイル選択 →(2)補助重みに誇張係数を乗算 →(3)保持値 hold を上限
-    クランプ →(4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小。
+    クランプ →(4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小
+    →(6)縮小後の全モーフへ一律に開口減衰係数を掛ける。開口減衰は手順5より前(hold や暫定重みへの
+    乗算)ではなく必ず手順5の後に適用する: 手順5より前に掛けると、全モーフへ一律に掛かる係数のため
+    比例縮小の分子・分母から相殺され、縮小が発動する組み合わせで開口減衰の効果が完全に消える。
     """
-    return _weights_from_hold(
+    weights = _weights_from_hold(
         shape, consonant_class, _hold_value(shape, open_amount, params), params
     )
+    scale = _APERTURE_SCALE[aperture_class]
+    return {morph: weight * scale for morph, weight in weights.items()}
 
 
 def _shape_diff(
@@ -242,9 +261,15 @@ class _Group:
 
 
 def _opening(event: MouthEvent, params: GenerationParams) -> float:
-    """境界イベントの開き量(吸収先タイブレーク用)。"""
-    scale = params.vowel_scale[_VOWEL_INDEX[event.shape]]
-    return min(max(event.open_amount * scale, 0.0), params.open_cap)
+    """境界イベントの開き量(吸収先タイブレーク用)。
+
+    唇形変調(ConsonantClass)と開口減衰(ApertureClass)の両方を適用した最終重みの最大値を返す。
+    コードベース全体で「その口形イベントがどれだけ開くか」を表す量を `_compose` の出力に一本化し、
+    同じ性質を表す複数の異なる式を持たない。
+    """
+    return max(
+        _compose(event.shape, event.consonant_class, event.aperture_class, event.open_amount, params).values()
+    )
 
 
 def _effective_attack_release(
@@ -434,19 +459,28 @@ def _vibrato_targets(
     """保持プラトーに伸び表現の揺らぎ節点を生成する。
 
     公称開き量 `base_open(t)` を保持・強弱節点の線形補間で求め、正弦波で変調した実効開き量 `open_v` から
-    合成手順で各モーフ重みを出す。節点は正弦波の極値(`t_k = plateau_start + P·(1/4 + k/2)`)の
-    厳密内側のみ。返すのは float 目標 `(モーフ名, フレーム, 重み)` 列(量子化は後段)。
+    合成手順(手順1〜5相当)で各モーフ重みを出し、最後に開口減衰 `aperture_v(t)`(同じ制御点で
+    `aperture_scale` を線形補間したもの)を一律に掛ける。開口減衰を `open_v` の計算に混ぜず最後に
+    別途掛けるのは、合成後総量の比例縮小と相殺させないため(`_compose` と同じ理由)。節点は正弦波の
+    極値(`t_k = plateau_start + P·(1/4 + k/2)`)の厳密内側のみ。返すのは float 目標
+    `(モーフ名, フレーム, 重み)` 列(量子化は後段)。
     """
     holds = [_hold_value(group.shape, ev.open_amount, params) for ev in group.events]
+    scales = [_APERTURE_SCALE[ev.aperture_class] for ev in group.events]
     # 公称開き量の制御点: プラトー始端(先頭 hold)・プラトー内の各イベント中央(その hold)・終端(末尾 hold)。
+    # 開口減衰の制御点も同じ位置で aperture_scale を使って作る(hold とは独立に補間する)。
     points: list[tuple[float, float]] = [(plateau_start, holds[0])]
+    aperture_points: list[tuple[float, float]] = [(plateau_start, scales[0])]
     if len(group.events) >= 2:
-        for ev, hold in zip(group.events, holds):
+        for ev, hold, scale in zip(group.events, holds, scales):
             mid = (ev.start + ev.end) / 2.0
             if plateau_start < mid < plateau_end:
                 points.append((mid, hold))
+                aperture_points.append((mid, scale))
     points.append((plateau_end, holds[-1]))
+    aperture_points.append((plateau_end, scales[-1]))
     points.sort()
+    aperture_points.sort()
     period = params.vibrato_period
     nodes: list[tuple[str, float, float]] = []
     k = 0
@@ -463,8 +497,9 @@ def _vibrato_targets(
         open_v = min(max(base + offset, 0.0), params.open_cap)
         # 同母音グループ内で子音種別が変わりうるので、その時刻のイベントの子音種別で変調する。
         cc = _consonant_at(group.events, t)
+        aperture_v = _interp_open(aperture_points, t)
         for morph, weight in _weights_from_hold(group.shape, cc, open_v, params).items():
-            nodes.append((morph, t, weight))
+            nodes.append((morph, t, weight * aperture_v))
     return nodes
 
 
@@ -485,7 +520,10 @@ def generate_morph_keys(
     """
     groups = _normalize_groups(events, params)
     weights = [
-        [_compose(ev.shape, ev.consonant_class, ev.open_amount, params) for ev in g.events]
+        [
+            _compose(ev.shape, ev.consonant_class, ev.aperture_class, ev.open_amount, params)
+            for ev in g.events
+        ]
         for g in groups
     ]
     n = len(groups)

@@ -63,7 +63,6 @@ def test_vibrato_disabled_when_amp_zero():
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (38, 0.5), (40, 0.0)])
 
 
-@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
 def test_vibrato_follows_interpolated_aperture_scale():
     # あ[0,20]op0.5(ApertureClass.NONE=1.0)・あ[20,40]op0.5(ApertureClass.FIRM_CLOSURE=0.75)を連結。
     # 開き量は両区間とも0.5で一定(公称開き量 base_open(t) は 0.5 で一定)だが、開口減衰
@@ -95,6 +94,48 @@ def test_vibrato_follows_interpolated_aperture_scale():
             (30, 0.375),  # mid2 強弱節点(後方小区間の最終重み 0.5*0.75)
             (36, 0.4125),  # t=35.75: open_v=0.55, aperture_v=0.75(mid2以降は一定0.75)
             (38, 0.375),  # 実効リリース開始(後方小区間の最終重み 0.5*0.75)
+            (40, 0.0),
+        ],
+    )
+
+
+def test_vibrato_aperture_decay_applied_after_shrink_not_before():
+    # あ[0,40]op0.6(SPREAD、ApertureClass.NARROW_CHANNEL=0.85)。有効プロファイル{あ:1.0,い:0.3}。
+    # 揺らぎの山(open_v=0.65)では raw 総量 0.65*1.3=0.845 が cap(0.8)を超え比例縮小が発動するが、
+    # 谷(open_v=0.55)では raw 総量 0.715<0.8 で発動しない。開口減衰を比例縮小の前に適用する誤った
+    # 実装だと、山では decayed_open_v=0.65*0.85=0.5525 となり raw 総量 0.5525*1.3=0.71825<0.8 で
+    # 縮小自体が発動しなくなり、下記の期待値(山:0.523077/0.156923、谷:0.4675/0.14025)とは異なる
+    # (0.5525/0.16575)になる。この違いを既知値で検出する。
+    events = [
+        MouthEvent(MouthShape.A, 0.0, 40.0, 0.6, ConsonantClass.SPREAD, lipsync.ApertureClass.NARROW_CHANNEL)
+    ]
+    env = _envelope(events)
+    assert set(env) == {"あ", "い"}
+    _approx_envelope(
+        env["あ"],
+        [
+            (0, 0.0),
+            (2, 0.51),  # アタック到達(境界の最終重み 0.6*0.85、総量0.78<capで縮小非発動)
+            (6, 0.5230769230769231),  # t=5.75: open_v=0.65(山)、比例縮小あり
+            (13, 0.4675),  # t=13.25: open_v=0.55(谷)、比例縮小なし
+            (21, 0.5230769230769231),
+            (28, 0.4675),
+            (36, 0.5230769230769231),
+            (38, 0.51),
+            (40, 0.0),
+        ],
+    )
+    _approx_envelope(
+        env["い"],
+        [
+            (0, 0.0),
+            (2, 0.153),
+            (6, 0.15692307692307692),
+            (13, 0.14025),
+            (21, 0.15692307692307692),
+            (28, 0.14025),
+            (36, 0.15692307692307692),
+            (38, 0.153),
             (40, 0.0),
         ],
     )

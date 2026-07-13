@@ -130,7 +130,6 @@ def test_short_same_vowel_different_consonant_no_mid_flicker():
     assert env["い"][-1][1] == pytest.approx(0.0)  # 補助はフェードして残留しない
 
 
-@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
 def test_same_vowel_merge_preserves_per_segment_aperture_decay():
     # 同じ母音(あ)で開き量は同じ(0.4)だが ApertureClass が異なる(FIRM_CLOSURE→NONE)2小区間を連結。
     # 各小区間の強弱節点は開口減衰まで適用した最終重みになる: 前0.4×0.75=0.3、後0.4×1.0=0.4。

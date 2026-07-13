@@ -163,7 +163,6 @@ def test_triangle_closes_on_closure_side_only():
         assert _total_open(env, f) > 0.05  # う→え は協調調音で閉口しない
 
 
-@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
 def test_absorb_winner_uses_aperture_decayed_final_weight():
     # _absorb_winner(_opening 経由)は開口減衰(ApertureClass)まで適用した最終重みの最大値で
     # 吸収先を選ぶ。前あ op=0.6(ApertureClass.NONE)→最終重み0.6。
@@ -188,6 +187,33 @@ def test_absorb_winner_uses_aperture_decayed_final_weight():
     u_group = next(g for g in groups if g.shape is MouthShape.U)
     assert (a_group.start, a_group.end) == (0.0, 11.0)  # 前(あ)が勝ち い の span を吸収
     assert (u_group.start, u_group.end) == (11.0, 21.0)  # 後(う)は自身の区間のまま
+
+
+def test_absorb_winner_uses_consonant_modulated_final_weight():
+    # 吸収先の判定は ConsonantClass の唇形変調(補助モーフ)まで含めた最終重みの最大値で行う。
+    # 前あ op=0.7(ConsonantClass.NONE)→最終重み0.7(補助なし・比例縮小非発動)。
+    # 後え op=0.75(ConsonantClass.ROUNDED)→有効プロファイル{え:1.0,う:0.3}(え は ROUNDED の
+    # 補助対象=う/お ではないので二重計上回避の対象外)、raw={え:0.75,う:0.225}、総量0.975>cap=0.8
+    # → factor=0.8/0.975 → 最終重み(主モーフ)=0.75×0.8/0.975≈0.6154。raw な open_amount だけを
+    # 比較する誤実装なら後(0.75)が勝つが、正しくは比例縮小後の最終重みが大きい前(あ、0.7)が勝つ。
+    groups = generate._normalize_groups(
+        [
+            MouthEvent(
+                MouthShape.A, 0.0, 10.0, 0.7, ConsonantClass.NONE, lipsync.ApertureClass.NONE
+            ),
+            MouthEvent(MouthShape.I, 10.0, 11.0, 0.5),
+            MouthEvent(
+                MouthShape.E, 11.0, 21.0, 0.75, ConsonantClass.ROUNDED,
+                lipsync.ApertureClass.NONE,
+            ),
+        ],
+        GenerationParams(),
+    )
+    assert len(groups) == 2
+    a_group = next(g for g in groups if g.shape is MouthShape.A)
+    e_group = next(g for g in groups if g.shape is MouthShape.E)
+    assert (a_group.start, a_group.end) == (0.0, 11.0)  # 前(あ)が勝ち い の span を吸収
+    assert (e_group.start, e_group.end) == (11.0, 21.0)  # 後(え)は自身の区間のまま
 
 
 def test_triangle_legato_triangle_bridged_without_closure():

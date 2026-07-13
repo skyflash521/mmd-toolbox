@@ -163,7 +163,6 @@ def test_vowel_scale_indexed_per_vowel(shape, index, main):
     assert _peak_weights(_vowel(shape, 0.3), p) == pytest.approx({main: 0.45})
 
 
-@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
 @pytest.mark.parametrize(
     "aperture_name,scale",
     [
@@ -181,7 +180,6 @@ def test_aperture_scale_applied_to_pure_vowel(aperture_name, scale):
     assert _peak_weights([ev]) == pytest.approx({"あ": 0.5 * scale})
 
 
-@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
 def test_aperture_decay_after_hold_clamp_not_before():
     # pop プリセット相当(vowel_scale[お]=1.70, open_cap=0.90)。open_amount=0.75・純母音(比例縮小
     # 非発動)・aperture_class=FIRM_CLOSURE(0.75)。hold=clamp(0.75×1.70,0,0.90)=0.90(クランプ発動)。
@@ -195,7 +193,6 @@ def test_aperture_decay_after_hold_clamp_not_before():
     assert _peak_weights([ev], p) == pytest.approx({"お": 0.675})
 
 
-@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
 def test_aperture_decay_survives_total_clamp_shrink():
     # SPREAD(唇形変調)併用で hold が高く合成後総量の比例縮小が発動する条件で、異なる
     # ApertureClass の最終重みが異なる値になることを検証する回帰。
@@ -219,7 +216,6 @@ def test_aperture_decay_survives_total_clamp_shrink():
     assert w_narrow == pytest.approx({"あ": shrunk_a * 0.85, "い": shrunk_i * 0.85})
 
 
-@pytest.mark.xfail(reason="impl pending: ApertureClass", strict=True)
 def test_consonant_and_aperture_independent_composition():
     # ConsonantClass(SPREAD、唇形混合)と ApertureClass(NARROW_CHANNEL、開口減衰)を同一イベントに
     # 設定し、唇形混合(補助モーフ「い」)と開口減衰(最終重みの縮小)が両方反映されることを検証する。

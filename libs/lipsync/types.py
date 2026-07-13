@@ -30,19 +30,36 @@ class MouthShape(Enum):
 
 
 class ConsonantClass(Enum):
-    """母音的口形イベントの先頭子音の種別(唇への影響で分類。§4.1 の母音合成を変調する)。
+    """母音的口形イベントの先頭子音の唇の丸め・横引き方向(母音合成を変調する)。
 
-    標準口モーフは唇・顎しか表せないため、子音は唇に影響するものだけが口形を変えられる。
-    NONE は子音なし、NEUTRAL は唇を動かさない子音(軟口蓋 か行・歯茎 さ/た/な/ら行・声門 は行 等。
-    舌/喉が主体で唇効果なし)、ROUNDED は唇を丸める子音(ふ・わ)、SPREAD は視覚補助として
-    い 方向へ寄せる子音(し・ち・じ・拗音)。両唇閉鎖(ま/ば/ぱ行)は `MouthShape.BILABIAL` で
-    表しここには設けない(二重表現を避ける)。合成上 NONE と NEUTRAL は同値(純母音=主モーフ単独)。
+    標準口モーフは唇しか表せないため、子音は唇に影響するものだけが口形を変えられる。顎の開口量
+    そのものは変えない(開口量は ApertureClass が独立に変調する)。NONE は子音なし、NEUTRAL は
+    唇を動かさない子音(軟口蓋 か行・歯茎 さ/た/な/ら行・声門 は行 等。舌/喉が主体で唇効果なし)、
+    ROUNDED は唇を丸める子音(ふ・わ)、SPREAD は視覚補助として い 方向へ寄せる子音(し・ち・じ・
+    拗音)。両唇閉鎖(ま/ば/ぱ行)は `MouthShape.BILABIAL` で表しここには設けない(二重表現を
+    避ける)。合成上 NONE と NEUTRAL は同値(純母音=主モーフ単独)。
     """
 
     NONE = "none"
     NEUTRAL = "neutral"
     ROUNDED = "rounded"
     SPREAD = "spread"
+
+
+class ApertureClass(Enum):
+    """母音的口形イベントの先頭子音がもたらす顎の開口減衰の強さ(母音合成の各モーフ最終重みを
+    一律に減衰させる)。
+
+    ConsonantClass(唇の丸め・横引き方向)とは独立な軸で、唇の方向を変えず顎の狭め具合だけを表す。
+    各メンバー名・所属音は日本語の音韻論上の厳密な「調音位置」区分ではなく、開口減衰の強さで
+    まとめた視覚チューニング用バケットである。両唇閉鎖(ま/ば/ぱ行)は `MouthShape.BILABIAL` で
+    表しここには設けない。
+    """
+
+    NONE = "none"
+    FIRM_CLOSURE = "firm_closure"
+    NARROW_CHANNEL = "narrow_channel"
+    SLIGHT_CLOSURE = "slight_closure"
 
 
 @dataclass
@@ -57,9 +74,13 @@ class MouthEvent:
     start: float  # 開始フレーム
     end: float  # 終了フレーム
     open_amount: float = 0.0  # 開き量 0〜1。母音的口形(母音・撥音「ん」)区間のみ有意
-    # 先頭子音の種別。母音合成を変調する(§4.1)。母音以外(両唇閉鎖・無音・レガート間隙)では NONE。
-    # 1音符に複数母音があるときはモーラ先頭の母音にのみ付け、後続母音は NONE(呼び出し側の責務)。
+    # 先頭子音の唇の丸め・横引き方向。母音合成を変調する。母音以外(両唇閉鎖・無音・レガート間隙)
+    # では NONE。1音符に複数母音があるときはモーラ先頭の母音にのみ付け、後続母音は NONE
+    # (呼び出し側の責務)。
     consonant_class: ConsonantClass = ConsonantClass.NONE
+    # 先頭子音がもたらす顎の開口減衰。母音合成の各モーフ最終重みを一律に減衰させる。ConsonantClass
+    # とは独立な軸。母音以外では NONE、複数母音の音符ではモーラ先頭の母音にのみ付ける(呼び出し側の責務)。
+    aperture_class: ApertureClass = ApertureClass.NONE
 
 
 @dataclass
