@@ -27,6 +27,7 @@ from .config import (
     ForcedAlignerId,
     SofaAlignerConfig,
 )
+from .english_oov_katakana import convert_oov_words
 from .phonemes import (
     _BLANK_G2P_SYMBOLS,
     _MIN_WORD_DURATION_SEC,
@@ -949,8 +950,29 @@ def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: 
 
 
 def _g2p(text: str) -> list[str]:
-    """テキストをG2Pで音素記号列へ変換する(§5.2手順4。pyopenjtalk-plus、ルールベース)。"""
+    """テキストをG2Pで音素記号列へ変換する(§5.2手順4。pyopenjtalk-plus、ルールベース)。
+
+    pyopenjtalk-plusへ渡す前に、英語未知語カタカナ化フォールバック(convert_oov_words)を適用する。
+    """
     import pyopenjtalk
+
+    try:
+        text = convert_oov_words(text)
+    except ImportError as e:
+        raise RecognitionError(
+            "nltk または transformers/torch が見つかりません。導入してください"
+            "(vocal-analysis extra で導入されます)。"
+        ) from e
+    except LookupError as e:
+        raise RecognitionError(
+            "CMUdict(nltkのcmudictコーパス)が見つかりません。`nltk.download('cmudict')`で"
+            "取得するか、事前にキャッシュしてください。"
+        ) from e
+    except OSError as e:
+        raise RecognitionError(
+            "英語未知語カタカナ化フォールバックの変換モデルを取得できません。ネットワーク接続を"
+            "確認するか、モデルを事前にキャッシュしてください。"
+        ) from e
 
     return pyopenjtalk.g2p(text, kana=False, join=False)
 

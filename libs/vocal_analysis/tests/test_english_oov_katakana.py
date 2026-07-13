@@ -11,6 +11,18 @@ pyopenjtalk-plusが正しく読めない英単語(1形態素ノードで完結�
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_conversion_cache():
+    """convert_oov_wordsが語ごとの変換結果を保持するプロセス内キャッシュを、テスト間で
+    汚染しないよう各テストの前後でクリアする。
+    """
+    import vocal_analysis.english_oov_katakana as module
+
+    module._conversion_cache.clear()
+    yield
+    module._conversion_cache.clear()
+
+
 @pytest.mark.parametrize(
     "surface,pos,expected",
     [
@@ -205,6 +217,33 @@ def test_convert_oov_words_converts_target_via_model(monkeypatch):
 
     assert result == "空を見上げてスカイ"
     assert calls == [("sky", "S K AY1")]
+
+
+def test_convert_oov_words_caches_conversion_result_across_calls(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    # CMUdict参照・モデル推論はいずれもコストが大きいため、同じ語をまたがる複数回の
+    # convert_oov_words呼び出し(_g2pがrecognize()実行中に同じ内容へ繰り返し呼ばれる状況を想定)で
+    # 再計算しない。2回目の呼び出しでは_lookup_cmudict_phonemes・_generate_katakanaのどちらも
+    # 呼ばれないことを確認する。
+    lookup_calls = []
+    monkeypatch.setattr(
+        module, "_lookup_cmudict_phonemes",
+        lambda word: lookup_calls.append(word) or "S K AY1",
+    )
+    generate_calls = []
+    monkeypatch.setattr(
+        module, "_generate_katakana",
+        lambda word, phonemes: generate_calls.append(word) or "スカイ",
+    )
+
+    first = module.convert_oov_words("空を見上げてsky")
+    second = module.convert_oov_words("空を見上げてsky")
+
+    assert first == "空を見上げてスカイ"
+    assert second == "空を見上げてスカイ"
+    assert lookup_calls == ["sky"]
+    assert generate_calls == ["sky"]
 
 
 def test_convert_oov_words_leaves_text_unchanged_when_cmudict_misses(monkeypatch):

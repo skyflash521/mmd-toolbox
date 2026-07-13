@@ -1106,7 +1106,6 @@ def test_path_to_segments_last_token_extends_to_audio_end():
     assert segments[-1].end_sec == pytest.approx(0.10)
 
 
-@pytest.mark.xfail(reason="impl pending: _g2p not yet wired to convert_oov_words", strict=True)
 def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatch):
     import pyopenjtalk
 
@@ -1136,3 +1135,27 @@ def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatc
     assert oov_calls == ["空を見上げてsky"]
     assert g2p_calls == [("スカイ", False, False)]
     assert result == ["s", "u", "k", "a", "i"]
+
+
+@pytest.mark.parametrize(
+    "raised,match",
+    [
+        (ImportError("no nltk"), "nltk"),
+        (LookupError("cmudict not found"), "cmudict"),
+        (OSError("network error"), "変換モデル"),
+    ],
+)
+def test_g2p_converts_oov_fallback_errors_to_recognition_error(monkeypatch, raised, match):
+    import vocal_analysis.recognizer as recognizer_module
+
+    # convert_oov_words内部のCMUdict未取得(LookupError)・変換モデル取得失敗(OSError)・
+    # nltk/torch/transformers未導入(ImportError)は、他のモデルロード処理
+    # (_load_model_and_processor・_load_content_recognizer_pipeline)と同様に、生の例外のまま
+    # 公開APIから漏らさずRecognitionErrorへ変換する。
+    def fake_convert_oov_words(text):
+        raise raised
+
+    monkeypatch.setattr(recognizer_module, "convert_oov_words", fake_convert_oov_words)
+
+    with pytest.raises(recognizer_module.RecognitionError, match=match):
+        recognizer_module._g2p("空を見上げてsky")

@@ -55,11 +55,24 @@ def _find_target_words(text: str) -> list[str]:
     return targets
 
 
+_cmudict_cache = None
+
+
+def _get_cmudict_entries():
+    """CMUdict辞書全体をプロセス内キャッシュする(nltkのdict()は呼び出すたびに辞書全体を
+    再構築するため、_g2p経由で頻繁に呼ばれるこの関数の呼び出しごとに再構築させない)。
+    """
+    global _cmudict_cache
+    if _cmudict_cache is None:
+        from nltk.corpus import cmudict
+
+        _cmudict_cache = cmudict.dict()
+    return _cmudict_cache
+
+
 def _lookup_cmudict_phonemes(word: str) -> str | None:
     """CMUdictで英単語の発音記号(ARPAbet)を引く。複数発音があれば先頭を使う。未収録ならNone。"""
-    from nltk.corpus import cmudict
-
-    entries = cmudict.dict().get(word.lower())
+    entries = _get_cmudict_entries().get(word.lower())
     if not entries:
         return None
     return " ".join(entries[0])
@@ -180,11 +193,33 @@ def convert_oov_words(text: str) -> str:
 
     converted: dict[str, str] = {}
     for word in dict.fromkeys(target_words):
-        phonemes = _lookup_cmudict_phonemes(word)
-        if phonemes is None:
-            continue
-        katakana = _generate_katakana(word, phonemes)
-        if _is_valid_katakana(katakana):
-            converted[word] = katakana
+        result = _convert_word(word)
+        if result is not None:
+            converted[word] = result
 
     return _locate_and_replace(text, target_words, converted)
+
+
+_conversion_cache: dict[str, str | None] = {}
+
+
+def _convert_word(word: str) -> str | None:
+    """1語をカタカナへ変換する(CMUdict参照→モデル生成→出力妥当性検証)。
+
+    _g2p経由でrecognize()の実行中に同じ語が複数回変換対象になりうる(区間全体の音素密度判定・
+    単語単位のG2Pなど、_g2pは同じ内容に対して複数回呼ばれるため)。CMUdict参照・モデル推論は
+    ともに毎回実行するとコストが大きいため、結果(カタカナ、または変換不可を示すNone)をプロセス内
+    キャッシュする(CMUdict・変換モデルはいずれも入力に対して決定論的なため、結果の使い回しは
+    安全)。
+    """
+    if word in _conversion_cache:
+        return _conversion_cache[word]
+
+    result = None
+    phonemes = _lookup_cmudict_phonemes(word)
+    if phonemes is not None:
+        katakana = _generate_katakana(word, phonemes)
+        if _is_valid_katakana(katakana):
+            result = katakana
+    _conversion_cache[word] = result
+    return result
