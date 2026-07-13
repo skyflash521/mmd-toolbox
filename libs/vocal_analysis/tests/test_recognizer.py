@@ -1104,3 +1104,35 @@ def test_path_to_segments_last_token_extends_to_audio_end():
     segments = _path_to_segments([0, 1, 1, 1, 1], ["pau", "a"], frame_duration_sec=0.02)
 
     assert segments[-1].end_sec == pytest.approx(0.10)
+
+
+@pytest.mark.xfail(reason="impl pending: _g2p not yet wired to convert_oov_words", strict=True)
+def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatch):
+    import pyopenjtalk
+
+    import vocal_analysis.recognizer as recognizer_module
+
+    # _g2p は pyopenjtalk.g2p() へ渡す前に convert_oov_words で元テキストを変換する。recognizer
+    # モジュール自身が公開する convert_oov_words 属性をモックする(トップレベルimportで束縛される
+    # 想定の実装契約。_g2pが独自に別名でインポートし直すとこのモックは効かず、それ自体が配線漏れの
+    # 検出になる)。pyopenjtalk.g2p も呼び出し記録付きモックにし、convert_oov_wordsの戻り値が
+    # そのまま渡されることを直接検証する(最終結果の値が偶然一致するだけの弱い検証にしない)。
+    oov_calls = []
+    monkeypatch.setattr(
+        recognizer_module, "convert_oov_words",
+        lambda text: oov_calls.append(text) or "スカイ",
+    )
+
+    g2p_calls = []
+
+    def fake_g2p(text, kana=None, join=None):
+        g2p_calls.append((text, kana, join))
+        return ["s", "u", "k", "a", "i"]
+
+    monkeypatch.setattr(pyopenjtalk, "g2p", fake_g2p)
+
+    result = recognizer_module._g2p("空を見上げてsky")
+
+    assert oov_calls == ["空を見上げてsky"]
+    assert g2p_calls == [("スカイ", False, False)]
+    assert result == ["s", "u", "k", "a", "i"]
