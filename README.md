@@ -11,7 +11,7 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 
 ## 使い方
 
-### 1. Python 3.11 以上をインストールする
+### 1. Python 3.12 以上をインストールする
 
 - [Python 公式ダウンロードページ](https://www.python.org/downloads/)
 - [Python 公式ドキュメント: Python のセットアップと利用](https://docs.python.org/ja/3/using/index.html)
@@ -19,7 +19,7 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 Python のインストール手順は AI に次のように聞いてね。
 
 ```text
-WindowsまたはmacOSでPython 3.11以上をインストールして、ターミナルでpythonコマンドが使えるようにする手順を、初心者向けに教えて。
+WindowsまたはmacOSでPython 3.12以上をインストールして、ターミナルでpythonコマンドが使えるようにする手順を、初心者向けに教えて。
 ```
 
 ### 2. mmd-toolbox をダウンロードする
@@ -177,11 +177,14 @@ shakevmd <入力ファイル名>.vmd
 
 | ツール | 用途 | 備考 |
 |---|---|---|
-| Python 3.11 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.11 未満のことがあるため `py -3` を使う |
+| Python 3.12 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.12 未満のことがあるため `py -3` を使う |
 | Git | バージョン管理 | Windows は Git for Windows(Git Bash 同梱)を推奨 |
 | GitHub CLI(`gh`) | リリース作業(PR 作成・マージ・Release 確認)の実行 | 任意。ツールをリリースするときだけ必要。初回に `gh auth login` で認証する |
 
-`numpy`・`scipy`(実行時依存)と `pytest`(開発依存)は `pip install -e ".[dev]"` で導入される。
+`numpy`・`scipy`(実行時依存)と `pytest`(開発依存)は `pip install -e ".[dev,vocal-analysis]"` で導入される。
+`song2vmd`(音声認識・音声分離を使う)のテスト実行には、追加で `vocal-analysis` extra
+(`torch`・`transformers`・`pyopenjtalk-plus`等)が要る。開発環境構築では両方合わせて
+`pip install -e ".[dev,vocal-analysis]"` を使う。
 
 ### 環境構築
 
@@ -192,7 +195,7 @@ shakevmd <入力ファイル名>.vmd
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,vocal-analysis]"
 ```
 
 **Windows (PowerShell)**
@@ -201,7 +204,7 @@ pip install -e ".[dev]"
 py -3 -m venv .venv
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+pip install -e ".[dev,vocal-analysis]"
 ```
 
 cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替える。

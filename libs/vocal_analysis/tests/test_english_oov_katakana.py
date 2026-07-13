@@ -1,11 +1,13 @@
 """英語未知語カタカナ化フォールバックのテスト。
 
 pyopenjtalk-plusが正しく読めない英単語(1形態素ノードで完結し、品詞がフィラーと判定される
-未知語)を検出し、CMUdictで発音記号を引いて変換モデルへ渡し、カタカナへ補完変換する機能を
+未知語)を検出し、CMUdictで発音記号を引いて変換方式(既定: arpakanaによるルールベース変換、
+選択式: tinyllama-katakana-converterモデルによる生成)へ渡し、カタカナへ補完変換する機能を
 検証する。対象判定条件(_is_target_node)・CMUdict参照(_lookup_cmudict_phonemes)・
-出力妥当性検証(_is_valid_katakana)・全角/半角変換は実際のpyopenjtalk-plus・nltk cmudictを
-使い決定論的に検証する(いずれもローカル・高速でGPU/ネットワークを要さない)。モデル呼び出しを
-伴う変換全体は _generate_katakana をモックして検証する(実モデル・ネットワークを必須にしない)。
+出力妥当性検証(_is_valid_katakana)・全角/半角変換・arpakanaによる変換は実際のpyopenjtalk-plus・
+nltk cmudict・arpakanaを使い決定論的に検証する(いずれもローカル・高速でGPU/ネットワークを
+要さない)。tinyllama-katakana-converterモデル呼び出しを伴う変換は_generate_katakana_tinyllama
+をモックして検証する(実モデル・ネットワークを必須にしない)。
 """
 
 import pytest
@@ -198,22 +200,105 @@ def test_locate_and_replace_prefers_nearer_occurrence_when_widths_mixed():
     assert result == "スカイ スカイ"
 
 
+def test_generate_katakana_arpakana_converts_phonemes_to_kana():
+    from vocal_analysis.english_oov_katakana import _generate_katakana_arpakana
+
+    # arpakanaはARPAbet音素をルールベースでカタカナへ変換する(生成モデル・GPU不要)。
+    assert _generate_katakana_arpakana("sky", "S K AY1") == "スカイ"
+
+
+def test_generate_katakana_arpakana_returns_invalid_output_when_conversion_raises(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    # arpabet_to_kana自体が例外を送出しても、CMUdict未収録・出力不正と同じ安全側フォールバック
+    # (呼び出し元が変換不可と判定できる値)にする。ライブラリ未導入時のインポート例外はこの経路の
+    # 対象外(呼び出し元まで伝播させる。設計上の意図は_generate_katakana_arpakanaのdocstring参照)。
+    import arpakana
+
+    def _raise(phonemes):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(arpakana, "arpabet_to_kana", _raise)
+
+    result = module._generate_katakana_arpakana("sky", "S K AY1")
+
+    assert module._is_valid_katakana(result) is False
+
+
+def test_generate_katakana_tinyllama_returns_invalid_output_when_generation_raises(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    # モデルロード後の生成処理自体が例外を送出しても、arpakanaと同じ安全側フォールバック
+    # (呼び出し元が変換不可と判定できる値)にする。_load_katakana_model自体が送出する例外
+    # (未導入・モデル取得失敗)はこの経路の対象外(呼び出し元まで伝播させる)。
+
+    class _RaisingTokenizer:
+        def __call__(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(module, "_load_katakana_model", lambda: (_RaisingTokenizer(), object()))
+
+    result = module._generate_katakana_tinyllama("sky", "S K AY1")
+
+    assert module._is_valid_katakana(result) is False
+
+
+def test_generate_katakana_dispatches_to_arpakana_by_default():
+    from vocal_analysis.english_oov_katakana import _generate_katakana
+
+    # methodを省略した既定の呼び出しが、method="arpakana"を明示した呼び出しと同じ結果になる
+    # ことを確認する(=既定値がarpakanaであることの検証。単に出力値が既定のTinyLlama実装と
+    # 偶然一致するかどうかでは検証にならないため、method引数の受理そのものを確認する)。
+    assert _generate_katakana("sky", "S K AY1") == _generate_katakana("sky", "S K AY1", method="arpakana")
+
+
+def test_generate_katakana_dispatches_to_tinyllama_when_selected(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    calls = []
+    monkeypatch.setattr(
+        module, "_generate_katakana_tinyllama",
+        lambda word, phonemes: calls.append((word, phonemes)) or "スカイ",
+    )
+
+    result = module._generate_katakana("sky", "S K AY1", method="tinyllama-katakana-converter")
+
+    assert result == "スカイ"
+    assert calls == [("sky", "S K AY1")]
+
+
+def test_generate_katakana_raises_for_unknown_method():
+    from vocal_analysis.english_oov_katakana import _generate_katakana
+
+    # 未知のmethod値は、無言でtinyllama-katakana-converter(GPU・生成モデル)側へ流さず
+    # ValueErrorにする(誤字・将来の値追加が意図せず重いモデルロードにつながることを防ぐ)。
+    with pytest.raises(ValueError):
+        _generate_katakana("sky", "S K AY1", method="unknown-method")
+
+
 def test_convert_oov_words_no_target_returns_text_unchanged():
     from vocal_analysis.english_oov_katakana import convert_oov_words
 
     assert convert_oov_words("空を見上げて雲をながめて") == "空を見上げて雲をながめて"
 
 
-def test_convert_oov_words_converts_target_via_model(monkeypatch):
+def test_convert_oov_words_uses_arpakana_by_default():
+    from vocal_analysis.english_oov_katakana import convert_oov_words
+
+    # methodを指定しない既定の呼び出しは、実際のarpakana(生成モデル不要)で変換する。
+    assert convert_oov_words("空を見上げてsky") == "空を見上げてスカイ"
+
+
+def test_convert_oov_words_converts_target_via_tinyllama_model(monkeypatch):
     import vocal_analysis.english_oov_katakana as module
 
     calls = []
     monkeypatch.setattr(
-        module, "_generate_katakana",
+        module, "_generate_katakana_tinyllama",
         lambda word, phonemes: calls.append((word, phonemes)) or "スカイ",
     )
 
-    result = module.convert_oov_words("空を見上げてsky")
+    result = module.convert_oov_words("空を見上げてsky", method="tinyllama-katakana-converter")
 
     assert result == "空を見上げてスカイ"
     assert calls == [("sky", "S K AY1")]
@@ -224,8 +309,8 @@ def test_convert_oov_words_caches_conversion_result_across_calls(monkeypatch):
 
     # CMUdict参照・モデル推論はいずれもコストが大きいため、同じ語をまたがる複数回の
     # convert_oov_words呼び出し(_g2pがrecognize()実行中に同じ内容へ繰り返し呼ばれる状況を想定)で
-    # 再計算しない。2回目の呼び出しでは_lookup_cmudict_phonemes・_generate_katakanaのどちらも
-    # 呼ばれないことを確認する。
+    # 再計算しない。2回目の呼び出しでは_lookup_cmudict_phonemes・_generate_katakana_tinyllamaの
+    # どちらも呼ばれないことを確認する。
     lookup_calls = []
     monkeypatch.setattr(
         module, "_lookup_cmudict_phonemes",
@@ -233,12 +318,12 @@ def test_convert_oov_words_caches_conversion_result_across_calls(monkeypatch):
     )
     generate_calls = []
     monkeypatch.setattr(
-        module, "_generate_katakana",
+        module, "_generate_katakana_tinyllama",
         lambda word, phonemes: generate_calls.append(word) or "スカイ",
     )
 
-    first = module.convert_oov_words("空を見上げてsky")
-    second = module.convert_oov_words("空を見上げてsky")
+    first = module.convert_oov_words("空を見上げてsky", method="tinyllama-katakana-converter")
+    second = module.convert_oov_words("空を見上げてsky", method="tinyllama-katakana-converter")
 
     assert first == "空を見上げてスカイ"
     assert second == "空を見上げてスカイ"
@@ -249,13 +334,17 @@ def test_convert_oov_words_caches_conversion_result_across_calls(monkeypatch):
 def test_convert_oov_words_leaves_text_unchanged_when_cmudict_misses(monkeypatch):
     import vocal_analysis.english_oov_katakana as module
 
-    # CMUdict参照が失敗した場合(戻り値None)は変換せず元のまま残り、モデルは一切呼ばれない。この
-    # 分岐そのものを検証したいので、_lookup_cmudict_phonemesをモックして直接Noneを返させる
-    # (特定の実在語が現時点でCMUdictに収録されているか否かという外部データの事実には依存しない。
-    # その事実自体は_lookup_cmudict_phonemes単体のテストで別途検証済み)。
+    # CMUdict参照が失敗した場合(戻り値None)は変換せず元のまま残り、変換方式(arpakana・
+    # tinyllama-katakana-converterのいずれも)は一切呼ばれない。この分岐そのものを検証したいので、
+    # _lookup_cmudict_phonemesをモックして直接Noneを返させる(特定の実在語が現時点でCMUdictに
+    # 収録されているか否かという外部データの事実には依存しない。その事実自体は
+    # _lookup_cmudict_phonemes単体のテストで別途検証済み)。
     calls = []
     monkeypatch.setattr(module, "_lookup_cmudict_phonemes", lambda word: None)
-    monkeypatch.setattr(module, "_generate_katakana", lambda word, phonemes: calls.append(word) or "スカイ")
+    monkeypatch.setattr(
+        module, "_generate_katakana_arpakana",
+        lambda word, phonemes: calls.append(word) or "スカイ",
+    )
 
     result = module.convert_oov_words("空を見上げてsky")
 
@@ -263,15 +352,15 @@ def test_convert_oov_words_leaves_text_unchanged_when_cmudict_misses(monkeypatch
     assert calls == []
 
 
-def test_convert_oov_words_leaves_text_unchanged_when_model_output_invalid(monkeypatch):
+def test_convert_oov_words_leaves_text_unchanged_when_output_invalid(monkeypatch):
     import vocal_analysis.english_oov_katakana as module
 
-    # 生成結果に非カタカナ文字が混入した場合(実機確認例: 別語でアルファベットが混入する破綻を
-    # 観測済み)は変換せず元のまま残る安全側フォールバック。対象語はフィラー・CMUdict収録済みの
-    # "sky"を使い、モデルが実際に呼ばれた上でこのフォールバックが働くことを確認する。
+    # 生成結果がひらがな・カタカナ以外の文字(非かな文字)を含む場合は採用せず、変換せず元の
+    # まま残る安全側フォールバックとする。対象語はフィラー・CMUdict収録済みの"sky"を使い、
+    # 変換関数が実際に呼ばれた上でこのフォールバックが働くことを確認する。
     calls = []
     monkeypatch.setattr(
-        module, "_generate_katakana",
+        module, "_generate_katakana_arpakana",
         lambda word, phonemes: calls.append(word) or "スカイER",
     )
 
@@ -279,3 +368,22 @@ def test_convert_oov_words_leaves_text_unchanged_when_model_output_invalid(monke
 
     assert result == "空を見上げてsky"
     assert calls == ["sky"]
+
+
+def test_convert_oov_words_caches_separately_per_method(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    # 同じ語でも変換方式が異なれば別の結果になりうるため、キャッシュは方式ごとに分離する
+    # (arpakanaでの変換結果がtinyllama-katakana-converter指定時の呼び出しを妨げてはならない)。
+    tinyllama_calls = []
+    monkeypatch.setattr(
+        module, "_generate_katakana_tinyllama",
+        lambda word, phonemes: tinyllama_calls.append(word) or "スカイー",
+    )
+
+    arpakana_result = module.convert_oov_words("空を見上げてsky")
+    tinyllama_result = module.convert_oov_words("空を見上げてsky", method="tinyllama-katakana-converter")
+
+    assert arpakana_result == "空を見上げてスカイ"
+    assert tinyllama_result == "空を見上げてスカイー"
+    assert tinyllama_calls == ["sky"]

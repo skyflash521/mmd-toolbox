@@ -111,7 +111,7 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -161,7 +161,7 @@ def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkey
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -206,7 +206,7 @@ def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(
 
     monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -241,7 +241,7 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -286,7 +286,7 @@ def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatc
     monkeypatch.setattr(
         recognizer_module, "_transcribe_text_only",
         lambda samples, content_recognizer_model: "あいうえおかきくけこさしすせそ")
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"] * 100)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: ["a"] * 100)
 
     def fail_if_called():
         raise AssertionError("音素密度が高い区間で音素モデルをロードしてはならない")
@@ -317,7 +317,7 @@ def test_recognize_empty_transcription_confirms_gap_without_g2p_or_model(tmp_pat
         recognizer_module, "_transcribe_segment",
         lambda pipeline, samples: ("  ", None))
 
-    def fail_g2p(text):
+    def fail_g2p(text, method=None):
         raise AssertionError("空文字列の区間でG2Pを呼んではならない")
 
     def fail_load_model():
@@ -361,7 +361,7 @@ def test_recognize_computes_and_passes_word_windows(tmp_path, monkeypatch):
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -410,7 +410,7 @@ def test_recognize_falls_back_to_band_alignment_when_word_window_infeasible(tmp_
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -461,7 +461,7 @@ def test_recognize_falls_back_to_global_min_stay_when_windowed_alignment_fails(t
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -513,7 +513,8 @@ def test_recognize_places_multiple_words_via_per_word_g2p_and_inter_word_window(
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     # 全文("あ い"。トリガ判定の密度算出に使う)と単語ごとの両方の呼び出しに応える。
     monkeypatch.setattr(
-        recognizer_module, "_g2p", lambda text: {"あ": ["a"], "い": ["i"], "あ い": ["a", "i"]}[text])
+        recognizer_module, "_g2p",
+        lambda text, method=None: {"あ": ["a"], "い": ["i"], "あ い": ["a", "i"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -545,7 +546,7 @@ def test_recognize_hallucination_density_sums_across_words(tmp_path, monkeypatch
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment",
         lambda pipeline, samples: ("あ い", [("あ", 0.1, 0.4), ("い", 0.5, 0.9)]))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"] * 15)
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: ["a"] * 15)
 
     def fail_if_called():
         raise AssertionError("音素密度が高い区間で音素モデルをロードしてはならない")
@@ -581,7 +582,7 @@ def test_recognize_empty_word_list_with_nonempty_text_falls_back_like_no_timesta
     )
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", []))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -634,7 +635,7 @@ def test_recognize_last_local_segment_extends_exactly_to_segment_boundary(tmp_pa
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -721,7 +722,7 @@ def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
 
-    def fake_g2p(text):
+    def fake_g2p(text, method=None):
         raise original_error
 
     monkeypatch.setattr(recognizer_module, "_g2p", fake_g2p)
@@ -745,7 +746,7 @@ def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, mo
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: ["a"])
 
     def fake_load(*args, **kwargs):
         raise original_error
@@ -770,7 +771,7 @@ def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monk
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: ["a"])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: ["a"])
 
     def fake_load(*args, **kwargs):
         raise original_error
@@ -1072,7 +1073,7 @@ def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_pa
         return _FakePipeline()
 
     monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -1123,7 +1124,7 @@ def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, m
         return _FakePipeline()
 
     monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
         recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
     )
@@ -1134,6 +1135,91 @@ def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, m
     recognizer_module.recognize(wav_path, content_recognizer_model=KANA_WHISPER_MODEL)
 
     assert calls["loaded_model"] == KANA_WHISPER_MODEL
+
+
+def test_recognize_english_oov_katakana_method_is_passed_through_to_g2p(tmp_path, monkeypatch):
+    """english_oov_katakana_method に既定値(arpakana)以外を渡すと、_g2p(ひいてはconvert_oov_words)
+    へその方式が渡る(製品経路recognize()からTinyLlama方式を実際に選択できることの検証)。"""
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+    g2p_calls = []
+
+    def fake_g2p(text, method=None):
+        g2p_calls.append(method)
+        return {"あ": ["a"]}[text]
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model: object(),
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
+    monkeypatch.setattr(recognizer_module, "_g2p", fake_g2p)
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    recognizer_module.recognize(
+        wav_path, english_oov_katakana_method="tinyllama-katakana-converter")
+
+    # _resolve_transcription内の音素密度判定(_text_phoneme_density)も含め、_g2pへの全呼び出しが
+    # 同じ指定方式を受け取る(呼び出し回数自体は密度判定の有無に依存するため、回数を1件に固定しない)。
+    assert len(g2p_calls) >= 1
+    assert all(m == "tinyllama-katakana-converter" for m in g2p_calls)
+
+
+def test_recognize_english_oov_katakana_method_reaches_per_word_g2p(tmp_path, monkeypatch):
+    """単語タイムスタンプが取得できた場合の単語ごとのG2P分岐にも、english_oov_katakana_methodが
+    渡る(全文G2P分岐だけでなく単語別G2P分岐も配線されていることの検証)。
+    """
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(2240), 16000)  # 0.14秒・7フレーム
+
+    decoder = {0: "<pad>", 1: "a", 2: "i"}
+    log_probs = np.array(
+        [
+            [5.0, -5.0, -5.0], [-5.0, 5.0, -5.0], [-5.0, 5.0, -5.0], [5.0, -5.0, -5.0],
+            [-5.0, -5.0, 5.0], [-5.0, -5.0, 5.0], [5.0, -5.0, -5.0],
+        ]
+    )
+    g2p_calls = []
+
+    def fake_g2p(text, method=None):
+        g2p_calls.append((text, method))
+        return {"あ": ["a"], "い": ["i"], "あ い": ["a", "i"]}[text]
+
+    def fake_transcribe(pipeline, samples):
+        return "あ い", [("あ", 0.02, 0.04), ("い", 0.06, 0.08)]
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model: object(),
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
+    monkeypatch.setattr(recognizer_module, "_g2p", fake_g2p)
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    recognizer_module.recognize(
+        wav_path, english_oov_katakana_method="tinyllama-katakana-converter")
+
+    # 単語ごとの呼び出し("あ"・"い")が実際に発生し、いずれも指定方式を受け取っている。
+    per_word_calls = [c for c in g2p_calls if c[0] in ("あ", "い")]
+    assert len(per_word_calls) == 2
+    assert all(method == "tinyllama-katakana-converter" for _, method in per_word_calls)
 
 
 def test_recognize_content_recognizer_model_fetch_failure_names_that_model(tmp_path, monkeypatch):
@@ -1229,7 +1315,7 @@ def test_recognize_sofa_path_splits_words_and_reassembles_segments(tmp_path, mon
     # 全文("かき"。トリガ判定の密度算出に使う)と単語ごとの両方の呼び出しに応える。
     monkeypatch.setattr(
         recognizer_module, "_g2p",
-        lambda text: {"か": ["k", "a"], "き": ["k", "i"], "かき": ["k", "a", "k", "i"]}[text]
+        lambda text, method=None: {"か": ["k", "a"], "き": ["k", "i"], "かき": ["k", "a", "k", "i"]}[text]
     )
 
     align_batch_calls = []
@@ -1285,7 +1371,7 @@ def test_recognize_sofa_path_uses_whole_region_when_no_word_timestamps(tmp_path,
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
 
     align_batch_calls = []
 
@@ -1321,7 +1407,7 @@ def test_recognize_sofa_path_never_loads_wav2vec2_model(tmp_path, monkeypatch):
         lambda content_recognizer_model: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(recognizer_module, "_g2p", lambda text: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(recognizer_module.sofa_align, "_align_batch", lambda targets, cfg: {"segment_0000": [(0.0, 0.2, "a")]})
 
     def fail_if_called():

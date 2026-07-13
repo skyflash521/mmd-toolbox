@@ -30,6 +30,7 @@ from cli_events import (
 from vocal_analysis import (
     ContentRecognizerModel,
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
+    DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
     DEFAULT_FORCED_ALIGNER,
     SofaAlignerConfig,
 )
@@ -59,6 +60,9 @@ SEPARATOR_NAMES = ("audio-separator-htdemucs-ft",)
 # S2強制アライメント段の登録アダプタの安定id(vocal_analysis.md §8.2・§8.3が正本)。既定は
 # DEFAULT_FORCED_ALIGNER(wav2vec2-ctc-forcedalign)で、SOFA選択時のみ--sofa-*系が必須になる。
 FORCED_ALIGNER_NAMES = ("wav2vec2-ctc-forcedalign", "sofa-forcedalign")
+
+# 英語未知語カタカナ化フォールバックの変換方式。既定は DEFAULT_ENGLISH_OOV_KATAKANA_METHOD(arpakana)。
+ENGLISH_OOV_KATAKANA_METHOD_NAMES = ("arpakana", "tinyllama-katakana-converter")
 
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS(song2vmd.md 5.2・9章)。
 _MODEL_NAME_MAX_BYTES = 20
@@ -211,6 +215,11 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    help="SOFAチェックポイント(.ckpt)ファイルパス(--forced-aligner sofa-forcedalign時に必須)")
     p.add_argument("--sofa-timeout", dest="sofa_timeout", type=_positive_float, default=300.0,
                    help="SOFAサブプロセス1回あたりのタイムアウト秒数")
+    p.add_argument("--english-oov-katakana-method", dest="english_oov_katakana_method",
+                   choices=ENGLISH_OOV_KATAKANA_METHOD_NAMES,
+                   default=DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+                   help="英語未知語カタカナ化フォールバックの変換方式選択(既定arpakana。"
+                        "tinyllama-katakana-converterは生成モデルを使う選択式オプション)")
     # --n-morph / --no-n-morph は既定 on の対(song2vmd.md 5.2)。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
                    help="撥音「ん」に「ん」モーフを使う(既定on)。--no-n-morphの対の明示形")
@@ -283,6 +292,7 @@ _D_TYPE = {
     "recognizer_model_revision": ("str", None),
     "recognizer_retry": ("flag", None),
     "forced_aligner": ("enum", {"choices": list(FORCED_ALIGNER_NAMES)}),
+    "english_oov_katakana_method": ("enum", {"choices": list(ENGLISH_OOV_KATAKANA_METHOD_NAMES)}),
     "sofa_python": ("str", None),
     "sofa_root": ("str", None),
     "checkpoint_path": ("str", None),
@@ -504,6 +514,7 @@ def _run(args, emitter, fail) -> int:
             silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
             style_name=args.style, model_name=args.model_name,
             forced_aligner=args.forced_aligner, sofa_aligner=_resolve_sofa_aligner_config(args),
+            english_oov_katakana_method=args.english_oov_katakana_method,
             keep_intermediate_dir=keep_intermediate_dir, progress=progress_reporter)
     except AudioLoadError as e:
         return fail("decoder_missing", str(e), 4, field="input")

@@ -264,6 +264,11 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
   指定する利用者自身の選択・責任の範囲。
 - ffmpeg は同梱・再配布しない(§3)ため、そのビルドのライセンス(LGPL/GPL)による義務は生じない。
 - Julius を採用する場合のみ、その音響モデルの個別ライセンスを確認する。
+- 英語未知語カタカナ化フォールバック([vocal_analysis.md](vocal_analysis.md) §5.2手順4)関連:
+  arpakana MIT(既定の変換方式) / nltk
+  Apache-2.0(CMUdict取得用)/ CMUdict(`nltk.corpus.cmudict`が配布するコーパス本体)修正BSD /
+  tinyllama-katakana-converter モデル(Hugging Face 配布 `pyon0024/tinyllama-katakana-converter`。
+  選択式の変換方式)Apache-2.0。
 
 ---
 

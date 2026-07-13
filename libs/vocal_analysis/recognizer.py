@@ -20,10 +20,12 @@ from scipy.signal import resample_poly
 from . import sofa_align
 from .config import (
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
+    DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
     DEFAULT_FORCED_ALIGNER,
     KANA_PROMPT,
     RECOGNIZER_CONFIG,
     ContentRecognizerModel,
+    EnglishOovKatakanaMethod,
     ForcedAlignerId,
     SofaAlignerConfig,
 )
@@ -229,16 +231,18 @@ def _find_suffix_repetition(text: str) -> tuple[str, int, str] | None:
     return best
 
 
-def _text_mora_count(text: str) -> int:
+def _text_mora_count(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD) -> int:
     """テキストのモーラ数(G2P結果の母音・撥音の数)。反復救済の個数正規化に使う。"""
-    return sum(1 for symbol in _g2p(text) if symbol in _MORA_G2P_SYMBOLS)
+    return sum(1 for symbol in _g2p(text, method=method) if symbol in _MORA_G2P_SYMBOLS)
 
 
-def _text_phoneme_density(text: str, duration_sec: float) -> float:
+def _text_phoneme_density(
+    text: str, duration_sec: float, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+) -> float:
     """テキスト全体をG2Pした音素密度(音素/秒)。エコー・反復のトリガ判定に使う。"""
     if not text.strip() or duration_sec <= 0:
         return 0.0
-    return len(_g2p(text)) / duration_sec
+    return len(_g2p(text, method=method)) / duration_sec
 
 
 def _resolve_transcription(
@@ -248,6 +252,7 @@ def _resolve_transcription(
     words: list[tuple[str, float, float]] | None,
     content_recognizer_model: ContentRecognizerModel,
     retry_enabled: bool,
+    english_oov_katakana_method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
 ) -> tuple[str, list[tuple[str, float, float]] | None]:
     """書き起こしの後処理: エコー除去→トリガ式区間リトライ→反復救済。
 
@@ -266,7 +271,8 @@ def _resolve_transcription(
         if not candidate.strip():
             # 元から空の書き起こしは既存のgap確定に委ねる。エコー除去で空になった場合のみ再認識する。
             return echo_removed
-        return _text_phoneme_density(candidate, trim_duration_sec) > _HALLUCINATION_PHONEME_RATE
+        density = _text_phoneme_density(candidate, trim_duration_sec, method=english_oov_katakana_method)
+        return density > _HALLUCINATION_PHONEME_RATE
 
     if retry_enabled and _needs_retry(text2):
         # トリガ式リトライは主モデル自身で、プロンプト無し・タイムスタンプ無しに再認識する。
@@ -278,7 +284,8 @@ def _resolve_transcription(
         retry_text, _retry_echo_removed = _strip_prompt_echo(retry_text)
         text2, words = retry_text, None
 
-    if text2.strip() and _text_phoneme_density(text2, trim_duration_sec) > _HALLUCINATION_PHONEME_RATE:
+    density = _text_phoneme_density(text2, trim_duration_sec, method=english_oov_katakana_method)
+    if text2.strip() and density > _HALLUCINATION_PHONEME_RATE:
         repetition = _find_suffix_repetition(text2)
         if repetition is not None:
             unit, count, head = repetition
@@ -286,7 +293,7 @@ def _resolve_transcription(
             if head.strip():
                 rescued = head
             else:
-                unit_moras = max(1, _text_mora_count(unit))
+                unit_moras = max(1, _text_mora_count(unit, method=english_oov_katakana_method))
                 normalized = max(1, round(trim_duration_sec * _REPEAT_NORMALIZE_MORA_RATE / unit_moras))
                 if normalized < count:
                     rescued = unit * normalized
@@ -665,6 +672,7 @@ def recognize(
     retry: bool = True,
     forced_aligner: ForcedAlignerId = DEFAULT_FORCED_ALIGNER,
     sofa_aligner: SofaAlignerConfig | None = None,
+    english_oov_katakana_method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
 ) -> list[Segment]:
     """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2・§5.3)。
 
@@ -674,7 +682,8 @@ def recognize(
     G2Pはどのモデル・どの強制アライメント経路でも共通。forced_aligner で強制アライメント段を選択する
     (既定`wav2vec2-ctc-forcedalign`)。`forced_aligner="sofa-forcedalign"`を選ぶ場合は
     sofa_aligner(`SofaAlignerConfig`)が必須で、省略(`None`)すると`RecognitionError`にする
-    (黙ってwav2vec2へフォールバックしない)。
+    (黙ってwav2vec2へフォールバックしない)。english_oov_katakana_method で英語未知語カタカナ化
+    フォールバックの変換方式を選択する(既定`arpakana`)。
     """
     if forced_aligner not in ("wav2vec2-ctc-forcedalign", "sofa-forcedalign"):
         raise RecognitionError(f"未知の forced_aligner です: {forced_aligner!r}")
@@ -754,6 +763,7 @@ def recognize(
             text, words = _resolve_transcription(
                 chunk_samples, trim_duration_sec, text, words,
                 content_recognizer_model, retry,
+                english_oov_katakana_method=english_oov_katakana_method,
             )
         except ImportError as e:
             raise RecognitionError(
@@ -778,11 +788,14 @@ def recognize(
             # §5.2手順4: 単語タイムスタンプが取得できた場合は単語ごとに個別にG2Pし(手順5の窓割り当てに
             # 使う)、取得できなかった場合は区間の書き起こし全体を1回で変換する(単語単位に分割しない)。
             if words:
-                words_phonemes = [(_g2p(word_text), w_start, w_end) for word_text, w_start, w_end in words]
+                words_phonemes = [
+                    (_g2p(word_text, method=english_oov_katakana_method), w_start, w_end)
+                    for word_text, w_start, w_end in words
+                ]
                 phonemes = [p for word_phonemes, _, _ in words_phonemes for p in word_phonemes]
             else:
                 words_phonemes = None
-                phonemes = _g2p(text)
+                phonemes = _g2p(text, method=english_oov_katakana_method)
         except ImportError as e:
             raise RecognitionError(
                 "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
@@ -949,18 +962,19 @@ def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: 
     return resample_poly(mono, up, down).astype(np.float32)
 
 
-def _g2p(text: str) -> list[str]:
+def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD) -> list[str]:
     """テキストをG2Pで音素記号列へ変換する(§5.2手順4。pyopenjtalk-plus、ルールベース)。
 
     pyopenjtalk-plusへ渡す前に、英語未知語カタカナ化フォールバック(convert_oov_words)を適用する。
+    methodで変換方式を選択する(既定`arpakana`)。
     """
     import pyopenjtalk
 
     try:
-        text = convert_oov_words(text)
+        text = convert_oov_words(text, method=method)
     except ImportError as e:
         raise RecognitionError(
-            "nltk または transformers/torch が見つかりません。導入してください"
+            "arpakana、nltk、または transformers/torch が見つかりません。導入してください"
             "(vocal-analysis extra で導入されます)。"
         ) from e
     except LookupError as e:

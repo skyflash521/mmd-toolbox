@@ -2,7 +2,7 @@
 
 MMDカメラモーション(VMD)に手ぶれを焼き込むCLIツール
 
-実装言語: Python 3.11+
+実装言語: Python 3.12+
 依存: vmd(同リポジトリのフォーマット層ライブラリ、../../libs/vmd/vmd.md), cli_events(同リポジトリの
 共有ドメイン層ライブラリ、機械モードのイベント送出、../../libs/cli_events/cli_events.md), numpy, scipy,
 click または argparse

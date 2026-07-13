@@ -10,8 +10,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version:
-          - "3.11"
           - "3.12"
+          - "3.14"
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +22,7 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,vocal-analysis]"
 
       - name: Run pytest
         run: pytest

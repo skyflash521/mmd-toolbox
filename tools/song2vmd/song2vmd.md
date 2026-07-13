@@ -169,6 +169,7 @@ song2vmd INPUT [options]
 | `--sofa-root PATH` | 無し(必須) | SOFAリポジトリのルートパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
 | `--sofa-checkpoint PATH` | 無し(必須) | SOFAチェックポイント(`.ckpt`)ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
 | `--sofa-timeout SEC` | `300` | SOFAサブプロセス1回あたりのタイムアウト秒数(正の数値のみ) |
+| `--english-oov-katakana-method NAME` | `arpakana` | S2 G2Pの英語未知語カタカナ化フォールバック(vocal_analysis.md §5.2手順4)の変換方式選択。`arpakana`(ルールベース。生成モデル・GPU不要)または `tinyllama-katakana-converter`(生成モデル) |
 | `--no-n-morph` | off(既定で「ん」モーフを使う) | 撥音「ん」(音節末の鼻音)に「ん」モーフ(`MouthShape.N`)を使わず、無音(閉口)に倒す。既定では「ん」モーフを使う(6.3) |
 | `--vowel-gain a:i:u:e:o` | `1:1:1:1:1` | 母音別(あ/い/う/え/お)の開き量微調整倍率。プリセットの母音別倍率(8.1)へ要素ごとに乗算する(既定はプリセット値そのまま。プリセット非依存の共通既定)。撥音「ん」はプリセット値のままで本引数の対象外(8.2) |
 | `--open-max V` | プリセット値(8.1) | 口の開き量の上限(開けすぎ防止) |
@@ -446,7 +447,7 @@ interface(Separator / Recognizer)、正規化中間形式、アダプタの登�
 - バックエンドの選択(`--separator` / `--recognizer-model-id` / `--recognizer-model-revision` /
   `--no-recognizer-retry` /
   `--separate-vocals` / `--forced-aligner` / `--sofa-python` / `--sofa-root` / `--sofa-checkpoint` /
-  `--sofa-timeout`)は `song2vmd` の CLI で公開する(5.2)。アダプタの追加・切り替えや内容認識
+  `--sofa-timeout` / `--english-oov-katakana-method`)は `song2vmd` の CLI で公開する(5.2)。アダプタの追加・切り替えや内容認識
   モデルの既定値・候補値・リトライ既定の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
 - 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、本リポジトリ本体の
   必須依存は `numpy/scipy` のまま保つ。
@@ -654,7 +655,8 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
   - `mode:"run"`(通常実行): `{type:"result", mode:"run", output, keys, backends, style, separated,
     phonemes, morae, merged_morae, coverage, closed_ranges, max_opening, duration_sec}`。
     `output` は書き出しパス(文字列)、`keys` は出力 VMD のモーフキー数、`backends` は採用バックエンド
-    (`{separator, recognizer, forced_aligner}`)、`style` はプリセット名、`separated` は分離を実施したか(bool)、
+    (`{separator, recognizer, forced_aligner, english_oov_katakana_method}`)、`style` はプリセット名、
+    `separated` は分離を実施したか(bool)、
     `phonemes` は認識音素数、`morae` は検出モーラ数、`merged_morae` は併合/間引きしたモーラ数、
     `coverage` は音素認識の被覆率(0〜1)、`closed_ranges` は閉口区間数、`max_opening` は最大開き量(0〜1)、
     `duration_sec` は入力音声の尺(秒)。6.7 の診断の構造化。

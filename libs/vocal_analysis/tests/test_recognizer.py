@@ -343,7 +343,7 @@ def _resolve(monkeypatch, text, words=None, duration=10.0, retry_result=None, re
 
     monkeypatch.setattr(R, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(R, "_transcribe_text_only", fake_transcribe_text_only)
-    monkeypatch.setattr(R, "_g2p", g2p or (lambda t: ["a"] * len(t.replace(" ", ""))))
+    monkeypatch.setattr(R, "_g2p", g2p or (lambda t, method=None: ["a"] * len(t.replace(" ", ""))))
     return R._resolve_transcription(
         np.zeros(16000, dtype=np.float32), duration, text, words, primary, retry_enabled)
 
@@ -402,7 +402,7 @@ def test_resolve_transcription_normalizes_whole_text_repetition(monkeypatch):
     # 模擬G2P: 1文字=1音素(母音扱い)→ 単位「ラ」=1モーラ。10秒×3.5=35個。
     from vocal_analysis import recognizer as R
 
-    def g2p(t):
+    def g2p(t, method=None):
         return ["a"] * len(t.replace(" ", ""))
 
     monkeypatch.setattr(R, "_g2p", g2p)
@@ -411,6 +411,28 @@ def test_resolve_transcription_normalizes_whole_text_repetition(monkeypatch):
         R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False)
     assert text == "ラ" * 35
     assert words is None
+
+
+def test_resolve_transcription_repetition_rescue_passes_english_oov_katakana_method(monkeypatch):
+    # 反復救済(_text_mora_count経由の個数正規化)でも、指定したenglish_oov_katakana_methodが
+    # _g2pへ渡る(密度判定だけでなく反復救済のモーラ数計算も配線されていることの検証)。
+    from vocal_analysis import recognizer as R
+
+    g2p_methods = []
+
+    def g2p(t, method=None):
+        g2p_methods.append(method)
+        return ["a"] * len(t.replace(" ", ""))
+
+    monkeypatch.setattr(R, "_g2p", g2p)
+    text, words = R._resolve_transcription(
+        np.zeros(16000, dtype=np.float32), 10.0, "ラ" * 400, None,
+        R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False,
+        english_oov_katakana_method="tinyllama-katakana-converter")
+
+    assert text == "ラ" * 35
+    assert len(g2p_methods) >= 1
+    assert all(m == "tinyllama-katakana-converter" for m in g2p_methods)
 
 
 def test_resolve_transcription_rescue_keeps_normal_density_text(monkeypatch):
@@ -1119,7 +1141,7 @@ def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatc
     oov_calls = []
     monkeypatch.setattr(
         recognizer_module, "convert_oov_words",
-        lambda text: oov_calls.append(text) or "スカイ",
+        lambda text, method=None: oov_calls.append(text) or "スカイ",
     )
 
     g2p_calls = []
@@ -1137,6 +1159,34 @@ def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatc
     assert result == ["s", "u", "k", "a", "i"]
 
 
+def test_g2p_method_reaches_real_convert_oov_words_dispatch(monkeypatch):
+    """_g2pに渡したmethodが、モックしていない実際のconvert_oov_words(english_oov_katakanaモジュール)
+    まで届き、実際にtinyllama-katakana-converter側の生成関数が選ばれることを検証する
+    (convert_oov_words自体をモックする他のテストと異なり、実装の分岐そのものを通す)。"""
+    import vocal_analysis.english_oov_katakana as oov_module
+    import vocal_analysis.recognizer as recognizer_module
+
+    oov_module._conversion_cache.clear()
+    try:
+        arpakana_calls = []
+        tinyllama_calls = []
+        monkeypatch.setattr(
+            oov_module, "_generate_katakana_arpakana",
+            lambda word, phonemes: arpakana_calls.append(word) or "スカイ",
+        )
+        monkeypatch.setattr(
+            oov_module, "_generate_katakana_tinyllama",
+            lambda word, phonemes: tinyllama_calls.append(word) or "スカイ",
+        )
+
+        recognizer_module._g2p("空を見上げてsky", method="tinyllama-katakana-converter")
+
+        assert tinyllama_calls == ["sky"]
+        assert arpakana_calls == []
+    finally:
+        oov_module._conversion_cache.clear()
+
+
 @pytest.mark.parametrize(
     "raised,match",
     [
@@ -1152,7 +1202,7 @@ def test_g2p_converts_oov_fallback_errors_to_recognition_error(monkeypatch, rais
     # nltk/torch/transformers未導入(ImportError)は、他のモデルロード処理
     # (_load_model_and_processor・_load_content_recognizer_pipeline)と同様に、生の例外のまま
     # 公開APIから漏らさずRecognitionErrorへ変換する。
-    def fake_convert_oov_words(text):
+    def fake_convert_oov_words(text, method=None):
         raise raised
 
     monkeypatch.setattr(recognizer_module, "convert_oov_words", fake_convert_oov_words)
@@ -1210,7 +1260,7 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
         generate_calls = []
         monkeypatch.setattr(
             oov_module, "_generate_katakana",
-            lambda word, phonemes: generate_calls.append(word) or "スカイ",
+            lambda word, phonemes, method=None: generate_calls.append(word) or "スカイ",
         )
 
         fragments = []

@@ -183,7 +183,8 @@ def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, m
         style_name="ballad", separate_vocals="always"))
 
     assert result.diagnostics.backends == {
-        "separator": "sep-x", "recognizer": "rec-y", "forced_aligner": "wav2vec2-ctc-forcedalign"}
+        "separator": "sep-x", "recognizer": "rec-y", "forced_aligner": "wav2vec2-ctc-forcedalign",
+        "english_oov_katakana_method": "arpakana"}
     assert result.diagnostics.style == "ballad"
     assert result.diagnostics.separated is True
     assert result.diagnostics.phonemes == 1
@@ -214,7 +215,8 @@ def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeyp
 
     received = {}
 
-    def fake_recognize(path, content_recognizer_model, retry, forced_aligner, sofa_aligner):
+    def fake_recognize(path, content_recognizer_model, retry, forced_aligner, sofa_aligner,
+                       english_oov_katakana_method):
         received["content_recognizer_model"] = content_recognizer_model
         received["forced_aligner"] = forced_aligner
         received["sofa_aligner"] = sofa_aligner
@@ -231,6 +233,27 @@ def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeyp
     assert received["content_recognizer_model"] is given_model
     assert received["forced_aligner"] == "sofa-forcedalign"
     assert received["sofa_aligner"] is given_sofa_config
+
+
+def test_recognizer_receives_selected_english_oov_katakana_method(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    received = {}
+
+    def fake_recognize(path, content_recognizer_model, retry, forced_aligner, sofa_aligner,
+                       english_oov_katakana_method):
+        received["english_oov_katakana_method"] = english_oov_katakana_method
+        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
+
+    pipeline.run(input_path, **_common_kwargs(
+        english_oov_katakana_method="tinyllama-katakana-converter"))
+    assert received["english_oov_katakana_method"] == "tinyllama-katakana-converter"
 
 
 def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monkeypatch):
@@ -318,14 +341,17 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
     sofa_config = object()
     progress = _RecordingProgress()
     result = pipeline.run(input_path, progress=progress, **_common_kwargs(
-        max_duration_sec=3.0, forced_aligner="sofa-forcedalign", sofa_aligner=sofa_config))
+        max_duration_sec=3.0, forced_aligner="sofa-forcedalign", sofa_aligner=sofa_config,
+        english_oov_katakana_method="tinyllama-katakana-converter"))
 
     assert len(separate_calls) == 3
     assert len(recognize_calls) == 3
-    # forced_aligner・sofa_alignerは長尺分割の全チャンクへ同一の値で伝播する(song2vmd.md 6.6)。
+    # forced_aligner・sofa_aligner・english_oov_katakana_methodは長尺分割の全チャンクへ
+    # 同一の値で伝播する(song2vmd.md 6.6)。
     for _, kwargs in recognize_calls:
         assert kwargs["forced_aligner"] == "sofa-forcedalign"
         assert kwargs["sofa_aligner"] is sofa_config
+        assert kwargs["english_oov_katakana_method"] == "tinyllama-katakana-converter"
     # 各チャンクは前後1.0秒のオーバーラップを持つ(先頭・末尾は片側のみ。song2vmd.md 6.6)。
     assert separate_calls[0] == pytest.approx(4.0, abs=0.05)  # [0, 3+1]
     assert separate_calls[1] == pytest.approx(5.0, abs=0.05)  # [3-1, 6+1]

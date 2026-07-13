@@ -2,7 +2,7 @@
 
 VMD フォーマット層 — VMD ファイルの読み書き・補間曲線評価・カメラ座標変換・キーフレーム疎化
 
-実装言語: Python 3.11+
+実装言語: Python 3.12+
 依存: numpy, scipy
 
 ---
@@ -87,7 +87,7 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
   (`vmd/io.py` ↔ `libs/vmd/tests/test_io.py`)。
   テスト共通資産(conftest、MMD産データ)は `libs/vmd/tests/` 直下に置く。
 - リポジトリルートに `pyproject.toml` を置き、セットアップは
-  `pip install -e ".[dev]"` の 1 コマンドで完了すること。
+  `pip install -e ".[dev,vocal-analysis]"` の 1 コマンドで完了すること。
 - リポジトリルートで `pytest` を実行するだけで全テスト(フォーマット層・各ツール)が
   走ること。対象ディレクトリを指定して限定できること。
 - テストは環境変数・外部サービス・ネットワーク・MMD本体・GUI を一切要求しない。

@@ -156,6 +156,7 @@
       retry: bool = True,
       forced_aligner: ForcedAlignerId = "wav2vec2-ctc-forcedalign",
       sofa_aligner: SofaAlignerConfig | None = None,
+      english_oov_katakana_method: EnglishOovKatakanaMethod = "arpakana",
   ) -> list[Segment]: ...
   ```
 
@@ -163,8 +164,10 @@
   リトライ」)。強制アライメント段は
   `forced_aligner`で選択可能(既定`wav2vec2-ctc-forcedalign`。5.3・8.1・8.2・8.3)で、
   `forced_aligner="sofa-forcedalign"`のときのみ`sofa_aligner`(`SofaAlignerConfig`。8.3)が必須になる。
+  `english_oov_katakana_method`で英語未知語カタカナ化フォールバック(5.2手順4)の変換方式を選択
+  できる(既定`arpakana`。選択式`tinyllama-katakana-converter`)。
   `content_recognizer_model`は既存どおり第2位置引数のままとし、`retry`・`forced_aligner`・
-  `sofa_aligner`はキーワード専用引数とする。
+  `sofa_aligner`・`english_oov_katakana_method`はキーワード専用引数とする。
   ライブラリ未導入時、またはモデル取得に失敗した場合は `RecognitionError` で失敗する(8.3章)。
   `forced_aligner="sofa-forcedalign"`で`sofa_aligner`が`None`の場合も同様に`RecognitionError`とする。
 
@@ -349,6 +352,20 @@ blank)に対応し、この1記号へ上記の分類規則を適用する。SOFA
    助詞「は」「へ」の読み(わ/え と は/へ の対応)や長音の解釈など、ごく一部は文脈(前後の品詞・
    文節境界)に依存し、内容認識モデルの単語分割の切り方次第で一括変換と異なる読みになることが
    ある(下記の既知の限界に含める)。文中の句読点は `pau`(無音)記号として現れる。
+   **英語未知語のカタカナ化フォールバック**: `pyopenjtalk-plus`へ渡す前に、文中でASCII英字のみの
+   1形態素ノードとして完結し品詞がフィラーと判定される語(`pyopenjtalk-plus`が正しい読みを
+   持たない未知の英単語)を検出し、CMUdict(発音記号辞書)で発音記号(ARPAbet)を引ける場合は
+   変換方式(既定値`arpakana`。ARPAbet音素をルールベースでカタカナへ変換する、生成モデル・
+   GPU不要のライブラリ。選択式`tinyllama-katakana-converter`。生成モデルによる変換)でカタカナへ
+   補完変換し、対象語をカタカナへ置き換えたテキスト全体をあらためて`pyopenjtalk-plus`へ渡す
+   (全文再解析)。CMUdictに未収録の語・変換結果がひらがな/カタカナ以外を含む場合・変換方式自体が
+   失敗した場合は、その語を変換せず元のテキストのまま`pyopenjtalk-plus`へ渡す(安全側
+   フォールバック)。
+   **既知の限界(対象範囲・CMUdict網羅率。未軽減)**: 対象は1形態素ノードで完結する未知語に限る。
+   アポストロフィ・ハイフンを含み複数ノードへ分裂する未知語(`dog's`・`rock-and-roll`等)は対象外
+   で、現行のpyopenjtalk-plus既定動作(アルファベット名の1文字読み)のまま残る。また、CMUdict
+   (1993〜2008年収録)は近年の固有名詞・俗語を収録しておらず、該当語も同様に変換されず現行の
+   既定動作のまま残る。
    **既知の限界(漢字の読み・一部のかなの文脈依存の読み。未軽減)**: かな化されず漢字を含む
    書き起こしになった単語は、漢字の読みを `pyopenjtalk-plus` 自身の辞書・形態素解析が(単語単独の
    文脈で)決定するため、歌詞特有の当て字・非標準的な読み(歌唱でのみ使われる読み方)を誤ることが
@@ -763,14 +780,17 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
 - **Separator**: `separate(vocal_source, mode) -> vocal_wav_path`(内部でライブラリ/サブプロセスを呼ぶ)。
   出力は「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・分離トラック構成・一時ファイルは各実装に
   閉じる。`mode`(`auto`/`always`/`never`)もこの抽象が解釈する。
-- **Recognizer**: `recognize(vocal_wav_path, content_recognizer_model, *, retry, forced_aligner, sofa_aligner) ->
-  [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`(文字列なしの音素認識)。
+- **Recognizer**: `recognize(vocal_wav_path, content_recognizer_model, *, retry, forced_aligner, sofa_aligner,
+  english_oov_katakana_method) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
+  (文字列なしの音素認識)。
   `content_recognizer_model`(`ContentRecognizerModel`。5.2・8.3)は既定値を持つ省略可能引数。
   `retry`(内容認識のトリガ式リトライの有効/無効。`bool`。既定`True`。5.2)はキーワード専用の
   省略可能引数。`forced_aligner`(強制アライメント段の選択。`ForcedAlignerId`。既定
   `wav2vec2-ctc-forcedalign`。5.2・5.3・8.2・8.3)はキーワード専用の省略可能引数で、
   `forced_aligner="sofa-forcedalign"`を選ぶときのみ`sofa_aligner`(`SofaAlignerConfig`。8.3)が
-  必須になる(それ以外では無視する)。
+  必須になる(それ以外では無視する)。`english_oov_katakana_method`(英語未知語カタカナ化
+  フォールバックの変換方式選択。`EnglishOovKatakanaMethod`。既定`arpakana`。5.2手順4)は
+  キーワード専用の省略可能引数。
   `type` は **母音/子音/gap** の3種で、出力は全時間軸を重複・欠落なく被覆する。
   アダプタは言語非依存の音素分割(母音/子音/gap)までに責務を限定し、RMS を必要としない(IPA→母音写像の
   適用・無音/閉口確定は利用先)。この契約(引数・戻り値の型・責務範囲)は`forced_aligner`の選択に

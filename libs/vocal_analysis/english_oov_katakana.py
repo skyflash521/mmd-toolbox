@@ -1,14 +1,19 @@
 """英語未知語カタカナ化フォールバック。
 
 pyopenjtalk-plusが1形態素ノードで完結する未知の英単語を正しく読めない場合(品詞がフィラーと
-判定される場合)に、CMUdictで発音記号(ARPAbet)を引き、変換モデル(ENGLISH_OOV_KATAKANA_MODEL)
-でカタカナへ補完変換する。CMUdictに無い語・変換結果がひらがな/カタカナ以外を含む場合は変換せず
-元のテキストのまま残す(安全側フォールバック)。
+判定される場合)に、CMUdictで発音記号(ARPAbet)を引き、変換方式(既定: arpakanaによるルール
+ベース変換。選択式: ENGLISH_OOV_KATAKANA_MODELの生成モデルによる変換)でカタカナへ補完変換
+する。CMUdictに無い語・変換結果がひらがな/カタカナ以外を含む場合は変換せず元のテキストのまま
+残す(安全側フォールバック)。
 """
 
 import unicodedata
 
-from .config import ENGLISH_OOV_KATAKANA_MODEL
+from .config import (
+    DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    ENGLISH_OOV_KATAKANA_MODEL,
+    EnglishOovKatakanaMethod,
+)
 
 _FULLWIDTH_OFFSET = 0xFEE0
 _FULLWIDTH_LO = 0xFF01
@@ -125,17 +130,62 @@ def _load_katakana_model():
     return _katakana_model_cache
 
 
-def _generate_katakana(word: str, phonemes: str) -> str:
-    """英単語・発音記号からカタカナを生成する(変換モデル呼び出し)。"""
+def _generate_katakana_tinyllama(word: str, phonemes: str) -> str:
+    """英単語・発音記号からカタカナを生成する(変換モデル呼び出し。method="tinyllama-katakana-
+    converter"選択時のみ使う)。
+
+    _load_katakana_model()が送出する例外(未導入時のインポート例外・モデル取得失敗のOSError)は
+    ここで捕捉せず呼び出し元(_g2p)まで伝播させる(環境不備として明確に停止させる。
+    _generate_katakana_arpakanaと同じ設計)。一方、モデルのロード後に生成処理自体が送出する
+    例外は、他の変換失敗経路(CMUdict未収録・出力不正)と同様に扱えるよう、空文字列
+    (_is_valid_katakanaがFalseと判定する値)を返す。
+    """
     import torch
 
     tokenizer, model = _load_katakana_model()
-    prompt = _PROMPT_TEMPLATE.format(word=word, phonemes=phonemes)
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        out = model.generate(**inputs, max_new_tokens=20, do_sample=False)
-    generated = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-    return generated.split("\n")[0].strip()
+    try:
+        prompt = _PROMPT_TEMPLATE.format(word=word, phonemes=phonemes)
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=20, do_sample=False)
+        generated = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        return generated.split("\n")[0].strip()
+    except Exception:
+        return ""
+
+
+def _generate_katakana_arpakana(word: str, phonemes: str) -> str:
+    """ARPAbet発音記号をルールベースでカタカナへ変換する(arpakanaライブラリ。生成モデル・
+    GPU不要。method="arpakana"(既定値)選択時に使う)。wordは使わない(音素列だけから決まる)。
+
+    arpakanaライブラリ未導入時のインポート例外はここで捕捉せず呼び出し元(_g2p)まで伝播させる
+    (CMUdict未収録・出力不正と異なり、ライブラリ不足は語ごとの変換失敗でなく環境不備のため、
+    安全側フォールバックせず明確に停止させる)。一方、変換処理自体が送出する例外(想定外の音素列
+    構成など)は、他の変換失敗経路(CMUdict未収録・出力不正)と同様に扱えるよう、空文字列
+    (_is_valid_katakanaがFalseと判定する値)を返す。
+    """
+    from arpakana import arpabet_to_kana
+
+    try:
+        return arpabet_to_kana(phonemes)
+    except Exception:
+        return ""
+
+
+def _generate_katakana(
+    word: str, phonemes: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+) -> str:
+    """英単語・発音記号からカタカナを生成する(methodで変換方式を選択する)。
+
+    未知のmethod値は、無言でいずれかの方式へ流さずValueErrorにする(EnglishOovKatakanaMethodは
+    型検査上の制約に過ぎず実行時には任意の文字列を渡せるため、誤字や将来の値追加が意図せず
+    tinyllama-katakana-converter(GPU・生成モデル)側で処理されることを防ぐ)。
+    """
+    if method == "arpakana":
+        return _generate_katakana_arpakana(word, phonemes)
+    if method == "tinyllama-katakana-converter":
+        return _generate_katakana_tinyllama(word, phonemes)
+    raise ValueError(f"未知の変換方式です: {method!r}")
 
 
 def _to_halfwidth(text: str) -> str:
@@ -198,9 +248,11 @@ def _locate_and_replace(text: str, target_words: list[str], converted: dict[str,
     return "".join(result)
 
 
-def convert_oov_words(text: str) -> str:
+def convert_oov_words(
+    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+) -> str:
     """テキスト中の対象語(pyopenjtalkが読めない英単語)をカタカナへ変換する。対象語が無ければ
-    元のテキストをそのまま返す。
+    元のテキストをそのまま返す。methodで変換方式を選択する(既定: arpakana)。
     """
     target_words = _find_target_words(text)
     if not target_words:
@@ -208,33 +260,35 @@ def convert_oov_words(text: str) -> str:
 
     converted: dict[str, str] = {}
     for word in dict.fromkeys(target_words):
-        result = _convert_word(word)
+        result = _convert_word(word, method)
         if result is not None:
             converted[word] = result
 
     return _locate_and_replace(text, target_words, converted)
 
 
-_conversion_cache: dict[str, str | None] = {}
+_conversion_cache: dict[tuple[EnglishOovKatakanaMethod, str], str | None] = {}
 
 
-def _convert_word(word: str) -> str | None:
-    """1語をカタカナへ変換する(CMUdict参照→モデル生成→出力妥当性検証)。
+def _convert_word(word: str, method: EnglishOovKatakanaMethod) -> str | None:
+    """1語をカタカナへ変換する(CMUdict参照→変換→出力妥当性検証)。
 
     _g2p経由でrecognize()の実行中に同じ語が複数回変換対象になりうる(区間全体の音素密度判定・
-    単語単位のG2Pなど、_g2pは同じ内容に対して複数回呼ばれるため)。CMUdict参照・モデル推論は
-    ともに毎回実行するとコストが大きいため、結果(カタカナ、または変換不可を示すNone)をプロセス内
-    キャッシュする(CMUdict・変換モデルはいずれも入力に対して決定論的なため、結果の使い回しは
-    安全)。
+    単語単位のG2Pなど、_g2pは同じ内容に対して複数回呼ばれるため)。CMUdict参照・変換はともに
+    毎回実行するとコストが大きいため、結果(カタカナ、または変換不可を示すNone)をプロセス内
+    キャッシュする(CMUdict・各変換方式はいずれも入力に対して決定論的なため、結果の使い回しは
+    安全)。キャッシュキーに変換方式(method)を含めるのは、同じ語でも方式が異なれば結果が
+    異なりうるため(arpakanaとtinyllama-katakana-converterの結果を混同しない)。
     """
-    if word in _conversion_cache:
-        return _conversion_cache[word]
+    cache_key = (method, word)
+    if cache_key in _conversion_cache:
+        return _conversion_cache[cache_key]
 
     result = None
     phonemes = _lookup_cmudict_phonemes(word)
     if phonemes is not None:
-        katakana = _generate_katakana(word, phonemes)
+        katakana = _generate_katakana(word, phonemes, method=method)
         if _is_valid_katakana(katakana):
             result = katakana
-    _conversion_cache[word] = result
+    _conversion_cache[cache_key] = result
     return result
