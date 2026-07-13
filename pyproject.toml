@@ -24,6 +24,7 @@ vocal-analysis = [
     "torch",
     "transformers",
     "pyopenjtalk-plus",
+    "nltk",
 ]
 
 [project.scripts]

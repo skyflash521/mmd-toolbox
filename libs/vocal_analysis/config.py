@@ -64,6 +64,22 @@ KANA_PROMPT = "すべて ひらがなだけで こたえてください。かん
 
 
 @dataclass(frozen=True)
+class EnglishOovKatakanaModel:
+    """英語未知語カタカナ化フォールバックで使う変換モデルの指定。model_revisionを省略(None)
+    すると最新リビジョンを使う。
+    """
+
+    model_id: str
+    model_revision: str | None = None
+
+
+ENGLISH_OOV_KATAKANA_MODEL = EnglishOovKatakanaModel(
+    model_id="pyon0024/tinyllama-katakana-converter",
+    model_revision="3319c206a7f62f0da2660a96a1b3395c3048cfec",
+)
+
+
+@dataclass(frozen=True)
 class SeparatorConfig:
     """S1 ボーカル分離器(audio-separator 経由の Demucs v4 htdemucs_ft)の固定条件(§4・§8.3)。"""
 

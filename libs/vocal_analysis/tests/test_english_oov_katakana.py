@@ -10,11 +10,6 @@ pyopenjtalk-plusが正しく読めない英単語(1形態素ノードで完結�
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    reason="impl pending: vocal_analysis.english_oov_katakana module not yet implemented",
-    strict=True,
-)
-
 
 @pytest.mark.parametrize(
     "surface,pos,expected",
@@ -131,10 +126,12 @@ def test_locate_and_replace_replaces_single_target():
 def test_locate_and_replace_leaves_unconverted_word_untouched():
     from vocal_analysis.english_oov_katakana import _locate_and_replace
 
-    # convertedに値が無い語(CMUdict未収録・生成失敗)は元のテキストのまま残す(安全側フォールバック)。
-    result = _locate_and_replace("空を見上げてTikTok", ["TikTok"], {})
+    # convertedに値が無い語(呼び出し元でCMUdict未収録・生成失敗と判定された語を想定)は元のテキスト
+    # のまま残す(安全側フォールバック)。このテストは_locate_and_replace単体の置換ロジックのみを
+    # 検証するもので、対象語がCMUdictに実在するかどうかとは無関係(任意の語で成立する)。
+    result = _locate_and_replace("空を見上げてwordx", ["wordx"], {})
 
-    assert result == "空を見上げてTikTok"
+    assert result == "空を見上げてwordx"
 
 
 def test_locate_and_replace_handles_multiple_occurrences_in_order():
@@ -149,12 +146,44 @@ def test_locate_and_replace_handles_multiple_occurrences_in_order():
 def test_locate_and_replace_mixed_converted_and_unconverted():
     from vocal_analysis.english_oov_katakana import _locate_and_replace
 
-    # 変換に成功した語と失敗した語が混在しても、成功分だけ正しい位置で置換する。
+    # 変換に成功した語と失敗した語が混在しても、成功分だけ正しい位置で置換する。convertedに
+    # 値が無い語(wordx)がCMUdict未収録かどうかはこのテストの対象外(_locate_and_replace単体の
+    # 置換ロジックのみを検証する)。
     result = _locate_and_replace(
-        "TikTokを見てskyを見上げる", ["TikTok", "sky"], {"sky": "スカイ"}
+        "wordxを見てskyを見上げる", ["wordx", "sky"], {"sky": "スカイ"}
     )
 
-    assert result == "TikTokを見てスカイを見上げる"
+    assert result == "wordxを見てスカイを見上げる"
+
+
+def test_locate_and_replace_matches_fullwidth_original_text():
+    from vocal_analysis.english_oov_katakana import _locate_and_replace
+
+    # 元テキスト自体が全角の場合(半角検索が失敗する場合)は全角表記でも検索する。
+    result = _locate_and_replace("空を見上げてｓｋｙ", ["sky"], {"sky": "スカイ"})
+
+    assert result == "空を見上げてスカイ"
+
+
+def test_locate_and_replace_advances_cursor_past_unconverted_word():
+    from vocal_analysis.english_oov_katakana import _locate_and_replace
+
+    # 変換に失敗した語(位置は特定できるが置換しない)の直後に別の対象語が続く場合、変換失敗語の
+    # 位置を読み飛ばさずカーソルを前進させることで、後続語の検索がその前の位置を誤って拾わない。
+    result = _locate_and_replace("skyline sky", ["skyline", "sky"], {"sky": "スカイ"})
+
+    assert result == "skyline スカイ"
+
+
+def test_locate_and_replace_prefers_nearer_occurrence_when_widths_mixed():
+    from vocal_analysis.english_oov_katakana import _locate_and_replace
+
+    # 同じ対象語が全角表記・半角表記の順で混在する場合、半角検索を無条件に優先すると手前の
+    # 全角の出現を飛び越して後方の半角の出現を誤って拾う。cursorに近い方を優先して両方を
+    # 出現順どおりに正しく置換する。
+    result = _locate_and_replace("ｓｋｙ sky", ["sky", "sky"], {"sky": "スカイ"})
+
+    assert result == "スカイ スカイ"
 
 
 def test_convert_oov_words_no_target_returns_text_unchanged():
@@ -181,13 +210,17 @@ def test_convert_oov_words_converts_target_via_model(monkeypatch):
 def test_convert_oov_words_leaves_text_unchanged_when_cmudict_misses(monkeypatch):
     import vocal_analysis.english_oov_katakana as module
 
-    # CMUdict未収録語(実機確認: TikTok)は変換せず元のまま残る。モデルは一切呼ばれない。
+    # CMUdict参照が失敗した場合(戻り値None)は変換せず元のまま残り、モデルは一切呼ばれない。この
+    # 分岐そのものを検証したいので、_lookup_cmudict_phonemesをモックして直接Noneを返させる
+    # (特定の実在語が現時点でCMUdictに収録されているか否かという外部データの事実には依存しない。
+    # その事実自体は_lookup_cmudict_phonemes単体のテストで別途検証済み)。
     calls = []
+    monkeypatch.setattr(module, "_lookup_cmudict_phonemes", lambda word: None)
     monkeypatch.setattr(module, "_generate_katakana", lambda word, phonemes: calls.append(word) or "スカイ")
 
-    result = module.convert_oov_words("空を見上げてTikTok")
+    result = module.convert_oov_words("空を見上げてsky")
 
-    assert result == "空を見上げてTikTok"
+    assert result == "空を見上げてsky"
     assert calls == []
 
 
