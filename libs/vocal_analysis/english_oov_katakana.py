@@ -85,17 +85,31 @@ def _is_valid_katakana(text: str) -> bool:
     return all(any(lo <= ord(ch) <= hi for lo, hi in _KANA_RANGES) for ch in text)
 
 
+def _select_katakana_model_device() -> str:
+    """変換モデルの実行デバイスを環境から自動選択する(GPUが利用可能ならGPUを使う)。
+
+    変換モデルは1.1Bパラメータの生成モデルで、CPU実行では1回の生成呼び出しに数秒かかる。
+    既存のS2内容認識モデル(recognizer._select_content_recognizer_device)と同じ考え方で
+    GPUを優先する。
+    """
+    import torch
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 _katakana_model_cache = None
 
 
 def _load_katakana_model():
-    """変換モデルをロードする(プロセス内キャッシュ)。"""
+    """変換モデルをロードする(プロセス内キャッシュ)。実行デバイスは環境から自動選択する。"""
     global _katakana_model_cache
     if _katakana_model_cache is not None:
         return _katakana_model_cache
 
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    device = _select_katakana_model_device()
 
     tokenizer = AutoTokenizer.from_pretrained(
         ENGLISH_OOV_KATAKANA_MODEL.model_id, revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision
@@ -105,6 +119,7 @@ def _load_katakana_model():
         revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision,
         dtype=torch.float32,
     )
+    model.to(device)
     model.eval()
     _katakana_model_cache = (tokenizer, model)
     return _katakana_model_cache
@@ -116,7 +131,7 @@ def _generate_katakana(word: str, phonemes: str) -> str:
 
     tokenizer, model = _load_katakana_model()
     prompt = _PROMPT_TEMPLATE.format(word=word, phonemes=phonemes)
-    inputs = tokenizer(prompt, return_tensors="pt")
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         out = model.generate(**inputs, max_new_tokens=20, do_sample=False)
     generated = tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
