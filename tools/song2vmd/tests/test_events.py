@@ -12,7 +12,7 @@ vocal_analysis の音素セグメント列(母音/子音/gap)と相対正規化R
 import numpy as np
 import pytest
 
-from lipsync import ConsonantClass, MouthShape
+from lipsync import ApertureClass, ConsonantClass, MouthShape
 from vocal_analysis import RmsEnvelope, Segment
 
 from song2vmd import events
@@ -195,6 +195,172 @@ def test_consonant_class_neutral_for_unlisted_consonant():
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
     assert mouth_events[0].consonant_class == ConsonantClass.NEUTRAL
+
+
+# --- 開口減衰種別(ApertureClass)の付与 ---------------------------------------
+
+
+def test_aperture_class_none_when_no_preceding_consonant():
+    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.9)]
+    rms = flat_rms(0.3, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[0].aperture_class == ApertureClass.NONE
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd ApertureClass判定", strict=True)
+@pytest.mark.parametrize("phoneme", ["t", "d", "n", "ts", "ɲ"])
+def test_aperture_class_firm_closure(phoneme):
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme=phoneme),
+        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.FIRM_CLOSURE
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd ApertureClass判定", strict=True)
+@pytest.mark.parametrize("phoneme", ["s", "z", "ɕ", "tɕ", "dʑ", "ç", "j"])
+def test_aperture_class_narrow_channel(phoneme):
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme=phoneme),
+        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.NARROW_CHANNEL
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd ApertureClass判定", strict=True)
+@pytest.mark.parametrize("phoneme", ["k", "ɡ", "ɾ", "kʲ", "ɡʲ"])
+def test_aperture_class_slight_closure(phoneme):
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme=phoneme),
+        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.SLIGHT_CLOSURE
+
+
+@pytest.mark.parametrize("phoneme", ["ɸ", "w", "h", "v"])
+def test_aperture_class_none_for_listed_none_phonemes(phoneme):
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme=phoneme),
+        seg("vowel", 0.05, 0.35, phoneme="ɯ" if phoneme in ("ɸ", "w") else "a", confidence=0.9),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.NONE
+
+
+def test_aperture_class_none_for_unlisted_consonant():
+    # 判定表に無い子音(声門破裂音相当の仮記号)はNONEに倒す(song2vmd.md 6.3)。
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme="ʔ"),
+        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.NONE
+
+
+def test_aperture_class_does_not_apply_generic_yod_suffix_rule():
+    # ConsonantClassのSPREAD(語尾ʲの一致)とは異なり、ApertureClassの拗音は判定表の明示メンバー
+    # (kʲ・ɡʲ)だけを判定する(song2vmd.md 6.3「語尾ʲの一致では判定しない」)。表に無い拗音はNONE。
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme="sʲ"),
+        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.NONE
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd ApertureClass判定", strict=True)
+def test_aperture_class_uses_strongest_among_consonant_run_when_strong_comes_last():
+    # k(SLIGHT_CLOSURE)→t(FIRM_CLOSURE)の連続子音列では、区切りからその母音までの間で最も強い
+    # クラスを採る(song2vmd.md 6.3)。
+    segments = [
+        seg("consonant", 0.0, 0.03, phoneme="k"),
+        seg("consonant", 0.03, 0.06, phoneme="t"),
+        seg("vowel", 0.06, 0.36, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.36, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.FIRM_CLOSURE
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd ApertureClass判定", strict=True)
+def test_aperture_class_strongest_wins_when_strong_comes_first():
+    # t(FIRM_CLOSURE)→k(SLIGHT_CLOSURE)の順(最後の子音は弱い)でも列内の最強クラスを採用する。
+    # 「最後の子音だけを見る」誤った実装だとSLIGHT_CLOSUREになってしまう違いを検出する。
+    segments = [
+        seg("consonant", 0.0, 0.03, phoneme="t"),
+        seg("consonant", 0.03, 0.06, phoneme="k"),
+        seg("vowel", 0.06, 0.36, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.36, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].aperture_class == ApertureClass.FIRM_CLOSURE
+
+
+def test_aperture_class_resets_after_bilabial_closure():
+    # 両唇閉鎖は区切りとして扱われ、それより前の子音による開口減衰は閉鎖後の母音へ引き継がない
+    # (song2vmd.md 6.3)。
+    segments = [
+        seg("consonant", 0.0, 0.03, phoneme="t"),
+        seg("consonant", 0.03, 0.08, phoneme="m"),
+        seg("vowel", 0.08, 0.38, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.38, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
+    assert a_event.aperture_class == ApertureClass.NONE
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd ApertureClass判定", strict=True)
+def test_aperture_class_resets_after_moraic_nasal():
+    # ɴ(撥音「ん」)自身が区切りとして扱われることを、母音を挟まず子音→ɴ→子音と連続させて検証する
+    # (母音を挟む構成だと母音境界だけでリセットが説明でき、ɴ自体のリセットを弁別できない)。
+    # ɴがリセットしない誤実装だと列は[t,k]→FIRM_CLOSUREになってしまう。正しくはɴ後のkのみで
+    # 判定しSLIGHT_CLOSUREになる。
+    segments = [
+        seg("consonant", 0.0, 0.03, phoneme="t"),
+        seg("consonant", 0.03, 0.13, phoneme="ɴ"),
+        seg("consonant", 0.13, 0.16, phoneme="k"),
+        seg("vowel", 0.16, 0.46, phoneme="i", confidence=0.9),
+    ]
+    rms = flat_rms(0.46, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    i_event = next(e for e in mouth_events if e.shape == MouthShape.I)
+    assert i_event.aperture_class == ApertureClass.SLIGHT_CLOSURE
+
+
+def test_aperture_class_resets_after_gap():
+    segments = [
+        seg("consonant", 0.0, 0.03, phoneme="t"),
+        seg("gap", 0.03, 0.13),
+        seg("vowel", 0.13, 0.43, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.43, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
+    assert a_event.aperture_class == ApertureClass.NONE
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd ApertureClass判定", strict=True)
+def test_aperture_class_independent_from_consonant_class():
+    # ɲ(にゃ行)はConsonantClass=SPREADかつApertureClass=FIRM_CLOSURE(両軸が一致しない具体例。
+    # song2vmd.md 6.3)。一方の判定がもう一方に影響しないことを確認する。
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme="ɲ"),
+        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].consonant_class == ConsonantClass.SPREAD
+    assert mouth_events[-1].aperture_class == ApertureClass.FIRM_CLOSURE
 
 
 # --- gap解決(RMS依存)・低ダイナミクス抑制 -----------------------------------
@@ -483,6 +649,40 @@ def test_adjacent_different_vowels_do_not_merge():
     rms = flat_rms(0.4, 0.8)
     mouth_events, diag = confirm(segments, rms)
     assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.I]
+    assert diag.merged_morae == 0
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd たた非統合(consonant_ipa存在チェック)", strict=True)
+@pytest.mark.parametrize("phoneme", ["t", "k", "s"])
+def test_repeated_consonant_between_same_vowels_does_not_merge(phoneme):
+    # 「たた」: 間の子音が前後で同じ音素でも、モーラの区切り(子音の再構音)は実在するため統合しない
+    # (song2vmd.md 6.3。lipsyncのモーラ境界の谷で区別できるようにする)。
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme=phoneme),
+        seg("vowel", 0.05, 0.25, phoneme="a", confidence=0.9),
+        seg("consonant", 0.25, 0.30, phoneme=phoneme),
+        seg("vowel", 0.30, 0.50, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.50, 0.8)
+    mouth_events, diag = confirm(segments, rms)
+    assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.A]
+    assert diag.merged_morae == 0
+    assert mouth_events[0].end == pytest.approx(0.25 * FRAME_RATE)
+    assert mouth_events[1].start == pytest.approx(0.25 * FRAME_RATE)
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd たた非統合(consonant_ipa存在チェック)", strict=True)
+def test_different_intervening_consonants_between_same_vowels_do_not_merge():
+    # 「たか」: 間の子音が前後で異なる場合はもとより統合しない(上の「たた」と対称の回帰)。
+    segments = [
+        seg("consonant", 0.0, 0.05, phoneme="t"),
+        seg("vowel", 0.05, 0.25, phoneme="a", confidence=0.9),
+        seg("consonant", 0.25, 0.30, phoneme="k"),
+        seg("vowel", 0.30, 0.50, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.50, 0.8)
+    mouth_events, diag = confirm(segments, rms)
+    assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.A]
     assert diag.merged_morae == 0
 
 
