@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from lipsync import ConsonantClass, MouthEvent, MouthShape
+from lipsync import ApertureClass, ConsonantClass, MouthEvent, MouthShape
 from vocal_analysis.phonemes import espeak_ipa_to_vowel
 
 FRAME_RATE = 30.0  # 30fps基準(song2vmd.md 9章・vmd規約)。
@@ -29,6 +29,18 @@ _MORAIC_NASAL_PHONEME = "ɴ"
 # 先頭子音種別(ConsonantClass)の判定表(song2vmd.md 6.3)。
 _ROUNDED_PHONEMES = frozenset({"ɸ", "w"})
 _SPREAD_PHONEMES = frozenset({"ɕ", "tɕ", "dʑ", "ɲ", "ç"})
+
+# 開口減衰種別(ApertureClass)の判定表(song2vmd.md 6.3)。ConsonantClassとは独立な軸で、区切りから
+# その母音までの子音列のうち最も強いクラスを付与する(_strongest_aperture_class)。
+_FIRM_CLOSURE_PHONEMES = frozenset({"t", "d", "n", "ts", "ɲ"})
+_NARROW_CHANNEL_PHONEMES = frozenset({"s", "z", "ɕ", "tɕ", "dʑ", "ç", "j"})
+_SLIGHT_CLOSURE_PHONEMES = frozenset({"k", "ɡ", "ɾ", "kʲ", "ɡʲ"})
+_APERTURE_RANK = {
+    ApertureClass.NONE: 0,
+    ApertureClass.SLIGHT_CLOSURE: 1,
+    ApertureClass.NARROW_CHANNEL: 2,
+    ApertureClass.FIRM_CLOSURE: 3,
+}
 
 _VOWEL_SHAPES = {"a": MouthShape.A, "i": MouthShape.I, "u": MouthShape.U, "e": MouthShape.E, "o": MouthShape.O}
 
@@ -54,6 +66,27 @@ def _consonant_class(phoneme):
     return ConsonantClass.NEUTRAL
 
 
+def _aperture_class_of_phoneme(phoneme):
+    """単一子音音素の開口減衰種別(song2vmd.md 6.3の判定表)。表に無い子音はNONE。"""
+    if phoneme in _FIRM_CLOSURE_PHONEMES:
+        return ApertureClass.FIRM_CLOSURE
+    if phoneme in _NARROW_CHANNEL_PHONEMES:
+        return ApertureClass.NARROW_CHANNEL
+    if phoneme in _SLIGHT_CLOSURE_PHONEMES:
+        return ApertureClass.SLIGHT_CLOSURE
+    return ApertureClass.NONE
+
+
+def _strongest_aperture_class(consonant_run):
+    """区切りからその母音までに連続して現れる子音列のうち最も強いクラス(song2vmd.md 6.3)。"""
+    strongest = ApertureClass.NONE
+    for phoneme in consonant_run:
+        cls = _aperture_class_of_phoneme(phoneme)
+        if _APERTURE_RANK[cls] > _APERTURE_RANK[strongest]:
+            strongest = cls
+    return strongest
+
+
 @dataclass
 class _Unit:
     """口形イベント確定の中間表現(確定前の口形区間。時刻は秒)。
@@ -70,6 +103,9 @@ class _Unit:
     letter: str | None = None  # "vowel" のみ意味を持つ(a/i/u/e/o)
     confidence: float | None = None  # "vowel" のみ意味を持つ
     consonant_ipa: str | None = None  # "vowel" のみ意味を持つ(先頭子音種別判定用)
+    # "vowel" のみ意味を持つ(開口減衰種別判定用)。直前の区切り(母音・gap・撥音「ん」・両唇閉鎖・
+    # 列先頭)からこの母音までに連続して現れた子音(両唇・撥音を除く)の音素列。
+    aperture_ipas: tuple[str, ...] = ()
     content_start_sec: float | None = None
     content_end_sec: float | None = None
 
@@ -141,19 +177,23 @@ def _classify_phonetic(segments, use_n_morph):
     units = []
     pending_start = None
     last_consonant_ipa = None
+    aperture_run = []  # 区切りからの累積子音列(開口減衰種別判定用。song2vmd.md 6.3)
     for seg in segments:
         if seg.type == "vowel":
             start = pending_start if pending_start is not None else seg.start_sec
             letter = espeak_ipa_to_vowel(seg.phoneme)
             if letter is None:
                 units.append(_Unit("gap", start, seg.end_sec))
+                aperture_run = []
             else:
                 # content_start/end_sec は吸収した子音区間を含めない元のセグメント境界(6.4)。
                 units.append(_Unit(
                     "vowel", start, seg.end_sec, letter=letter,
                     confidence=seg.confidence, consonant_ipa=last_consonant_ipa,
+                    aperture_ipas=tuple(aperture_run),
                     content_start_sec=seg.start_sec, content_end_sec=seg.end_sec,
                 ))
+                aperture_run = []
             pending_start = None
             last_consonant_ipa = None
         elif seg.type == "consonant":
@@ -162,6 +202,7 @@ def _classify_phonetic(segments, use_n_morph):
                 start = pending_start if pending_start is not None else seg.start_sec
                 units.append(_Unit("bilabial", start, seg.end_sec))
                 pending_start = None
+                aperture_run = []  # 両唇閉鎖は区切り(song2vmd.md 6.3)
             elif seg.phoneme == _MORAIC_NASAL_PHONEME:
                 start = pending_start if pending_start is not None else seg.start_sec
                 kind = "n" if use_n_morph else "silence"
@@ -171,15 +212,19 @@ def _classify_phonetic(segments, use_n_morph):
                 ))
                 pending_start = None
                 # 撥音「ん」自身は独立イベントとして表示済みなので、次の母音の先頭子音種別には
-                # 使わない(song2vmd.md 6.3。先行隣接子音なし=NONE)。
+                # 使わない(song2vmd.md 6.3。先行隣接子音なし=NONE)。撥音自身も区切り。
                 last_consonant_ipa = None
-            elif pending_start is None:
-                pending_start = seg.start_sec
+                aperture_run = []
+            else:
+                if pending_start is None:
+                    pending_start = seg.start_sec
+                aperture_run.append(seg.phoneme)
         else:  # gap
             start = pending_start if pending_start is not None else seg.start_sec
             units.append(_Unit("gap", start, seg.end_sec))
             pending_start = None
             last_consonant_ipa = None
+            aperture_run = []
     if pending_start is not None and segments:
         units.append(_Unit("gap", pending_start, segments[-1].end_sec))
     return units
@@ -276,7 +321,14 @@ def _merge_adjacent(units):
     merged = []
     merged_morae = 0
     for u in units:
-        if merged and merged[-1].kind == u.kind and (u.kind != "vowel" or merged[-1].letter == u.letter):
+        # 母音どうしは、間に子音を挟まない(u.consonant_ipa is None、認識上の分割による観測上の
+        # 連続)場合だけ統合する。前後の子音が同一音素であっても(例:「たた」)モーラの区切り
+        # (子音の再構音)は実在するため統合しない(song2vmd.md 6.3)。
+        can_merge = (
+            merged and merged[-1].kind == u.kind
+            and (u.kind != "vowel" or (merged[-1].letter == u.letter and u.consonant_ipa is None))
+        )
+        if can_merge:
             prev = merged[-1]
             if u.kind in _MORA_KINDS:
                 merged_morae += 1
@@ -285,6 +337,7 @@ def _merge_adjacent(units):
             merged[-1] = replace(
                 prev, end_sec=u.end_sec,
                 content_start_sec=prev_content_start, content_end_sec=u_content_end,
+                aperture_ipas=prev.aperture_ipas + u.aperture_ipas,
             )
         else:
             merged.append(u)
@@ -400,16 +453,19 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
                     weak_vowels += 1
                 shape = _VOWEL_SHAPES[u.letter]
                 consonant_class = _consonant_class(u.consonant_ipa)
+                aperture_class = _strongest_aperture_class(u.aperture_ipas)
             else:
                 shape = MouthShape.N
                 consonant_class = ConsonantClass.NONE
+                aperture_class = ApertureClass.NONE
         else:  # "bilabial" | "silence"
             shape = MouthShape.BILABIAL if u.kind == "bilabial" else MouthShape.SILENCE
             open_amount = 0.0
             consonant_class = ConsonantClass.NONE
+            aperture_class = ApertureClass.NONE
         mouth_events.append(MouthEvent(
             shape=shape, start=u.start_sec * FRAME_RATE, end=u.end_sec * FRAME_RATE,
-            open_amount=open_amount, consonant_class=consonant_class,
+            open_amount=open_amount, consonant_class=consonant_class, aperture_class=aperture_class,
         ))
 
     return mouth_events, EventDiagnostics(
