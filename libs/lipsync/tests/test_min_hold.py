@@ -127,10 +127,10 @@ def test_single_sided_absorption_reclassifies_without_remerge():
 def test_absorbed_span_extends_effective_boundary_for_valley_and_midpoints():
     # あ[0,4.5]op0.8(FIRM_CLOSURE)→い[4.5,5.0](短区間、吸収対象)→あ[5.0,9.0]op0.8(FIRM_CLOSURE)。
     # い は前側の あ へ吸収され、あ の実効 end が5.0(元の4.5でなく吸収した0.5ぶん広がった位置)
-    # になり、後側の あ と直接隣接して§4.2の連結で1グループへ再連結される。実効小区間長は
-    # [5.0,4.0]、mid1=2.5(四捨五入3)・mid2=7.0(四捨五入7、hold_endと一致)。内部境界b=5.0の
-    # ApertureClassはFIRM_CLOSURE(後側あ自身のクラス)なので谷が生成される: hw=min(1,2.5,2.0)=1、
-    # 前後の最終重みはどちらも0.8*0.75=0.6、谷central=0.375*(0.6+0.6)=0.45。
+    # になり、後側の あ と直接隣接して§4.2の連結で1グループへ再連結される。内部境界(実効
+    # end=5.0)のApertureClassはFIRM_CLOSURE(後側あ自身のクラス)なので谷が生成される。谷の左肩は
+    # mid1の量子化後フレームと一致、右肩はmid2と一致し、両者とも谷の肩の値と等しいため独立した
+    # 肩キーは生じず、mid1・谷central・mid2の3キーだけが残る。
     events = [
         MouthEvent(
             MouthShape.A, 0.0, 4.5, 0.8, ConsonantClass.NONE, lipsync.ApertureClass.FIRM_CLOSURE
@@ -147,11 +147,9 @@ def test_absorbed_span_extends_effective_boundary_for_valley_and_midpoints():
         [
             (0, 0.0),
             (2, 0.6),
-            (3, 0.6),  # mid1(2.5 を四捨五入)
-            (4, 0.6),  # 谷の左肩(b-hw=4.0)
+            (3, 0.6),  # mid1(2.5 を四捨五入)と谷の左肩(b-hw=3.0)が一致
             (5, 0.45),  # 谷の中央(b=5.0)
-            (6, 0.6),  # 谷の右肩(b+hw=6.0)
-            (7, 0.6),  # mid2(7.0。hold_endと一致)
+            (7, 0.6),  # mid2(7.0)と谷の右肩(b+hw=7.0)が一致
             (9, 0.0),
         ],
     )

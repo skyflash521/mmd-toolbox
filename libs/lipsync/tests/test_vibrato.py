@@ -65,16 +65,11 @@ def test_vibrato_disabled_when_amp_zero():
 
 def test_vibrato_follows_interpolated_aperture_scale():
     # あ[0,20]op0.5(ApertureClass.NONE=1.0)・あ[20,40]op0.5(ApertureClass.FIRM_CLOSURE=0.75)を連結。
-    # 開き量は両区間とも0.5で一定(公称開き量 base_open(t) は 0.5 で一定)だが、開口減衰
-    # aperture_v(t) は同じ制御点(plateau_start=2・mid1=10・mid2=30・plateau_end=38)で 1.0→0.75 へ
-    # 線形補間される。境界(mid1=10とmid2=30の間、b=20)の子音は FIRM_CLOSURE(NONEでない)なので
-    # モーラ境界の谷が生成される(半幅hw=min(1,10,10)=1)。谷の3点は lerp(19)=0.44375・
-    # 中央=0.375*(0.44375+0.43125)=0.328125・lerp(21)=0.43125。揺らぎの極値
-    # (t=5.75(+),13.25(-),20.75(+),28.25(-),35.75(+)。量子化フレーム6,13,21,28,36)のうち、
-    # 谷と逆方向(正)の極値は|t-20|≤max(hw+2,期間/2)=7.5、谷と同方向(負)の極値は
-    # |t-20|≤max(hw+2,期間)=15 の範囲で間引かれる: t=13.25(距離6.75≤15,負→間引き)、
-    # t=20.75(距離0.75≤7.5,正→間引き)、t=28.25(距離8.25≤15,負→間引き)。t=5.75(距離14.25>7.5,正→残存)、
-    # t=35.75(距離15.75>7.5,正→残存)だけが揺らぎ極値として残る。
+    # 開き量は両区間とも0.5で一定だが、開口減衰aperture_v(t)はmid1=10からmid2=30にかけて1.0→0.75へ
+    # 線形補間される。境界の子音がFIRM_CLOSURE(NONEでない)なので谷が生成される。mora_valley_frames
+    # を小さく指定し(既定値では両隣のモーラが長く谷が完全飽和して肩キーが消え、揺らぎ間引き幅も
+    # period/2側でなくhw+2側が支配的になって検証が弱まるため)、谷の肩キー・揺らぎ間引きの両方を
+    # 独立に検証できる形にする。
     events = [
         MouthEvent(
             MouthShape.A, 0.0, 20.0, 0.5, ConsonantClass.NONE, lipsync.ApertureClass.NONE
@@ -84,20 +79,20 @@ def test_vibrato_follows_interpolated_aperture_scale():
             lipsync.ApertureClass.FIRM_CLOSURE,
         ),
     ]
-    env = _envelope(events)
+    env = _envelope(events, GenerationParams(mora_valley_frames=2.0))
     assert set(env) == {"あ"}
     _approx_envelope(
         env["あ"],
         [
             (0, 0.0),
             (2, 0.5),  # アタック到達(先頭小区間の最終重み 0.5*1.0)
-            (6, 0.55),  # t=5.75: open_v=0.5+0.05=0.55, aperture_v(5.75)=1.0(mid1手前は一定1.0)
+            (6, 0.55),  # 揺らぎの正極値(残存)
             (10, 0.5),  # mid1 強弱節点(先頭小区間の最終重み 0.5*1.0)
-            (19, 0.44375),  # モーラ境界の谷の左肩(lerp(19))
-            (20, 0.328125),  # モーラ境界の谷の中央
-            (21, 0.43125),  # モーラ境界の谷の右肩(lerp(21))
+            (18, 0.45),  # 谷の左肩
+            (20, 0.328125),  # 谷の中央
+            (22, 0.425),  # 谷の右肩
             (30, 0.375),  # mid2 強弱節点(後方小区間の最終重み 0.5*0.75)
-            (36, 0.4125),  # t=35.75: open_v=0.55, aperture_v=0.75(mid2以降は一定0.75)
+            (36, 0.4125),  # 揺らぎの正極値(残存)
             (38, 0.375),  # 実効リリース開始(後方小区間の最終重み 0.5*0.75)
             (40, 0.0),
         ],
@@ -147,15 +142,12 @@ def test_vibrato_aperture_decay_applied_after_shrink_not_before():
 
 
 def test_vibrato_extremum_exactly_at_half_period_margin_is_suppressed():
-    # あ[0,20]op0.5(NONE)・あ[20,40]op0.5(FIRM_CLOSURE)を連結。mid1=10,mid2=30,b=20,hw=1。
-    # vibrato_period=24 にすると、揺らぎの極値は t=8(正,k=0)・t=20(負,k=1)・t=32(正,k=2)の3つ
-    # (t=44はk=3でプラトー終端38以上のため生成されない)。正極値(t=8, t=32)は谷と逆方向で、
-    # 距離|8-20|=|32-20|=12 がちょうど正方向の間引き幅 max(hw+2,period/2)=max(3,12)=12 と
-    # 一致する(境界値)。仕様は`≤`(境界を含めて間引く)なので、この2つの正極値はどちらも間引かれ、
-    # 揺らぎ由来のキーは1つも残らない。厳密不等号`<`で間引く誤った実装だと、t=8(重み0.55)・
-    # t=32(重み0.4125=open_v0.55×aperture_v0.75)が残ってしまう。t=20(負、距離0)はどちらの
-    # 実装でも間引かれる(近接マージン
-    # hw+2=3で十分)。谷の3点(19,0.44375)・(20,0.328125)・(21,0.43125)は§4.2の式どおり。
+    # あ[0,20]op0.5(NONE)・あ[20,40]op0.5(FIRM_CLOSURE)を連結。mora_valley_framesを小さく指定し
+    # (理由は前テストと同じ)、vibrato_period=24にする。正方向の間引き幅max(hw+2,period/2)は
+    # period/2=12で支配され、ちょうど揺らぎの正極値(t=8,32)までの距離(12)と一致する境界値になる。
+    # 仕様は`≤`(境界を含めて間引く)なので、この2つの正極値はどちらも間引かれ、揺らぎ由来のキーは
+    # 1つも残らない。厳密不等号`<`で間引く誤った実装だと、t=8(重み0.55)・t=32(重み0.4125)が
+    # 残ってしまい、この既知値とは異なる。
     events = [
         MouthEvent(
             MouthShape.A, 0.0, 20.0, 0.5, ConsonantClass.NONE, lipsync.ApertureClass.NONE
@@ -165,7 +157,7 @@ def test_vibrato_extremum_exactly_at_half_period_margin_is_suppressed():
             lipsync.ApertureClass.FIRM_CLOSURE,
         ),
     ]
-    env = _envelope(events, GenerationParams(vibrato_period=24.0))
+    env = _envelope(events, GenerationParams(mora_valley_frames=2.0, vibrato_period=24))
     assert set(env) == {"あ"}
     _approx_envelope(
         env["あ"],
@@ -173,9 +165,9 @@ def test_vibrato_extremum_exactly_at_half_period_margin_is_suppressed():
             (0, 0.0),
             (2, 0.5),
             (10, 0.5),
-            (19, 0.44375),
+            (18, 0.45),
             (20, 0.328125),
-            (21, 0.43125),
+            (22, 0.425),
             (30, 0.375),
             (38, 0.375),
             (40, 0.0),

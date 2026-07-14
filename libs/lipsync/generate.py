@@ -395,7 +395,7 @@ class _Valley:
 def _mora_valley_candidates(
     group: _Group, gw: list[dict[str, float]], group_morphs: Sequence[str], params: GenerationParams
 ) -> list[_Valley]:
-    """通常長グループの内部境界ごとに、谷の候補(ApertureClass が NONE でなく `hw>0`)を作る。"""
+    """通常長グループの内部境界ごとに、谷の候補(ApertureClass が NONE でなく `hw>=2`)を作る。"""
     events = group.events
     if len(events) < 2:
         return []
@@ -408,7 +408,7 @@ def _mora_valley_candidates(
             continue
         scale = _APERTURE_SCALE[aperture_class]
         hw = math.floor(min(params.mora_valley_frames, b - mids[j], mids[j + 1] - b))
-        if hw <= 0:
+        if hw < 2:
             continue
         d = scale / 2.0
         values: dict[str, tuple[float, float, float]] = {}
@@ -753,7 +753,7 @@ def generate_morph_keys(
                 f_mid = (ev.start + ev.end) / 2.0
                 for morph in group_morphs:
                     targets.append((morph, f_mid, w.get(morph, 0.0)))
-            # モーラ境界の谷(§4.2): ApertureClass が NONE でなく半幅が正の内部境界を候補にし、
+            # モーラ境界の谷(§4.2): ApertureClass が NONE でなく半幅が2フレーム以上の内部境界を候補にし、
             # 密集回避(動的計画法)で採用された谷だけを3点キーとして追加する。
             candidates = _mora_valley_candidates(g, gw, group_morphs, params)
             selected = _select_valleys(candidates, params)

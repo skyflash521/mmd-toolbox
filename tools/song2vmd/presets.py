@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 # song2vmd.md §8.1 の表。pop の母音別倍率・先行・協調調音・伸び表現・レガート谷は、同じ lipsync
 # 生成コアを使う口パク生成系のMMD視覚チューニングで確定した標準値。他スタイルは未チューニングの
-# 出発点値。プリセットは生成パラメータ一式を明示的に持ち、lipsync の生成既定への暗黙依存を残さない。
+# 出発点値。モーラ境界の谷(半幅・最低間隔)はここに含めず、全プリセットが lipsync の生成既定を
+# そのまま使う(song2vmd.md §8.1)。
 _PRESETS = {
     "pop": {
         "open_lo": 0.30, "open_hi": 0.75, "attack": 2, "release": 2,

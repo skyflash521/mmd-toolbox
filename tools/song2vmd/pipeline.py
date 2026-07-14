@@ -78,7 +78,8 @@ def _build_generation_params(openness, style_gen):
     (song2vmd.md §8.1・§8.2)。
 
     vowel_scale は presets.resolve が --vowel-gain 乗算まで済ませた最終6要素。プリセットが持つ
-    生成パラメータ一式を明示的に渡し、lipsync の生成既定への暗黙依存を残さない(song2vmd.md §8.1)。
+    生成パラメータは明示的に渡す。モーラ境界の谷(半幅・最低間隔)はプリセットが値を持たないため
+    渡さず、lipsync の生成既定をそのまま使う(song2vmd.md §8.1)。
     """
     return GenerationParams(
         open_cap=openness.open_max,
