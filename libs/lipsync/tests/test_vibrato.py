@@ -63,7 +63,6 @@ def test_vibrato_disabled_when_amp_zero():
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (38, 0.5), (40, 0.0)])
 
 
-@pytest.mark.xfail(reason="impl pending: mora boundary valley", strict=True)
 def test_vibrato_follows_interpolated_aperture_scale():
     # あ[0,20]op0.5(ApertureClass.NONE=1.0)・あ[20,40]op0.5(ApertureClass.FIRM_CLOSURE=0.75)を連結。
     # 開き量は両区間とも0.5で一定(公称開き量 base_open(t) は 0.5 で一定)だが、開口減衰
@@ -147,7 +146,6 @@ def test_vibrato_aperture_decay_applied_after_shrink_not_before():
     )
 
 
-@pytest.mark.xfail(reason="impl pending: mora boundary valley", strict=True)
 def test_vibrato_extremum_exactly_at_half_period_margin_is_suppressed():
     # あ[0,20]op0.5(NONE)・あ[20,40]op0.5(FIRM_CLOSURE)を連結。mid1=10,mid2=30,b=20,hw=1。
     # vibrato_period=24 にすると、揺らぎの極値は t=8(正,k=0)・t=20(負,k=1)・t=32(正,k=2)の3つ

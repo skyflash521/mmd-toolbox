@@ -12,8 +12,6 @@ import pytest
 import lipsync
 from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
-_PENDING = "impl pending: mora boundary valley"
-
 
 def _envelope(events, params=None):
     params = params or GenerationParams()
@@ -31,7 +29,6 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_basic_valley_between_equal_weight_moras():
     # あ[0,10]op0.8・あ[10,20]op0.8、両方 ApertureClass.FIRM_CLOSURE を連結(「たた」に相当する
     # 最小ケース。同一ConsonantClass・同一開き量・同一ApertureClassでも境界に谷が入る)。
@@ -65,7 +62,6 @@ def test_basic_valley_between_equal_weight_moras():
     )
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_three_moras_all_boundaries_get_valleys_when_well_spaced():
     # 3モーラ(あ、全て op0.8・FIRM_CLOSURE で最終重み0.6均一、長さ10ずつ)を連結。内部境界
     # b1=10, b2=20(いずれも hw=1、間隔十分)は mora_valley_min_gap_frames の既定(4)を満たして
@@ -97,7 +93,6 @@ def test_three_moras_all_boundaries_get_valleys_when_well_spaced():
     )
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_valley_depth_scales_with_aperture_class():
     # 前後の小区間に同じ ApertureClass(両方 FIRM_CLOSURE、または両方 SLIGHT_CLOSURE)を与え
     # 前後の最終重みを0.6で揃え、境界の ApertureClass だけを変えると谷の深さが変わることを見る。
@@ -168,7 +163,6 @@ def test_valley_omitted_when_half_width_floors_to_zero():
     )
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_valley_uses_lerp_not_raw_endpoints_for_unequal_weights():
     # あ[0,6]op0.15(NONE)・あ[6,20]op0.8/0.75=... 最終重み0.60(FIRM_CLOSURE) を連結。
     # mid1=3(w=0.15), mid2=13(w=0.60), b=6, hw=min(1,3,7)=1。lerp は mid1→mid2 を結ぶ直線
@@ -200,7 +194,6 @@ def test_valley_uses_lerp_not_raw_endpoints_for_unequal_weights():
     )
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_density_avoidance_prioritizes_total_displacement_over_greedy():
     # 4小区間(あ、長さ[10,4,4,10])を連結。境界の ApertureClass は中央(b2=14、e3自身の
     # クラス)を FIRM_CLOSURE(aperture_scale=0.75)、両端(b1=10, b3=18、e2/e4のクラス)を
@@ -237,7 +230,6 @@ def test_density_avoidance_prioritizes_total_displacement_over_greedy():
     assert by_frame[12] == pytest.approx(0.6) and by_frame[16] == pytest.approx(0.6)  # mid2・mid3 は平坦
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_density_avoidance_uses_multi_morph_sum_not_single_morph_max():
     # え[0,10]op0.2(NONE consonant, NONE aperture)→え[10,16]op0.2(NONE consonant,
     # FIRM_CLOSURE aperture。b1=10 を作る。主モーフ「え」だけが動く単一モーフ境界)→
@@ -272,7 +264,6 @@ def test_density_avoidance_uses_multi_morph_sum_not_single_morph_max():
     assert by_frame_u[16] == pytest.approx(0.11719384615384618)  # b2の「う」も谷central
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_density_avoidance_uses_quantized_frames_for_gap_check():
     # 3小区間(あ、op0.6均一、FIRM_CLOSURE)を、境界の実数上の左端・右端が互いに逆方向へ丸まる
     # 位置([0,9.51],[9.51,15.52],[15.52,25.52])で連結する。境界1(b1=9.51)の右端は10.51
@@ -293,7 +284,6 @@ def test_density_avoidance_uses_quantized_frames_for_gap_check():
     assert 10 not in by_frame  # b1(round=10)の谷は量子化後の間隔不足で見送られる
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_density_avoidance_prioritizes_actual_displacement_over_aperture_class_alone():
     # 3小区間(あ、長さ[4,2,4])を SLIGHT_CLOSURE→FIRM_CLOSURE の順の境界で連結する。最終重みは
     # w1=0.8(NONE)・w2=0.02*0.92=0.0184(SLIGHT_CLOSURE)・w3=0.02*0.75=0.015(FIRM_CLOSURE)。

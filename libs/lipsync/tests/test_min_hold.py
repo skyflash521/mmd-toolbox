@@ -87,7 +87,6 @@ def test_normal_groups_not_shortened():
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
 
 
-@pytest.mark.xfail(reason="impl pending: multi-segment triangle length-weighted average", strict=True)
 def test_triangle_multi_segment_uses_length_weighted_average_no_valley():
     # あ[0,1]op0.4(ApertureClass.NONE)・あ[1,3]op0.8(ApertureClass.FIRM_CLOSURE)、既定。
     # 合体後 L=3 は triangle_min(2)≤L<min_hold+2(5) で三角形。内部小区間数(n=2)によらず単一
@@ -125,7 +124,6 @@ def test_single_sided_absorption_reclassifies_without_remerge():
     assert g.attack > 0.0 and g.release > 0.0
 
 
-@pytest.mark.xfail(reason="impl pending: mora boundary valley", strict=True)
 def test_absorbed_span_extends_effective_boundary_for_valley_and_midpoints():
     # あ[0,4.5]op0.8(FIRM_CLOSURE)→い[4.5,5.0](短区間、吸収対象)→あ[5.0,9.0]op0.8(FIRM_CLOSURE)。
     # い は前側の あ へ吸収され、あ の実効 end が5.0(元の4.5でなく吸収した0.5ぶん広がった位置)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from vmd import MorphKey
 
@@ -336,8 +336,11 @@ def _normalize_groups(
         )
         winner = _absorb_winner(prev_anchor, nxt_anchor, params)
         if winner is prev_anchor and prev_anchor is not None:
+            # 境界イベント自身の実効 end も広げる(§4.4)。元のイベントは変更せず複製で差し替える。
+            prev_anchor.events[-1] = replace(prev_anchor.events[-1], end=run_end)
             prev_anchor.end = run_end
         elif winner is nxt_anchor and nxt_anchor is not None:
+            nxt_anchor.events[0] = replace(nxt_anchor.events[0], start=run_start)
             nxt_anchor.start = run_start
         i = j
     # 吸収後に直接隣接した同一母音(shape)グループを連結へ統合する(子音種別が違っても同母音は連続)。
@@ -358,6 +361,105 @@ def _normalize_groups(
         if not g.triangle:
             g.attack, g.release = _effective_attack_release(L, params)
     return merged
+
+
+def _lerp_morph(
+    w_prev: dict[str, float], w_next: dict[str, float], t_prev: float, t_next: float, t: float, morph: str
+) -> float:
+    """2つの小区間の最終重み(モーフ別)を結ぶ直線を時刻 t で評価する(§4.2 の `lerp_i`)。"""
+    v_prev, v_next = w_prev.get(morph, 0.0), w_next.get(morph, 0.0)
+    if t_next == t_prev:
+        return v_prev
+    return v_prev + (v_next - v_prev) * (t - t_prev) / (t_next - t_prev)
+
+
+@dataclass
+class _Valley:
+    """モーラ境界の谷の候補(§4.2)。`values` はモーフ名→(左肩, 中央, 右肩) の最終重み。"""
+
+    b: float
+    hw: int
+    aperture_scale: float
+    disp: float
+    values: dict[str, tuple[float, float, float]]
+
+    @property
+    def left(self) -> float:
+        return self.b - self.hw
+
+    @property
+    def right(self) -> float:
+        return self.b + self.hw
+
+
+def _mora_valley_candidates(
+    group: _Group, gw: list[dict[str, float]], group_morphs: Sequence[str], params: GenerationParams
+) -> list[_Valley]:
+    """通常長グループの内部境界ごとに、谷の候補(ApertureClass が NONE でなく `hw>0`)を作る。"""
+    events = group.events
+    if len(events) < 2:
+        return []
+    mids = [(ev.start + ev.end) / 2.0 for ev in events]
+    candidates: list[_Valley] = []
+    for j in range(len(events) - 1):
+        b = events[j].end
+        aperture_class = events[j + 1].aperture_class
+        if aperture_class is ApertureClass.NONE:
+            continue
+        scale = _APERTURE_SCALE[aperture_class]
+        hw = math.floor(min(params.mora_valley_frames, b - mids[j], mids[j + 1] - b))
+        if hw <= 0:
+            continue
+        d = scale / 2.0
+        values: dict[str, tuple[float, float, float]] = {}
+        disp = 0.0
+        for morph in group_morphs:
+            left_val = _lerp_morph(gw[j], gw[j + 1], mids[j], mids[j + 1], b - hw, morph)
+            right_val = _lerp_morph(gw[j], gw[j + 1], mids[j], mids[j + 1], b + hw, morph)
+            center_val = d * (left_val + right_val)
+            values[morph] = (left_val, center_val, right_val)
+            disp += (1.0 - scale) * _lerp_morph(gw[j], gw[j + 1], mids[j], mids[j + 1], b, morph)
+        candidates.append(_Valley(b, hw, scale, disp, values))
+    return candidates
+
+
+def _select_valleys(candidates: Sequence[_Valley], params: GenerationParams) -> list[_Valley]:
+    """密集回避: 視覚的な変位量の総和を最大化する部分集合を動的計画法で選ぶ(§4.2)。
+
+    互換性判定は整数フレーム化した両端点で行う(`round(L_j) - round(R_i) - 1 ≥
+    mora_valley_min_gap_frames`)。同値の場合は必ず採用する側を選ぶ(候補を右端の昇順に処理する
+    決定論的な単一パスなので、複数の最適解が並ぶ曖昧さは生じない)。
+    """
+    ordered = sorted(candidates, key=lambda c: c.right)
+    n = len(ordered)
+    q_left = [_half_up(c.left) for c in ordered]
+    q_right = [_half_up(c.right) for c in ordered]
+    gap = params.mora_valley_min_gap_frames
+    pred: list[int] = []  # 1-indexed 互換先(0 は「候補なし」)
+    for i in range(n):
+        best = 0
+        for j in range(i):
+            if q_left[i] - q_right[j] - 1 >= gap:
+                best = j + 1
+        pred.append(best)
+    opt = [0.0] * (n + 1)
+    take_choice = [False] * (n + 1)
+    for i in range(1, n + 1):
+        take = ordered[i - 1].disp + opt[pred[i - 1]]
+        skip = opt[i - 1]
+        if take >= skip:
+            opt[i], take_choice[i] = take, True
+        else:
+            opt[i], take_choice[i] = skip, False
+    selected: list[_Valley] = []
+    i = n
+    while i > 0:
+        if take_choice[i]:
+            selected.append(ordered[i - 1])
+            i = pred[i - 1]
+        else:
+            i -= 1
+    return selected
 
 
 def _preceding_event(events: Sequence[MouthEvent], start: float) -> MouthEvent | None:
@@ -453,8 +555,24 @@ def _consonant_at(events: Sequence[MouthEvent], t: float) -> ConsonantClass:
     return nearest.consonant_class
 
 
+def _suppressed_by_valley(t: float, sign: float, period: float, valleys: Sequence[_Valley]) -> bool:
+    """揺らぎ極値(時刻 t・符号 sign)が、いずれかの谷(常に負方向)との近接で間引かれるべきか。
+
+    谷と逆方向(正)の極値は `|t-b| ≤ max(hw+2, vibrato_period/2)` で、谷と同じ方向(負)の極値は
+    `|t-b| ≤ max(hw+2, vibrato_period)` で間引く(§4.2)。マージンは実際にクランプ済みの半幅
+    `hw` を使う(パラメータ `mora_valley_frames` そのものは使わない)。
+    """
+    return any(
+        abs(t - v.b) <= max(v.hw + 2, period if sign < 0.0 else period / 2.0) for v in valleys
+    )
+
+
 def _vibrato_targets(
-    group: _Group, plateau_start: float, plateau_end: float, params: GenerationParams
+    group: _Group,
+    plateau_start: float,
+    plateau_end: float,
+    params: GenerationParams,
+    valleys: Sequence[_Valley] = (),
 ) -> list[tuple[str, float, float]]:
     """保持プラトーに伸び表現の揺らぎ節点を生成する。
 
@@ -462,7 +580,9 @@ def _vibrato_targets(
     合成手順(手順1〜5相当)で各モーフ重みを出し、最後に開口減衰 `aperture_v(t)`(同じ制御点で
     `aperture_scale` を線形補間したもの)を一律に掛ける。開口減衰を `open_v` の計算に混ぜず最後に
     別途掛けるのは、合成後総量の比例縮小と相殺させないため(`_compose` と同じ理由)。節点は正弦波の
-    極値(`t_k = plateau_start + P·(1/4 + k/2)`)の厳密内側のみ。返すのは float 目標
+    極値(`t_k = plateau_start + P·(1/4 + k/2)`)の厳密内側のみ。プラトー内にモーラ境界の谷(§4.2)が
+    ある場合、谷と逆方向(正)の極値は半周期、谷と同じ方向(負)の極値は1周期の間引き幅で除外する
+    (同符号の二重ディップ・谷直後の近接ディップを防ぐ)。返すのは float 目標
     `(モーフ名, フレーム, 重み)` 列(量子化は後段)。
     """
     holds = [_hold_value(group.shape, ev.open_amount, params) for ev in group.events]
@@ -492,8 +612,11 @@ def _vibrato_targets(
         base = _interp_open(points, t)
         if base <= 0.0:
             continue
+        sign = math.sin(2.0 * math.pi * (t - plateau_start) / period)
+        if valleys and _suppressed_by_valley(t, sign, period, valleys):
+            continue
         amp_eff = min(params.vibrato_amp, base)
-        offset = amp_eff * math.sin(2.0 * math.pi * (t - plateau_start) / period)
+        offset = amp_eff * sign
         open_v = min(max(base + offset, 0.0), params.open_cap)
         # 同母音グループ内で子音種別が変わりうるので、その時刻のイベントの子音種別で変調する。
         cc = _consonant_at(group.events, t)
@@ -551,17 +674,30 @@ def generate_morph_keys(
     # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、最後に一括量子化する。
     targets: list[tuple[str, float, float]] = []
     plateaus: list[tuple[float, float]] = []  # グループごとの保持プラトー [始端, 終端](伸び表現の対象)。
+    valleys_by_group: dict[int, list[_Valley]] = {}  # モーラ境界の谷(§4.2)。伸び表現の間引きが参照する。
     # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
     for i, g in enumerate(groups):
         gw = weights[i]
         if g.triangle:
             # 三角形短区間: 中央に保持値ピーク1点。極短母音を吸収せず開いて見せる。有声(協調調音・レガート
             # 間隙)に接する側は端点 0 を置かず境界キー(クロスフェード/谷)へ繋ぎ、閉口/曲端に接する側だけ
-            # 0 へ閉じる(有声が続く区間内で口を閉じてフリッカーにしない)。
+            # 0 へ閉じる(有声が続く区間内で口を閉じてフリッカーにしない)。内部小区間数によらず単一ピーク
+            # へ平滑化し、モーラ境界の谷は適用しない(時間解像度が無いため)。ピーク重みは n≥2 なら各小区間の
+            # 長さによる長さ加重平均、n=1 ならその1小区間の最終重み。
             mid = (g.start + g.end) / 2.0
+            if len(g.events) >= 2:
+                lens = [ev.end - ev.start for ev in g.events]
+                total_len = sum(lens)
+                peak_morphs = sorted({morph for w in gw for morph in w})
+                peak_weight = {
+                    morph: sum(length * w.get(morph, 0.0) for length, w in zip(lens, gw)) / total_len
+                    for morph in peak_morphs
+                }
+            else:
+                peak_weight = gw[0]
             connect_in = (i - 1) in coart_half or (i - 1) in legato_at
             connect_out = i in coart_half or i in legato_at
-            for morph, weight in gw[0].items():
+            for morph, weight in peak_weight.items():
                 if not connect_in:
                     targets.append((morph, g.start, 0.0))
                 targets.append((morph, mid, weight))
@@ -617,6 +753,18 @@ def generate_morph_keys(
                 f_mid = (ev.start + ev.end) / 2.0
                 for morph in group_morphs:
                     targets.append((morph, f_mid, w.get(morph, 0.0)))
+            # モーラ境界の谷(§4.2): ApertureClass が NONE でなく半幅が正の内部境界を候補にし、
+            # 密集回避(動的計画法)で採用された谷だけを3点キーとして追加する。
+            candidates = _mora_valley_candidates(g, gw, group_morphs, params)
+            selected = _select_valleys(candidates, params)
+            if selected:
+                valleys_by_group[i] = selected
+                for valley in selected:
+                    for morph in group_morphs:
+                        left_val, center_val, right_val = valley.values[morph]
+                        targets.append((morph, valley.left, left_val))
+                        targets.append((morph, valley.b, center_val))
+                        targets.append((morph, valley.right, right_val))
         plateaus.append((plateau_start, plateau_end))
     # 隣接する異母音グループ境界の協調調音。閉口を挟まず中間口形へ線形遷移する。
     for i in range(n - 1):
@@ -653,5 +801,9 @@ def generate_morph_keys(
         for i, g in enumerate(groups):
             plateau_start, plateau_end = plateaus[i]
             if plateau_end - plateau_start > params.vibrato_threshold:
-                targets.extend(_vibrato_targets(g, plateau_start, plateau_end, params))
+                targets.extend(
+                    _vibrato_targets(
+                        g, plateau_start, plateau_end, params, valleys_by_group.get(i, [])
+                    )
+                )
     return _quantize_targets(targets)

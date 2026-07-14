@@ -116,3 +116,5 @@ class GenerationParams:
     vibrato_threshold: int = 18  # 伸び表現を適用する保持プラトー長の下限
     vibrato_amp: float = 0.05
     vibrato_period: int = 15
+    mora_valley_frames: float = 1.0  # モーラ境界の谷の片側半幅(非負)
+    mora_valley_min_gap_frames: float = 4.0  # 連続する谷の間引きが要求する最低間隔(非負)
