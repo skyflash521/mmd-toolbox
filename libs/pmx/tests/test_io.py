@@ -1,4 +1,4 @@
-"""PMX読み取り read_pmx のテスト(pmx.md)。
+"""PMX読み取り read_pmx のテスト。
 
 最小PMXバイト列をテスト内で組み立てて read_pmx を検証する。
 ボーン配列までを読めればよいので、頂点・面・テクスチャ・材質は
@@ -249,7 +249,7 @@ def build_pmx(
     """ボーン配列とそれ以降のセクションを含む構造的に完全なPMX。
 
     ボーン以降(モーフ・表示枠・剛体・Joint、PMX2.1ではSoftBody)も
-    PMX仕様の構造概要どおり個数付きで置く。
+    形式どおりの順序で個数付きで置く。
     """
     encoding = kwargs.get("encoding", 0)
     version = kwargs.get("version", 2.0)

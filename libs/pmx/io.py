@@ -1,4 +1,4 @@
-"""PMX読み取り(pmx.md・docs/specs/pmx/PMX仕様.txt)。
+"""PMX読み取り。
 
 ボーン階層のみを保持し、それ以外のセクション(頂点・面・テクスチャ・材質・
 モーフ・表示枠・剛体・ジョイント・SoftBody)は個数を読んで本体を読み飛ばす。
@@ -15,7 +15,7 @@ _MAGIC = b"PMX "
 _SUPPORTED_VERSIONS = (2.0, 2.1)
 _INDEX_FMT = {1: "<b", 2: "<h", 4: "<i"}
 
-# ボーンフラグ(PMX仕様.txt ○ボーンフラグ)
+# ボーンフラグ
 _FLAG_TAIL_IS_BONE = 0x0001
 _FLAG_ROTATABLE = 0x0002
 _FLAG_MOVABLE = 0x0004
@@ -132,7 +132,7 @@ def _skip_material(r: _Reader, idx: dict) -> None:
 
 
 def _morph_offset_size(morph_type: int, idx: dict) -> int:
-    """モーフ種類1件あたりのオフセットデータのバイト数(PMX仕様.txt ●モーフ)。"""
+    """モーフ種類1件あたりのオフセットデータのバイト数。"""
     if morph_type == 0:  # グループ
         return idx["morph"] + 4
     if morph_type == 1:  # 頂点

@@ -1,4 +1,4 @@
-"""PMXデータモデル(pmx.md §3)。
+"""PMXデータモデル。
 
 読み取り専用。ボーン階層・基準位置・移動/回転可否のみを保持し、
 FK近似に不要なデータ(頂点・材質・モーフ等)は読み飛ばす。
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 
 class PmxFormatError(Exception):
-    """PMXファイル構造の異常(pmx.md §5)。"""
+    """PMXファイル構造の異常。"""
 
 
 @dataclass
