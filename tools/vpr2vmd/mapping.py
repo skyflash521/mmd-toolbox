@@ -1,4 +1,4 @@
-"""音符内の音素→口形イベント写像(vpr2vmd.md §3)。
+"""音符内の音素→口形イベント写像。
 
 1つの採用音符のフレーム区間 [s, e) の音素列を、文脈なしで定まる口形イベント(MouthEvent)へ写像する。
 母音を持たず撥音/促音でもない音符(継続「-」・その他子音のみ・未知のみ・空)は直前の口形に依存するため
@@ -10,7 +10,7 @@ from lipsync import ApertureClass, ConsonantClass, MouthEvent, MouthShape
 
 from .phonemes import PhonemeCategory, aperture_class, categorize, consonant_class, vowel_shape
 
-# 語頭両唇閉鎖の時間配分(vpr2vmd.md §3)。初期値で、実データ(視覚確認)で調整する。
+# 語頭両唇閉鎖の時間配分。初期値で、実データ(視覚確認)で調整する。
 _BILABIAL_NOMINAL_FRAMES = 3.0  # 公称長
 _BILABIAL_SHARE_CAP = 0.5  # 音符長に対する取り分上限
 
@@ -18,7 +18,7 @@ _BILABIAL_SHARE_CAP = 0.5  # 音符長に対する取り分上限
 def note_mouth_events(
     phonemes: list[str], start: float, end: float, use_n_morph: bool = True
 ) -> list[MouthEvent] | None:
-    """1採用音符 [start, end)(フレーム)の音素列を口形イベント列へ写像する(vpr2vmd.md §3)。
+    """1採用音符 [start, end)(フレーム)の音素列を口形イベント列へ写像する。
 
     文脈なしで定まる口形だけを返す。優先順は次のとおり(MMD の見た目で口を不自然に開けない):
 
@@ -44,7 +44,7 @@ def note_mouth_events(
 
 
 def _onset_consonant_class(phonemes: list[str], first_vowel_index: int) -> ConsonantClass:
-    """先頭母音の前にある子音から、先頭モーラの母音へ付ける ConsonantClass を決める(vpr2vmd.md §3)。
+    """先頭母音の前にある子音から、先頭モーラの母音へ付ける ConsonantClass を決める。
 
     両唇音は `MouthShape.BILABIAL` で別途表すので語頭子音から除く。残る子音(OTHER カテゴリ)を
     `consonant_class` で写像し、唇を丸める子音があれば ROUNDED、い 方向へ寄せる子音があれば SPREAD、
@@ -65,7 +65,7 @@ def _onset_consonant_class(phonemes: list[str], first_vowel_index: int) -> Conso
 
 
 def _onset_aperture_class(phonemes: list[str], first_vowel_index: int) -> ApertureClass:
-    """先頭母音の前にある子音列から、先頭モーラの母音へ付ける ApertureClass を決める(vpr2vmd.md §3)。
+    """先頭母音の前にある子音列から、先頭モーラの母音へ付ける ApertureClass を決める。
 
     語頭子音列のうち最後に現れる両唇音より後(両唇音が無ければ列全体)の OTHER カテゴリ子音だけを
     対象にし、優先順 FIRM_CLOSURE > NARROW_CHANNEL > SLIGHT_CLOSURE > NONE で1つに決める。両唇音の

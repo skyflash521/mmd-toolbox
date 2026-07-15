@@ -1,4 +1,4 @@
-"""口パクスタイルプリセットの解決(vpr2vmd.md §4)。
+"""口パクスタイルプリセットの解決。
 
 `--style` のプリセット名と、任意の上書き(`--open-max`/`--default-open`)から、開き量写像の
 パラメータ(openness)と lipsync の生成パラメータ(GenerationParams)を決定論的に解決する。
@@ -75,7 +75,7 @@ def resolve(
     open_max: float | None = None,
     default_open: float | None = None,
 ) -> tuple[OpennessParams, GenerationParams]:
-    """スタイル名と任意の上書きから開き量写像・生成パラメータを解決する(vpr2vmd.md §4)。
+    """スタイル名と任意の上書きから開き量写像・生成パラメータを解決する。
 
     `open_max` を渡すとそのスタイルの既定上限を上書きし、開き量写像の上限と lipsync の
     `open_cap` の両方に効く。`default_open` を渡すと一様ベロシティ時の既定開き量を上書きし、

@@ -1,4 +1,4 @@
-"""vpr の抽出層(vpr2vmd.md §3・§4)。
+"""vpr の抽出層。
 
 vpr の読み込みは形式I/Oモジュール `vpr` に委譲し、本モジュールは vpr2vmd 固有の入口処理の
 うち、対象とする歌唱トラックの選択と、選択トラックの全パート音符の統合・安定整列を担う。
@@ -13,7 +13,7 @@ class TrackSelectionError(Exception):
 
 
 def select_track(project: VprProject, track: str | None) -> Track:
-    """対象の歌唱トラックを選ぶ(vpr2vmd.md §4.2)。
+    """対象の歌唱トラックを選ぶ。
 
     `track` が None なら先頭トラック。整数として解釈できれば 0-based の INDEX、そうでなければ
     `Track.name` と解釈する。名前の複数一致・不一致・INDEX 範囲外・トラック無しは
@@ -41,7 +41,7 @@ def select_track(project: VprProject, track: str | None) -> Track:
 
 
 def collect_notes(track: Track) -> list[Note]:
-    """選択トラックの全パートの音符を統合し安定整列する(vpr2vmd.md §3)。
+    """選択トラックの全パートの音符を統合し安定整列する。
 
     整列順は (start_tick 昇順, duration_tick 降順, パート出現順, パート内の音符索引昇順)。
     duration_tick の降順は符号反転で表す。整列キーが各音符を一意に定めるため結果は決定的。

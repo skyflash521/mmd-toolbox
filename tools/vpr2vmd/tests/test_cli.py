@@ -1,4 +1,4 @@
-"""vpr2vmd CLI 骨組みのテスト(vpr2vmd.md §4)。
+"""vpr2vmd CLI 骨組みのテスト。
 
 範囲は CLI の起動・引数解析・検証と `--dry-run` の空実行(出力を書かない)に限る。
 vpr 読み込み・口形イベント確定・VMD 生成の統合は test_convert.py が検証する。
@@ -15,7 +15,7 @@ from vpr2vmd import cli
 
 
 def _assert_error_line(err):
-    """非機械の失敗理由が『error: <理由>』の行(理由は非空)で出て、トレースバックを含まないこと(§6・§7.4)。"""
+    """非機械の失敗理由が『error: <理由>』の行(理由は非空)で出て、トレースバックを含まないこと。"""
     lines = [ln for ln in err.splitlines() if ln.strip()]
     assert any(ln.startswith("error: ") and ln[len("error: "):].strip() for ln in lines), err
     assert "Traceback" not in err, err
@@ -74,13 +74,13 @@ def test_dry_run_writes_no_output(tmp_path):
 
 
 def test_report_json_is_now_unknown_option(tmp_path):
-    """--report-json は廃止。未知オプションとして引数エラー(コード2。vpr2vmd.md §4.2・§4.4)。"""
+    """--report-json は廃止。未知オプションとして引数エラー(コード2)。"""
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--report-json", str(tmp_path / "rep.json"), "--dry-run"]) == 2
 
 
 def test_track_accepts_non_integer_name(tmp_path):
-    """--track は整数 INDEX だけでなく非整数の Track 名も受理する(vpr2vmd.md §4.2)。"""
+    """--track は整数 INDEX だけでなく非整数の Track 名も受理する。"""
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--track", "Vocal", "--dry-run"]) == 0
 
@@ -178,13 +178,13 @@ def test_overwrite_guard_blocks_same_path_even_when_missing(tmp_path):
 
 
 def test_model_name_over_20_bytes_is_arg_error(tmp_path):
-    """--model-name が cp932 で 20 バイト超なら引数エラー(vpr2vmd.md §4.2)。"""
+    """--model-name が cp932 で 20 バイト超なら引数エラー。"""
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--model-name", "x" * 21, "--dry-run"]) == 2
 
 
 def test_no_n_morph_accepted_in_dry_run(tmp_path):
-    """--no-n-morph を受理し --dry-run で 0(vpr2vmd.md §4.2)。"""
+    """--no-n-morph を受理し --dry-run で 0。"""
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--no-n-morph", "--dry-run"]) == 0
 
@@ -242,7 +242,7 @@ def test_default_output_is_vmd_alongside_input(tmp_path):
     assert not (tmp_path / "song.vmd").exists()
 
 
-# --- 調整パラメータの CLI オプション(vpr2vmd.md §4.2) ---
+# --- 調整パラメータの CLI オプション ---
 
 
 def test_parses_tuning_options_in_dry_run(tmp_path):
@@ -336,7 +336,7 @@ def test_dry_run_plan_shows_tuning_overrides(tmp_path, capsys):
     assert "anticipation: 9" in out
 
 
-# --- 版・--version/--n-morph/--verbose・上書きガード統一・非機械の失敗理由(vpr2vmd.md §2・§4・§6・§7.4) ---
+# --- 版・--version/--n-morph/--verbose・上書きガード統一・非機械の失敗理由 ---
 
 
 def _project_with_notes(notes):
@@ -384,7 +384,7 @@ def test_verbose_prints_plan_on_normal_run(tmp_path, capsys):
 
 
 def test_missing_input_reports_reason(tmp_path, capsys):
-    """存在しない入力 vpr は理由 1 行 + 終了コード 1(§7.4 input_not_found)。"""
+    """存在しない入力 vpr は理由 1 行 + 終了コード 1(input_not_found)。"""
     missing = str(tmp_path / "nope.vpr")
     rc = cli.main([missing])
     assert rc == 1
@@ -392,7 +392,7 @@ def test_missing_input_reports_reason(tmp_path, capsys):
 
 
 def test_missing_positional_reports_reason(capsys):
-    """input 欠落は理由 1 行 + 終了コード 2(§7.4 bad_argument)。
+    """input 欠落は理由 1 行 + 終了コード 2(bad_argument)。
 
     非機械では argparse 自身が使用法エラーを標準エラーへ出す(理由 1 行を満たす)。
     """
@@ -402,7 +402,7 @@ def test_missing_positional_reports_reason(capsys):
 
 
 def test_not_vpr_reports_reason(tmp_path, capsys, monkeypatch):
-    """非 vpr(VprFormatError)は理由 1 行 + 終了コード 1(§7.4 not_vpr)。"""
+    """非 vpr(VprFormatError)は理由 1 行 + 終了コード 1(not_vpr)。"""
     src = _touch(tmp_path / "in.vpr")
 
     def _raise(_src):
@@ -415,7 +415,7 @@ def test_not_vpr_reports_reason(tmp_path, capsys, monkeypatch):
 
 
 def test_no_tracks_reports_reason(tmp_path, capsys, monkeypatch):
-    """トラックが 1 件も無い入力は理由 1 行 + 終了コード 1(§7.4 no_tracks)。"""
+    """トラックが 1 件も無い入力は理由 1 行 + 終了コード 1(no_tracks)。"""
     src = _touch(tmp_path / "in.vpr")
     empty = VprProject(resolution=480, tempos=[TempoEvent(0, 120.0)], tracks=[])
     monkeypatch.setattr(cli, "read", lambda _src: (empty, []))
@@ -425,7 +425,7 @@ def test_no_tracks_reports_reason(tmp_path, capsys, monkeypatch):
 
 
 def test_bad_track_reports_reason(tmp_path, capsys):
-    """--track の INDEX 範囲外は理由 1 行 + 終了コード 2(§7.4 bad_track)。"""
+    """--track の INDEX 範囲外は理由 1 行 + 終了コード 2(bad_track)。"""
     src = _touch(tmp_path / "in.vpr")
     rc = cli.main([src, "--track", "5"])
     assert rc == 2
@@ -433,7 +433,7 @@ def test_bad_track_reports_reason(tmp_path, capsys):
 
 
 def test_valley_inverted_reports_reason(tmp_path, capsys):
-    """谷係数の逆転は理由 1 行 + 終了コード 2(§7.4 valley_bounds_inverted)。"""
+    """谷係数の逆転は理由 1 行 + 終了コード 2(valley_bounds_inverted)。"""
     src = _touch(tmp_path / "in.vpr")
     rc = cli.main([src, "--valley-deep", "0.6", "--dry-run"])
     assert rc == 2
@@ -441,7 +441,7 @@ def test_valley_inverted_reports_reason(tmp_path, capsys):
 
 
 def test_output_overwrites_input_reports_reason(tmp_path, capsys):
-    """出力先が入力と同一パスは理由 1 行 + 終了コード 2(§7.4 output_overwrites_input)。"""
+    """出力先が入力と同一パスは理由 1 行 + 終了コード 2(output_overwrites_input)。"""
     src = _touch(tmp_path / "in.vpr")
     rc = cli.main([src, "-o", src, "--dry-run"])
     assert rc == 2
@@ -449,7 +449,7 @@ def test_output_overwrites_input_reports_reason(tmp_path, capsys):
 
 
 def test_write_failure_reports_reason(tmp_path, capsys, monkeypatch):
-    """出力書き込み失敗(OSError)は理由 1 行 + 終了コード 3(§7.4 write_failed)。"""
+    """出力書き込み失敗(OSError)は理由 1 行 + 終了コード 3(write_failed)。"""
     src = _touch(tmp_path / "in.vpr")
     out = tmp_path / "out.vmd"
 
@@ -463,7 +463,7 @@ def test_write_failure_reports_reason(tmp_path, capsys, monkeypatch):
 
 
 def test_internal_error_reports_reason_without_traceback(tmp_path, capsys, monkeypatch):
-    """想定外例外はトレースバックを漏らさず理由 1 行 + 終了コード 1(§7.4 internal_error)。"""
+    """想定外例外はトレースバックを漏らさず理由 1 行 + 終了コード 1(internal_error)。"""
     src = _touch(tmp_path / "in.vpr")
 
     def _boom(*_a, **_k):
@@ -476,7 +476,7 @@ def test_internal_error_reports_reason_without_traceback(tmp_path, capsys, monke
 
 
 def test_vpr_read_warning_surfaced_to_stderr(tmp_path, capsys, monkeypatch):
-    """vpr 読み込みが返す構造化警告(重なり音符)を標準エラーへ出す(§4.4・§7.2)。"""
+    """vpr 読み込みが返す構造化警告(重なり音符)を標準エラーへ出す。"""
     src = _touch(tmp_path / "in.vpr")
     project = _project_with_notes(
         [Note(start_tick=0, duration_tick=480, pitch=60, lyric="x", velocity=64, phonemes=["a"])]
@@ -493,7 +493,7 @@ def test_vpr_read_warning_surfaced_to_stderr(tmp_path, capsys, monkeypatch):
 
 
 def test_no_adopted_notes_warns_and_succeeds(tmp_path, capsys, monkeypatch):
-    """採用音符が空でもエラーにせず正常終了し、標準エラーへ警告を出す(§4.3・§4.4)。"""
+    """採用音符が空でもエラーにせず正常終了し、標準エラーへ警告を出す。"""
     src = _touch(tmp_path / "in.vpr")
     empty_track = _project_with_notes([])  # 発音の無いトラック
     monkeypatch.setattr(cli, "read", lambda _src: (empty_track, []))

@@ -1,9 +1,9 @@
-"""音素→カテゴリ写像(vpr2vmd.md §3、口形イベント確定の音素分類)。
+"""音素→カテゴリ写像(口形イベント確定の音素分類)。
 
-VOCALOID 日本語の音素(X-SAMPA 表記)を、口形イベント確定で使うカテゴリへ分類する。写像規則
-(母音→母音イベント、語頭の両唇音→両唇閉鎖、両唇閉鎖以外の子音は自前イベントを作らず、唇の方向
-(ConsonantClass)と顎の開口減衰(ApertureClass)という独立な2軸で母音合成を変調する)は
-vpr2vmd.md §3 が定める。各記号がどのカテゴリに属するか(およびどの母音か)は、日本語初音ミクの実 vpr と
+VOCALOID 日本語の音素(X-SAMPA 表記)を、口形イベント確定で使うカテゴリへ分類する。写像規則は、
+母音→母音イベント、語頭の両唇音→両唇閉鎖、両唇閉鎖以外の子音は自前イベントを作らず、唇の方向
+(ConsonantClass)と顎の開口減衰(ApertureClass)という独立な2軸で母音合成を変調する、というもの。
+各記号がどのカテゴリに属するか(およびどの母音か)は、日本語初音ミクの実 vpr と
 X-SAMPA・日本語音韻の標準で確定したインベントリに従い、実装者が独自判断しない。
 """
 
@@ -54,8 +54,7 @@ _CONTINUATIONS = {"-"}
 _ROUNDED_CONSONANTS = {"p\\", "w"}
 _SPREAD_CONSONANTS = {"S", "dZ", "tS", "j"}
 
-# 舌位置が主体の子音(顎の開口量を部分的に減衰させる。lipsync の ApertureClass へ写像。X-SAMPA。
-# vpr2vmd.md §3)。
+# 舌位置が主体の子音(顎の開口量を部分的に減衰させる。lipsync の ApertureClass へ写像。X-SAMPA)。
 _FIRM_CLOSURE_CONSONANTS = {"t", "d", "n", "ts", "dz", "J"}
 _NARROW_CHANNEL_CONSONANTS = {"s", "z", "S", "dZ", "tS", "j"}
 _SLIGHT_CLOSURE_CONSONANTS = {"k", "k'", "g", "4"}
@@ -64,8 +63,8 @@ _SLIGHT_CLOSURE_CONSONANTS = {"k", "k'", "g", "4"}
 def vowel_shape(symbol: str) -> MouthShape | None:
     """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。
 
-    母音記号テーブル自体は vocal_analysis(共有ドメイン層)が持つ(vocal_analysis.md §7.2。vpr を読む
-    CLI と S-1認識測定が同一の写像表を使うため、二重管理を避ける)。
+    母音記号テーブル自体は vocal_analysis(共有ドメイン層)が持つ(vpr を読む CLI と S-1認識測定が
+    同一の写像表を使うため、二重管理を避ける)。
     """
     letter = xsampa_vowel_letter(symbol)
     if letter is None:
@@ -74,7 +73,7 @@ def vowel_shape(symbol: str) -> MouthShape | None:
 
 
 def categorize(symbol: str) -> PhonemeCategory:
-    """音素記号をカテゴリへ分類する(vpr2vmd.md §3)。
+    """音素記号をカテゴリへ分類する。
 
     母音・両唇音・撥音・促音・継続のいずれにも該当しない記号(既知のその他子音・未知記号)は、両唇閉鎖
     以外の子音と同じく自前イベントを作らず協調調音/直前口形継続へ委ねるため、まとめて OTHER とする。
@@ -94,7 +93,7 @@ def categorize(symbol: str) -> PhonemeCategory:
 
 
 def consonant_class(symbol: str) -> ConsonantClass:
-    """子音記号を ConsonantClass へ写像する(唇への影響で分類。vpr2vmd.md §3)。
+    """子音記号を ConsonantClass へ写像する(唇への影響で分類)。
 
     唇を丸める子音は ROUNDED、い 方向へ寄せる子音は SPREAD、それ以外の子音(唇を動かさない子音)と
     未知記号は NEUTRAL。両唇音(ま/ば/ぱ行)は MouthShape.BILABIAL で表すので本写像の対象外で、
@@ -110,7 +109,7 @@ def consonant_class(symbol: str) -> ConsonantClass:
 
 
 def aperture_class(symbol: str) -> ApertureClass:
-    """子音記号を ApertureClass へ写像する(顎の開口減衰の強さで分類。vpr2vmd.md §3)。
+    """子音記号を ApertureClass へ写像する(顎の開口減衰の強さで分類)。
 
     判定表に無い子音と未知記号は NONE。複数の子音から1つに絞る優先順(FIRM_CLOSURE >
     NARROW_CHANNEL > SLIGHT_CLOSURE > NONE)は呼び出し側の責務で、この関数自体は単一記号の

@@ -1,4 +1,4 @@
-"""tick→秒→フレーム変換(vpr2vmd.md §3・§6)。
+"""tick→秒→フレーム変換。
 
 vpr は時刻を tick(整数、resolution=tick/四分音符)で、テンポを `TempoEvent{tick, bpm}` の列で
 渡す。秒への変換はテンポマップの区分積分で行い、30fps の float フレームへ写す。整数フレームへの

@@ -1,4 +1,4 @@
-"""vpr2vmd CLI 機械モードのテスト(vpr2vmd.md §7)。
+"""vpr2vmd CLI 機械モードのテスト。
 
 --machine / --describe は標準出力を JSON Lines のイベント専用にし、result または error の
 ちょうど 1 つで終端する。失敗は確定 code/field/exit_code の error イベントで返す。自己記述
@@ -44,12 +44,12 @@ def _stub_read(monkeypatch, project, warnings=()):
 def _machine_events(capsysbinary):
     """capsysbinary の stdout を JSON Lines として解析しイベント配列で返す(LF のみ・UTF-8 を検証)。"""
     out = capsysbinary.readouterr().out
-    assert out.endswith(b"\n") and b"\r" not in out  # 行区切りは LF 固定(§7.1・規約 §10)
+    assert out.endswith(b"\n") and b"\r" not in out  # 行区切りは LF 固定
     return [json.loads(ln) for ln in out.decode("utf-8").split("\n") if ln]
 
 
 def _terminal_events(capsysbinary):
-    """result または error のちょうど 1 つ(末尾)で終端することを確認し、全イベントを返す(§7.1)。"""
+    """result または error のちょうど 1 つ(末尾)で終端することを確認し、全イベントを返す。"""
     events = _machine_events(capsysbinary)
     assert events, "stdout に少なくとも 1 イベントが要る"
     terminals = [e for e in events if e["type"] in ("result", "error")]
@@ -63,7 +63,7 @@ def _machine_error(capsysbinary):
     return events[-1]
 
 
-# --- メタ操作(--version / --help は機械併用でも人間向け。§7.1)-----------------
+# --- メタ操作(--version / --help は機械併用でも人間向け)-----------------------
 
 
 def test_machine_version_stays_human(capsys):
@@ -90,7 +90,7 @@ def test_help_lists_machine_flags(capsys):
         assert flag in text
 
 
-# --- 自己記述(--describe。§7.3)------------------------------------------------
+# --- 自己記述(--describe)------------------------------------------------------
 
 
 def test_describe_without_input_returns_options_and_presets(capsysbinary):
@@ -100,7 +100,7 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
     assert res["type"] == "result" and res["mode"] == "describe"
 
     opts = res["options"]
-    assert len(opts) == 19  # §7.3 の全 19 要素
+    assert len(opts) == 19  # 自己記述が報告する全 19 要素
     names = [o["name"] for o in opts]
     assert names[0] == "input"
     # 肯定形のみ・メタ/モード操作は除外。
@@ -119,7 +119,7 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
     assert by["--n-morph"]["type"] == "flag" and by["--n-morph"]["default"] is True
     assert by["--overwrite"]["default"] is False and by["--model-name"]["default"] == ""
     assert by["--output"]["default"] is None
-    # 固定既定は呼び出し先由来で報告される(§7.3)。
+    # 固定既定は呼び出し先由来で報告される。
     assert by["--legato-max"]["default"] == 8.0
     assert by["--ref-bpm"]["default"] == 120.0
     assert by["--tempo-scale-min"]["default"] == 0.5
@@ -138,14 +138,14 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
 
 
 def test_describe_with_unknown_option_is_bad_argument(capsysbinary):
-    # --describe と未知オプションの併用も error イベント + 終了コード 2(§7.1)。
+    # --describe と未知オプションの併用も error イベント + 終了コード 2。
     rc = cli.main(["--describe", "--bogus"])
     assert rc == 2
     e = _machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["exit_code"] == 2
 
 
-# --- 入力検査(--machine --dry-run の inspect。§7.2)----------------------------
+# --- 入力検査(--machine --dry-run の inspect)----------------------------------
 
 
 def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, monkeypatch):
@@ -180,7 +180,7 @@ def test_machine_dry_run_no_adopted_warns_then_inspect(tmp_path, capsysbinary, m
     assert events[-1]["mode"] == "inspect" and events[-1]["open_amounts"] is None
 
 
-# --- 通常実行(convert result。§7.2)------------------------------------------
+# --- 通常実行(convert result)--------------------------------------------------
 
 
 def test_machine_convert_result_after_write(tmp_path, capsysbinary, monkeypatch):
@@ -216,7 +216,7 @@ def test_machine_warning_overlapping_notes_passthrough(tmp_path, capsysbinary, m
     assert events[-1]["mode"] == "convert"
 
 
-# --- 構造化エラー全経路(§7.4)------------------------------------------------
+# --- 構造化エラー全経路 --------------------------------------------------------
 
 
 def test_machine_error_unknown_option(tmp_path, capsysbinary):
@@ -348,7 +348,7 @@ def test_machine_error_stdout_is_valid_json_lines_lf_only(tmp_path, capsysbinary
 
 def test_describe_type_table_covers_non_meta_args():
     # _D_TYPE はメタ/モード操作を除く全 parser 引数を覆う。parser に引数を足して _D_TYPE への追加を
-    # 忘れると --describe から黙って抜けるため、その載せ忘れをここで検出する(§7.3)。
+    # 忘れると --describe から黙って抜けるため、その載せ忘れをここで検出する。
     parser = cli._build_parser()
     meta = {"help", "version", "machine", "describe"}
     non_meta = {a.dest for a in parser._actions if a.dest not in meta}

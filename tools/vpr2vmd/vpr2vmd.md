@@ -197,7 +197,7 @@ vpr2vmd INPUT [options]
 | `-v, --verbose` | off | 通常実行でも処理計画と診断(§4.4 と同内容)を標準出力へ表示する(出力 VMD は書く)。機械モードでは標準出力をイベント専用に保つため、この人間向け表示は出さない |
 | `--machine` | off | 出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない(§7) |
 | `--describe` | off | vpr を読まずにオプション定義とスタイルプリセット一覧の result イベントを出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作(§7.3) |
-| `--version` | — | バージョン(`__init__.py` の `__version__`)を表示して終了する |
+| `--version` | — | バージョンを表示して終了する |
 
 CLIには口パクの「効かせ方」(プリセット選択と上限)と、視覚で詰める**調整パラメータの上書き**を置く。
 調整パラメータ(`--legato-max`・谷係数・`--coartic-overlap`・`--anticipation`・`--ref-bpm`・
@@ -284,7 +284,7 @@ CLI 上書き**で、`--ref-bpm`/`--tempo-scale-min` はテンポ補正の入力
 共通契約(イベント種別の語彙・終端規則・チャネル固定・stdout の UTF-8/LF 固定・終了コードの基底)は
 規約 [cli-interface.md](../../docs/conventions/cli-interface.md) §3〜§6・§8・§10 と、共有基盤
 [cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は `vpr2vmd` 固有のイベント
-ペイロードと `code` 値だけを定める。イベント送出は cli_events の `EventEmitter` を用いる。
+ペイロードと `code` 値だけを定める。イベント送出は共有基盤 cli_events に委譲する。
 
 `vpr2vmd` は入力解析からモーフキー生成までが短時間で完了し、抑制対象の進捗表示を持たないため、
 progress イベント・`--quiet` は導入しない(将来重い段が生じたら規約 §4.1 の後方互換追加として
@@ -293,16 +293,16 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 ### 7.1 チャネルと終端
 
 - **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 §3。`--describe` は人間向け
-  既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定してエミッタと
-  `MachineArgumentParser`(§7.4)を使い、使用法エラー・想定外エラーも error イベントで終端する
+  既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定し、
+  使用法エラー・想定外エラーも error イベントで終端する
   (例: `--describe` と未知オプションの併用も `bad_argument` イベント+終了コード 2)。
-- 構造化出力モードの標準出力は §7.2 のイベントのみ。エミッタ(`cli_events.EventEmitter`)はバイナリ
-  標準出力(`sys.stdout.buffer`)へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない
+- 構造化出力モードの標準出力は §7.2 のイベントのみ。バイナリストリームとして
+  標準出力へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない
   (規約 §10)。
-- 人間向け標準エラーは `sys.stderr.reconfigure(errors="backslashreplace")` で符号化失敗時もプロセスを
+- 人間向け標準エラーは、ロケール符号化で表せない文字を置換して出し、符号化失敗でプロセスを
   落とさない(規約 §10。機械モードに限らず常に適用する)。
-- ストリームは result または error のちょうど 1 つで終端する。終端は `main()` の単一経路で送出し、
-  終端後の送出はしない(cli_events が `StreamTerminatedError` で拒否する)。
+- ストリームは result または error のちょうど 1 つで終端する。終端は CLI 本体の単一経路で送出し、
+  終端後の送出は拒否される。
 - `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベント
   ストリームには載せない(規約 §3 のメタ操作の例外)。
 - イベント契約の進化は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
@@ -387,10 +387,10 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 
 | 事象 | `code` | `field` | `exit_code` |
 |---|---|---|---|
-| argparse 検出(未知オプション・型/範囲エラー(開き量 0〜1・`--legato-max` 正値・谷係数 0〜1・`--valley-slope` 非負・`--coartic-overlap` 1 以上・`--anticipation` 非負・`--ref-bpm` 正値・`--tempo-scale-min` 0 超〜1・`--model-name` の cp932/20 バイト))、および describe 以外での `input` 欠落(`main()` 検査) | `bad_argument` | argparse が示す引数名、`input` 欠落は `"input"` | 2 |
+| argparse 検出(未知オプション・型/範囲エラー(開き量 0〜1・`--legato-max` 正値・谷係数 0〜1・`--valley-slope` 非負・`--coartic-overlap` 1 以上・`--anticipation` 非負・`--ref-bpm` 正値・`--tempo-scale-min` 0 超〜1・`--model-name` の cp932/20 バイト))、および describe 以外での `input` 欠落(CLI 本体の検査) | `bad_argument` | argparse が示す引数名、`input` 欠落は `"input"` | 2 |
 | 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
 | 解決後の谷係数が下限>上限(プリセット既定と CLI 上書きの組み合わせ) | `valley_bounds_inverted` | `null`(2 オプションとプリセットにまたがる。値は `message` に載る) | 2 |
-| `--track` の INDEX 範囲外・NAME 不一致・NAME 複数一致(`TrackSelectionError`) | `bad_track` | `"--track"` | 2 |
+| `--track` の INDEX 範囲外・NAME 不一致・NAME 複数一致 | `bad_track` | `"--track"` | 2 |
 | 入力パスが不在・通常ファイルでない | `input_not_found` | `"input"` | 1 |
 | 読み込み・形式検証の失敗(非 vpr。`VprFormatError`) | `not_vpr` | `"input"` | 1 |
 | 入力 vpr にトラックが 1 件も無い | `no_tracks` | `"input"` | 1 |
@@ -399,18 +399,16 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
 
 - `not_vpr` は例外の文言を `message` に載せる。
-- 構造化出力モードの argparse エラーは `cli_events.MachineArgumentParser` で `ArgumentParseError` に
-  振り替え、`argparse_error_event` で `bad_argument` イベントにする。`field` の抽出は共有ヘルパ
-  `cli_events.argparse_error_field(message)` を使う(抽出規則は
-  [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正)。
+- 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は
+  [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正。
 - `internal_error` は引数解析後の本体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
   なく中断(`cancelled`/130)として手前で分岐する(§7.5)。
 
 ### 7.5 中断と出力の原子性
 
-- VMD 出力は `vmd.io.write_file` の一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
+- VMD 出力は一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
   起きるため、途中終了で中途半端な出力ファイルは残らない。
-- `main()` は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
+- CLI は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
   error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130
   で終える。POSIX シグナル API には依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む(`vpr2vmd` は
   単一プロセスで走り、子プロセスは持たない)。

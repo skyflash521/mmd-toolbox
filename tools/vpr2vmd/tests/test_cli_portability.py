@@ -1,4 +1,4 @@
-"""vpr2vmd CLI 移植性・既定挙動回帰のテスト(vpr2vmd.md §7・規約 §10、§9 項目9・10)。
+"""vpr2vmd CLI 移植性・既定挙動回帰のテスト。
 
 非ASCIIパスの受理・生成、人間向け標準エラーの符号化安全性(ロケール符号化で表せない文字でもプロセスを
 落とさない)、機械モードが出力VMDを変えない(--machine の有無で出力バイト一致)ことを検証する。
@@ -39,7 +39,7 @@ def _cp932_stderr(monkeypatch):
     return wrapper
 
 
-# --- 非ASCIIパスの受理・生成(規約 §10、§9 項目10)----------------------------
+# --- 非ASCIIパスの受理・生成 ----------------------------------------------------
 
 
 def test_non_ascii_path_roundtrip_non_machine(tmp_path, monkeypatch):
@@ -69,7 +69,7 @@ def test_non_ascii_path_machine(tmp_path, monkeypatch, capsysbinary):
     assert events[-1]["output"] == str(out)
 
 
-# --- 人間向け標準エラーの符号化安全性(規約 §10、§9 項目10)-------------------
+# --- 人間向け標準エラーの符号化安全性 -------------------------------------------
 
 
 def test_stderr_safe_on_argparse_usage_error(monkeypatch):
@@ -90,7 +90,7 @@ def test_stderr_safe_on_warning(tmp_path, monkeypatch):
     assert rc == 0
 
 
-# --- 既定挙動の回帰: 機械モードは出力VMDを変えない(§9 項目9)----------------
+# --- 既定挙動の回帰: 機械モードは出力VMDを変えない ------------------------------
 
 
 def test_machine_output_equals_non_machine_output(tmp_path, monkeypatch):

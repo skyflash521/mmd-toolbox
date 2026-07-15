@@ -1,4 +1,4 @@
-"""vpr2vmd の vpr 抽出層のテスト(vpr2vmd.md §3・§4)。
+"""vpr2vmd の vpr 抽出層のテスト。
 
 vpr の読み込み(vpr へ委譲)・対象トラック選択・音符収集(全パートの統合と安定整列)を、
 合成した `VprProject`(vpr データモデル)を入力に決定論的に検証する。重なり解決・フレーム変換・
@@ -76,7 +76,7 @@ def _project(tracks, *, tempos=None):
     )
 
 
-# --- 対象トラック選択(vpr2vmd.md §4.2、整数=0-based INDEX / 非整数=Track.name) ---
+# --- 対象トラック選択(整数=0-based INDEX / 非整数=Track.name) ---
 
 def test_select_track_defaults_to_first():
     project = _project([_track([], name="a"), _track([], name="b")])
@@ -165,7 +165,7 @@ def test_collect_notes_empty_track():
 # --- 代表 vpr からの抽出(読み込みは vpr、選択・収集は vpr2vmd)---
 
 def test_extracts_notes_tempo_rests_from_representative_vpr():
-    """代表 vpr から音符・休符・テンポが取り出せる(vpr2vmd.md §3、実装計画の受入条件)。"""
+    """代表 vpr から音符・休符・テンポが取り出せる。"""
     vpr = _make_vpr(_sequence(
         [{
             "type": 2, "name": "vocal",

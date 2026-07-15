@@ -1,4 +1,4 @@
-"""口パクスタイルプリセット解決のテスト(vpr2vmd.md §4)。
+"""口パクスタイルプリセット解決のテスト。
 
 `presets.resolve` はスタイル名と任意の上書き(--open-max/--default-open)から、開き量写像の
 パラメータ(OpennessParams)と lipsync の生成パラメータ(GenerationParams)を返す。プリセット

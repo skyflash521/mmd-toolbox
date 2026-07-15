@@ -1,4 +1,4 @@
-"""vpr→VMD 変換パイプライン(cli._build と main)の統合テスト(vpr2vmd.md §3〜§5)。
+"""vpr→VMD 変換パイプライン(cli._build と main)の統合テスト。
 
 cli._build は vpr 解析結果(合成フィクスチャ)を入口に、トラック選択→重なり解決→口形イベント
 確定→開き量→lipsync→モーフキー生成までを束ね、main が書き込み・診断表示・警告を担う。
@@ -202,7 +202,7 @@ def test_convert_legato_max_override_reaches_build_mouth_events(monkeypatch, tmp
 
 
 def test_convert_writes_only_morph_section(monkeypatch, tmp_path):
-    # 生成するのはモーフキーのみ。ボーン・カメラ・照明・セルフ影・IK は空(vpr2vmd.md §5)。
+    # 生成するのはモーフキーのみ。ボーン・カメラ・照明・セルフ影・IK は空。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
     assert rc == 0
     doc = _read_doc(out)
@@ -284,7 +284,7 @@ def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):
     assert cli.main([str(src), "-o", str(out)]) == 3
 
 
-# --- P-5 診断(--dry-run。vpr2vmd.md §4.4)。 ---
+# --- 診断(--dry-run) ---
 
 
 def _dry_run(monkeypatch, tmp_path, project, capsys, *args):
