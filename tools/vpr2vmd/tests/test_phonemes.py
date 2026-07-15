@@ -6,7 +6,9 @@ VOCALOID 日本語の音素(X-SAMPA)を、口形イベント確定で使うカ�
 標準で確定したもの。
 """
 
-from lipsync import ConsonantClass, MouthShape
+import pytest
+
+from lipsync import ApertureClass, ConsonantClass, MouthShape
 
 from vpr2vmd import phonemes
 
@@ -88,3 +90,28 @@ def test_other_and_unknown_consonants_mapped_to_neutral():
     # 唇を動かさない子音(軟口蓋/歯茎/声門 等)と未知記号は ConsonantClass.NEUTRAL(純母音扱い)。
     for sym in ["k", "k'", "g", "s", "z", "t", "d", "n", "J", "4", "ts", "dz", "h", "zzz"]:
         assert phonemes.consonant_class(sym) is ConsonantClass.NEUTRAL
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_firm_closure_consonants_mapped_to_firm_closure():
+    for sym in ["t", "d", "n", "ts", "dz", "J"]:
+        assert phonemes.aperture_class(sym) is ApertureClass.FIRM_CLOSURE
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_narrow_channel_consonants_mapped_to_narrow_channel():
+    for sym in ["s", "z", "S", "dZ", "tS", "j"]:
+        assert phonemes.aperture_class(sym) is ApertureClass.NARROW_CHANNEL
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_slight_closure_consonants_mapped_to_slight_closure():
+    for sym in ["k", "k'", "g", "4"]:
+        assert phonemes.aperture_class(sym) is ApertureClass.SLIGHT_CLOSURE
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_none_class_consonants_and_unknown_mapped_to_none_aperture():
+    # p\・w・h は判定表の NONE(残り)行に列挙され、ApertureClass.NONE(開口減衰なし)。未知記号も同様。
+    for sym in ["p\\", "w", "h", "zzz"]:
+        assert phonemes.aperture_class(sym) is ApertureClass.NONE

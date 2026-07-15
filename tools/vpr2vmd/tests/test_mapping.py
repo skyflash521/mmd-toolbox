@@ -7,7 +7,9 @@
 組み立て段で直前口形を継続する(既定母音「あ」フォールバックは行わない)。
 """
 
-from lipsync import ConsonantClass, MouthShape
+import pytest
+
+from lipsync import ApertureClass, ConsonantClass, MouthShape
 
 from vpr2vmd import mapping
 
@@ -18,6 +20,10 @@ def _shapes_spans(eventlist):
 
 def _classes(eventlist):
     return [(e.shape, e.consonant_class) for e in eventlist]
+
+
+def _apertures(eventlist):
+    return [(e.shape, e.aperture_class) for e in eventlist]
 
 
 def test_single_vowel_fills_note():
@@ -202,3 +208,66 @@ def test_open_amount_placeholder_zero_for_all_event_kinds():
         events = mapping.note_mouth_events(phonemes, 0.0, 30.0)
         assert events
         assert all(e.open_amount == 0.0 for e in events)
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_onset_aperture_class_attached_to_leading_vowel():
+    # 先頭母音に先頭子音の ApertureClass を付ける。た(t=FIRM_CLOSURE)・さ(s=NARROW_CHANNEL)・
+    # か(k=SLIGHT_CLOSURE)・母音単独(子音なし=NONE)。
+    assert _apertures(mapping.note_mouth_events(["t", "a"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.FIRM_CLOSURE),
+    ]
+    assert _apertures(mapping.note_mouth_events(["s", "a"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.NARROW_CHANNEL),
+    ]
+    assert _apertures(mapping.note_mouth_events(["k", "o"], 0.0, 30.0)) == [
+        (MouthShape.O, ApertureClass.SLIGHT_CLOSURE),
+    ]
+    assert _apertures(mapping.note_mouth_events(["a"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.NONE),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_onset_aperture_only_on_first_mora_vowel():
+    # 1音符に母音が複数あるとき、先頭母音にだけ ApertureClass を付け後続母音は NONE。
+    assert _apertures(mapping.note_mouth_events(["k", "a", "i"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.SLIGHT_CLOSURE),
+        (MouthShape.I, ApertureClass.NONE),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_onset_aperture_priority_when_multiple_consonants():
+    # 複数の語頭子音は優先順 FIRM_CLOSURE > NARROW_CHANNEL > SLIGHT_CLOSURE > NONE で1つに決める。
+    # か+さ(k=SLIGHT_CLOSURE + s=NARROW_CHANNEL)→ NARROW_CHANNEL、さ+た(s=NARROW_CHANNEL +
+    # t=FIRM_CLOSURE)→ FIRM_CLOSURE。
+    assert mapping.note_mouth_events(["k", "s", "a"], 0.0, 30.0)[0].aperture_class is (
+        ApertureClass.NARROW_CHANNEL
+    )
+    assert mapping.note_mouth_events(["s", "t", "a"], 0.0, 30.0)[0].aperture_class is (
+        ApertureClass.FIRM_CLOSURE
+    )
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_onset_aperture_and_consonant_class_are_independent():
+    # ConsonantClass 優先順で勝つ子音(w=ROUNDED)と ApertureClass 優先順で勝つ子音(t=FIRM_CLOSURE)が
+    # 混在する語頭子音列で、両軸が同時に(互いに影響せず)確定する。
+    event = mapping.note_mouth_events(["w", "t", "a"], 0.0, 30.0)[0]
+    assert event.consonant_class is ConsonantClass.ROUNDED
+    assert event.aperture_class is ApertureClass.FIRM_CLOSURE
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
+def test_onset_aperture_class_depends_on_bilabial_position():
+    # 両唇音を挟む場合の順序依存: ConsonantClass は両唇音を除外した順序を問わない集合で判定するが、
+    # ApertureClass は「最後に現れる両唇音より後」だけを対象にするため両唇音の位置に依存する。
+    # k,m,a(両唇音 m が最後で後続の子音が無い)は NONE。
+    assert mapping.note_mouth_events(["k", "m", "a"], 0.0, 30.0)[0].aperture_class is (
+        ApertureClass.NONE
+    )
+    # m,k,a(両唇音 m の後に k がある)は SLIGHT_CLOSURE。
+    assert mapping.note_mouth_events(["m", "k", "a"], 0.0, 30.0)[1].aperture_class is (
+        ApertureClass.SLIGHT_CLOSURE
+    )
