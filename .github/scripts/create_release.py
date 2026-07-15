@@ -1,4 +1,4 @@
-"""タグ push から GitHub Release を作成する(転記の規則は docs/conventions/changelog.md §4)。
+"""タグ push から GitHub Release を作成する。
 
 タグ名 <ツール>/v<版> を受け取り、tools/<ツール>/CHANGELOG.md から該当版の節を抽出して
 Release の本文にする。形式逸脱・節なしの場合は失敗し、Release を作らない。

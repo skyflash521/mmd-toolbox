@@ -1,4 +1,4 @@
-"""tools/<ツール>/CHANGELOG.md の共通パーサ(形式の正本は docs/conventions/changelog.md §3)。
+"""tools/<ツール>/CHANGELOG.md の共通パーサ。
 
 PR 時の検査(check_changelog.py)とタグ push 時の Release 作成(create_release.py)が同じ
 解析を使うことで、検査に通った CHANGELOG からは必ず Release 本文を抽出できることを保証する。

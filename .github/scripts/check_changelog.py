@@ -1,4 +1,4 @@
-"""PR 時に CHANGELOG を検査する(形式の正本は docs/conventions/changelog.md §3)。
+"""PR 時に CHANGELOG を検査する。
 
 常に全公開ツールの CHANGELOG の形式を検査する。さらに main 宛ての PR では、リリース対象
 (main と比べて __version__ が変わった公開ツール。複数可)ごとに、その後のタグ push で
