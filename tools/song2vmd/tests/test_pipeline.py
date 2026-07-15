@@ -1,4 +1,4 @@
-"""song2vmd パイプライン統合のテスト(song2vmd.md §4章・§6章)。
+"""song2vmd パイプライン統合のテスト。
 
 vocal_analysis(S0読込・S1分離・S2認識・S3 RMS)から song2vmd 自身の口形イベント確定(events)・
 長尺分割(chunking)・モーフ生成(morphs)までの呼び出し順序・受け渡しを検証する。重い外部アダプタ
@@ -148,8 +148,8 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
         openness=openness, intensity_curve=0.7, silence_on=0.05, use_n_morph=False))
 
     # load_audioは入力読み込みと(分離後の)ボーカル読み込みの2回呼ばれる。各段のprogress発行
-    # ("progress:X")は、その段の実処理("X")より必ず前に来る(song2vmd.md 12.1「各段は開始時に
-    # 最低1本のprogressを出す」の後退を防ぐ回帰テスト)。
+    # ("progress:X")は、その段の実処理("X")より必ず前に来る(「各段は開始時に
+    # 最低1本のprogressを出す」挙動の後退を防ぐ回帰テスト)。
     assert call_order == [
         "progress:load", "load_audio", "progress:separate", "separate", "progress:recognize",
         "recognize", "progress:rms", "load_audio", "compute_rms", "progress:events",
@@ -277,7 +277,7 @@ def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monke
     monkeypatch.setattr(pipeline.morphs, "build_vmd_document", spy_build_vmd_document)
 
     # vowel_gain は presets.resolve がプリセットの母音別倍率へ乗算して style_gen.vowel_scale に
-    # 織り込み済み(song2vmd.md 8.2)。pipeline は style_gen の値をそのまま lipsync へ渡す。
+    # 織り込み済み。pipeline は style_gen の値をそのまま lipsync へ渡す。
     openness, style_gen = presets.resolve("powerful", vowel_gain=(1.1, 0.9, 1.0, 1.0, 1.2))
     pipeline.run(input_path, **_common_kwargs(
         openness=openness, style_gen=style_gen, style_name="powerful"))
@@ -315,7 +315,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
     def fake_merge(chunk_segments_list, chunk_offsets_sec, boundaries_sec):
         assert len(chunk_segments_list) == 3
         # 境界[3.0, 6.0]・オーバーラップ1.0秒・全長10.0秒のとき、各チャンクの範囲は
-        # [0,4]・[2,7]・[5,10](先頭・末尾は片側のみオーバーラップ。song2vmd.md 6.6)なので、
+        # [0,4]・[2,7]・[5,10](先頭・末尾は片側のみオーバーラップ)なので、
         # チャンクローカル時刻0に対応するグローバル時刻(オフセット)は [0.0, 2.0, 5.0] になる。
         assert chunk_offsets_sec == pytest.approx([0.0, 2.0, 5.0])
         assert boundaries_sec == [3.0, 6.0]
@@ -347,17 +347,17 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
     assert len(separate_calls) == 3
     assert len(recognize_calls) == 3
     # forced_aligner・sofa_aligner・english_oov_katakana_methodは長尺分割の全チャンクへ
-    # 同一の値で伝播する(song2vmd.md 6.6)。
+    # 同一の値で伝播する。
     for _, kwargs in recognize_calls:
         assert kwargs["forced_aligner"] == "sofa-forcedalign"
         assert kwargs["sofa_aligner"] is sofa_config
         assert kwargs["english_oov_katakana_method"] == "tinyllama-katakana-converter"
-    # 各チャンクは前後1.0秒のオーバーラップを持つ(先頭・末尾は片側のみ。song2vmd.md 6.6)。
+    # 各チャンクは前後1.0秒のオーバーラップを持つ(先頭・末尾は片側のみ)。
     assert separate_calls[0] == pytest.approx(4.0, abs=0.05)  # [0, 3+1]
     assert separate_calls[1] == pytest.approx(5.0, abs=0.05)  # [3-1, 6+1]
     assert separate_calls[2] == pytest.approx(5.0, abs=0.05)  # [6-1, 10]
     assert result.diagnostics.duration_sec == pytest.approx(10.0, abs=0.05)
-    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり。song2vmd.md 12.1)。
+    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
     separate_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "separate"]
     assert separate_done_totals == [(0, 3), (1, 3), (2, 3)]
 
@@ -365,7 +365,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
 def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_events(tmp_path, monkeypatch):
     # 境界決定(find_chunk_boundaries)には分離前の生音声のRMSを使い、口形イベント確定
     # (events.confirm_mouth_events)にはチャンクの核区間を連結した曲全体のボーカルRMSを
-    # 1回だけ渡す(チャンクごとに個別正規化しない。song2vmd.md 6.4・6.6)ことを検証する。
+    # 1回だけ渡す(チャンクごとに個別正規化しない)ことを検証する。
     # rms.compute_rmsは実関数をそのまま通し、どちらの呼び出しがどの下流(境界決定/events)へ
     # 渡ったかは戻り値の同一性(is)で識別する(io.load_audioがピーク正規化するため、振幅の
     # 大小では入力を識別できない)。
@@ -426,7 +426,7 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
     # 各チャンクの分離済みボーカル音声の振幅が異なるとき(曲の強弱)、チャンクごとの読み込みで
     # vocal_analysis.io.load_audioのピーク正規化(目標値固定)を経由すると、静かなチャンクも
     # 大きいチャンクも独立に同じ目標振幅へ引き伸ばされ、チャンク間の相対的な強弱(曲全体基準の
-    # RMS。song2vmd.md 6.4・6.6)が壊れる。核区間を連結した曲全体のボーカル音声が、チャンクごとの
+    # RMS)が壊れる。核区間を連結した曲全体のボーカル音声が、チャンクごとの
     # 元の振幅差を保持していることを検証する。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=6.0)
@@ -490,13 +490,13 @@ def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monk
     progress = _RecordingProgress()
     pipeline.run(input_path, progress=progress, **_common_kwargs(max_duration_sec=3.0))
 
-    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり。song2vmd.md 12.1)。
+    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
     recognize_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "recognize"]
     assert recognize_done_totals == [(0, 2), (1, 2)]
 
 
 def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_recognize(tmp_path, monkeypatch):
-    # 分割しない場合や内訳の無い段は done=0, total=None(song2vmd.md 12.1)。
+    # 分割しない場合や内訳の無い段は done=0, total=None。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"

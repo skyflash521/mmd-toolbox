@@ -1,8 +1,8 @@
-"""song2vmd 口形イベント確定のテスト(song2vmd.md §6.3・§6.4・§6.5)。
+"""song2vmd 口形イベント確定のテスト。
 
 vocal_analysis の音素セグメント列(母音/子音/gap)と相対正規化RMSから、`lipsync` へ渡す口形イベント列
 (`MouthEvent`)と各モーラの開き量を確定する入口処理(events.confirm_mouth_events)を検証する。
-音素記号は採用構成(G2P強制アライメント。vocal_analysis.md §5.2)が実際に出力する記号に基づく:
+音素記号は採用構成(G2P強制アライメント)が実際に出力する記号に基づく:
 撥音「ん」は専用記号 `ɴ`、ま行/ば行/ぱ行頭子音は `m`/`mʲ`・`b`/`bʲ`・`p`/`pʲ`。
 
 範囲は口形イベント列(母音・撥音「ん」・両唇閉鎖・無音)と開き量の確定に限る。lipsync へのモーフキー
@@ -44,8 +44,8 @@ def flat_rms(duration_sec, value, dynamic_range_db=20.0, hop_sec=0.010):
     return rms_env(times, values, dynamic_range_db)
 
 
-# 共通の呼び出し既定値(pop相当。song2vmd.md 8.1)。--vowel-gain は lipsync へ渡す vowel_scale の
-# 一部(song2vmd.md 8.2)であり、song2vmd入口のRMS→開き量写像(6.5)自体には関与しないため、
+# 共通の呼び出し既定値(pop相当)。--vowel-gain は lipsync へ渡す vowel_scale の
+# 一部であり、song2vmd入口のRMS→開き量写像自体には関与しないため、
 # ここでは扱わない。
 _DEFAULT_KW = dict(
     open_lo=0.30, open_hi=0.75, open_max=0.90, intensity_curve=0.6,
@@ -81,8 +81,8 @@ def test_all_five_vowels_map(phoneme, letter):
 
 
 def test_unmapped_vowel_symbol_is_treated_as_gap():
-    # IPA写像表に無い母音記号は gap 扱い(vocal_analysis.md §7.1・phonemes.espeak_ipa_to_vowel)。
-    # 先頭gapは無音になる(song2vmd.md 6.3)。
+    # IPA写像表に無い母音記号は gap 扱い(phonemes.espeak_ipa_to_vowel)。
+    # 先頭gapは無音になる。
     segments = [seg("vowel", 0.0, 0.3, phoneme="ʔ", confidence=0.9)]
     rms = flat_rms(0.3, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -102,7 +102,7 @@ def test_bilabial_consonants_become_independent_closure_event(phoneme):
 
 
 def test_fu_consonant_is_not_bilabial_closure():
-    # ɸ(ふ)は両唇音だが閉口しない(song2vmd.md 6.3)。独立イベントを作らず後続母音へ吸収される。
+    # ɸ(ふ)は両唇音だが閉口しない。独立イベントを作らず後続母音へ吸収される。
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="ɸ"),
         seg("vowel", 0.05, 0.35, phoneme="ɯ", confidence=0.9),
@@ -252,7 +252,7 @@ def test_aperture_class_none_for_listed_none_phonemes(phoneme):
 
 
 def test_aperture_class_none_for_unlisted_consonant():
-    # 判定表に無い子音(声門破裂音相当の仮記号)はNONEに倒す(song2vmd.md 6.3)。
+    # 判定表に無い子音(声門破裂音相当の仮記号)はNONEに倒す。
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="ʔ"),
         seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
@@ -264,7 +264,7 @@ def test_aperture_class_none_for_unlisted_consonant():
 
 def test_aperture_class_does_not_apply_generic_yod_suffix_rule():
     # ConsonantClassのSPREAD(語尾ʲの一致)とは異なり、ApertureClassの拗音は判定表の明示メンバー
-    # (kʲ・ɡʲ)だけを判定する(song2vmd.md 6.3「語尾ʲの一致では判定しない」)。表に無い拗音はNONE。
+    # (kʲ・ɡʲ)だけを判定する(語尾ʲの一致では判定しない)。表に無い拗音はNONE。
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="sʲ"),
         seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
@@ -276,7 +276,7 @@ def test_aperture_class_does_not_apply_generic_yod_suffix_rule():
 
 def test_aperture_class_uses_strongest_among_consonant_run_when_strong_comes_last():
     # k(SLIGHT_CLOSURE)→t(FIRM_CLOSURE)の連続子音列では、区切りからその母音までの間で最も強い
-    # クラスを採る(song2vmd.md 6.3)。
+    # クラスを採る。
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="k"),
         seg("consonant", 0.03, 0.06, phoneme="t"),
@@ -301,8 +301,7 @@ def test_aperture_class_strongest_wins_when_strong_comes_first():
 
 
 def test_aperture_class_resets_after_bilabial_closure():
-    # 両唇閉鎖は区切りとして扱われ、それより前の子音による開口減衰は閉鎖後の母音へ引き継がない
-    # (song2vmd.md 6.3)。
+    # 両唇閉鎖は区切りとして扱われ、それより前の子音による開口減衰は閉鎖後の母音へ引き継がない。
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="t"),
         seg("consonant", 0.03, 0.08, phoneme="m"),
@@ -344,8 +343,8 @@ def test_aperture_class_resets_after_gap():
 
 
 def test_aperture_class_independent_from_consonant_class():
-    # ɲ(にゃ行)はConsonantClass=SPREADかつApertureClass=FIRM_CLOSURE(両軸が一致しない具体例。
-    # song2vmd.md 6.3)。一方の判定がもう一方に影響しないことを確認する。
+    # ɲ(にゃ行)はConsonantClass=SPREADかつApertureClass=FIRM_CLOSURE(両軸が一致しない具体例)。
+    # 一方の判定がもう一方に影響しないことを確認する。
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="ɲ"),
         seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
@@ -358,7 +357,7 @@ def test_aperture_class_independent_from_consonant_class():
 
 def test_consonant_run_yields_independent_classes_on_both_axes():
     # k(SLIGHT_CLOSURE)→w(ROUNDED)→aの連続子音では、ConsonantClassは最後の子音(w)から、
-    # ApertureClassは列内の最強クラス(k)から、それぞれ独立に決まる(song2vmd.md 6.3)。
+    # ApertureClassは列内の最強クラス(k)から、それぞれ独立に決まる。
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="k"),
         seg("consonant", 0.03, 0.06, phoneme="w"),
@@ -372,7 +371,7 @@ def test_consonant_run_yields_independent_classes_on_both_axes():
 
 def test_aperture_class_resets_after_vowel_boundary():
     # 母音イベント自体も区切りとして扱われ、それより前の子音による開口減衰は次のモーラへ
-    # 引き継がない(song2vmd.md 6.3)。t(FIRM_CLOSURE)の後の母音でリセットされないままだと、
+    # 引き継がない。t(FIRM_CLOSURE)の後の母音でリセットされないままだと、
     # 2モーラ目のkはFIRM_CLOSURE(tとの併合で強い方が残る)になってしまうが、正しくは
     # k単独のSLIGHT_CLOSUREになる。
     segments = [
@@ -416,7 +415,7 @@ def test_gap_below_silence_threshold_becomes_silence():
     mouth_events, diag = confirm(segments, rms)
     shapes = [e.shape for e in mouth_events]
     assert shapes == [MouthShape.A, MouthShape.SILENCE, MouthShape.I]
-    # gap先頭から無音の連続が始まる場合はgap全体が無音になる(song2vmd.md 6.4)。直前母音は
+    # gap先頭から無音の連続が始まる場合はgap全体が無音になる。直前母音は
     # gap側へ延長されず(継続断片が生じず)、モーラ併合の診断値も増えない。
     assert mouth_events[0].end == pytest.approx(0.2 * FRAME_RATE)
     assert diag.merged_morae == 0
@@ -437,7 +436,7 @@ def test_gap_above_silence_threshold_continues_preceding_vowel():
 
 
 def test_gap_above_silence_threshold_continues_preceding_n_mora():
-    # 撥音「ん」も母音的口形なので、後続gapのRMSが無音しきい値を上回れば継続する(song2vmd.md 6.3)。
+    # 撥音「ん」も母音的口形なので、後続gapのRMSが無音しきい値を上回れば継続する。
     # 末尾に母音区間を置き、末尾gapの強制無音規則(RMSに依らず常に無音)と混同しないようにする。
     segments = [
         seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
@@ -480,7 +479,7 @@ def test_gap_after_silence_does_not_continue_as_open():
 
 def test_gap_with_voiced_head_and_silent_tail_splits_at_voice_end():
     # 伸ばして歌う発声の尾部(有声)と真の無音が1つのgapに混在する場合、gap全体の一発判定ではなく
-    # 走査で分割し、発声が終わった時点から無音にする(song2vmd.md 6.4のgap走査)。
+    # 走査で分割し、発声が終わった時点から無音にする(gap走査)。
     segments = [
         seg("vowel", 0.0, 0.2, phoneme="e̞", confidence=0.9),
         seg("gap", 0.2, 2.0),
@@ -501,7 +500,7 @@ def test_gap_with_voiced_head_and_silent_tail_splits_at_voice_end():
 
 def test_gap_with_short_dip_does_not_close_when_voice_resumes():
     # gap内の0.2秒未満の瞬間的な谷(ビブラート・トレモロ)では閉口せず、gap全体を継続する
-    # (song2vmd.md 6.4のgap走査の連続要件)。
+    # (gap走査の連続要件)。
     segments = [
         seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
         seg("gap", 0.2, 1.0),
@@ -519,7 +518,7 @@ def test_gap_with_short_dip_does_not_close_when_voice_resumes():
 
 def test_gap_stays_closed_after_scan_close_even_if_voice_returns():
     # 0.2秒以上の無音で一度閉じたgap内では、後から音量が戻っても再度開かない
-    # (song2vmd.md 6.4: 無音を挟んで戻る発声は直前母音の継続ではない)。
+    # (無音を挟んで戻る発声は直前母音の継続ではない)。
     segments = [
         seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
         seg("gap", 0.2, 1.4),
@@ -540,7 +539,7 @@ def test_gap_stays_closed_after_scan_close_even_if_voice_returns():
 
 def test_gap_short_quiet_tail_reaching_gap_end_closes_without_debounce():
     # gap終端まで達する下降側しきい値以下の連続には0.2秒の連続要件を適用しない
-    # (その先で発声が再開しないため。song2vmd.md 6.4)。
+    # (その先で発声が再開しないため)。
     segments = [
         seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
         seg("gap", 0.2, 1.0),
@@ -595,7 +594,7 @@ def test_low_dynamics_suppresses_vowel_silence_override():
 
 def _loud_consonant_quiet_core_fixture():
     """伸ばして歌う発声の大部分が先行子音トークンへ割り当てられたモーラを再現する
-    (song2vmd.md 6.4「モーラ代表RMS」の(b)窓が要る事例)。
+    (モーラ代表RMSの、モーラ区間全体の窓が要る事例)。
 
     子音 n [0.0, 0.9](発声の実体。高RMS)+ 母音 i [0.9, 0.92](狭い母音核。低RMS)。
     母音核の中央60%だけを見ると無音しきい値以下になるが、モーラ区間全体では大音量。
@@ -650,7 +649,7 @@ def test_adjacent_same_vowel_segments_merge_into_one_event():
     assert mouth_events[0].shape == MouthShape.A
     assert mouth_events[0].start == pytest.approx(0.0)
     assert mouth_events[0].end == pytest.approx(0.4 * FRAME_RATE)
-    assert diag.merged_morae == 1  # 2区間→1イベントで1回統合(song2vmd.md 6.7)
+    assert diag.merged_morae == 1  # 2区間→1イベントで1回統合
 
 
 def test_three_adjacent_same_vowel_segments_merge_with_merged_count_two():
@@ -679,7 +678,7 @@ def test_adjacent_different_vowels_do_not_merge():
 @pytest.mark.parametrize("phoneme", ["t", "k", "s"])
 def test_repeated_consonant_between_same_vowels_does_not_merge(phoneme):
     # 「たた」: 間の子音が前後で同じ音素でも、モーラの区切り(子音の再構音)は実在するため統合しない
-    # (song2vmd.md 6.3。lipsyncのモーラ境界の谷で区別できるようにする)。
+    # (lipsyncのモーラ境界の谷で区別できるようにする)。
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
         seg("vowel", 0.05, 0.25, phoneme="a", confidence=0.9),
@@ -709,7 +708,7 @@ def test_different_intervening_consonants_between_same_vowels_do_not_merge():
 
 
 def test_adjacent_silence_segments_merging_does_not_count_as_merged_morae():
-    # 無音(閉口)区間同士の統合はモーラの併合ではないため merged_morae に数えない(song2vmd.md 6.7)。
+    # 無音(閉口)区間同士の統合はモーラの併合ではないため merged_morae に数えない。
     segments = [
         seg("gap", 0.0, 0.2),
         seg("gap", 0.2, 0.4),
@@ -828,7 +827,7 @@ def test_bilabial_and_silence_have_zero_open_amount():
 
 def test_open_amount_uses_middle_60_percent_of_vowel_segment():
     # 母音区間[0,1.0]の中央60%([0.2,0.8])だけ高RMS、両端(子音トランジェント相当)は低RMSにする
-    # (song2vmd.md 6.4「モーラ代表RMS」)。中央60%平均(≈0.8)を使うはずで、両端に引きずられる
+    # (モーラ代表RMS)。中央60%平均(≈0.8)を使うはずで、両端に引きずられる
     # 区間全体平均より明らかに大きくなる。
     hop = 0.010
     n = 101
@@ -844,7 +843,7 @@ def test_open_amount_uses_middle_60_percent_of_vowel_segment():
 
 
 def test_n_mora_open_amount_is_derived_from_rms():
-    # 撥音「ん」も母音的口形として区間代表RMSから開き量を決める(song2vmd.md 6.3)。
+    # 撥音「ん」も母音的口形として区間代表RMSから開き量を決める。
     segments = [
         seg("vowel", 0.0, 0.1, phoneme="a", confidence=0.9),
         seg("consonant", 0.1, 0.3, phoneme="ɴ"),

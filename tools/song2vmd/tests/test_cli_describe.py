@@ -1,4 +1,4 @@
-"""song2vmd CLI 自己記述 --describe のテスト(song2vmd.md 12.2)。
+"""song2vmd CLI 自己記述 --describe のテスト。
 
 --describe は音声を読まず、オプション定義とプリセット一覧の result イベント(mode:"describe")を
 出して終了する独立メタ操作。--machine を要さず単独で起動でき、入力 positional も要求しない。
@@ -83,7 +83,7 @@ def describe_result(capsysbinary):
 
 def test_describe_stdout_is_valid_json_lines_lf_only(capsysbinary):
     # --describe は --machine 無しでも構造化出力モード。stdout は UTF-8・LF固定(\r 不在)の
-    # JSON Lines のみ(song2vmd.md §5.5・12章、CLI インターフェース規約 §4・§10)。
+    # JSON Lines のみ。
     rc = cli.main(["--describe"])
     assert rc == 0
     raw = capsysbinary.readouterr().out

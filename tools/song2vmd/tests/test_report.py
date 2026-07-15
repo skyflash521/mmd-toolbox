@@ -1,4 +1,4 @@
-"""song2vmd レポート/診断のテスト(song2vmd.md §6.7・§12.1)。
+"""song2vmd レポート/診断のテスト。
 
 口形イベント列・音素セグメント列・EventDiagnostics から診断データ(Diagnostics)を組み立てる
 report.build_diagnostics と、それを人間向けテキスト(--dry-run)・機械モード result ペイロード
@@ -91,8 +91,8 @@ def test_merged_morae_comes_from_event_diagnostics():
 
 
 def test_low_dynamics_comes_from_event_diagnostics():
-    # low_dynamicsは機械モードのresultペイロードには載せない(呼び出し側のwarningイベント判定専用。
-    # song2vmd.md 12.1)ため、result_run_fields/result_inspect_fieldsのキー集合検証とは別に
+    # low_dynamicsは機械モードのresultペイロードには載せない(呼び出し側のwarningイベント判定専用)
+    # ため、result_run_fields/result_inspect_fieldsのキー集合検証とは別に
     # Diagnostics自体のフィールドとして直接検証する。
     assert diag_of(
         event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=True, merged_morae=0)
@@ -122,7 +122,7 @@ def test_render_report_text_includes_backends_style_params_and_stats():
         duration_sec=0.5, keys=4,
     )
     text = report.render_report_text(diag, {"open_lo": 0.2, "open_hi": 0.55})
-    # song2vmd.md 6.7 の列挙順(バックエンド・style・params → 分離有無・音素数・モーラ数・被覆率 →
+    # 定めた列挙順(バックエンド・style・params → 分離有無・音素数・モーラ数・被覆率 →
     # モーラごとの明細・併合数 → 閉口区間数・最大開き量・生成キー数・尺)どおりであることを、
     # 各行の出現順(部分文字列の存在でなく行インデックス)で確認する。
     lines = text.splitlines()

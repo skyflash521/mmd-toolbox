@@ -1,4 +1,4 @@
-"""song2vmd パイプライン統合(song2vmd.md §4章・§6章)。
+"""song2vmd パイプライン統合。
 
 vocal_analysis(S0読込・S1分離・S2認識・S3 RMS)から song2vmd 自身の口形イベント確定(events)・
 長尺分割(chunking)・モーフ生成(morphs)までを1回のパイプライン実行として結線する。song2vmd 固有の
@@ -6,8 +6,8 @@ vocal_analysis(S0読込・S1分離・S2認識・S3 RMS)から song2vmd 自身の
 
 長尺分割(--max-duration 超過時)は、処理資源対策のため S1分離・S2認識をチャンク単位(前後1.0秒の
 オーバーラップ付き)で行う。境界決定には分離前の生音声のRMSを使う(分離という重い処理を境界決定の
-ためだけに追加で行わずに済むため)。RMS(S3)は「曲全体基準」で正規化する必要がある(song2vmd.md
-§6.4)ため、各チャンクの分離済みボーカル音声から重複領域を除いた「核」区間(隣接チャンクとの境界から
+ためだけに追加で行わずに済むため)。RMS(S3)は「曲全体基準」で正規化する必要がある
+ため、各チャンクの分離済みボーカル音声から重複領域を除いた「核」区間(隣接チャンクとの境界から
 その次の境界まで)だけを取り出して全チャンク分を連結し、その連結した曲全体のボーカル音声に対して
 1回だけRMSを算出する(チャンクごとに個別正規化しない)。この連結のため、各チャンクのボーカルWAVは
 vocal_analysis.io.load_audio のピーク正規化を経ずに読み込む(正規化はチャンクごとに異なる倍率を
@@ -31,11 +31,11 @@ from vocal_analysis.types import AudioPcm
 
 from . import chunking, events, morphs, report
 
-_CHUNK_OVERLAP_SEC = 1.0  # song2vmd.md §6.6(初期値)。
+_CHUNK_OVERLAP_SEC = 1.0  # 初期値。
 
 
 class IntermediateWriteError(Exception):
-    """--keep-intermediate の中間生成物書き込み失敗(song2vmd.md 5.3・11章・12.3)。"""
+    """--keep-intermediate の中間生成物書き込み失敗。"""
 
 
 @dataclass(frozen=True)
@@ -67,19 +67,18 @@ def _read_pcm_raw(path):
     """ピーク正規化を経ずに音声ファイルを読み込む(チャンクの核区間連結専用)。
 
     vocal_analysis.io.load_audio は毎回ピーク正規化(目標値固定)を適用するため、チャンクごとに
-    個別に読み込むと倍率がチャンクごとに異なり、曲全体基準のRMS(song2vmd.md 6.4)が壊れる。
+    個別に読み込むと倍率がチャンクごとに異なり、曲全体基準のRMSが壊れる。
     """
     samples, sample_rate = sf.read(path, dtype="float32", always_2d=True)
     return AudioPcm(samples=samples, sample_rate=sample_rate)
 
 
 def _build_generation_params(openness, style_gen):
-    """presets の OpennessParams/StyleGenParams から lipsync.GenerationParams を組み立てる
-    (song2vmd.md §8.1・§8.2)。
+    """presets の OpennessParams/StyleGenParams から lipsync.GenerationParams を組み立てる。
 
     vowel_scale は presets.resolve が --vowel-gain 乗算まで済ませた最終6要素。プリセットが持つ
     生成パラメータは明示的に渡す。モーラ境界の谷(半幅・最低間隔)はプリセットが値を持たないため
-    渡さず、lipsync の生成既定をそのまま使う(song2vmd.md §8.1)。
+    渡さず、lipsync の生成既定をそのまま使う。
     """
     return GenerationParams(
         open_cap=openness.open_max,
@@ -101,7 +100,7 @@ def _build_generation_params(openness, style_gen):
 
 
 def _report_stage(progress, stage, *, done=0, total=None, note=""):
-    """段の開始を報告する(song2vmd.md 12.1「各段は開始時に最低1本のprogressを出す」)。
+    """段の開始を報告する(各段は開始時に最低1本のprogressを出す)。
 
     呼び出しは各段の実処理より前に置く。elapsed は段開始時点の経過秒(0)。
     """
@@ -110,11 +109,11 @@ def _report_stage(progress, stage, *, done=0, total=None, note=""):
 
 
 def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
-    """--keep-intermediate 指定時に中間生成物を保存する(song2vmd.md 5.2・5.3)。
+    """--keep-intermediate 指定時に中間生成物を保存する。
 
     S0正規化PCM(input_normalized.wav)・分離後ボーカルWAV(vocal.wav。長尺分割時は核区間を
     連結した曲全体分)・S2認識結果(segments.json)を、指定ディレクトリへ保存する。書き込み失敗
-    (権限・ディスク等のI/O失敗)は IntermediateWriteError として送出する(song2vmd.md 11章・12.3)。
+    (権限・ディスク等のI/O失敗)は IntermediateWriteError として送出する。
     `sf.write` はlibsndfileが開くため失敗を `OSError` でなく `sf.SoundFileError` 系で送出する
     (`mkdir`/`write_text` の失敗は `OSError`)ため、両方を捕捉する。
     """
@@ -135,7 +134,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         style_name, model_name, forced_aligner, sofa_aligner,
         english_oov_katakana_method=_DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
         keep_intermediate_dir=None, progress=None):
-    """song2vmd の音声→VMDパイプラインを実行する(song2vmd.md 4章・6章)。
+    """song2vmd の音声→VMDパイプラインを実行する。
 
     content_recognizer_model は vocal_analysis.recognizer.recognize が受け取る内容認識モデル
     (ContentRecognizerModel)。retry は同じ recognize が受け取るトリガ式リトライ(エコー幻覚・
@@ -143,7 +142,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
     アライメント段のバックエンド選択。english_oov_katakana_method は同じ recognize が受け取る
     英語未知語カタカナ化フォールバックの変換方式選択(既定`arpakana`)。
     keep_intermediate_dir を渡すと中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)をその
-    ディレクトリへ保存する(5.2の--keep-intermediate)。省略時(既定None)は何も保存しない。
+    ディレクトリへ保存する。省略時(既定None)は何も保存しない。
     """
     _report_stage(progress, "load")
     pcm = _va_io.load_audio(input_path)
@@ -187,7 +186,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
 
 def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
                 forced_aligner, sofa_aligner, english_oov_katakana_method, progress):
-    """長尺分割なしの単一実行(song2vmd.md 6.6の対象外の通常経路)。"""
+    """長尺分割なしの単一実行(通常経路)。"""
     _report_stage(progress, "separate")
     vocal_path = _va_separator.separate(pcm, separate_vocals)
     _report_stage(progress, "recognize")
@@ -204,7 +203,7 @@ def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
 def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
                  retry, max_duration_sec, forced_aligner, sofa_aligner,
                  english_oov_katakana_method, progress):
-    """長尺分割ありの実行(song2vmd.md 6.6)。境界決定は分離前の生音声RMSを使う。"""
+    """長尺分割ありの実行。境界決定は分離前の生音声RMSを使う。"""
     raw_rms = _va_rms.compute_rms(pcm)
     boundaries = chunking.find_chunk_boundaries(
         duration_sec, raw_rms.times_sec, raw_rms.values, max_duration_sec=max_duration_sec)
@@ -221,8 +220,8 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
         chunk_offsets_sec.append(pad_start)
 
         chunk_pcm = _slice_pcm(pcm, pad_start, pad_end)
-        # done は「このチャンクを始める時点までに完了したチャンク数」(0始まり。song2vmd.md 12.1の
-        # 「処理済み」の語義)。1個目のチャンクを始める時点(i=0)ではまだ0個も完了していない。
+        # done は「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
+        # 1個目のチャンクを始める時点(i=0)ではまだ0個も完了していない。
         _report_stage(progress, "separate", done=i, total=n)
         vocal_path = _va_separator.separate(chunk_pcm, separate_vocals)
         _report_stage(progress, "recognize", done=i, total=n)

@@ -1,7 +1,7 @@
-"""song2vmd 長尺分割の境界検出・セグメント結合(song2vmd.md §6.6)。
+"""song2vmd 長尺分割の境界検出・セグメント結合。
 
 処理資源対策のための自動分割(`--max-duration`)を担う純粋ロジック。実際の音声ファイル分割・
-vocal_analysis(S0〜S2)呼び出し・RMSの曲全体基準での算出(song2vmd.md §6.4)は、実音声を要する
+vocal_analysis(S0〜S2)呼び出し・RMSの曲全体基準での算出は、実音声を要する
 統合の関心事であり本モジュールの対象外。
 """
 
@@ -10,7 +10,7 @@ from vocal_analysis import Segment
 
 def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_duration_sec,
                            search_window_sec=5.0, silence_threshold=0.06):
-    """長尺の分割境界を決める(song2vmd.md §6.6)。
+    """長尺の分割境界を決める。
 
     最初の目標境界は先頭から max_duration_sec 秒後、以降の目標境界は直前に確定した実境界
     (無音点または強制分割点)から max_duration_sec 秒後とする。各目標境界の前後
@@ -44,12 +44,12 @@ def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_durati
 
 
 def merge_chunk_segments(chunk_segments, chunk_offsets_sec, boundaries_sec):
-    """チャンクごとのセグメント列を全曲セグメント列へ統合する(song2vmd.md §6.6)。
+    """チャンクごとのセグメント列を全曲セグメント列へ統合する。
 
     各チャンクのセグメント(チャンクローカル時刻)を chunk_offsets_sec でグローバル時刻へ変換し、
     隣接チャンクとのオーバーラップ区間は境界(boundaries_sec)で切り詰めて重複を除く。境界を
     またぐ連続母音区間(type が "vowel" で同一 phoneme)だけを1区間へ結合する(同一チャンク内で
-    元々隣接する同一母音の結合は本関数の対象外。song2vmd.md 6.6は境界をまたぐ場合に限定する)。
+    元々隣接する同一母音の結合は本関数の対象外)。
 
     前提: len(chunk_offsets_sec) == len(chunk_segments)、
     len(boundaries_sec) == len(chunk_segments) - 1(チャンク数nに対し境界はn-1個)。

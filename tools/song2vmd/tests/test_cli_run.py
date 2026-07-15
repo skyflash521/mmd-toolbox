@@ -1,4 +1,4 @@
-"""song2vmd CLI のパイプライン配線テスト(song2vmd.md §5・§6.7・11章・12章)。
+"""song2vmd CLI のパイプライン配線テスト。
 
 cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(PipelineResult)を
 --dry-run の人間向けレポート/機械モードの result イベント、VMD 書き出し、警告発行、
@@ -76,8 +76,8 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["separator_name"] == "audio-separator-htdemucs-ft"
     assert kwargs["max_duration_sec"] == 300.0
     assert kwargs["use_n_morph"] is True
-    # --vowel-gain の既定 1:1:1:1:1 は presets.resolve での乗算後もプリセット値のまま
-    # (song2vmd.md 8.2)。pipeline.run へは style_gen.vowel_scale として渡る。
+    # --vowel-gain の既定 1:1:1:1:1 は presets.resolve での乗算後もプリセット値のまま。
+    # pipeline.run へは style_gen.vowel_scale として渡る。
     assert kwargs["style_gen"].vowel_scale == _presets.resolve("pop")[1].vowel_scale
     assert kwargs["intensity_curve"] == 0.6
     assert kwargs["silence_on"] == 0.06
@@ -254,7 +254,7 @@ def test_normal_run_machine_emits_run_result(tmp_path, monkeypatch, capsysbinary
 
 
 def test_normal_run_emits_write_progress_stage_before_writing(tmp_path, monkeypatch, capsysbinary):
-    # VMD書き出し(song2vmd.md 12.1の段id "write")はcli.py自身の責務なので、pipeline.run()の
+    # VMD書き出し(段id "write")はcli.py自身の責務なので、pipeline.run()の
     # 内部でなくcli.py側でprogress.stage("write")を発行する必要がある。
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
@@ -300,7 +300,7 @@ def test_low_dynamics_suppressed_warning_printed_to_stderr_non_machine(tmp_path,
 
 
 def test_low_dynamics_suppressed_warning_survives_quiet(tmp_path, monkeypatch, capsys):
-    # --quiet は進捗表示だけを抑制し、警告は抑制しない(song2vmd.md 5.2)。--quiet指定時も
+    # --quiet は進捗表示だけを抑制し、警告は抑制しない。--quiet指定時も
     # 警告そのものは実際に残ることを検証する。
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
@@ -393,7 +393,7 @@ def test_forced_aligner_sofa_all_missing_machine_mode_reports_only_first_field(
     tmp_path, monkeypatch, capsysbinary
 ):
     """sofa-python・sofa-root・sofa-checkpointが全て欠落していても、走査順で最初の1件だけ報告する
-    (song2vmd.md 12.3。複数欠落を1つのエラーへまとめて返す設計は採らない)。"""
+    (複数欠落を1つのエラーへまとめて返す設計は採らない)。"""
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch)
 

@@ -1,8 +1,8 @@
-"""song2vmd のモーフ生成・VMD組み立てのテスト(song2vmd.md §6.5・9章)。
+"""song2vmd のモーフ生成・VMD組み立てのテスト。
 
 口形イベント列(MouthEvent)を共有モジュール lipsync へ渡してモーフキーを生成し、モーフキーのみの
 VmdDocument を組み立てる morphs.build_vmd_document を検証する。共有モーフ生成コア(lipsync)自体の
-正しさ・回帰は lipsync 仕様 §7 の既知値フィクスチャが担保するため、ここでは song2vmd 側の接続
+正しさ・回帰は lipsync 側の既知値フィクスチャが担保するため、ここでは song2vmd 側の接続
 (lipsync 呼び出し・VmdDocument 組み立て・0F中立キー・正規化・cp932エンコード)だけを検証する。
 """
 
@@ -20,7 +20,7 @@ def ev(shape, start, end, open_amount=0.0, consonant_class=ConsonantClass.NONE):
 
 
 def test_build_vmd_document_calls_lipsync_generate_morph_keys(monkeypatch):
-    """lipsyncへの接続を、実際の母音合成結果に依存せず直接検証する(song2vmd.md 6.5)。
+    """lipsyncへの接続を、実際の母音合成結果に依存せず直接検証する。
 
     generate_morph_keys を差し替え、同一の events・params が渡ること、返した MorphKey が
     そのまま VmdDocument.morph へ入ることを確認する(共有モーフ生成コア自体の正しさは対象外)。
@@ -70,7 +70,7 @@ def test_empty_model_name_produces_all_zero_padding():
 
 def test_frame0_neutral_key_exists_for_every_used_morph():
     # 最初の実キーがフレーム0より後にある場合でも、使用モーフには0Fの中立キーが補われる
-    # (vmd.ensure_frame0_neutral_keys。song2vmd.md 9章)。
+    # (vmd.ensure_frame0_neutral_keys)。
     events = [
         ev(MouthShape.SILENCE, 0, 10),
         ev(MouthShape.A, 10, 30, open_amount=0.6),

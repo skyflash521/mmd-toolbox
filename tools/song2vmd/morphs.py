@@ -1,8 +1,8 @@
-"""song2vmd モーフ生成・VMD組み立て接続(song2vmd.md §6.5・9章)。
+"""song2vmd モーフ生成・VMD組み立て接続。
 
 口形イベント列(MouthEvent)と生成パラメータを共有モジュール lipsync へ渡してモーフキーを生成し、
 モーフキーのみを持つ VmdDocument を組み立てる。ボーン・カメラ・照明・セルフ影・IKの各セクションは
-空で出力する(song2vmd.md §9)。VMDへの書き出しはこのモジュールでは行わない(呼び出し側が
+空で出力する。VMDへの書き出しはこのモジュールでは行わない(呼び出し側が
 `vmd.io.write_file` を使う)。
 """
 
@@ -13,7 +13,7 @@ _MODEL_NAME_BYTES = 20
 
 
 def build_vmd_document(events, params, model_name):
-    """口形イベント列からモーフキーのみのVmdDocumentを組み立てる(song2vmd.md §6.5・9章)。
+    """口形イベント列からモーフキーのみのVmdDocumentを組み立てる。
 
     model_name は cp932 で表現できる20バイト以内であることを呼び出し側(cli.py の引数検証)が
     保証済みの前提で、ここでは20バイトへパディングするだけを行う。

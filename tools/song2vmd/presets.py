@@ -1,19 +1,19 @@
-"""song2vmd 歌い方スタイルプリセット(song2vmd.md §8.1)。
+"""song2vmd 歌い方スタイルプリセット。
 
 --style が選ぶプリセットの具体値(開き量レンジ・アタック/リリース・協調調音の重なり上限・先行・
 最小保持・合成誇張係数・開き量上限・母音別倍率・三角形下限・伸び表現・レガート谷)を確定する。
 開き量上限・協調調音・先行・最小保持はCLIで明示指定(--open-max・--coarticulation・--anticipation・
 --min-hold)があればプリセット値より優先する。母音別倍率は --vowel-gain が5母音値を要素ごとに
-乗算して微調整する(撥音「ん」はプリセット値のまま。song2vmd.md §8.2)。それ以外の生成パラメータに
+乗算して微調整する(撥音「ん」はプリセット値のまま)。それ以外の生成パラメータに
 対応するCLIオプションは無く、プリセット値に固定される。
 """
 
 from dataclasses import dataclass
 
-# song2vmd.md §8.1 の表。pop の母音別倍率・先行・協調調音・伸び表現・レガート谷は、同じ lipsync
+# スタイル別プリセットの表。pop の母音別倍率・先行・協調調音・伸び表現・レガート谷は、同じ lipsync
 # 生成コアを使う口パク生成系のMMD視覚チューニングで確定した標準値。他スタイルは未チューニングの
 # 出発点値。モーラ境界の谷(半幅・最低間隔)はここに含めず、全プリセットが lipsync の生成既定を
-# そのまま使う(song2vmd.md §8.1)。
+# そのまま使う。
 _PRESETS = {
     "pop": {
         "open_lo": 0.30, "open_hi": 0.75, "attack": 2, "release": 2,
@@ -62,7 +62,7 @@ STYLE_NAMES = tuple(_PRESETS)
 
 @dataclass(frozen=True)
 class OpennessParams:
-    """RMS→開き量写像に使うパラメータ(song2vmd.md §6.5・8.1)。"""
+    """RMS→開き量写像に使うパラメータ。"""
 
     open_lo: float
     open_hi: float
@@ -72,7 +72,7 @@ class OpennessParams:
 @dataclass(frozen=True)
 class StyleGenParams:
     """lipsync へ渡す生成パラメータのうち song2vmd のスタイルプリセットが確定する部分
-    (song2vmd.md §8.1。母音合成プロファイル等の残りは lipsync 側が持つ)。
+    (母音合成プロファイル等の残りは lipsync 側が持つ)。
 
     vowel_scale は --vowel-gain 乗算適用後の最終6要素(a, i, u, e, o, ん)。
     """
@@ -95,10 +95,10 @@ class StyleGenParams:
 
 def resolve(style, *, open_max=None, coarticulation=None, anticipation=None, min_hold=None,
             vowel_gain=(1.0, 1.0, 1.0, 1.0, 1.0)):
-    """style のプリセット値に、CLI明示指定(Noneでない引数)を上書きして確定する(song2vmd.md §8.1)。
+    """style のプリセット値に、CLI明示指定(Noneでない引数)を上書きして確定する。
 
     vowel_gain(--vowel-gain の5母音値)はプリセットの母音別倍率の a〜o へ要素ごとに乗算し、
-    撥音「ん」はプリセット値のまま使う(song2vmd.md §8.2)。戻り値は (OpennessParams, StyleGenParams)。
+    撥音「ん」はプリセット値のまま使う。戻り値は (OpennessParams, StyleGenParams)。
     開き量レンジ(open_lo/open_hi)・アタック・リリース・合成誇張係数・三角形下限・伸び表現・
     レガート谷はプリセット値に固定される(対応するCLIオプションが無いため)。
     """
@@ -130,12 +130,12 @@ def resolve(style, *, open_max=None, coarticulation=None, anticipation=None, min
 
 
 def describe_values():
-    """--describe の presets(song2vmd.md 12.2)用に、公開引数名→プリセット値の対応を返す。
+    """--describe の presets 用に、公開引数名→プリセット値の対応を返す。
 
     載せるのは open_max・coarticulation・anticipation・min_hold のみ(CLIの対応オプションで
     プリセット値を上書きできる引数。開き量レンジ・アタック・リリース・合成誇張係数・母音別倍率・
     三角形下限・伸び表現・レガート谷はプリセット値に固定でCLIから上書きできない。母音別倍率は
-    `--vowel-gain` で乗算による微調整はできるが上書きではないためここには載せない。song2vmd.md 8.1)。
+    `--vowel-gain` で乗算による微調整はできるが上書きではないためここには載せない)。
     """
     return {
         name: {

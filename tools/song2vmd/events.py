@@ -1,11 +1,11 @@
-"""song2vmd 口形イベント確定(入口。song2vmd.md §6.3・§6.4・§6.5)。
+"""song2vmd 口形イベント確定(入口)。
 
 vocal_analysis の音素セグメント列(母音/子音/gap)と相対正規化RMSから、`lipsync` へ渡す口形イベント列
-(`MouthEvent`)と各モーラの開き量を確定する。適用順は song2vmd.md §6.3 の6段階に従う:
+(`MouthEvent`)と各モーラの開き量を確定する。適用順は次の6段階に従う:
 (1) IPA写像・両唇閉鎖判定・撥音「ん」判定、(2) gap解決・母音区間の無音補正、(3) 同母音連結、
 (4) 母音境界のRMSオンセット補正、(5) 低信頼・無声判定、(6) 先頭子音種別の付与。
 
-音素記号は採用構成(G2P強制アライメント。vocal_analysis.md §5.2)が実際に出力する記号に基づく:
+音素記号は採用構成(G2P強制アライメント)が実際に出力する記号に基づく:
 撥音「ん」は専用記号 ɴ、ま行/ば行/ぱ行頭子音は m/mʲ・b/bʲ・p/pʲ。
 """
 
@@ -16,21 +16,21 @@ import numpy as np
 from lipsync import ApertureClass, ConsonantClass, MouthEvent, MouthShape
 from vocal_analysis.phonemes import espeak_ipa_to_vowel
 
-FRAME_RATE = 30.0  # 30fps基準(song2vmd.md 9章・vmd規約)。
+FRAME_RATE = 30.0  # 30fps基準。
 
-# ま行・ば行・ぱ行頭子音(採用構成の音素記号。vocal_analysis.md §5.2)。ɸ(ふ)は唇を丸める子音で
-# 閉鎖しないため含めない(song2vmd.md 6.3)。
+# ま行・ば行・ぱ行頭子音(採用構成の音素記号)。ɸ(ふ)は唇を丸める子音で
+# 閉鎖しないため含めない。
 _BILABIAL_PHONEMES = frozenset({"m", "mʲ", "b", "bʲ", "p", "pʲ"})
 
 # 撥音「ん」専用の音素記号(採用構成ではG2Pの N に対応する ɴ)。頭子音の鼻音(n・ɲ・m・mʲ等)とは
-# 記号が分かれるため、後続母音の有無を観測しなくても記号だけで一意に判定できる(song2vmd.md 6.3)。
+# 記号が分かれるため、後続母音の有無を観測しなくても記号だけで一意に判定できる。
 _MORAIC_NASAL_PHONEME = "ɴ"
 
-# 先頭子音種別(ConsonantClass)の判定表(song2vmd.md 6.3)。
+# 先頭子音種別(ConsonantClass)の判定表。
 _ROUNDED_PHONEMES = frozenset({"ɸ", "w"})
 _SPREAD_PHONEMES = frozenset({"ɕ", "tɕ", "dʑ", "ɲ", "ç"})
 
-# 開口減衰種別(ApertureClass)の判定表(song2vmd.md 6.3)。ConsonantClassとは独立な軸で、区切りから
+# 開口減衰種別(ApertureClass)の判定表。ConsonantClassとは独立な軸で、区切りから
 # その母音までの子音列のうち最も強いクラスを付与する(_strongest_aperture_class)。
 _FIRM_CLOSURE_PHONEMES = frozenset({"t", "d", "n", "ts", "ɲ"})
 _NARROW_CHANNEL_PHONEMES = frozenset({"s", "z", "ɕ", "tɕ", "dʑ", "ç", "j"})
@@ -44,19 +44,19 @@ _APERTURE_RANK = {
 
 _VOWEL_SHAPES = {"a": MouthShape.A, "i": MouthShape.I, "u": MouthShape.U, "e": MouthShape.E, "o": MouthShape.O}
 
-_LOW_DYNAMICS_THRESHOLD_DB = 12.0  # song2vmd.md 6.4(初期値)。
-_MORA_CENTER_FRACTION = 0.6  # 代表RMSの中央60%窓の比率(母音核・モーラ全体の二窓共通。song2vmd.md 6.4)。
-_ONSET_WINDOW_SEC = 0.06  # 母音境界のRMSオンセット補正窓(song2vmd.md 6.3。初期値)。
-_ONSET_SLOPE_PER_10MS = 0.15  # オンセット判定の傾きしきい値(song2vmd.md 6.3。初期値)。
-_ONSET_SMOOTH_WINDOW_SEC = 0.03  # オンセット検出前の平滑化窓(song2vmd.md 6.3。初期値)。
-_WEAK_CONFIDENCE_THRESHOLD = 0.5  # song2vmd.md 6.3(初期値)。
+_LOW_DYNAMICS_THRESHOLD_DB = 12.0  # 低ダイナミクス判定のしきい値(初期値)。
+_MORA_CENTER_FRACTION = 0.6  # 代表RMSの中央60%窓の比率(母音核・モーラ全体の二窓共通)。
+_ONSET_WINDOW_SEC = 0.06  # 母音境界のRMSオンセット補正窓(初期値)。
+_ONSET_SLOPE_PER_10MS = 0.15  # オンセット判定の傾きしきい値(初期値)。
+_ONSET_SMOOTH_WINDOW_SEC = 0.03  # オンセット検出前の平滑化窓(初期値)。
+_WEAK_CONFIDENCE_THRESHOLD = 0.5  # 低信頼判定のしきい値(初期値)。
 _WEAK_RMS_WITH_CONFIDENCE = 0.3
 _WEAK_RMS_WITHOUT_CONFIDENCE = 0.2
 _WEAK_SCALE = 0.5
 
 
 def _consonant_class(phoneme):
-    """先頭子音種別(ConsonantClass)を音素記号から判定する(song2vmd.md 6.3)。"""
+    """先頭子音種別(ConsonantClass)を音素記号から判定する。"""
     if phoneme is None:
         return ConsonantClass.NONE
     if phoneme in _ROUNDED_PHONEMES:
@@ -67,7 +67,7 @@ def _consonant_class(phoneme):
 
 
 def _aperture_class_of_phoneme(phoneme):
-    """単一子音音素の開口減衰種別(song2vmd.md 6.3の判定表)。表に無い子音はNONE。"""
+    """単一子音音素の開口減衰種別。表に無い子音はNONE。"""
     if phoneme in _FIRM_CLOSURE_PHONEMES:
         return ApertureClass.FIRM_CLOSURE
     if phoneme in _NARROW_CHANNEL_PHONEMES:
@@ -78,7 +78,7 @@ def _aperture_class_of_phoneme(phoneme):
 
 
 def _strongest_aperture_class(consonant_run):
-    """区切りからその母音までに連続して現れる子音列のうち最も強いクラス(song2vmd.md 6.3)。"""
+    """区切りからその母音までに連続して現れる子音列のうち最も強いクラス。"""
     strongest = ApertureClass.NONE
     for phoneme in consonant_run:
         cls = _aperture_class_of_phoneme(phoneme)
@@ -94,7 +94,7 @@ class _Unit:
     start_sec/end_sec は口形イベントとして表示する区間(吸収した子音区間を含みうる)。
     content_start_sec/content_end_sec は「子音区間を除いた」母音核区間(vowel/nのみ意味を持つ。
     未指定なら start_sec/end_sec をそのまま使う)。代表RMSは母音核区間とモーラ区間全体の
-    中央60%平均の大きい方(song2vmd.md 6.4「モーラ代表RMS」)。
+    中央60%平均の大きい方(モーラ代表RMS)。
     """
 
     kind: str  # "vowel" | "bilabial" | "n" | "gap" | "silence"
@@ -117,10 +117,10 @@ class _Unit:
 
 @dataclass(frozen=True)
 class EventDiagnostics:
-    """口形イベント確定の診断(song2vmd.md 6.7)。"""
+    """口形イベント確定の診断。"""
 
     weak_vowels: int  # 低信頼・無声判定で開き量を弱めたモーラ数
-    low_dynamics: bool  # 低ダイナミクス抑制(6.4)が働いたか
+    low_dynamics: bool  # 低ダイナミクス抑制が働いたか
     merged_morae: int  # 段階(3)の同母音連結で統合された(vowel/n)モーラ数
 
 
@@ -147,7 +147,7 @@ def _rms_window_average(rms, start_sec, end_sec):
 
 
 def _mora_rms(rms, start_sec, end_sec):
-    """区間の中央60%の平均RMS(song2vmd.md 6.4)。"""
+    """区間の中央60%の平均RMS。"""
     span = end_sec - start_sec
     margin = span * (1.0 - _MORA_CENTER_FRACTION) / 2.0
     return _rms_window_average(rms, start_sec + margin, end_sec - margin)
@@ -155,7 +155,7 @@ def _mora_rms(rms, start_sec, end_sec):
 
 def _mora_representative_rms(rms, unit):
     """モーラ代表RMS(母音核区間と、吸収した先行子音を含むモーラ区間全体の、中央60%平均の
-    大きい方。song2vmd.md 6.4)。
+    大きい方)。
 
     強制アライメントは伸ばして歌う発声の大部分を先行子音トークンへ割り当て、母音核を数十msまで
     狭めることがある。その狭い窓だけで判定すると、発声中のモーラを無音補正で閉口させたり開き量を
@@ -169,15 +169,15 @@ def _mora_representative_rms(rms, unit):
 
 
 def _classify_phonetic(segments, use_n_morph):
-    """段階(1): IPA→5母音写像・両唇閉鎖判定・撥音「ん」判定(音素由来、RMS非依存。song2vmd.md 6.3)。
+    """段階(1): IPA→5母音写像・両唇閉鎖判定・撥音「ん」判定(音素由来、RMS非依存)。
 
     独立イベントを作らない子音(両唇閉鎖・撥音「ん」以外)は、次に現れる母音的口形イベントの開始時刻を
-    その子音の開始まで前へ寄せることで吸収する(前後母音の協調調音は lipsync が扱う。song2vmd.md 6.3)。
+    その子音の開始まで前へ寄せることで吸収する(前後母音の協調調音は lipsync が扱う)。
     """
     units = []
     pending_start = None
     last_consonant_ipa = None
-    aperture_run = []  # 区切りからの累積子音列(開口減衰種別判定用。song2vmd.md 6.3)
+    aperture_run = []  # 区切りからの累積子音列(開口減衰種別判定用)
     for seg in segments:
         if seg.type == "vowel":
             start = pending_start if pending_start is not None else seg.start_sec
@@ -186,7 +186,7 @@ def _classify_phonetic(segments, use_n_morph):
                 units.append(_Unit("gap", start, seg.end_sec))
                 aperture_run = []
             else:
-                # content_start/end_sec は吸収した子音区間を含めない元のセグメント境界(6.4)。
+                # content_start/end_sec は吸収した子音区間を含めない元のセグメント境界。
                 units.append(_Unit(
                     "vowel", start, seg.end_sec, letter=letter,
                     confidence=seg.confidence, consonant_ipa=last_consonant_ipa,
@@ -202,7 +202,7 @@ def _classify_phonetic(segments, use_n_morph):
                 start = pending_start if pending_start is not None else seg.start_sec
                 units.append(_Unit("bilabial", start, seg.end_sec))
                 pending_start = None
-                aperture_run = []  # 両唇閉鎖は区切り(song2vmd.md 6.3)
+                aperture_run = []  # 両唇閉鎖は区切り
             elif seg.phoneme == _MORAIC_NASAL_PHONEME:
                 start = pending_start if pending_start is not None else seg.start_sec
                 kind = "n" if use_n_morph else "silence"
@@ -212,7 +212,7 @@ def _classify_phonetic(segments, use_n_morph):
                 ))
                 pending_start = None
                 # 撥音「ん」自身は独立イベントとして表示済みなので、次の母音の先頭子音種別には
-                # 使わない(song2vmd.md 6.3。先行隣接子音なし=NONE)。撥音自身も区切り。
+                # 使わない(先行隣接子音なし=NONE)。撥音自身も区切り。
                 last_consonant_ipa = None
                 aperture_run = []
             else:
@@ -230,11 +230,11 @@ def _classify_phonetic(segments, use_n_morph):
     return units
 
 
-_GAP_CLOSE_RUN_SEC = 0.2  # §6.4: gap走査で発声終了とみなす、下降側しきい値以下の最小連続長
+_GAP_CLOSE_RUN_SEC = 0.2  # gap走査で発声終了とみなす、下降側しきい値以下の最小連続長
 
 
 def _gap_close_time(rms, start_sec, end_sec, silence_on):
-    """gap内の正規化RMSを先頭から走査し、発声終了時刻を返す(song2vmd.md 6.4のgap走査)。
+    """gap内の正規化RMSを先頭から走査し、発声終了時刻を返す(gap走査)。
 
     silence_on以下が _GAP_CLOSE_RUN_SEC 以上連続した最初の連続、または gap 終端まで続く連続の
     開始時刻を返す(連続要件はビブラート・トレモロの瞬間的な谷での早期閉口を防ぐ余裕で、終端まで
@@ -261,11 +261,11 @@ def _gap_close_time(rms, start_sec, end_sec, silence_on):
 
 
 def _resolve_silence(units, rms, silence_on, low_dynamics):
-    """段階(2): gap解決・母音区間の無音補正(song2vmd.md 6.3・6.4)。
+    """段階(2): gap解決・母音区間の無音補正。
 
     gapの無音/継続は、直前に確定した口形が母音的(母音・撥音「ん」)かどうかと開始(下降側)しきい値
     だけで決める。gap全体をひとまとめに判定せず、RMSを先頭から走査して発声が終わった時点でgapを
-    分割し、前半は直前の母音的口形の継続・残りは無音にする(§6.4のgap走査。一度閉じたgap内では
+    分割し、前半は直前の母音的口形の継続・残りは無音にする(一度閉じたgap内では
     再度開かない)。先頭・末尾のgapはRMSに依らず常に無音。
     低ダイナミクス曲では、この音量に基づく無音化(gap無音化・母音区間の無音補正)を抑制する
     (先頭・末尾の閉口は対象外)。
@@ -306,24 +306,24 @@ def _resolve_silence(units, rms, silence_on, low_dynamics):
     return result
 
 
-_MORA_KINDS = frozenset({"vowel", "n"})  # merged_morae(6.7)に数える対象(閉口・無音は含めない)
+_MORA_KINDS = frozenset({"vowel", "n"})  # merged_morae に数える対象(閉口・無音は含めない)
 
 
 def _merge_adjacent(units):
-    """段階(3): 連続する同一口形区間を1つのイベントへまとめる(song2vmd.md 6.3)。
+    """段階(3): 連続する同一口形区間を1つのイベントへまとめる。
 
-    content_start_sec/content_end_sec(代表RMS算出用の区間。6.4)は、先頭ユニットの開始から
+    content_start_sec/content_end_sec(代表RMS算出用の区間)は、先頭ユニットの開始から
     末尾ユニットの終了までへ広げる(同一口形が続く区間はすべて母音的内容とみなす)。
 
-    戻り値は (統合後のユニット列, 統合回数)。統合回数は母音/撥音「ん」区間の統合(6.7の
-    merged_morae)だけを数え、閉口・無音区間の統合は含めない。
+    戻り値は (統合後のユニット列, 統合回数)。統合回数は母音/撥音「ん」区間の統合
+    (merged_morae)だけを数え、閉口・無音区間の統合は含めない。
     """
     merged = []
     merged_morae = 0
     for u in units:
         # 母音どうしは、間に子音を挟まない(u.consonant_ipa is None、認識上の分割による観測上の
         # 連続)場合だけ統合する。前後の子音が同一音素であっても(例:「たた」)モーラの区切り
-        # (子音の再構音)は実在するため統合しない(song2vmd.md 6.3)。
+        # (子音の再構音)は実在するため統合しない。
         can_merge = (
             merged and merged[-1].kind == u.kind
             and (u.kind != "vowel" or (merged[-1].letter == u.letter and u.consonant_ipa is None))
@@ -345,7 +345,7 @@ def _merge_adjacent(units):
 
 
 def _smoothed_rms(rms):
-    """オンセット検出用に約30ms移動平均で平滑化したRMSを返す(song2vmd.md 6.3)。"""
+    """オンセット検出用に約30ms移動平均で平滑化したRMSを返す。"""
     times, values = rms.times_sec, rms.values
     if len(times) < 2:
         return times, values
@@ -382,7 +382,7 @@ def _find_onset(times, smoothed, center_sec):
 
 
 def _refine_onsets(units, rms):
-    """段階(4): 母音境界のRMSオンセット補正(song2vmd.md 6.3)。
+    """段階(4): 母音境界のRMSオンセット補正。
 
     見つかった立ち上がり時刻は、直前ユニット自身の開始と当該母音区間の終了の範囲へクランプし、
     負長イベントを作らない(lipsync.types.MouthEvent の隙間なし・非重複契約)。
@@ -408,14 +408,14 @@ def _refine_onsets(units, rms):
 
 
 def _map_open_amount(rms_value, *, open_lo, open_hi, open_max, intensity_curve):
-    """段階(6.5): RMS→開き量の写像(累乗則・スタイルレンジ・open_maxへのクランプ。song2vmd.md 6.5)。"""
+    """段階(6.5): RMS→開き量の写像(累乗則・スタイルレンジ・open_maxへのクランプ)。"""
     raw = rms_value ** intensity_curve
     clamped = min(max(raw, open_lo), open_hi)
     return min(clamped, open_max)
 
 
 def _is_weak_vowel(confidence, rms_value):
-    """段階(5): 低信頼・無声母音判定(song2vmd.md 6.3)。"""
+    """段階(5): 低信頼・無声母音判定。"""
     if confidence is not None:
         return confidence < _WEAK_CONFIDENCE_THRESHOLD and rms_value < _WEAK_RMS_WITH_CONFIDENCE
     return rms_value < _WEAK_RMS_WITHOUT_CONFIDENCE
@@ -423,7 +423,7 @@ def _is_weak_vowel(confidence, rms_value):
 
 def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity_curve, silence_on,
                           use_n_morph=True):
-    """音素セグメント列とRMSから口形イベント列(MouthEvent)と開き量を確定する(song2vmd.md 6.3〜6.5)。
+    """音素セグメント列とRMSから口形イベント列(MouthEvent)と開き量を確定する。
 
     段階(6)の先頭子音種別付与とフレーム変換(30fps)は本関数内で行い、`lipsync` へ渡す最終形を返す。
     """

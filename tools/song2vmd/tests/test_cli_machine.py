@@ -1,4 +1,4 @@
-"""song2vmd CLI 機械モード骨格・構造化エラーのテスト(song2vmd.md 11章・12章)。
+"""song2vmd CLI 機械モード骨格・構造化エラーのテスト。
 
 機械モードは stdout を JSON Lines のイベント専用にし、失敗は確定 code/field/exit_code の error
 イベントで終端する。非機械モードは失敗理由を標準エラーへ1行出す。既定(非機械)挙動が不変であること
@@ -98,7 +98,7 @@ def test_machine_error_bad_argument_unknown_style(tmp_path, capsysbinary):
     assert e["code"] == "bad_argument" and e["field"] == "--style" and e["exit_code"] == 2
 
 
-# --- 上書きガード(song2vmd.md 5.3)------------------------------------------
+# --- 上書きガード ------------------------------------------------------------
 
 
 def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):

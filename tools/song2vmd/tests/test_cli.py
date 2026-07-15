@@ -1,10 +1,10 @@
-"""song2vmd CLI 骨組みのテスト(song2vmd.md §5・11章)。
+"""song2vmd CLI 骨組みのテスト。
 
 範囲は CLI の起動・引数解析・検証・出力先解決・上書きガードと `--dry-run` の(出力を書かない)経路に
 限る。実際の音声処理パイプライン(`pipeline.run`)は決定論的なスタブに差し替え、引数の受理・検証・
 出力先解決だけを対象にする(パイプラインの実データ配線は test_cli_run.py で検証する)。
 
-終了コード(song2vmd.md 11章): 0 正常 / 1 入力不正 / 2 引数エラー(未知オプション・範囲不正・
+終了コード: 0 正常 / 1 入力不正 / 2 引数エラー(未知オプション・範囲不正・
 上書きガード等) / 3 出力書き込み失敗 / 4 音声前段の外部依存の失敗 / 130 協調的な中断。
 """
 
@@ -163,7 +163,7 @@ def test_unknown_separator_is_arg_error(tmp_path):
 
 
 def test_recognizer_model_id_accepts_any_string(tmp_path):
-    """--recognizer-model-id は安定idでなく自由な文字列(vocal_analysis.md §5.2)。"""
+    """--recognizer-model-id は安定idでなく自由な文字列。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--recognizer-model-id", "anything/goes", "--dry-run"]) == 0
 
@@ -293,7 +293,7 @@ def test_max_duration_negative_is_arg_error(tmp_path):
 
 
 def test_max_duration_zero_is_accepted(tmp_path):
-    """0 は長尺分割の無効化を意味する有効値(song2vmd.md 5.2)。"""
+    """0 は長尺分割の無効化を意味する有効値。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--max-duration", "0", "--dry-run"]) == 0
 
@@ -349,7 +349,7 @@ def test_model_name_at_20_byte_limit_is_accepted(tmp_path):
     assert cli.main([src, "--model-name", "x" * 20, "--dry-run"]) == 0
 
 
-# --- 上書きガード(song2vmd.md 5.3)-----------------------------------------
+# --- 上書きガード -----------------------------------------------------------
 
 
 def test_overwrite_guard_blocks_input_overwrite(tmp_path):
@@ -370,7 +370,7 @@ def test_overwrite_flag_allows_input_overwrite(tmp_path):
 
 
 def test_existing_separate_output_does_not_require_overwrite(tmp_path):
-    """保護対象は入力ファイルに限る。別パスの既存出力ファイルはガード対象外(song2vmd.md 5.3)。"""
+    """保護対象は入力ファイルに限る。別パスの既存出力ファイルはガード対象外。"""
     src = _touch(tmp_path / "in.wav")
     out = _touch(tmp_path / "out.vmd")  # 既存だが入力とは別パス
     assert cli.main([src, "-o", out, "--dry-run"]) == 0

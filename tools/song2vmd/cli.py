@@ -1,17 +1,16 @@
-"""song2vmd CLI(song2vmd.md §5)。
+"""song2vmd CLI。
 
 日本語の歌声音声からアニメ的口パクの口パク VMD を1コマンドで生成する独立 CLI。本ファイルは
 引数解析・検証・出力先解決・上書きガードと、`pipeline`(vocal_analysis による音声読み込み・分離・
 認識・強弱RMS算出 → 口形イベント確定 → lipsync によるモーフキー生成)の呼び出し・
 `vmd.io` による VMD 出力・レポート/診断(`report`)・進捗表示(`progress`)への配線を実装する。
 
-終了コード(song2vmd.md 11章): 0 正常 / 1 入力不正 / 2 引数エラー(範囲・書式・上書きガード等) /
+終了コード: 0 正常 / 1 入力不正 / 2 引数エラー(範囲・書式・上書きガード等) /
 3 出力書き込み失敗 / 4 音声前段の外部依存の失敗(失敗ステージ明示) / 130 協調的な中断(Ctrl-C 等)。
 
-`--machine`/`--describe` は構造化出力モード(song2vmd.md 5.5・12章)。標準出力を JSON Lines の
-イベントストリーム専用にし、失敗も error イベントで理由を返す。共通の契約は
-[CLI インターフェース規約](../../docs/conventions/cli-interface.md)が正、イベント送出は共有基盤
-[cli_events](../../libs/cli_events/cli_events.md) を用いる。既定(非機械)の表示・終了コードは変えない。
+`--machine`/`--describe` は構造化出力モード。標準出力を JSON Lines の
+イベントストリーム専用にし、失敗も error イベントで理由を返す。イベント送出は共有基盤
+cli_events を用いる。既定(非機械)の表示・終了コードは変えない。
 """
 
 import argparse
@@ -45,26 +44,26 @@ from . import presets as _presets
 from . import progress as _progress
 from . import report as _report
 
-# 歌い方スタイルプリセット名(song2vmd.md 8.1)。具体値の解決は presets モジュールが持つ。
+# 歌い方スタイルプリセット名。具体値の解決は presets モジュールが持つ。
 STYLE_NAMES = _presets.STYLE_NAMES
 
-# --separate-vocals の実施方針(song2vmd.md 5.2)。
+# --separate-vocals の実施方針。
 SEPARATE_VOCALS_MODES = ("auto", "always", "never")
 
-# S1 の登録アダプタの安定 id(vocal_analysis.md §8.2・§8.3 が正本)。選択肢の公開は利用先 CLI の
-# 責務なので、現行の採用アダプタ id をここで公開する(採用アダプタの追加・変更は vocal_analysis.md
-# §8.3 を先に更新してから、この一覧を追随させる)。S2内容認識モデルは安定idでなく
-# `--recognizer-model-id`/`--recognizer-model-revision`(ContentRecognizerModel。5.2)で選ぶ。
+# S1 の登録アダプタの安定 id。選択肢の公開は利用先 CLI の責務なので、現行の採用アダプタ id を
+# ここで公開する(vocal_analysis 側の採用アダプタの追加・変更にこの一覧を追随させる)。
+# S2内容認識モデルは安定idでなく
+# `--recognizer-model-id`/`--recognizer-model-revision`(ContentRecognizerModel)で選ぶ。
 SEPARATOR_NAMES = ("audio-separator-htdemucs-ft",)
 
-# S2強制アライメント段の登録アダプタの安定id(vocal_analysis.md §8.2・§8.3が正本)。既定は
+# S2強制アライメント段の登録アダプタの安定id。既定は
 # DEFAULT_FORCED_ALIGNER(wav2vec2-ctc-forcedalign)で、SOFA選択時のみ--sofa-*系が必須になる。
 FORCED_ALIGNER_NAMES = ("wav2vec2-ctc-forcedalign", "sofa-forcedalign")
 
 # 英語未知語カタカナ化フォールバックの変換方式。既定は DEFAULT_ENGLISH_OOV_KATAKANA_METHOD(arpakana)。
 ENGLISH_OOV_KATAKANA_METHOD_NAMES = ("arpakana", "tinyllama-katakana-converter")
 
-# VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS(song2vmd.md 5.2・9章)。
+# VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS。
 _MODEL_NAME_MAX_BYTES = 20
 
 
@@ -109,7 +108,7 @@ def _positive_float(text: str) -> float:
 
 
 def _nonneg_float(text: str) -> float:
-    """0 以上の有限 float(--max-duration)。0 は長尺分割の無効化(song2vmd.md 5.2)。"""
+    """0 以上の有限 float(--max-duration)。0 は長尺分割の無効化。"""
     v = _finite_float(text)
     if v < 0.0:
         raise argparse.ArgumentTypeError(f"0 以上の数値が必要: {text!r}")
@@ -125,10 +124,10 @@ def _nonneg_int(text: str) -> int:
 
 
 def _vowel_gain(text: str) -> tuple:
-    """--vowel-gain の `a:i:u:e:o` を5要素 float タプルへ解析する(song2vmd.md 5.2・8.3)。
+    """--vowel-gain の `a:i:u:e:o` を5要素 float タプルへ解析する。
 
     各要素はプリセットの母音別倍率へ乗算する微調整倍率なので非負の有限値を要求する。
-    撥音「ん」はプリセット値のままで本引数の対象外(song2vmd.md 8.2)。
+    撥音「ん」はプリセット値のままで本引数の対象外。
     """
     parts = text.split(":")
     if len(parts) != 5:
@@ -145,11 +144,11 @@ def _vowel_gain(text: str) -> tuple:
 
 
 def _silence_threshold(text: str) -> tuple:
-    """--silence-threshold の `ON:OFF` を (on, off) へ解析する(song2vmd.md 6.4・8.1)。
+    """--silence-threshold の `ON:OFF` を (on, off) へ解析する。
 
     正規化RMSのヒステリシスしきい値で、いずれも 0.0〜1.0。無音/継続の判定に使う下降側(ON)は
     上昇側(OFF)より小さくなければならない(下降側 < 上昇側。無音ヒステリシスの意味上の制約)。
-    上昇側(OFF)は無音状態からの母音復帰自体の判定には使わない(song2vmd.md 6.4)。
+    上昇側(OFF)は無音状態からの母音復帰自体の判定には使わない。
     """
     parts = text.split(":")
     if len(parts) != 2:
@@ -220,7 +219,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    default=DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
                    help="英語未知語カタカナ化フォールバックの変換方式選択(既定arpakana。"
                         "tinyllama-katakana-converterは生成モデルを使う選択式オプション)")
-    # --n-morph / --no-n-morph は既定 on の対(song2vmd.md 5.2)。dest=n_morph を共有する。
+    # --n-morph / --no-n-morph は既定 on の対。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
                    help="撥音「ん」に「ん」モーフを使う(既定on)。--no-n-morphの対の明示形")
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
@@ -262,7 +261,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     return p
 
 
-# --describe(12.2)の型/制約表。dest → (type, constraint)。help/default は parser の各 action から取る。
+# --describe の型/制約表。dest → (type, constraint)。help/default は parser の各 action から取る。
 _D_UNIT = {"min": 0, "max": 1, "exclusive_min": False}             # 0〜1(開き量)
 _D_NONNEG_INT = {"min": 0, "max": None, "exclusive_min": False}    # 0以上の整数
 _D_POS_FLOAT = {"min": 0, "max": None, "exclusive_min": True}      # 正の数値(強弱指数)
@@ -314,7 +313,7 @@ _D_TYPE = {
 
 
 def _describe_options(parser):
-    """--describe の options を parser 定義から機械導出する(12.2)。順序は add_argument 順。
+    """--describe の options を parser 定義から機械導出する。順序は add_argument 順。
 
     各要素は {name, type, constraint, default, help}(キー5つ)。メタ/モード操作(--describe/--version/
     --help/--machine)は _D_TYPE に無いので除外。真偽フラグの否定形(--no-n-morph)は肯定形の長形式で
@@ -345,16 +344,16 @@ def _describe_options(parser):
 
 
 def _describe_presets():
-    """--describe の presets を歌い方スタイルプリセットから導出する(12.2)。
+    """--describe の presets を歌い方スタイルプリセットから導出する。
 
     各要素は {name, values}。values は CLI で上書き可能な公開引数名(open_max・coarticulation・
-    anticipation・min_hold)→ そのプリセットが与える値のオブジェクト(song2vmd.md 8.1・presetsモジュール)。
+    anticipation・min_hold)→ そのプリセットが与える値のオブジェクト(値の正体は presets モジュール)。
     """
     return [{"name": name, "values": dict(values)} for name, values in _presets.describe_values().items()]
 
 
 def _default_output(input_path: str) -> str:
-    # song2vmd.md 5.1: 既定出力は <入力名(拡張子なし)>.vmd。元の拡張子に依らず常に .vmd。
+    # 既定出力は <入力名(拡張子なし)>.vmd。元の拡張子に依らず常に .vmd。
     base, _ = os.path.splitext(input_path)
     return base + ".vmd"
 
@@ -370,9 +369,8 @@ def _same_path(a: str, b: str) -> bool:
 
 
 def main(argv=None) -> int:
-    """CLI エントリポイント。終了コードを返す(0/1/2/3/4/130。song2vmd.md 11章・12章)。"""
-    # 人間向け標準エラーはロケール符号化で表せない文字でも UnicodeEncodeError で落とさない
-    # (CLI インターフェース規約 §10)。
+    """CLI エントリポイント。終了コードを返す(0/1/2/3/4/130)。"""
+    # 人間向け標準エラーはロケール符号化で表せない文字でも UnicodeEncodeError で落とさない。
     if hasattr(sys.stderr, "reconfigure"):
         try:
             sys.stderr.reconfigure(errors="backslashreplace")
@@ -381,7 +379,7 @@ def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # 構造化出力モード判定(規約 §3)。解析前に argv で先取り(引数エラー時も出力チャネルを決めるため)。
+    # 構造化出力モード判定。解析前に argv で先取り(引数エラー時も出力チャネルを決めるため)。
     # --describe は --machine を要さない独立メタ操作。どちらかがあれば emitter を用意し、
     # MachineArgumentParser で使用法エラーも error イベントへ振り替える。emitter はバイナリ stdout へ
     # UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None(従来の人間向け経路)。
@@ -390,9 +388,9 @@ def main(argv=None) -> int:
     emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
 
     def fail(code, message, exit_code, *, field=None, path=None, stage=None):
-        """失敗を報告して終了コードを返す(12.3)。構造化出力モードは error イベントでストリームを終端し、
+        """失敗を報告して終了コードを返す。構造化出力モードは error イベントでストリームを終端し、
         それ以外は理由を標準エラーへ1行出す(トレースバックは出さない)。stage は stage_failed のみが
-        持つ追加キー(失敗ステージの安定id。12.1のprogressと同じ語彙)。"""
+        持つ追加キー(失敗ステージの安定id。progressと同じ語彙)。"""
         if emitter is not None:
             event = error_event(code=code, message=message, exit_code=exit_code, field=field, path=path)
             if stage is not None:
@@ -414,7 +412,7 @@ def main(argv=None) -> int:
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
 
-    # 自己記述(12.2)。音声を読まず options/presets の result を出して終了する独立メタ操作。
+    # 自己記述。音声を読まず options/presets の result を出して終了する独立メタ操作。
     if args.describe:
         emitter.result(mode="describe", options=_describe_options(parser),
                        presets=_describe_presets())
@@ -424,7 +422,7 @@ def main(argv=None) -> int:
         return fail("bad_argument", "入力音声(input)が必要です", 2, field="input")
 
     # --forced-aligner sofa-forcedalign 選択時のみ --sofa-* を必須検証する(既定のwav2vec2経路は
-    # --sofa-* が一切不要。song2vmd.md 5.2)。順序どおり走査し最初に見つかったNoneだけを報告する
+    # --sofa-* が一切不要)。順序どおり走査し最初に見つかったNoneだけを報告する
     # (--recognizer-model-revision の組み合わせ検証と同じ「1回の呼び出しにつき最初の1件のみ報告」方式)。
     if args.forced_aligner == "sofa-forcedalign":
         for field, dest in (
@@ -437,7 +435,7 @@ def main(argv=None) -> int:
                             2, field=field)
 
     # 引数解析後の本体。KeyboardInterrupt(Ctrl-C 等)は協調的な中断(cancelled/130)として畳み、それ以外の
-    # 想定外例外はトレースバックを漏らさず internal_error(理由1行 + 終了コード1)へ畳む(11章・12.3)。
+    # 想定外例外はトレースバックを漏らさず internal_error(理由1行 + 終了コード1)へ畳む。
     try:
         return _run(args, emitter, fail)
     except KeyboardInterrupt:
@@ -447,8 +445,8 @@ def main(argv=None) -> int:
 
 
 def _resolve_content_recognizer_model(args):
-    """--recognizer-model-id/--recognizer-model-revision から ContentRecognizerModel を組み立てる
-    (song2vmd.md 5.2)。--recognizer-model-id 未指定時は vocal_analysis の既定モデルを使う。"""
+    """--recognizer-model-id/--recognizer-model-revision から ContentRecognizerModel を
+    組み立てる。--recognizer-model-id 未指定時は vocal_analysis の既定モデルを使う。"""
     if args.recognizer_model_id is None:
         return DEFAULT_CONTENT_RECOGNIZER_MODEL
     return ContentRecognizerModel(
@@ -456,7 +454,7 @@ def _resolve_content_recognizer_model(args):
 
 
 def _resolve_sofa_aligner_config(args):
-    """--sofa-* から SofaAlignerConfig を組み立てる(song2vmd.md 5.2)。
+    """--sofa-* から SofaAlignerConfig を組み立てる。
 
     --forced-aligner が sofa-forcedalign 以外のときは None を返す(SofaAlignerConfig不要)。
     """
@@ -468,7 +466,7 @@ def _resolve_sofa_aligner_config(args):
 
 
 def _report_params(args, openness, style_gen):
-    """--dry-run の人間向けレポート(6.7の「選択した...主要パラメータ」)に載せる解決後パラメータ。"""
+    """--dry-run の人間向けレポートに載せる、解決後の主要パラメータ。"""
     return {
         "open_lo": openness.open_lo, "open_hi": openness.open_hi, "open_max": openness.open_max,
         "intensity_curve": args.intensity_curve,
@@ -480,10 +478,10 @@ def _report_params(args, openness, style_gen):
 
 
 def _run(args, emitter, fail) -> int:
-    """引数解析済みの本体(検証 → パイプライン実行 → 空実行/書き出し)。失敗は fail() で終端する(12.3)。"""
+    """引数解析済みの本体(検証 → パイプライン実行 → 空実行/書き出し)。失敗は fail() で終端する。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
-    # 上書きガード(song2vmd.md 5.3): 出力先が入力と同一パスになる指定だけを --overwrite 無しで拒否する。
+    # 上書きガード: 出力先が入力と同一パスになる指定だけを --overwrite 無しで拒否する。
     # 別パスの既存出力ファイルは対象にしない。同一パス判定を存在確認より先に置く(未存在でも入力上書きは弾く)。
     if not args.overwrite and _same_path(output, args.input):
         return fail("output_overwrites_input",
@@ -501,7 +499,7 @@ def _run(args, emitter, fail) -> int:
         anticipation=args.anticipation, min_hold=args.min_hold, vowel_gain=args.vowel_gain)
     progress_reporter = _progress.ProgressReporter(
         machine=emitter is not None, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
-    # 中間生成物は出力先の隣に <出力ファイル名>.intermediate/ を作って保存する(song2vmd.md 5.2・5.3)。
+    # 中間生成物は出力先の隣に <出力ファイル名>.intermediate/ を作って保存する。
     keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
 
     try:
@@ -526,8 +524,8 @@ def _run(args, emitter, fail) -> int:
         return fail("write_failed", str(e), 3, field="--keep-intermediate", path=keep_intermediate_dir)
 
     if result.diagnostics.low_dynamics:
-        # --quiet は進捗表示だけを抑制し、警告は抑制しない(song2vmd.md 5.2)。機械モードは
-        # warning イベント、非機械モードは標準エラーへの1行(12.1・5.2 の警告非抑制の趣旨)。
+        # --quiet は進捗表示だけを抑制し、警告は抑制しない。機械モードは
+        # warning イベント、非機械モードは標準エラーへの1行を出す。
         if emitter is not None:
             emitter.warning(code="low_dynamics_suppressed",
                             message="曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました")
@@ -535,7 +533,7 @@ def _run(args, emitter, fail) -> int:
             print("warning: 曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました",
                   file=sys.stderr)
 
-    # --dry-run は出力を書かずに終える(song2vmd.md 5.2の「空実行」)。診断は実データから得る(6.7)。
+    # --dry-run は出力を書かずに終える(空実行)。診断は実データから得る。
     if args.dry_run:
         if emitter is not None:
             emitter.result(mode="inspect", **_report.result_inspect_fields(

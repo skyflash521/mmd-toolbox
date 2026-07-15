@@ -1,15 +1,15 @@
-"""song2vmd 長尺分割の境界検出・セグメント結合のテスト(song2vmd.md §6.6)。
+"""song2vmd 長尺分割の境界検出・セグメント結合のテスト。
 
 処理資源対策のための自動分割(`--max-duration`)を検証する。範囲は次の2点に限る:
 1. 目標境界±5秒(初期値)の探索窓で無音点を探し、無音が無ければ強制分割する境界検出
    (chunking.find_chunk_boundaries)。
 2. チャンクごとのセグメント列(チャンクローカル時刻)を、オーバーラップ区間はチャンク境界で切り詰め、
    境界をまたぐ連続母音区間(同一vowel)を1つへ結合して全曲セグメント列へ統合する処理
-   (chunking.merge_chunk_segments。song2vmd.md 6.6「境界をまたぐ連続母音区間は1区間へ結合」)。
+   (chunking.merge_chunk_segments)。
 
-音声ファイルの実際の分割・vocal_analysis(S0〜S2)呼び出し・RMSの曲全体基準での算出(6.4)は
-実音声を要する統合の関心事であり、本モジュールの対象外(song2vmd.md 6.4「強弱の相対正規化は曲全体を
-基準に行う」はRMS算出を1回だけ行うことで満たされ、本モジュールが担うセグメント結合とは別の関心事)。
+音声ファイルの実際の分割・vocal_analysis(S0〜S2)呼び出し・RMSの曲全体基準での算出は
+実音声を要する統合の関心事であり、本モジュールの対象外(強弱の相対正規化を曲全体基準で行う要件は
+RMS算出を1回だけ行うことで満たされ、本モジュールが担うセグメント結合とは別の関心事)。
 """
 
 from vocal_analysis import Segment
@@ -25,7 +25,7 @@ def seg(type_, start, end, phoneme=None, confidence=None):
 
 
 def test_short_audio_has_no_boundaries():
-    # 曲長がmax_duration以下なら分割しない(song2vmd.md 6.6)。
+    # 曲長がmax_duration以下なら分割しない。
     boundaries = chunking.find_chunk_boundaries(
         duration_sec=200.0, rms_times_sec=[0.0, 100.0, 199.0], rms_values=[0.5, 0.5, 0.5],
         max_duration_sec=300.0,
@@ -35,7 +35,7 @@ def test_short_audio_has_no_boundaries():
 
 def test_boundary_picks_quietest_point_among_multiple_silence_candidates():
     # 探索窓内にしきい値以下の候補が複数(296s=0.05・298s=0.02・303s=0.04)あるとき、
-    # 単に最初に見つかった無音点ではなく、最も静かな点(298s)を選ぶ(song2vmd.md 6.6)。
+    # 単に最初に見つかった無音点ではなく、最も静かな点(298s)を選ぶ。
     times = [290.0, 295.0, 296.0, 297.0, 298.0, 299.0, 300.0, 303.0, 305.0, 310.0]
     values = [0.8, 0.7, 0.05, 0.5, 0.02, 0.5, 0.6, 0.04, 0.8, 0.9]
     boundaries = chunking.find_chunk_boundaries(
@@ -47,7 +47,7 @@ def test_boundary_picks_quietest_point_among_multiple_silence_candidates():
 
 def test_forced_split_when_no_silence_in_window():
     # 探索窓内に無音(しきい値以下)が無ければ、目標境界そのもので強制分割する
-    # (ロングトーン・ライブ音源等。song2vmd.md 6.6)。
+    # (ロングトーン・ライブ音源等)。
     times = [295.0, 297.0, 299.0, 300.0, 301.0, 303.0, 305.0]
     values = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]  # 終始しきい値(0.06)を上回る
     boundaries = chunking.find_chunk_boundaries(
@@ -59,7 +59,7 @@ def test_forced_split_when_no_silence_in_window():
 
 def test_second_target_is_computed_from_actual_cut_point_not_fixed_grid():
     # 次の目標境界は固定グリッド(2×max_duration=600s)ではなく、実際に切った点(298s)から
-    # max_duration秒後(598s)を起点にする(song2vmd.md 6.6)。無音点を594sに置くと、
+    # max_duration秒後(598s)を起点にする。無音点を594sに置くと、
     # 起点598sの探索窓[593,603]には入るが、固定グリッド起点600sの探索窓[595,605]には
     # 入らない(594<595)ため、両設計を区別できる。
     times = [float(t) for t in range(0, 651)]
@@ -113,7 +113,7 @@ def test_overlap_is_trimmed_at_boundary():
     # (チャンク1のローカル0.0はグローバル9.0に相当)。境界は10.0。オーバーラップ区間
     # (グローバル[9,11])は、チャンク0側が[9,10)・チャンク1側が[10,11)を採用する形で
     # 境界で切り詰められる。子音は母音ではないため、境界をまたいでも結合しない
-    # (song2vmd.md 6.6は「連続母音区間」のみを結合対象とする)。
+    # (結合対象は「連続母音区間」のみ)。
     chunk0 = [seg("vowel", 0.0, 9.0, phoneme="a"), seg("consonant", 9.0, 11.0, phoneme="k")]
     chunk1 = [seg("consonant", 0.0, 2.0, phoneme="k"), seg("vowel", 2.0, 11.0, phoneme="i")]
     merged = chunking.merge_chunk_segments(
