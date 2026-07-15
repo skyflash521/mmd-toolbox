@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(bash .claude/skills/codex-watchdog/watchdog.sh*)",
+      "Bash(python3 .claude/hooks/trash.py *)",
       "Bash(git add *)",
       "Bash(git blame *)",
       "Bash(git branch --list *)",
@@ -98,6 +99,11 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-pytest-pipe.py\"",
+            "shell": "bash"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-rm.py\"",
             "shell": "bash"
           },
           {
