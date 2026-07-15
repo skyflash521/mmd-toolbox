@@ -7,8 +7,6 @@
 組み立て段で直前口形を継続する(既定母音「あ」フォールバックは行わない)。
 """
 
-import pytest
-
 from lipsync import ApertureClass, ConsonantClass, MouthShape
 
 from vpr2vmd import mapping
@@ -210,7 +208,6 @@ def test_open_amount_placeholder_zero_for_all_event_kinds():
         assert all(e.open_amount == 0.0 for e in events)
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
 def test_onset_aperture_class_attached_to_leading_vowel():
     # 先頭母音に先頭子音の ApertureClass を付ける。た(t=FIRM_CLOSURE)・さ(s=NARROW_CHANNEL)・
     # か(k=SLIGHT_CLOSURE)・母音単独(子音なし=NONE)。
@@ -228,7 +225,6 @@ def test_onset_aperture_class_attached_to_leading_vowel():
     ]
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
 def test_onset_aperture_only_on_first_mora_vowel():
     # 1音符に母音が複数あるとき、先頭母音にだけ ApertureClass を付け後続母音は NONE。
     assert _apertures(mapping.note_mouth_events(["k", "a", "i"], 0.0, 30.0)) == [
@@ -237,7 +233,6 @@ def test_onset_aperture_only_on_first_mora_vowel():
     ]
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
 def test_onset_aperture_priority_when_multiple_consonants():
     # 複数の語頭子音は優先順 FIRM_CLOSURE > NARROW_CHANNEL > SLIGHT_CLOSURE > NONE で1つに決める。
     # か+さ(k=SLIGHT_CLOSURE + s=NARROW_CHANNEL)→ NARROW_CHANNEL、さ+た(s=NARROW_CHANNEL +
@@ -250,7 +245,6 @@ def test_onset_aperture_priority_when_multiple_consonants():
     )
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
 def test_onset_aperture_and_consonant_class_are_independent():
     # ConsonantClass 優先順で勝つ子音(w=ROUNDED)と ApertureClass 優先順で勝つ子音(t=FIRM_CLOSURE)が
     # 混在する語頭子音列で、両軸が同時に(互いに影響せず)確定する。
@@ -259,7 +253,6 @@ def test_onset_aperture_and_consonant_class_are_independent():
     assert event.aperture_class is ApertureClass.FIRM_CLOSURE
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd配線(ApertureClass) 実装フェーズ", strict=True)
 def test_onset_aperture_class_depends_on_bilabial_position():
     # 両唇音を挟む場合の順序依存: ConsonantClass は両唇音を除外した順序を問わない集合で判定するが、
     # ApertureClass は「最後に現れる両唇音より後」だけを対象にするため両唇音の位置に依存する。

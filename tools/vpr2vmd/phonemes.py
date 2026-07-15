@@ -1,14 +1,15 @@
 """音素→カテゴリ写像(vpr2vmd.md §3、口形イベント確定の音素分類)。
 
 VOCALOID 日本語の音素(X-SAMPA 表記)を、口形イベント確定で使うカテゴリへ分類する。写像規則
-(母音→母音イベント、語頭の両唇音→両唇閉鎖、両唇閉鎖以外の子音→協調調音へ委ねる)は vpr2vmd.md §3
-が定める。各記号がどのカテゴリに属するか(およびどの母音か)は、日本語初音ミクの実 vpr と X-SAMPA・
-日本語音韻の標準で確定したインベントリに従い、実装者が独自判断しない。
+(母音→母音イベント、語頭の両唇音→両唇閉鎖、両唇閉鎖以外の子音は自前イベントを作らず、唇の方向
+(ConsonantClass)と顎の開口減衰(ApertureClass)という独立な2軸で母音合成を変調する)は
+vpr2vmd.md §3 が定める。各記号がどのカテゴリに属するか(およびどの母音か)は、日本語初音ミクの実 vpr と
+X-SAMPA・日本語音韻の標準で確定したインベントリに従い、実装者が独自判断しない。
 """
 
 from enum import Enum
 
-from lipsync import ConsonantClass, MouthShape
+from lipsync import ApertureClass, ConsonantClass, MouthShape
 from vocal_analysis.phonemes import xsampa_vowel_letter
 
 
@@ -53,6 +54,12 @@ _CONTINUATIONS = {"-"}
 _ROUNDED_CONSONANTS = {"p\\", "w"}
 _SPREAD_CONSONANTS = {"S", "dZ", "tS", "j"}
 
+# 舌位置が主体の子音(顎の開口量を部分的に減衰させる。lipsync の ApertureClass へ写像。X-SAMPA。
+# vpr2vmd.md §3)。
+_FIRM_CLOSURE_CONSONANTS = {"t", "d", "n", "ts", "dz", "J"}
+_NARROW_CHANNEL_CONSONANTS = {"s", "z", "S", "dZ", "tS", "j"}
+_SLIGHT_CLOSURE_CONSONANTS = {"k", "k'", "g", "4"}
+
 
 def vowel_shape(symbol: str) -> MouthShape | None:
     """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。
@@ -91,10 +98,28 @@ def consonant_class(symbol: str) -> ConsonantClass:
 
     唇を丸める子音は ROUNDED、い 方向へ寄せる子音は SPREAD、それ以外の子音(唇を動かさない子音)と
     未知記号は NEUTRAL。両唇音(ま/ば/ぱ行)は MouthShape.BILABIAL で表すので本写像の対象外で、
-    呼び出し側が両唇音(BILABIAL カテゴリ)を除いた語頭子音を渡す。
+    呼び出し側が両唇音(BILABIAL カテゴリ)を除いた語頭子音を渡す。この関数が返す ConsonantClass は
+    唇の方向だけを表し、開口減衰は別軸の aperture_class 関数が担う(独立に判定し、一方が他方に
+    影響しない)。
     """
     if symbol in _ROUNDED_CONSONANTS:
         return ConsonantClass.ROUNDED
     if symbol in _SPREAD_CONSONANTS:
         return ConsonantClass.SPREAD
     return ConsonantClass.NEUTRAL
+
+
+def aperture_class(symbol: str) -> ApertureClass:
+    """子音記号を ApertureClass へ写像する(顎の開口減衰の強さで分類。vpr2vmd.md §3)。
+
+    判定表に無い子音と未知記号は NONE。複数の子音から1つに絞る優先順(FIRM_CLOSURE >
+    NARROW_CHANNEL > SLIGHT_CLOSURE > NONE)は呼び出し側の責務で、この関数自体は単一記号の
+    分類のみを行う。
+    """
+    if symbol in _FIRM_CLOSURE_CONSONANTS:
+        return ApertureClass.FIRM_CLOSURE
+    if symbol in _NARROW_CHANNEL_CONSONANTS:
+        return ApertureClass.NARROW_CHANNEL
+    if symbol in _SLIGHT_CLOSURE_CONSONANTS:
+        return ApertureClass.SLIGHT_CLOSURE
+    return ApertureClass.NONE
