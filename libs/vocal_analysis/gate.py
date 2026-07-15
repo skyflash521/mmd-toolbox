@@ -343,7 +343,7 @@ def _frame_categories(segments: list[CategorySegment], duration_sec: float) -> l
 def compute_vowel_accuracy(
     predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
 ) -> float:
-    """母音正解率(§9.4): 基準が母音(a/i/u/e/o)のフレームのうち、予測の母音種別が一致した割合。
+    """母音正解率: 基準が母音(a/i/u/e/o)のフレームのうち、予測の母音種別が一致した割合。
     未検出(予測がそのフレームを覆わない)は不一致として数える。"""
     ref_frames = _frame_categories(reference, duration_sec)
     pred_frames = _frame_categories(predicted, duration_sec)
@@ -355,7 +355,7 @@ def compute_vowel_accuracy(
 def compute_over_opening_rate(
     predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
 ) -> float:
-    """過開口率(§9.4): 基準が c/sil のフレームのうち、予測が母音になったフレームの割合。"""
+    """過開口率: 基準が c/sil のフレームのうち、予測が母音になったフレームの割合。"""
     ref_frames = _frame_categories(reference, duration_sec)
     pred_frames = _frame_categories(predicted, duration_sec)
     non_vowel_indices = [i for i, category in enumerate(ref_frames) if category in _NON_VOWEL_SCORED_CATEGORIES]
@@ -380,7 +380,7 @@ def _better_assignment(
 def match_segments(
     predicted: list[CategorySegment], reference: list[CategorySegment]
 ) -> tuple[list[tuple[CategorySegment, CategorySegment]], list[CategorySegment], list[CategorySegment]]:
-    """区間の対応付け(§9.4)。
+    """区間の対応付け。
 
     母音カテゴリ(a/i/u/e/o)の基準区間と予測区間のうち、母音種別が一致し時間重なりが正(0より大)の
     組に限り、総重なり時間を最大化する全体最適割当で1対1対応させる。子音・無音カテゴリの区間は
@@ -436,7 +436,7 @@ def match_segments(
 def compute_boundary_deviation(
     matched_pairs: list[tuple[CategorySegment, CategorySegment]],
 ) -> tuple[float, float] | None:
-    """境界時刻ずれ(§9.4): match_segments が返す対応済み(基準区間, 予測区間)の組ごとに開始時刻差
+    """境界時刻ずれ: match_segments が返す対応済み(基準区間, 予測区間)の組ごとに開始時刻差
     |予測-基準|(ミリ秒)を求め、その中央値と95パーセンタイル(線形補間)を返す。対応区間が無い場合は
     未定義として None を返す(マクロ平均からの除外とその事実の報告は集計側=呼び出し側の責務)。
     """
@@ -451,7 +451,7 @@ def compute_boundary_deviation(
 
 @dataclass
 class SongMetrics:
-    """1曲分の採点指標(§9.4)。"""
+    """1曲分の採点指標。"""
 
     vowel_accuracy: float
     over_opening_rate: float
@@ -464,9 +464,9 @@ class SongMetrics:
 def compute_song_metrics(
     predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
 ) -> SongMetrics:
-    """1曲分の採点指標(§9.4)をまとめて算出する。
+    """1曲分の採点指標をまとめて算出する。
 
-    合否判定は行わない(§9.5: 数値は認識構成間の相対比較と破綻検出に使い、品質の合否は利用先の
+    合否判定は行わない(数値は認識構成間の相対比較と破綻検出に使い、品質の合否は利用先の
     実装時調整と MMD 上の視聴確認が担う)。複数曲のマクロ平均などの集計は測定側(呼び出し側)が行う。
     """
     matched, undetected, excess = match_segments(predicted, reference)

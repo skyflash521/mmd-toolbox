@@ -823,14 +823,14 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
 | ステージ | 採用ツール | 主な採用理由 | 代替候補 |
 |---|---|---|---|
 | S0 入力読み込み | soundfile(現行 libsndfile は mp3 も可)優先 + 自動検出ffmpegへフォールバック(リポジトリに同梱しない) | 標準入出力を内部処理。soundfileで読めない形式のみffmpeg。ffmpegを再配布せずライセンス義務を避ける | —(imageio-ffmpeg 等は不採用) |
-| S1 ボーカル抽出 | Demucs v4 htdemucs_ft を audio-separator 経由で実行(アダプタ id: `audio-separator-htdemucs-ft`。`audio_separator.separator.Separator`。`demucs_params.shifts=0`) | 高品質・MIT・ライブラリでin-process呼び出し可・GPU不要でも動作。生 `demucs.api`(adefossez fork)は `torchaudio<2.2` 固定で新しい Python(3.13等)向けビルドが無く採用しない(§8.3後注) | audio-separator の他モデル(MDXC系Roformer等。ライセンス個別確認要) / Spleeter / 分離なし(`never`) |
+| S1 ボーカル抽出 | Demucs v4 htdemucs_ft を audio-separator 経由で実行(アダプタ id: `audio-separator-htdemucs-ft`。非決定要素を無効化する設定で決定論を確定) | 高品質・MIT・ライブラリでin-process呼び出し可・GPU不要でも動作。生 `demucs.api`(adefossez fork)は `torchaudio<2.2` 固定で新しい Python(3.13等)向けビルドが無く採用しない(§8.3後注) | audio-separator の他モデル(MDXC系Roformer等。ライセンス個別確認要) / Spleeter / 分離なし(`never`) |
 | S2 音素/母音認識(既定アダプタ) | 複合構成(内容認識 + `pyopenjtalk-plus` G2P + 音素モデルの CTC 強制アライメント。5.2。アダプタ id: `wav2vec2-ctc-forcedalign`)。内容認識モデルは `content_recognizer_model` 引数で指定する(既定値 `openai/whisper-medium`・候補値 `kana-whisper`。5.2)。**単段の自由音素認識(`wav2vec2-espeak`)は歌唱で母音をほぼ出力しないことが S-1 測定で確認済みのため不採用**([external-tools.md](external-tools.md) §2) | すべて純Pythonでin-process・torch/transformersは既存と共有・ライセンス清浄。内容認識モデルの選定理由は [external-tools.md](external-tools.md) §2 を正とする | Julius 音素認識(phone-loop構成が必要・高精度時刻)。Allosaurusは GPL-3.0 で不可 |
 | S2 音素/母音認識(選択制アダプタ) | 内容認識+G2Pは既定アダプタと共通、強制アライメント段をSOFA(Singing-Oriented Forced Aligner。MIT)の単語単位アライメントへ置き換える構成(5.3。アダプタ id: `sofa-forcedalign`。`forced_aligner="sofa-forcedalign"`で選択)。利用者提供の専用Python実行環境・SOFAリポジトリ・チェックポイント(`SofaAlignerConfig`。下記補足)をサブプロセスとして呼ぶ | 単独指標(母音一致率・境界時刻精度)だけでは実曲のフルパイプラインを通した最終的な口パク品質の優劣を判定できないため、両アダプタを選択可能とし既定はwav2vec2 CTC経路のまま維持する(下記補足) | ―(SOFA自体が代替候補。単段自由CTC等は上記と同じ理由で不採用) |
 
 採用ツールは品質・導入性の評価で見直しうる(候補比較は [external-tools.md](external-tools.md)。見直す場合は
 本書を先に更新する)。**モデル本体を変えずrevisionだけを更新する場合も同様の手順を踏む**: 新しい
 revisionで9章のS-1測定を実行し、現行revisionと比べて品質退行が無いことを確認してから、本書の
-revision値・config.pyの固定値・対応するテストの期待値を更新する(revisionが変わればモデルの重み・
+revision値・実装の固定値・対応するテストの期待値を更新する(revisionが変わればモデルの重み・
 挙動が変わりうるため、事前検証を経ずに値だけ書き換えない)。重い依存(`torch`・`transformers`・
 `pyopenjtalk-plus`・モデル取得)は `vocal_analysis`
 側に閉じ、本リポジトリ本体の必須依存は `numpy/scipy` のまま保つ。モデル重み(分離・認識)は各ライブラリの
@@ -847,13 +847,10 @@ S2 の音素モデル(強制アライメント用。5.2)は `facebook/wav2vec2-l
 
 **S1 実行ライブラリの補足**: 生 `demucs.api`(adefossez fork)は依存 `torchaudio` を `<2.2` に固定しており、
 この上限を満たす `torchaudio` のビルドが無い新しい Python(3.13等)では導入できないため採用しない。
-`audio-separator`(MIT。`audio_separator.separator.Separator`)経由で同じ Demucs v4 の重み(`htdemucs_ft`。
-ボーカル SDR≈10.8。`audio-separator` の `get_simplified_model_list()` が示すモデル一覧の値)を、この
-`torchaudio` 上限に縛られない形で in-process 実行する。`Separator.__init__` の
-`output_single_stem="vocals"` でボーカルstem以外を書き出させず(`separate()` の戻り値
-`output_files` がボーカルWAVパス1件のみになる。stem名の比較は大文字小文字を区別しない)、
-`demucs_params={"shifts": 0, ...}` で非決定要素(shift平均)を無効化し決定論を確定する(§8.3表の
-`shifts=0`と同じ意図)。
+`audio-separator`(MIT)経由で同じ Demucs v4 の重み(`htdemucs_ft`。
+ボーカル SDR≈10.8。`audio-separator` が示すモデル一覧の値)を、この
+`torchaudio` 上限に縛られない形で in-process 実行する。ボーカル stem 以外は書き出さない設定にし
+(stem名の比較は大文字小文字を区別しない)、非決定要素(shift平均)を無効化する設定で決定論を確定する。
 
 **S2 複合構成の補足**: 無音検出による区間分割・内容認識・G2P(`pyopenjtalk-plus`)・強制アライメント
 (5.2)の各段は1つの Recognizer アダプタ(id `wav2vec2-ctc-forcedalign`)としてまとめて実装し、

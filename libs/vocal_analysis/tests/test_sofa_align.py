@@ -1,4 +1,4 @@
-"""SOFAサブプロセス呼び出しコアのテスト(vocal_analysis.md §5.3・§8.3)。
+"""SOFAサブプロセス呼び出しコアのテスト。
 
 SOFA(Singing-Oriented Forced Aligner)は実インストール・専用venvを要するため、通常のpytestスイート
 では subprocess をモックした決定論的単体テストで検証する。ここでは入力の書き出し・サブプロセス起動・
@@ -88,8 +88,7 @@ def test_align_batch_happy_path_parses_htk_output_as_seconds(tmp_path, monkeypat
     samples = np.zeros(16000, dtype=np.float32)
     result = sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
-    # 100ナノ秒単位 → 秒(vocal_analysis.md §5.1「フレーム時間」・§5.3「時刻の変換」):
-    # 5000000 / 1e7 = 0.5秒、10000000 / 1e7 = 1.0秒。
+    # 100ナノ秒単位 → 秒: 5000000 / 1e7 = 0.5秒、10000000 / 1e7 = 1.0秒。
     assert result == {"segment_0000": [(0.0, 0.5, "pau"), (0.5, 1.0, "a")]}
 
 
@@ -375,8 +374,8 @@ def test_validate_and_normalize_segments_passes_through_exact_input():
 def test_validate_and_normalize_segments_snaps_within_tolerance_to_exact_values():
     from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
-    # 先頭・末尾・境界ともに50ミリ秒以内のずれ(SOFAの内部リサンプリングに由来する丸め誤差を模す。
-    # §5.3「Segment契約の検証」)。正規化は先頭のstart→0.0、末尾のend→trim_duration_sec、後続の
+    # 先頭・末尾・境界ともに50ミリ秒以内のずれ(SOFAの内部リサンプリングに由来する丸め誤差を模す)。
+    # 正規化は先頭のstart→0.0、末尾のend→trim_duration_sec、後続の
     # 各startを先行のend(元の値)へそれぞれ上書きする。境界の基準は先行セグメントのend側(0.49)で
     # あり、後続のstart側(0.52)ではない。
     segments = [(0.01, 0.49, "pau"), (0.52, 0.98, "a")]
@@ -462,9 +461,8 @@ def test_validate_and_normalize_segments_rejects_new_violation_created_by_snappi
     # 一次検証(許容誤差50ミリ秒)は通るが、正規化(後続の開始時刻を先行の終了時刻へ上書き)により
     # 新たな逆順(start > end)を生む例。極端に短い2件目のセグメント(終了時刻1.02)へ、1件目の
     # 終了時刻1.04が上書きされ、上書き後は1.04 > 1.02になる
-    # (vocal_analysis.md §5.3「Segment契約の検証」が現象として述べる「極端に短い隣接セグメントが
-    # 正規化の上書きにより新たな逆順を生む場合がある」の具体例。数値そのものは仕様書には無くこの
-    # テストが独自に構成した)。
+    # (極端に短い隣接セグメントが正規化の上書きにより新たな逆順を生む場合がある。
+    # 数値そのものはこのテストが独自に構成した)。
     segments = [(0.0, 1.04, "pau"), (1.00, 1.02, "a")]
     with pytest.raises(RecognitionError):
         _validate_and_normalize_segments(segments, trim_duration_sec=1.02)
@@ -702,7 +700,7 @@ def test_clamp_words_to_valid_list_invalidates_empty_phoneme_symbols():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
     # 空の音素記号列を持つ単語はSOFA対象として意味を成さないため、区間長に関わらず無効とする
-    # (vocal_analysis.md §5.3「有効な単語列の確定」に確定)。cursorも他の無効化と同様に更新しない
+    # cursorも他の無効化と同様に更新しない
     # (単語Bの区間長自体は最小長以上だが、空の音素記号列だけを理由に無効化されることを確認する)。
     words = [(["a"], 0.5, 1.0), ([], 1.0, 1.5), (["i"], 1.2, 2.0)]
     assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
@@ -736,7 +734,7 @@ def test_covered_invalid_words_produce_no_gap_and_intervals_tile_whole_duration(
     # 単語B・Cが単語Aに完全に包含されるとき、B・Cの元の時間範囲([0.8, 0.9)・[1.0, 1.2))へ
     # 個別のgapが生成されないこと(Aの結果がその範囲を被覆するため。重ねて置くとSegment契約の
     # 非重複性を破る)、および有効単語とgapを合わせた区間列がトリム後区間全体を隙間なく非重複で
-    # 被覆することを、クランプ→gap確定の連結で確認する(vocal_analysis.md §5.3「gapの確定」)。
+    # 被覆することを、クランプ→gap確定の連結で確認する。
     words = [(["a"], 0.5, 2.0), (["i"], 0.8, 0.9), (["u"], 1.0, 1.2)]
     trim_duration_sec = 2.5
 
@@ -760,7 +758,7 @@ def test_all_words_invalidated_confirms_whole_duration_as_single_gap():
 
     # 単語タイムスタンプ自体は取得できたが、短い単語が密集しcursorクランプ・最小長判定で全て
     # 無効化され「有効な単語列」が0件になるケース。トリム後区間全体が単一のgapとして確定する
-    # (vocal_analysis.md §5.3「有効な単語列が0件になった場合」)。
+    # 有効な単語列が0件になった場合。
     words = [(["a"], 0.00, 0.04), (["i"], 0.02, 0.05), (["u"], 0.04, 0.07)]
     trim_duration_sec = 1.0
 

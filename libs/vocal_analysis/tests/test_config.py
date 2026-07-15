@@ -1,8 +1,8 @@
-"""固定推論条件のテスト(vocal_analysis.md §5.1・§8.3)。
+"""固定推論条件のテスト。
 
 外部モデル委譲ステージ(S1 分離・S2 認識)の非決定要素を固定し、S-1 測定と実装が同一条件で
-動くようにする。モデル id・revision は §8.3 の固定値、Demucs の shift 平均無効化は §4・§8.3。
-これらは実装が独自に変えない値であり、値がずれていないことをテストで固定する。
+動くようにする。モデル id・revision の固定値、Demucs の shift 平均無効化は実装が独自に
+変えない値であり、値がずれていないことをテストで固定する。
 """
 
 import dataclasses
@@ -15,7 +15,7 @@ import pytest
 def test_recognizer_model_id_and_revision_are_pinned():
     from vocal_analysis import RECOGNIZER_CONFIG
 
-    # §8.3 で固定した採用モデルと revision。実装が独自に変えない。
+    # 採用モデルと revision の固定値。実装が独自に変えない。
     assert RECOGNIZER_CONFIG.model_id == "facebook/wav2vec2-lv-60-espeak-cv-ft"
     assert RECOGNIZER_CONFIG.model_revision == "ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4"
 
@@ -23,7 +23,7 @@ def test_recognizer_model_id_and_revision_are_pinned():
 def test_recognizer_target_sample_rate_is_16khz():
     from vocal_analysis import RECOGNIZER_CONFIG
 
-    # S2 認識器が要求する目標サンプルレート 16kHz(§5・§5.1)。mono への downmix と
+    # S2 認識器が要求する目標サンプルレート 16kHz。mono への downmix と
     # 16kHz への再サンプリング(方式)は S2 アダプタの変換責務でそこで検証する。
     # config の可変値はこの目標レートで、mono はモデル要件で固定なので別フィールドにしない。
     assert RECOGNIZER_CONFIG.sample_rate == 16000
@@ -33,7 +33,7 @@ def test_recognizer_inference_conditions_are_deterministic():
     from vocal_analysis import RECOGNIZER_CONFIG
 
     # 音素モデル(強制アライメント用)の実行デバイス/dtype・スレッド・乱数シードを固定して決定論に
-    # する(§5.1)。内容認識モデル(Whisper系)の実行デバイスは環境依存で自動選択し、この固定値の
+    # する。内容認識モデル(Whisper系)の実行デバイスは環境依存で自動選択し、この固定値の
     # 対象外(recognizer.py の _select_content_recognizer_device)。
     assert RECOGNIZER_CONFIG.device == "cpu"
     assert RECOGNIZER_CONFIG.dtype == "float32"
@@ -44,7 +44,7 @@ def test_recognizer_inference_conditions_are_deterministic():
 def test_default_content_recognizer_model_id_and_revision_are_pinned():
     from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL
 
-    # §8.3 で固定した既定値(openai/whisper-medium)のモデル・revision。実装が独自に変えない。
+    # 既定値(openai/whisper-medium)として固定したモデル・revision。実装が独自に変えない。
     assert DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id == "openai/whisper-medium"
     assert DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision == "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
 
@@ -52,7 +52,7 @@ def test_default_content_recognizer_model_id_and_revision_are_pinned():
 def test_kana_whisper_model_id_and_revision_are_pinned():
     from vocal_analysis import KANA_WHISPER_MODEL
 
-    # §8.3 で固定した候補値(kana-whisper)のモデルとrevision。
+    # 候補値(kana-whisper)として固定したモデルとrevision。
     assert KANA_WHISPER_MODEL.model_id == "sbintuitions/kana-whisper"
     assert KANA_WHISPER_MODEL.model_revision == "88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82"
 
@@ -60,14 +60,14 @@ def test_kana_whisper_model_id_and_revision_are_pinned():
 def test_kana_prompt_is_pinned():
     from vocal_analysis import KANA_PROMPT
 
-    # §8.3 で固定したかな限定プロンプトの文字列。既定値・候補値どちらに渡す場合も共通。
+    # かな限定プロンプトとして固定した文字列。既定値・候補値どちらに渡す場合も共通。
     assert KANA_PROMPT == "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
 
 
 def test_content_recognizer_model_revision_defaults_to_none():
     from vocal_analysis import ContentRecognizerModel
 
-    # revision省略時は最新リビジョンを使う(§5.2)。既定値・候補値以外を任意指定するときの挙動。
+    # revision省略時は最新リビジョンを使う。既定値・候補値以外を任意指定するときの挙動。
     custom = ContentRecognizerModel(model_id="openai/whisper-large-v3")
     assert custom.model_revision is None
 
@@ -75,14 +75,14 @@ def test_content_recognizer_model_revision_defaults_to_none():
 def test_separator_shifts_disabled_for_determinism():
     from vocal_analysis import SEPARATOR_CONFIG
 
-    # Demucs の shift 平均は非決定要素なので無効化する(§4・§8.3)。
+    # Demucs の shift 平均は非決定要素なので無効化する。
     assert SEPARATOR_CONFIG.shifts == 0
 
 
 def test_separator_model_and_stem_are_pinned():
     from vocal_analysis import SEPARATOR_CONFIG
 
-    # §8.3後注: audio-separator 経由で実行する Demucs v4 htdemucs_ft と、書き出す単一stem(vocals)。
+    # audio-separator 経由で実行する Demucs v4 htdemucs_ft と、書き出す単一stem(vocals)。
     assert SEPARATOR_CONFIG.model_filename == "htdemucs_ft.yaml"
     assert SEPARATOR_CONFIG.output_single_stem == "vocals"
 
@@ -90,7 +90,7 @@ def test_separator_model_and_stem_are_pinned():
 def test_sofa_aligner_config_stores_user_provided_paths():
     from vocal_analysis import SofaAlignerConfig
 
-    # sofa_python・sofa_root・checkpoint_path はいずれも利用者提供の必須値(§2.3・§8.3。既定値なし)。
+    # sofa_python・sofa_root・checkpoint_path はいずれも利用者提供の必須値(既定値なし)。
     config = SofaAlignerConfig(
         sofa_python=Path("/tmp/sofa-venv/python"),
         sofa_root=Path("/tmp/SOFA"),
@@ -104,7 +104,7 @@ def test_sofa_aligner_config_stores_user_provided_paths():
 def test_sofa_aligner_config_timeout_defaults_to_300_seconds():
     from vocal_analysis import SofaAlignerConfig
 
-    # timeout_sec のみ実装が定める既定値(300.0秒、float型)を持つ(§8.3)。
+    # timeout_sec のみ実装が定める既定値(300.0秒、float型)を持つ。
     config = SofaAlignerConfig(
         sofa_python=Path("/tmp/sofa-venv/python"),
         sofa_root=Path("/tmp/SOFA"),
@@ -123,7 +123,7 @@ def test_sofa_aligner_config_timeout_defaults_to_300_seconds():
 def test_sofa_aligner_config_required_fields_have_no_default():
     from vocal_analysis import SofaAlignerConfig
 
-    # 本プロジェクトはSOFAのチェックポイント・実行環境の既定値を一切持たない(利用者保護の方針。§8.3)。
+    # 本プロジェクトはSOFAのチェックポイント・実行環境の既定値を一切持たない(利用者保護の方針)。
     with pytest.raises(TypeError):
         SofaAlignerConfig()
 

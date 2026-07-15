@@ -1,10 +1,10 @@
-"""S2 音素/母音認識(vocal_analysis.md §5・§5.1・§5.2・§5.3・§8.1・§8.3)。
+"""S2 音素/母音認識。
 
-無音検出による区間分割・内容認識・G2P(pyopenjtalk-plus)は経路共通(§5.2手順1〜4)。強制アライメント段は
-`forced_aligner`引数で選択できる: 既定のwav2vec2 CTC強制アライメント(§5.2)と、SOFA経路(§5.3。
-`sofa_align`モジュールへ委譲)。公開関数 recognize() が唯一の公開面(Recognizerアダプタ契約。§8.1。
+無音検出による区間分割・内容認識・G2P(pyopenjtalk-plus)は経路共通(手順1〜4)。強制アライメント段は
+`forced_aligner`引数で選択できる: 既定のwav2vec2 CTC強制アライメントと、SOFA経路
+(`sofa_align`モジュールへ委譲)。公開関数 recognize() が唯一の公開面(Recognizerアダプタ契約。
 契約は`forced_aligner`の選択に関わらず不変)。内容認識モデルは `content_recognizer_model`
-(`ContentRecognizerModel`。§5.2)で指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・候補値
+(`ContentRecognizerModel`)で指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・候補値
 `KANA_WHISPER_MODEL`・任意指定も可)。`retry` はエコー幻覚・反復幻覚へのトリガ式リトライの
 有効/無効を切り替える(既定True。主モデル自身をプロンプト無しで再認識する。別モデルは使わない)。
 """
@@ -39,21 +39,21 @@ from .phonemes import (
 )
 from .types import Segment
 
-FRAME_DURATION_SEC = 0.02  # §5.1: 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
+FRAME_DURATION_SEC = 0.02  # 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
 
 
-# --- §5.2 手順1・2: 無音検出による区間分割 ---
+# --- 手順1・2: 無音検出による区間分割 ---
 
-_SILENCE_FRAME_SEC = 0.1  # §5.2手順1: 無音検出用フレーム幅
-_SILENCE_THRESHOLD_DB_BELOW_PEAK = 30.0  # §5.2手順1: ピーク(95パーセンタイル)から下回るdB
-_SILENCE_MIN_RUN_SEC = 0.6  # §5.2手順1: 分割点とみなす無音区間の最小長
-_SEGMENT_MIN_SEC = 1.5  # §5.2手順1: 区間の最小長(未満は次の分割点まで結合)
-_SEGMENT_MAX_SEC = 25.0  # §5.2手順1: 区間の最大長(超過は均等分割)
-_TRIM_MARGIN_SEC = 0.1  # §5.2手順2: 有声スパンの外側に残す余白(しきい値未満の子音の助走を切らない)
+_SILENCE_FRAME_SEC = 0.1  # 手順1: 無音検出用フレーム幅
+_SILENCE_THRESHOLD_DB_BELOW_PEAK = 30.0  # 手順1: ピーク(95パーセンタイル)から下回るdB
+_SILENCE_MIN_RUN_SEC = 0.6  # 手順1: 分割点とみなす無音区間の最小長
+_SEGMENT_MIN_SEC = 1.5  # 手順1: 区間の最小長(未満は次の分割点まで結合)
+_SEGMENT_MAX_SEC = 25.0  # 手順1: 区間の最大長(超過は均等分割)
+_TRIM_MARGIN_SEC = 0.1  # 手順2: 有声スパンの外側に残す余白(しきい値未満の子音の助走を切らない)
 
 
 def _frame_rms(mono: np.ndarray, sample_rate: int, frame_sec: float) -> np.ndarray:
-    """一定幅の連続フレームに区切ってRMSを求める(§5.2手順1)。末尾の不完全フレームは切り捨てる。"""
+    """一定幅の連続フレームに区切ってRMSを求める(手順1)。末尾の不完全フレームは切り捨てる。"""
     frame_len = max(1, round(frame_sec * sample_rate))
     num_frames = len(mono) // frame_len
     if num_frames == 0:
@@ -63,7 +63,7 @@ def _frame_rms(mono: np.ndarray, sample_rate: int, frame_sec: float) -> np.ndarr
 
 
 def _silence_threshold(frame_rms: np.ndarray) -> float:
-    """フレームRMS列から無音しきい値(95パーセンタイルのピークから30dB下)を求める(§5.2手順1)。
+    """フレームRMS列から無音しきい値(95パーセンタイルのピークから30dB下)を求める(手順1)。
 
     ピークが0(全フレームRMSが0)の場合はしきい値も0になり、RMSがしきい値"以下"かどうかで判定する
     呼び出し側(手順1・2)がRMS0のフレーム・区間を過不足なく無音と判定する。
@@ -75,7 +75,7 @@ def _silence_threshold(frame_rms: np.ndarray) -> float:
 
 
 def _detect_silence_split_points(mono: np.ndarray, sample_rate: int) -> list[float]:
-    """無音区間(しきい値以下が0.6秒以上連続)の中点を分割点の時刻(秒)として返す(§5.2手順1)。"""
+    """無音区間(しきい値以下が0.6秒以上連続)の中点を分割点の時刻(秒)として返す(手順1)。"""
     frame_rms = _frame_rms(mono, sample_rate, _SILENCE_FRAME_SEC)
     if frame_rms.size == 0:
         return []
@@ -98,7 +98,7 @@ def _detect_silence_split_points(mono: np.ndarray, sample_rate: int) -> list[flo
 
 
 def _build_segment_bounds(duration_sec: float, split_points: list[float]) -> list[tuple[float, float]]:
-    """分割点から、最小長・最大長の制約を満たす区間の(開始, 終了)秒の列を作る(§5.2手順1)。
+    """分割点から、最小長・最大長の制約を満たす区間の(開始, 終了)秒の列を作る(手順1)。
 
     分割点(0秒・音声終端を含む)で区切られた各区間を左から順に長さを累積し、1.5秒未満の区間は
     次の分割点まで結合を続ける(音声終端まで結合しても1.5秒に満たない場合はそのまま採用する)。
@@ -129,7 +129,7 @@ def _build_segment_bounds(duration_sec: float, split_points: list[float]) -> lis
 
 
 def _is_segment_silent(segment_samples: np.ndarray, threshold: float) -> bool:
-    """区間全体のRMSがしきい値以下かどうかを判定する(§5.2手順2)。"""
+    """区間全体のRMSがしきい値以下かどうかを判定する(手順2)。"""
     if segment_samples.size == 0:
         return True
     rms = float(np.sqrt(np.mean(np.square(segment_samples.astype(np.float64)))))
@@ -137,7 +137,7 @@ def _is_segment_silent(segment_samples: np.ndarray, threshold: float) -> bool:
 
 
 def _voiced_trim_bounds(segment_samples: np.ndarray, sample_rate: int, threshold: float) -> tuple[int, int]:
-    """無音でない区間の有声スパン+余白のサンプル範囲を返す(§5.2手順2のトリム)。
+    """無音でない区間の有声スパン+余白のサンプル範囲を返す(手順2のトリム)。
 
     しきい値を上回る最初のフレームの開始から最後のフレームの終了までを有声スパンとし、
     その外側へ余白(_TRIM_MARGIN_SEC)を加えて区間内へクランプする。有声フレームが1つも
@@ -155,9 +155,9 @@ def _voiced_trim_bounds(segment_samples: np.ndarray, sample_rate: int, threshold
     return lo, hi
 
 
-# --- §5.2 手順4以降: 内容認識+G2P+強制アライメントの区間化 ---
+# --- 手順4以降: 内容認識+G2P+強制アライメントの区間化 ---
 
-_HALLUCINATION_PHONEME_RATE = 20.0  # §5.2手順4: 反復幻覚を疑う音素密度のしきい値(音素/秒)
+_HALLUCINATION_PHONEME_RATE = 20.0  # 手順4: 反復幻覚を疑う音素密度のしきい値(音素/秒)
 _ECHO_FRAGMENT_PREFIX_LEN = 5  # エコー断片とみなすプロンプト文との共通接頭辞の最小文字数
 _REPEAT_MIN_COUNT = 3  # 末尾反復として検出する最小繰り返し数
 _REPEAT_MIN_TOTAL_CHARS = 8  # 末尾反復として検出する最小総長(文字)
@@ -182,7 +182,7 @@ _PROMPT_SENTENCES = frozenset(
 
 
 def _is_hallucinated_phoneme_density(phoneme_count: int, duration_sec: float) -> bool:
-    """音素密度(音素/秒)が反復幻覚を疑うしきい値を超えるかを判定する(§5.2手順4)。"""
+    """音素密度(音素/秒)が反復幻覚を疑うしきい値を超えるかを判定する(手順4)。"""
     if duration_sec <= 0:
         return False
     return phoneme_count / duration_sec > _HALLUCINATION_PHONEME_RATE
@@ -311,11 +311,11 @@ def _resolve_transcription(
 
 
 def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
-    """チャンクごとのG2P音素記号列を pau を挟んで結合する(§5.2手順5。単語タイムスタンプ非取得時)。
+    """チャンクごとのG2P音素記号列を pau を挟んで結合する(手順5。単語タイムスタンプ非取得時)。
 
     チャンク境界ごとに pau を1つ挟み、列の先頭と末尾にも pau を1つずつ補う(区間ごとに独立して
     内容認識呼び出しを行う現行パイプラインでは chunk_phonemes は常に1要素で呼ばれ、実質的に
-    その区間の音素記号列の先頭・末尾へ pau を補う処理になる)。単語窓は対応付けない(§5.2手順7の
+    その区間の音素記号列の先頭・末尾へ pau を補う処理になる)。単語窓は対応付けない(手順7の
     フォールバック=位置バンド制限で整列する)。
     """
     sequence = ["pau"]
@@ -331,10 +331,10 @@ def _assemble_with_word_windows(
     words_phonemes: list[tuple[list[str], float, float]], margin_sec: float, duration_sec: float
 ) -> tuple[list[str], list[tuple[float, float]]]:
     """単語ごとの音素記号列と時間窓から、pauで連結したトークン記号列と各記号の時間窓を組み立てる
-    (§5.2手順5。単語タイムスタンプ取得時)。
+    (手順5。単語タイムスタンプ取得時)。
 
     words_phonemes は単語の時系列順の (音素記号列, 開始時刻, 終了時刻) の列(開始・終了はトリムした
-    入力範囲内の相対秒。§5.2手順3で単調化・クランプ済み)。単語内の音素記号(句読点由来の pau を
+    入力範囲内の相対秒。手順3で単調化・クランプ済み)。単語内の音素記号(句読点由来の pau を
     含む)は自身の単語の [開始-余白, 終了+余白] を窓とする。単語境界に挿入する pau は隣接する
     2単語の [前の終了-余白, 次の開始+余白]、先頭の pau は [0, 最初の開始+余白]、末尾の pau は
     [最後の終了-余白, duration_sec] を窓とする。窓の下端が上端を上回る場合は入れ替える(空窓に
@@ -365,7 +365,7 @@ def _assemble_with_word_windows(
 
 
 def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_token_id: int) -> list[int]:
-    """G2P記号列を音素モデル語彙のトークンID列へ変換する(§5.2手順6)。
+    """G2P記号列を音素モデル語彙のトークンID列へ変換する(手順6)。
 
     pau・cl は blank_token_id へ変換する。写像表に無い記号、または写像先が実際のモデル語彙に
     無い場合は RecognitionError で停止する(黙って捨てない)。
@@ -377,7 +377,7 @@ def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_t
             continue
         vocab_symbol = _G2P_TO_VOCAB_SYMBOL.get(symbol)
         if vocab_symbol is None:
-            raise RecognitionError(f"G2P記号 '{symbol}' の音素モデル語彙への写像が未定義です(§5.2写像表)")
+            raise RecognitionError(f"G2P記号 '{symbol}' の音素モデル語彙への写像が未定義です")
         token_id = vocab.get(vocab_symbol)
         if token_id is None:
             raise RecognitionError(f"音素モデルの語彙に記号 '{vocab_symbol}' が見つかりません")
@@ -385,17 +385,17 @@ def _g2p_symbols_to_token_ids(symbols: list[str], vocab: dict[str, int], blank_t
     return token_ids
 
 
-_FORCED_ALIGN_BAND_SEC = 1.0  # §5.2手順7: blank支配下での押し込み崩壊を防ぐ位置バンド幅(フォールバック)
-_MIN_STAY_FRAMES = 6  # §5.2手順7: 非blank(音素)状態の最小滞在フレーム数(120ms)
-_VOICED_BLANK_PENALTY = 7.0  # §5.2手順7: 有声フレームのblank列から引く対数確率ペナルティ
-_WORD_WINDOW_MARGIN_SEC = 0.75  # §5.2手順7: 単語窓制約の余白(0.2/0.5/0.75秒の実測比較で採用)
-_EARLY_COMMIT_BONUS = 2.0  # §5.2手順7: 単語窓制約の早期遷移ボーナスの加算項上限(実測比較で採用)
+_FORCED_ALIGN_BAND_SEC = 1.0  # 手順7: blank支配下での押し込み崩壊を防ぐ位置バンド幅(フォールバック)
+_MIN_STAY_FRAMES = 6  # 手順7: 非blank(音素)状態の最小滞在フレーム数(120ms)
+_VOICED_BLANK_PENALTY = 7.0  # 手順7: 有声フレームのblank列から引く対数確率ペナルティ
+_WORD_WINDOW_MARGIN_SEC = 0.75  # 手順7: 単語窓制約の余白(0.2/0.5/0.75秒の実測比較で採用)
+_EARLY_COMMIT_BONUS = 2.0  # 手順7: 単語窓制約の早期遷移ボーナスの加算項上限(実測比較で採用)
 
 
 def _apply_voiced_blank_penalty(
     log_probs: np.ndarray, chunk_samples: np.ndarray, threshold: float, blank_token_id: int
 ) -> np.ndarray:
-    """有声フレームのblank列へ固定ペナルティを適用する(§5.2手順7)。
+    """有声フレームのblank列へ固定ペナルティを適用する(手順7)。
 
     blank優勢の歌唱では、声が出ているフレームでもblank(pau)に留まる経路が最尤になりやすく、
     フレーズ先頭のモーラが実際の発声より数百ms遅れて置かれるため、有声フレーム(20msフレームRMSが
@@ -412,7 +412,7 @@ def _apply_voiced_blank_penalty(
 def _expand_min_stay(
     token_ids: list[int], blank_token_id: int, num_frames: int
 ) -> tuple[list[int], list[int]]:
-    """非blankトークンを最小滞在フレーム数ぶんの連鎖サブ状態へ展開する(§5.2手順7)。
+    """非blankトークンを最小滞在フレーム数ぶんの連鎖サブ状態へ展開する(手順7)。
 
     blank優勢の歌唱では音素状態を1フレームで通過する経路が最尤になりやすく、モーラが数十msへ
     潰れるため、非blankトークンをサブ状態の連鎖(各1フレーム以上滞在)で表して合計滞在を強制する。
@@ -440,7 +440,7 @@ def _expand_min_stay_local(
     words_phonemes: list[tuple[list[str], float, float]],
     blank_token_id: int,
 ) -> tuple[list[int], list[int]]:
-    """最小滞在フレーム数を単語ごとに局所適応させて展開する(§5.2手順7の局所適応。単語
+    """最小滞在フレーム数を単語ごとに局所適応させて展開する(手順7の局所適応。単語
     タイムスタンプが取得できた場合のみ使う)。
 
     _expand_min_stay(チャンク全体で1回だけ最小滞在を計算する版)と異なり、単語ごとに
@@ -483,7 +483,7 @@ def _viterbi_monotonic(
     out_of_bounds: np.ndarray,
     state_bias: np.ndarray | None = None,
 ) -> list[int] | None:
-    """トークン列を対数確率行列へ単調に対応付ける共通Viterbi(§5.2手順7)。
+    """トークン列を対数確率行列へ単調に対応付ける共通Viterbi(手順7)。
 
     各トークンを1状態とし、フレームごとに「同一状態に留まる」「次のトークンの状態へ進む」の
     2種の遷移のみ許す(読み飛ばし禁止)。各状態の対数確率には token_ids が指すその状態自身の
@@ -531,7 +531,7 @@ def _viterbi_monotonic(
 
 
 def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
-    """既知のトークン列を対数確率行列へ単調に対応付ける(§5.2手順7の**フォールバック**。位置バンド制限)。
+    """既知のトークン列を対数確率行列へ単調に対応付ける(手順7の**フォールバック**。位置バンド制限)。
 
     単語タイムスタンプが取得できない場合、または単語窓制約(下記 _forced_align_windowed)で
     最終フレームへ到達できない場合に用いる。
@@ -572,7 +572,7 @@ def _forced_align_windowed(
     log_probs: np.ndarray, token_ids: list[int], windows_sec: list[tuple[float, float]]
 ) -> list[int]:
     """単語タイムスタンプの窓で状態ごとの到達可能フレームを制約した強制アライメント
-    (§5.2手順7の**単語窓制約**。主経路)。
+    (手順7の**単語窓制約**。主経路)。
 
     状態 l がフレーム t に遷移できるのは、windows_sec[l] = (lo, hi) がフレーム区間
     [t*frame_dur, (t+1)*frame_dur) と交差する場合(lo < (t+1)*frame_dur かつ hi > t*frame_dur)に
@@ -614,7 +614,7 @@ def _forced_align_windowed(
 
 
 def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: float) -> list[Segment]:
-    """強制アライメントの状態パスをSegment列へ変換する(§5.2手順8・9)。
+    """強制アライメントの状態パスをSegment列へ変換する(手順8・9)。
 
     各トークンの区間は、自身の状態が経路上に最初に現れるフレームから次のトークンの状態が最初に
     現れるフレームまで(最後のトークンは区間終端まで)とする。隣接する区間が同一の出力(type・
@@ -657,7 +657,7 @@ def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: f
 
 
 def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
-    """隣接する同一 type・phoneme の Segment を1つへ結合する(§5.2手順9。区間境界をまたぐ結合)。"""
+    """隣接する同一 type・phoneme の Segment を1つへ結合する(手順9。区間境界をまたぐ結合)。"""
     merged: list[Segment] = []
     for seg in segments:
         if merged and merged[-1].type == seg.type and merged[-1].phoneme == seg.phoneme:
@@ -680,7 +680,7 @@ def recognize(
     sofa_aligner: SofaAlignerConfig | None = None,
     english_oov_katakana_method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
 ) -> list[Segment]:
-    """ボーカルWAVから母音/子音/gapのセグメント列を認識する(§8.1のRecognizerアダプタ契約。§5.2・§5.3)。
+    """ボーカルWAVから母音/子音/gapのセグメント列を認識する(Recognizerアダプタ契約)。
 
     content_recognizer_model で内容認識モデルを指定する(既定値・候補値・任意指定)。
     retry はエコー幻覚・反復幻覚へのトリガ式リトライの有効/無効を切り替える
@@ -708,7 +708,7 @@ def recognize(
     split_points = _detect_silence_split_points(resampled, RECOGNIZER_CONFIG.sample_rate)
     segment_bounds = _build_segment_bounds(duration_sec, split_points)
 
-    # 音素モデルは実際に強制アライメントへ進む区間が現れるまでロードしない(§5.2手順2: 全区間が
+    # 音素モデルは実際に強制アライメントへ進む区間が現れるまでロードしない(手順2: 全区間が
     # 無音ならモデルを一切必要としない。非無音区間でも内容認識・G2P・手順4の音素密度チェックより
     # 先にロードするのではなく、それらを経てなお進む区間だけで遅延ロードする。幻覚検出でgap確定
     # した区間はロードせずスキップする。ロード自体の失敗は握りつぶさず例外にして失敗境界を隠さない)。
@@ -716,7 +716,7 @@ def recognize(
     # 使い回す(区間ごとの再ロードによるモデル転送コスト(特にGPU使用時)の浪費を避ける)。
     processor = model = vocab = blank_token_id = None
     content_pipeline = None
-    # SOFA経路(§5.3)専用: 対象区間・対象単語をここへ積み、recognize()呼び出し全体で1回だけ
+    # SOFA経路専用: 対象区間・対象単語をここへ積み、recognize()呼び出し全体で1回だけ
     # SOFAへまとめて渡す(ループの外、全区間処理後)。各要素は
     # (音声サンプル, サンプルレート, G2P音素記号列, 絶対オフセット秒, 相対長さ秒)。
     pending_sofa_targets: list[tuple[np.ndarray, int, list[str], float, float]] = []
@@ -733,7 +733,7 @@ def recognize(
             )
             continue
 
-        # §5.2手順2: 有声スパンへトリムしてから内容認識・アライメントへ渡す。区間の境界は無音区間の
+        # 手順2: 有声スパンへトリムしてから内容認識・アライメントへ渡す。区間の境界は無音区間の
         # 中点のため端に長い無音を含みうる。トリムで除いた先頭・末尾はgapとして直接確定する。
         # トリムが無い側の境界は丸め誤差を持ち込まないよう区間自身の境界秒をそのまま使う。
         trim_lo, trim_hi = _voiced_trim_bounds(chunk_samples, RECOGNIZER_CONFIG.sample_rate, threshold)
@@ -791,7 +791,7 @@ def recognize(
             continue
 
         try:
-            # §5.2手順4: 単語タイムスタンプが取得できた場合は単語ごとに個別にG2Pし(手順5の窓割り当てに
+            # 手順4: 単語タイムスタンプが取得できた場合は単語ごとに個別にG2Pし(手順5の窓割り当てに
             # 使う)、取得できなかった場合は区間の書き起こし全体を1回で変換する(単語単位に分割しない)。
             if words:
                 words_phonemes = [
@@ -837,7 +837,7 @@ def recognize(
                 vocab = processor.tokenizer.get_vocab()
                 blank_token_id = processor.tokenizer.pad_token_id
 
-            # §5.2手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ
+            # 手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ
             # (単語分割していない一括の)音素記号列の前後にpauを補うだけにする。
             if words_phonemes is not None:
                 seq, windows_sec = _assemble_with_word_windows(
@@ -849,12 +849,12 @@ def recognize(
 
             token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
             log_probs = _compute_log_probs(processor, model, chunk_samples)
-            # §5.2手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
+            # 手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
             # 非blankトークンをサブ状態へ展開してアライメントし、経路を元トークンindexへ戻してから
             # Segment化する。
             log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
 
-            # §5.2手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
+            # 手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
             # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。単語窓がある場合、
             # 最小滞在は単語ごとの局所適応(_expand_min_stay_local)を使う。局所適応でも窓制約が
             # 到達不能ならチャンク全体の最小滞在(_expand_min_stay)へ計算し直し、位置バンド制限を使う。
@@ -892,8 +892,8 @@ def recognize(
                     )
                 )
         else:
-            # forced_aligner == "sofa-forcedalign"(関数入口でこの2値のいずれかであることを検証済み。
-            # §5.3): 単語単位分割してSOFA対象を積み、gapはここで直接確定する。実際のSOFA呼び出しは
+            # forced_aligner == "sofa-forcedalign"(関数入口でこの2値のいずれかであることを
+            # 検証済み): 単語単位分割してSOFA対象を積み、gapはここで直接確定する。実際のSOFA呼び出しは
             # recognize()呼び出し全体で1回にまとめる(全区間処理後にまとめて行う。バッチ単位の確定)。
             if words_phonemes is not None:
                 valid_words = sofa_align._clamp_words_to_valid_list(words_phonemes, trim_duration_sec)
@@ -930,7 +930,7 @@ def recognize(
             )
 
     if forced_aligner == "sofa-forcedalign":
-        # §5.3「バッチ単位」: 積んだ対象をrecognize()呼び出し1回につき1回だけSOFAへまとめて渡す
+        # バッチ単位の確定: 積んだ対象をrecognize()呼び出し1回につき1回だけSOFAへまとめて渡す
         # (対象が0件ならsofa_align._align_batchがサブプロセスの起動自体を省略する)。
         raw_by_basename = sofa_align._align_batch(
             [(samples, sr, ph) for samples, sr, ph, _, _ in pending_sofa_targets], sofa_aligner
@@ -954,12 +954,12 @@ def recognize(
 
 
 def _downmix_to_mono(samples: np.ndarray) -> np.ndarray:
-    """複数チャンネルの PCM を平均でモノラルへダウンミックスする(§5.1)。"""
+    """複数チャンネルの PCM を平均でモノラルへダウンミックスする。"""
     return samples.mean(axis=1)
 
 
 def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: int) -> np.ndarray:
-    """モノラル PCM を目標サンプルレートへ再サンプリングする(§5.1。多相補間)。"""
+    """モノラル PCM を目標サンプルレートへ再サンプリングする(多相補間)。"""
     if sample_rate == target_sample_rate:
         return mono
     gcd = math.gcd(sample_rate, target_sample_rate)
@@ -969,7 +969,7 @@ def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: 
 
 
 def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD) -> list[str]:
-    """テキストをG2Pで音素記号列へ変換する(§5.2手順4。pyopenjtalk-plus、ルールベース)。
+    """テキストをG2Pで音素記号列へ変換する(手順4。pyopenjtalk-plus、ルールベース)。
 
     pyopenjtalk-plusへ渡す前に、英語未知語カタカナ化フォールバック(convert_oov_words)を適用する。
     methodで変換方式を選択する(既定`arpakana`)。
@@ -1000,7 +1000,7 @@ def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAK
 def _sanitize_word_timestamps(
     words: list[tuple[str, float, float]], duration_sec: float
 ) -> list[tuple[str, float, float]]:
-    """単語タイムスタンプを単調化する(§5.2手順3)。
+    """単語タイムスタンプを単調化する(手順3)。
 
     まず開始・終了をトリムした入力範囲 [0, duration_sec] へクランプし、続けて開始時刻を直前の
     単語の開始時刻以上へ、終了時刻を自身の開始時刻+最小長以上へ、単語の時系列順にクランプする。
@@ -1018,7 +1018,7 @@ def _sanitize_word_timestamps(
 
 
 def _extract_word_timestamps(chunks: list[dict], duration_sec: float) -> list[tuple[str, float, float]]:
-    """内容認識パイプラインの chunks から単語タイムスタンプを抽出し単調化する(§5.2手順3)。
+    """内容認識パイプラインの chunks から単語タイムスタンプを抽出し単調化する(手順3)。
 
     テキストが空、または開始時刻が無い要素は読み飛ばす。終了時刻が無い要素(生成が単語の途中で
     打ち切られた場合)は開始時刻+最小長で補う。
@@ -1058,13 +1058,13 @@ def _transcribe_text_only(samples: np.ndarray, content_recognizer_model: Content
 def _transcribe_segment(
     pipeline, samples: np.ndarray
 ) -> tuple[str, list[tuple[str, float, float]] | None]:
-    """区間のボーカル音声を書き起こし、単語タイムスタンプも得る(§5.2手順3。区間ごとに独立呼び出し)。
+    """区間のボーカル音声を書き起こし、単語タイムスタンプも得る(手順3。区間ごとに独立呼び出し)。
 
     pipeline は呼び出し側(recognize())が無音でない最初の区間で一度だけロードし、以降の区間へ
     使い回す(区間ごとの再ロードによるモデル転送コストの浪費を避ける)。
     どの content_recognizer_model でも同じ手順(かな限定プロンプトでprompt_ids取得→単語
     タイムスタンプ付き貪欲デコード)を適用する(モデルによる分岐は持たない)。単語タイムスタンプを
-    返さないモデルは None を返す(§5.2手順7のフォールバックに帰着)。生成トークン数の上限
+    返さないモデルは None を返す(手順7のフォールバックに帰着)。生成トークン数の上限
     (_SEGMENT_MAX_NEW_TOKENS)も指定し、反復ハルシネーション時の生成時間を有界化する
     (貪欲デコードは接頭辞不変のため、上限に達しない正常な書き起こしの結果は変わらない)。
     """
@@ -1089,13 +1089,13 @@ def _transcribe_segment(
 
 
 def _select_content_recognizer_device() -> str:
-    """内容認識モデル(Whisper系)の実行デバイスを環境から自動選択する(§5.1・§5.2)。
+    """内容認識モデル(Whisper系)の実行デバイスを環境から自動選択する。
 
     GPU(CUDA)が利用可能ならGPUを使う。強制アライメント用の音素モデル(RECOGNIZER_CONFIG.device)は
-    決定論のためCPU固定のままで、この自動選択の対象外(§5.1「実行条件の固定」)。内容認識の貪欲デコード
+    決定論のためCPU固定のままで、この自動選択の対象外。内容認識の貪欲デコード
     (ビーム幅1・サンプリング無し)はサンプリング由来の乱数的非決定性を排除するが、実行デバイス・
     スレッド数の違いによる浮動小数点演算の丸め誤差までは排除しない。環境が異なれば僅差のトークン
-    選択が割れ、書き起こし結果がわずかに変わりうる(§5.2「決定論」)。
+    選択が割れ、書き起こし結果がわずかに変わりうる。
     """
     import torch
 
@@ -1146,9 +1146,9 @@ def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognize
 
 
 def _compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:
-    """音素モデルで推論し、フレームごとの対数確率行列を返す(§5.2手順7の入力)。
+    """音素モデルで推論し、フレームごとの対数確率行列を返す(手順7の入力)。
 
-    スレッド数の固定(RECOGNIZER_CONFIG.num_threads。§5.1)はこの音素モデル推論だけへ局所的に
+    スレッド数の固定(RECOGNIZER_CONFIG.num_threads)はこの音素モデル推論だけへ局所的に
     適用し、呼び出し前後の設定へ復元する(内容認識(Whisper系。手順3)のCPU実行はこの制約を
     受けず、環境のデフォルトスレッド数で並列に動く)。
     """
@@ -1167,7 +1167,7 @@ def _compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:
 
 
 def _load_model_and_processor():
-    """音素モデル(強制アライメント用)をS-1測定の固定条件(§5.1・§8.3)でロードする。
+    """音素モデル(強制アライメント用)をS-1測定の固定条件でロードする。
 
     スレッド数の固定(RECOGNIZER_CONFIG.num_threads)はロード時ではなく推論時(_compute_log_probs)
     に局所適用する(内容認識(Whisper系)のCPU実行を道連れにしないため)。
@@ -1177,7 +1177,7 @@ def _load_model_and_processor():
 
     torch.manual_seed(RECOGNIZER_CONFIG.random_seed)
 
-    # §5.1: wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
+    # wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
     # 要求する。音素IDのデコードのみが必要で音素へのエンコードは不要なため do_phonemize=False
     # でこの依存を回避する。
     processor = AutoProcessor.from_pretrained(

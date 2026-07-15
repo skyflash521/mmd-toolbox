@@ -1,6 +1,6 @@
-"""S2 音素認識の統合テスト(vocal_analysis.md §5・§5.2・§8.1・§8.3)。
+"""S2 音素認識の統合テスト。
 
-無音検出による区間分割(§5.2手順1・2)は合成音声(実RMS)でそのまま検証し、外部呼び出し(内容認識器の
+無音検出による区間分割は合成音声(実RMS)でそのまま検証し、外部呼び出し(内容認識器の
 書き起こし・G2P・音素モデル推論)はモック(_transcribe_segment・_load_content_recognizer_pipeline・
 _g2p・_load_model_and_processor・_compute_log_probs を差し替え)して検証する(ネットワーク・実モデルを
 必須にしない)。ダウンミックス・
@@ -79,7 +79,7 @@ def _write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> Path:
 
 
 def _loud_samples(num_samples: int, sample_rate: int = 16000, amplitude: float = 0.5) -> np.ndarray:
-    """無音判定のRMSしきい値を確実に上回る、振幅一定の正弦波(§5.2手順1・2の無音検出を通過させる)。"""
+    """無音判定のRMSしきい値を確実に上回る、振幅一定の正弦波。"""
     t = np.arange(num_samples) / sample_rate
     return (amplitude * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32).reshape(-1, 1)
 
@@ -92,7 +92,7 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
     # 区間のテキスト「あ」-> G2P「a」-> 音素列 ["pau","a","pau"]。語彙は blank=0・a=1 の2記号のみ。
-    # 最小滞在制約(§5.2手順7)により a は (6-2)//1=4 個のサブ状態へ展開され、6フレームに
+    # 最小滞在制約により a は (6-2)//1=4 個のサブ状態へ展開され、6フレームに
     # サブ状態6個がちょうど収まるため経路は [0,1,1,1,1,2] に一意に定まる(a はフレーム1〜4)。
     decoder = {0: "<pad>", 1: "a"}
     log_probs = np.array(
@@ -139,8 +139,8 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
 def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 先頭2秒は大音量、続く3秒は完全な無音(RMS=0)。無音区間は内容認識呼び出し自体をスキップする
-    # (§5.2手順2)。分割点は無音区間[2.0,5.0)の中点3.5秒に立ち、区間[0,3.5)は大音量を含むため
+    # 先頭2秒は大音量、続く3秒は完全な無音(RMS=0)。無音区間は内容認識呼び出し自体をスキップする。
+    # 分割点は無音区間[2.0,5.0)の中点3.5秒に立ち、区間[0,3.5)は大音量を含むため
     # 無音でなく、区間[3.5,5.0)は完全に無音になる。
     loud = _loud_samples(32000)
     silence = np.zeros((48000, 1), dtype=np.float32)
@@ -224,7 +224,7 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
 
     # 先頭1.5秒は完全な無音(RMS=0)、続く2.0秒は大音量。先頭の無音区間[0,1.5)は分割点(中点0.75秒)を
     # 立てるが、区間[0,0.75)は最小長1.5秒未満のため次と結合され、全体が1つの非無音区間[0,3.5)になる。
-    # §5.2手順2のトリムにより、有声スパン(1.5秒から。100msフレーム単位)の外側余白100msを残した
+    # トリムにより、有声スパン(1.5秒から。100msフレーム単位)の外側余白100msを残した
     # 1.4秒より前は gap として直接確定され、アライメント結果のセグメントは絶対時刻1.4秒起点で
     # オフセットされるべきである(先頭無音上にトークンを置かない)。
     silence = np.zeros((24000, 1), dtype=np.float32)
@@ -270,7 +270,7 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
 def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 2.0秒の有声区間に対しG2Pが100音素(密度50/秒。§5.2手順4のしきい値20/秒を大幅に超える)を
+    # 2.0秒の有声区間に対しG2Pが100音素(密度50/秒。しきい値20/秒を大幅に超える)を
     # 返すケース(内容認識の反復幻覚を模す。リトライも同じ結果を返し、テキストに末尾反復が無いため
     # 反復救済も適用されない)。誤った音素列で強制アライメントを試みず、区間全体をgapとして確定し、
     # 音素モデルも一度もロードしない。
@@ -305,8 +305,8 @@ def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatc
 def test_recognize_empty_transcription_confirms_gap_without_g2p_or_model(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 書き起こしが空文字列(空白のみを含む)の区間は、§5.2手順3によりG2P・強制アライメントを
-    # 試みず区間全体をgapとして直接確定する(手順2の無音確定・手順4の音素密度超過確定と同様)。
+    # 書き起こしが空文字列(空白のみを含む)の区間はG2P・強制アライメントを
+    # 試みず区間全体をgapとして直接確定する(無音確定・音素密度超過確定と同様)。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)  # 2.0秒・無音区間なし
 
     monkeypatch.setattr(
@@ -338,7 +338,7 @@ def test_recognize_empty_transcription_confirms_gap_without_g2p_or_model(tmp_pat
 def test_recognize_computes_and_passes_word_windows(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 単語タイムスタンプが取得できた場合、§5.2手順5の窓を計算して単語窓制約Viterbi
+    # 単語タイムスタンプが取得できた場合、単語窓を計算して単語窓制約Viterbi
     # (_forced_align_windowed)へ渡す(位置バンド制限へのフォールバックではない)。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)  # 0.12秒・6フレーム
 
@@ -374,7 +374,7 @@ def test_recognize_computes_and_passes_word_windows(tmp_path, monkeypatch):
 
     assert "windows_sec" in captured  # 単語窓制約経路が呼ばれた
     margin = recognizer_module._WORD_WINDOW_MARGIN_SEC
-    # seq=["pau","a","pau"]。最小滞在は単語ごとの局所適応(§5.2手順7)で、「あ」の実時間
+    # seq=["pau","a","pau"]。最小滞在は単語ごとの局所適応で、「あ」の実時間
     # 0.02s-0.06s(2フレーム)を音素数1で割った2フレームへ展開されるため、窓は
     # [先頭pau, a, a, 末尾pau] の4個(log_probsの6フレームのうち残り2フレームはViterbi自身が
     # stay遷移で埋める)。
@@ -390,7 +390,7 @@ def test_recognize_falls_back_to_band_alignment_when_word_window_infeasible(tmp_
     from vocal_analysis import recognizer as recognizer_module
 
     # 単語窓制約Viterbiが末尾トークンへ到達できず RecognitionError を送出した場合、
-    # §5.2手順7のフォールバック(位置バンド制限)へ切り替えて正常にセグメントを組み立てる
+    # フォールバック(位置バンド制限)へ切り替えて正常にセグメントを組み立てる
     # (エラーを外へ伝播させない)。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
@@ -430,7 +430,7 @@ def test_recognize_falls_back_to_global_min_stay_when_windowed_alignment_fails(t
 
     # 単語窓制約Viterbiが失敗した場合、フォールバック(位置バンド制限)は単語ごとの局所適応
     # (_expand_min_stay_local)ではなく、チャンク全体の最小滞在(_expand_min_stay)を計算し
-    # 直したサブ状態を使う(§5.2手順7)。
+    # 直したサブ状態を使う。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
     decoder = {0: "<pad>", 1: "a"}
@@ -485,7 +485,7 @@ def test_recognize_places_multiple_words_via_per_word_g2p_and_inter_word_window(
 
     # 単語2個("あ"→G2P"a"、"い"→G2P"i")。単語ごとに個別G2Pされ(辞書引きモックのため、結合
     # テキストを1回で変換する誤実装ならKeyErrorになる)、母音が正しい順序で配置されることを
-    # 検証する(§5.2手順4・5)。窓・単語間pauの拘束力そのものは他のテスト
+    # 検証する。窓・単語間pauの拘束力そのものは他のテスト
     # (test_recognize_computes_and_passes_word_windows・test_forced_align_windowed_*)が担う
     # (この音声長0.14秒は余白0.75秒に対し極めて短く、ここでは窓は実質非拘束になる)。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(2240), 16000)  # 0.14秒・7フレーム
@@ -532,7 +532,7 @@ def test_recognize_places_multiple_words_via_per_word_g2p_and_inter_word_window(
 def test_recognize_hallucination_density_sums_across_words(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 単語ごとにG2Pする場合の音素密度(§5.2手順4)は全単語分の音素数の合計で判定する。
+    # 単語ごとにG2Pする場合の音素密度は全単語分の音素数の合計で判定する。
     # 1.0秒の区間に単語2個・各15音素を割り当てる: 単語1個分だけ(15音素/秒)ならしきい値
     # (20音素/秒)未満で見逃すが、2単語の合計(30音素/秒)なら明確に超過する。単語1個分しか
     # 数えない誤実装ならこの区間をgap確定できず音素モデルをロードしてしまい、fail_if_calledで
@@ -565,7 +565,7 @@ def test_recognize_empty_word_list_with_nonempty_text_falls_back_like_no_timesta
     # 書き起こしは非空だが単語タイムスタンプが空リスト(chunksはあったが単語として使える要素が
     # 無かった場合)は、Noneと同様に「単語タイムスタンプが取得できない場合」として扱い、
     # 単語ごとのG2P・単語窓制約を使わず、区間の書き起こし全体を1回で変換して位置バンド制限で
-    # 整列する(§5.2手順3・4・5)。
+    # 整列する。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
     decoder = {0: "<pad>", 1: "a"}
@@ -599,7 +599,7 @@ def test_recognize_empty_word_list_with_nonempty_text_falls_back_like_no_timesta
 def test_recognize_fully_silent_input_never_loads_phoneme_model(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 音声全体が無音(RMS=0)の場合、§5.2手順2により全区間が内容認識呼び出し無しでgap確定され、
+    # 音声全体が無音(RMS=0)の場合、全区間が内容認識呼び出し無しでgap確定され、
     # 音素モデル(_load_model_and_processor)は一度も必要にならない(不要な依存失敗を避ける)。
     wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((32000, 1), dtype=np.float32), 16000)
 
@@ -681,7 +681,7 @@ def test_recognize_content_recognizer_missing_library_raises_clear_error(tmp_pat
 def test_recognize_content_recognizer_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # §4: モデルが未キャッシュでネットワークからも取得できない場合、モデル取得が必要と分かる
+    # モデルが未キャッシュでネットワークからも取得できない場合、モデル取得が必要と分かる
     # エラーで失敗させる(黙って劣化させない)。from_pretrained 系はこの場合 OSError を送出する。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
 
@@ -825,16 +825,16 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
 
     _load_model_and_processor()
 
-    # §5.1: wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を要求
+    # wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を要求
     # するため do_phonemize=False を渡してこの依存を回避する(音素IDのデコードのみが必要で
     # 音素へのエンコードは不要なため)。
     assert captured["do_phonemize"] is False
-    # §8.3: モデル id・revision を固定する。
+    # モデル id・revision を固定する。
     assert captured["processor_model_id"] == RECOGNIZER_CONFIG.model_id
     assert captured["processor_revision"] == RECOGNIZER_CONFIG.model_revision
     assert captured["model_model_id"] == RECOGNIZER_CONFIG.model_id
     assert captured["model_revision"] == RECOGNIZER_CONFIG.model_revision
-    # §5.1: 実行デバイス・dtype・乱数シードを固定条件どおりに適用する(スレッド数は推論時に
+    # 実行デバイス・dtype・乱数シードを固定条件どおりに適用する(スレッド数は推論時に
     # _compute_log_probs が局所適用する。下記 test_compute_log_probs_scopes_num_threads_...)。
     assert captured["model_torch_dtype"] == getattr(torch, RECOGNIZER_CONFIG.dtype)
     assert captured["model_to_device"] == RECOGNIZER_CONFIG.device
@@ -843,8 +843,8 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
 
 def test_compute_log_probs_scopes_num_threads_to_phoneme_model_and_restores(monkeypatch):
     """_compute_log_probs はスレッド数を推論の直前だけ RECOGNIZER_CONFIG.num_threads へ設定し、
-    呼び出し前の値へ復元する(§5.1)。内容認識(Whisper系)のCPU実行をこの制約に道連れにしない
-    ための局所化(§5.2「決定論」)。"""
+    呼び出し前の値へ復元する。内容認識(Whisper系)のCPU実行をこの制約に道連れにしない
+    ための局所化。"""
     torch = pytest.importorskip("torch")
     from vocal_analysis import RECOGNIZER_CONFIG
     from vocal_analysis.recognizer import _compute_log_probs
@@ -906,10 +906,10 @@ def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypa
     _load_content_recognizer_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
 
     assert captured["task"] == "automatic-speech-recognition"
-    # §5.2・§8.3: content_recognizer_model が指すモデル・revisionをそのままロードに渡す。
+    # content_recognizer_model が指すモデル・revisionをそのままロードに渡す。
     assert captured["model"] == DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id
     assert captured["revision"] == DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision
-    # §5.1: GPU不在時はCPUを使う(強制アライメント用音素モデルとは独立の自動選択)。
+    # GPU不在時はCPUを使う(強制アライメント用音素モデルとは独立の自動選択)。
     assert captured["device"] == "cpu"
     assert captured["dtype"] == torch.float32
 
@@ -935,7 +935,7 @@ def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
 
     _load_content_recognizer_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
 
-    # §5.1: GPUが利用可能なら自動的にGPUを使う(強制アライメント用音素モデルはCPU固定のまま)。
+    # GPUが利用可能なら自動的にGPUを使う(強制アライメント用音素モデルはCPU固定のまま)。
     assert captured["device"] == "cuda"
     # GPU実行時はfp16でロードし、重み・アクティベーションのメモリ使用量を半減させる。
     assert captured["dtype"] == torch.float16
@@ -981,7 +981,7 @@ def test_load_content_recognizer_pipeline_evicts_previous_model_before_loading_n
 
 def test_transcribe_segment_extracts_word_timestamps_from_chunks(monkeypatch):
     """パイプラインが chunks(単語ごとのテキスト・タイムスタンプ)を返す場合、_transcribe_segment は
-    それを単調化した単語タイムスタンプ列として書き起こしテキストと共に返す(§5.2手順3)。"""
+    それを単調化した単語タイムスタンプ列として書き起こしテキストと共に返す。"""
     from vocal_analysis import recognizer as recognizer_module
 
     class _FakePromptIds:
@@ -1014,7 +1014,7 @@ def test_transcribe_segment_extracts_word_timestamps_from_chunks(monkeypatch):
 
 def test_transcribe_segment_returns_none_words_when_pipeline_has_no_chunks(monkeypatch):
     """パイプラインが chunks を返さない(単語タイムスタンプ非対応の)場合、_transcribe_segment は
-    words に None を返す(§5.2手順7のフォールバックに帰着)。"""
+    words に None を返す(フォールバックに帰着)。"""
     from vocal_analysis import recognizer as recognizer_module
 
     class _FakePromptIds:
@@ -1042,7 +1042,7 @@ def test_transcribe_segment_returns_none_words_when_pipeline_has_no_chunks(monke
 
 def test_transcribe_segment_bounds_generation_length(monkeypatch):
     """_transcribe_segment は反復ハルシネーション時の生成時間を有界化するため、生成トークン数の
-    上限をgenerate_kwargsへ指定してパイプラインへ渡す(§5.2手順3)。"""
+    上限をgenerate_kwargsへ指定してパイプラインへ渡す。"""
     from vocal_analysis import recognizer as recognizer_module
 
     class _FakePromptIds:
@@ -1070,7 +1070,7 @@ def test_transcribe_segment_bounds_generation_length(monkeypatch):
 
 def test_transcribe_text_only_bounds_generation_length(monkeypatch):
     """_transcribe_text_only(トリガ式リトライの再認識用)も同様に生成トークン数の上限を
-    generate_kwargsへ指定する(§5.2手順3)。"""
+    generate_kwargsへ指定する。"""
     from vocal_analysis import ContentRecognizerModel
     from vocal_analysis import recognizer as recognizer_module
 
@@ -1094,7 +1094,7 @@ def test_transcribe_text_only_bounds_generation_length(monkeypatch):
 
 def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_path, monkeypatch):
     """既定値(DEFAULT_CONTENT_RECOGNIZER_MODEL)で呼び出すと、そのmodel_id・revisionで
-    パイプラインをロードし、かな限定プロンプト(KANA_PROMPT)をprompt_idsとして渡す(§5.2)。"""
+    パイプラインをロードし、かな限定プロンプト(KANA_PROMPT)をprompt_idsとして渡す。"""
     from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL, KANA_PROMPT
     from vocal_analysis import recognizer as recognizer_module
 
@@ -1143,13 +1143,13 @@ def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_pa
     assert calls["loaded_model"] == DEFAULT_CONTENT_RECOGNIZER_MODEL
     assert calls["prompt_text"] == KANA_PROMPT
     assert calls["generate_kwargs"]["prompt_ids"] == "PROMPT_IDS"
-    assert calls["return_timestamps"] == "word"  # §5.2手順3: 単語タイムスタンプ付きで呼び出す
+    assert calls["return_timestamps"] == "word"  # 単語タイムスタンプ付きで呼び出す
     assert segments[1].phoneme == "a"
 
 
 def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, monkeypatch):
     """content_recognizer_model に既定値以外(例: 候補値 KANA_WHISPER_MODEL)を渡すと、
-    そのモデルでパイプラインをロードする(モデルによる分岐は無い。§5.2)。"""
+    そのモデルでパイプラインをロードする(モデルによる分岐は無い)。"""
     from vocal_analysis import KANA_WHISPER_MODEL
     from vocal_analysis import recognizer as recognizer_module
 
@@ -1390,7 +1390,7 @@ def test_recognize_sofa_path_splits_words_and_reassembles_segments(tmp_path, mon
         wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=config
     )
 
-    # SOFAへは1回のrecognize()呼び出しにつき1回だけ、2単語分をまとめて渡す(バッチ単位。§5.3)。
+    # SOFAへは1回のrecognize()呼び出しにつき1回だけ、2単語分をまとめて渡す(バッチ単位)。
     assert len(align_batch_calls) == 1
     targets, passed_config = align_batch_calls[0]
     assert passed_config is config
@@ -1418,7 +1418,7 @@ def test_recognize_sofa_path_splits_words_and_reassembles_segments(tmp_path, mon
 def test_recognize_sofa_path_uses_whole_region_when_no_word_timestamps(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
-    # 単語タイムスタンプが取得できない場合(§5.2手順3のフォールバック対象)は、区間全体を
+    # 単語タイムスタンプが取得できない場合(フォールバック対象)は、区間全体を
     # 1つのSOFA対象とする(単語単位分割をしない)。
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(3200), 16000)
     config = _make_sofa_config(tmp_path)

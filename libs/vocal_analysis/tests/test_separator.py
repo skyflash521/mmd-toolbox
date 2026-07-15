@@ -1,4 +1,4 @@
-"""S1 ボーカル抽出のテスト(vocal_analysis.md §4・§8.1・§8.3後注)。
+"""S1 ボーカル抽出のテスト。
 
 外部ライブラリ(audio-separator)を呼ぶ分離実行は、内部の分離器ファクトリ(_build_separator)を
 差し替えてモックし、ネットワーク・実モデルを必須にしない。mode=never(分離なし)は純粋な
@@ -39,7 +39,7 @@ def test_separate_never_mode_returns_input_unseparated():
 def test_separate_never_mode_does_not_call_separator_factory(monkeypatch):
     from vocal_analysis import separator as separator_module
 
-    # §4: never は分離せず入力をそのままボーカルとして扱う。分離器を呼んではならない
+    # never は分離せず入力をそのままボーカルとして扱う。分離器を呼んではならない
     # (audio-separator 未導入環境でも never モードだけは動くことを保証する)。
     def _fail(output_dir):
         raise AssertionError("never モードで分離器ファクトリを呼んではならない")
@@ -88,8 +88,8 @@ def test_separate_always_and_auto_modes_call_separator_factory(monkeypatch, mode
 
     result = separator_module.separate(_make_pcm(), mode=mode)
 
-    # §4: auto は BGM 有無の自動判定を持たず always と同義(常に分離する)。
-    # §8.1: 出力は「ボーカルWAVのパス」を約束するため、返るパスが実在することも検証する。
+    # auto は BGM 有無の自動判定を持たず always と同義(常に分離する)。
+    # 出力は「ボーカルWAVのパス」を約束するため、返るパスが実在することも検証する。
     assert result == Path(calls["audio_file_path"]).parent / "vocals_output.wav"
     assert result.exists()
     assert calls["model_filename"] == "htdemucs_ft.yaml"
@@ -149,7 +149,7 @@ def test_separate_missing_library_raises_clear_error(monkeypatch):
 
 def test_build_separator_configures_real_separator_with_pinned_values():
     # audio-separator が実際に導入されている環境でのみ、_build_separator の実体を検証する
-    # (vocal-analysis extra が無い最小環境では skip。§4のテスト方針: 実モデル・ネットワークは必須にしない)。
+    # (vocal-analysis extra が無い最小環境では skip。実モデル・ネットワークは必須にしない)。
     pytest.importorskip("audio_separator")
     from vocal_analysis import SEPARATOR_CONFIG
     from vocal_analysis.separator import _build_separator

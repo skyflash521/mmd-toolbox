@@ -1,4 +1,4 @@
-"""正規化中間形式の公開データ型(vocal_analysis.md §2.1)。
+"""正規化中間形式の公開データ型。
 
 各ステージ(S0/S2/S3)をつなぐ中間形式と共有出力コンテナを、特定の外部ツールに依存しない
 正規化モデルとして公開する。時刻は秒(float)、numpy 配列は np.ndarray。S1 出力(ボーカル WAV)は
@@ -20,7 +20,7 @@ class AudioPcm:
     """S0 出力(入力レベル正規化済み PCM)。
 
     samples は形状 (フレーム数, チャンネル数) の float32・値域 [-1, 1]。チャンネル数は
-    samples.shape[1](ch/SR を保持し mono 化・再サンプリングしない。§3)。
+    samples.shape[1](ch/SR を保持し mono 化・再サンプリングしない)。
     """
 
     samples: np.ndarray
@@ -45,7 +45,7 @@ class Segment:
 # eq=False: AudioPcm と同じく np.ndarray フィールドを持つため(理由は AudioPcm 参照)。
 @dataclass(eq=False)
 class RmsEnvelope:
-    """S3 出力(相対正規化した強弱エンベロープ。§6.1)。
+    """S3 出力(相対正規化した強弱エンベロープ)。
 
     times_sec は各フレーム中心時刻(秒)、values は相対正規化済み RMS。dynamic_range_db は曲全体の
     ダイナミックレンジ(95/5 パーセンタイル RMS の dB 差。ゲイン不変)で、正規化済み values からは
@@ -60,7 +60,7 @@ class RmsEnvelope:
 # eq=False: RmsEnvelope(eq=False)を内包し、既定の == が意味を持たないため。
 @dataclass(eq=False)
 class AnalysisResult:
-    """共有出力コンテナ(§2.1)。利用先は必要な部分集合だけを使う。"""
+    """共有出力コンテナ。利用先は必要な部分集合だけを使う。"""
 
     vocal_wav: Path
     segments: list[Segment]

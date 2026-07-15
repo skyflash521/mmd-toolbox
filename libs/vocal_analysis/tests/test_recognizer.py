@@ -1,4 +1,4 @@
-"""S2 音素認識のテスト(vocal_analysis.md §5・§5.1・§5.2)。
+"""S2 音素認識のテスト。
 
 母音/子音判定基準(アダプタ共通)と、複合構成(内容認識+G2P+強制アライメント)の区間化を担う純関数の
 核を合成フィクスチャで決定論的に検証する。実モデル呼び出し(wav2vec2・Whisper)を伴う統合部分
@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 
 
-# §5.1 の母音記号基準集合(IPA母音チャートの基本母音28記号+R音性母音2記号+拡張母音記号1)を
-# 過不足なく列挙する(仕様の有限集合をそのまま固定する)。
+# 母音記号基準集合(IPA母音チャートの基本母音28記号+R音性母音2記号+拡張母音記号1)を
+# 過不足なく列挙する(この有限集合をそのまま固定する)。
 _VOWEL_BASE_SYMBOLS = [
     "i", "y", "ɨ", "ʉ", "ɯ", "u",
     "ɪ", "ʏ", "ʊ",
@@ -28,7 +28,7 @@ _VOWEL_BASE_SYMBOLS = [
 def test_classify_symbol_vowel_base_set_is_complete(symbol):
     from vocal_analysis.recognizer import _classify_symbol
 
-    # §5.1: 母音記号基準集合(31記号)は単体でいずれも母音と判定される。
+    # 母音記号基準集合(31記号)は単体でいずれも母音と判定される。
     assert _classify_symbol(symbol) == "vowel"
 
 
@@ -45,7 +45,7 @@ def test_classify_symbol_vowel_base_set_is_complete(symbol):
 def test_classify_symbol_modified_and_compound_vowel_examples(symbol):
     from vocal_analysis.recognizer import _classify_symbol
 
-    # §5.1: NFD正規化後の先頭基底文字が母音記号基準集合に含まれる限り、修飾付き・複合表記でも
+    # NFD正規化後の先頭基底文字が母音記号基準集合に含まれる限り、修飾付き・複合表記でも
     # 母音側に判定する。
     assert _classify_symbol(symbol) == "vowel"
 
@@ -57,12 +57,12 @@ def test_classify_symbol_modified_and_compound_vowel_examples(symbol):
 def test_classify_symbol_consonant_examples(symbol):
     from vocal_analysis.recognizer import _classify_symbol
 
-    # §5.1: 母音記号基準集合に無い記号は子音。先頭が接近音(j/w)始まりの ja/ju/wa のような
+    # 母音記号基準集合に無い記号は子音。先頭が接近音(j/w)始まりの ja/ju/wa のような
     # 記号も、先頭基底文字が基準集合に無いため子音側になる。空文字列も子音側。
     assert _classify_symbol(symbol) == "consonant"
 
 
-# --- §5.2 手順1・2: 無音検出による区間分割 ---
+# --- 手順1・2: 無音検出による区間分割 ---
 
 
 def test_frame_rms_computes_rms_per_frame():
@@ -109,7 +109,7 @@ def test_silence_threshold_is_30db_below_95th_percentile():
 def test_silence_threshold_zero_peak_gives_zero_threshold():
     from vocal_analysis.recognizer import _silence_threshold
 
-    # §5.2手順1: 全フレームRMSが0(完全無音入力)の場合、しきい値も0になる。
+    # 手順1: 全フレームRMSが0(完全無音入力)の場合、しきい値も0になる。
     assert _silence_threshold(np.zeros(10)) == pytest.approx(0.0)
 
 
@@ -122,7 +122,7 @@ def test_silence_threshold_empty_input_is_zero():
 def test_detect_silence_split_points_finds_midpoint_of_qualifying_run():
     from vocal_analysis.recognizer import _detect_silence_split_points
 
-    # 前後1秒の大音量(振幅0.5)に挟まれた1秒の無音(§5.2手順1の最小長0.6秒を満たす)。
+    # 前後1秒の大音量(振幅0.5)に挟まれた1秒の無音(手順1の最小長0.6秒を満たす)。
     loud = np.full(16000, 0.5, dtype=np.float32)
     silence = np.zeros(16000, dtype=np.float32)
     mono = np.concatenate([loud, silence, loud])
@@ -136,7 +136,7 @@ def test_detect_silence_split_points_finds_midpoint_of_qualifying_run():
 def test_detect_silence_split_points_ignores_short_silence_gap():
     from vocal_analysis.recognizer import _detect_silence_split_points
 
-    # 無音区間が0.3秒(§5.2手順1の最小長0.6秒未満)なので分割点にならない。
+    # 無音区間が0.3秒(手順1の最小長0.6秒未満)なので分割点にならない。
     loud = np.full(16000, 0.5, dtype=np.float32)
     silence = np.zeros(4800, dtype=np.float32)
     mono = np.concatenate([loud, silence, loud])
@@ -516,7 +516,7 @@ def test_merge_adjacent_segments_keeps_different_phoneme_separate():
     assert len(result) == 2
 
 
-# --- §5.2 手順3: 単語タイムスタンプの単調化・抽出 ---
+# --- 手順3: 単語タイムスタンプの単調化・抽出 ---
 
 
 def test_sanitize_word_timestamps_clamps_to_duration_range():
@@ -550,7 +550,7 @@ def test_sanitize_word_timestamps_enforces_minimum_length():
 def test_sanitize_word_timestamps_clamp_precedes_minimum_length_enforcement():
     from vocal_analysis.recognizer import _sanitize_word_timestamps
 
-    # §5.2手順3: 「まず[0,duration_sec]へクランプし、続けて…終了時刻を自身の開始時刻+最小長以上へ」
+    # 手順3では、まず[0,duration_sec]へクランプし、続けて終了時刻を自身の開始時刻+最小長以上へ揃える。こ
     # の順序どおりだと、終了は先にduration(2.0)へクランプされてから+最小長(0.05)されるため、
     # 最終的な終了(2.03)がduration自体を上回りうる(クランプを後段でやり直すなら2.0のまま)。
     result = _sanitize_word_timestamps([("a", 1.98, 2.5)], duration_sec=2.0)
@@ -584,7 +584,7 @@ def test_extract_word_timestamps_fills_missing_end_with_minimum_length():
     assert result == [("あ", 1.0, 1.0 + _MIN_WORD_DURATION_SEC)]
 
 
-# --- §5.2 手順5: 音素列の組み立て(pau挿入) ---
+# --- 手順5: 音素列の組み立て(pau挿入) ---
 
 
 def test_assemble_phoneme_sequence_wraps_single_chunk_with_pau():
@@ -620,7 +620,7 @@ def test_assemble_phoneme_sequence_no_chunks_is_leading_and_trailing_pau_only():
     assert result == ["pau", "pau"]
 
 
-# --- §5.2 手順5: 単語窓の割り当て(単語タイムスタンプ取得時) ---
+# --- 手順5: 単語窓の割り当て(単語タイムスタンプ取得時) ---
 
 
 def test_assemble_with_word_windows_single_word():
@@ -663,7 +663,7 @@ def test_assemble_with_word_windows_swaps_inverted_window():
     assert inter_word_window[0] <= inter_word_window[1]
 
 
-# --- §5.2 手順6: G2P記号→音素モデル語彙のトークンID変換 ---
+# --- 手順6: G2P記号→音素モデル語彙のトークンID変換 ---
 
 
 def test_g2p_symbols_to_token_ids_maps_known_symbols():
@@ -679,7 +679,7 @@ def test_g2p_symbols_to_token_ids_maps_known_symbols():
 def test_g2p_symbols_to_token_ids_maps_pau_and_cl_to_blank():
     from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
 
-    # §5.2: pau・cl は語彙記号への対応付けを持たず、blank トークンへ変換する。
+    # pau・cl は語彙記号への対応付けを持たず、blank トークンへ変換する。
     vocab = {"<pad>": 0, "a": 5}
 
     result = _g2p_symbols_to_token_ids(["pau", "cl"], vocab, blank_token_id=0)
@@ -690,7 +690,7 @@ def test_g2p_symbols_to_token_ids_maps_pau_and_cl_to_blank():
 def test_g2p_symbols_to_token_ids_devoiced_vowels_collapse_to_voiced():
     from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
 
-    # §5.2 写像表: 無声化母音 I/U は有声母音と同じ語彙記号(i/ɯ)へ収束する。
+    # 写像表では無声化母音 I/U は有声母音と同じ語彙記号(i/ɯ)へ収束する。
     vocab = {"<pad>": 0, "i": 3, "ɯ": 4}
 
     result = _g2p_symbols_to_token_ids(["I", "U"], vocab, blank_token_id=0)
@@ -701,7 +701,7 @@ def test_g2p_symbols_to_token_ids_devoiced_vowels_collapse_to_voiced():
 def test_g2p_symbols_to_token_ids_unmapped_symbol_raises_recognition_error():
     from vocal_analysis.recognizer import RecognitionError, _g2p_symbols_to_token_ids
 
-    # §5.2 手順6: 写像表に無い記号が現れたら RecognitionError で停止する(黙って捨てない)。
+    # 手順6: 写像表に無い記号が現れたら RecognitionError で停止する(黙って捨てない)。
     with pytest.raises(RecognitionError):
         _g2p_symbols_to_token_ids(["xx"], {"<pad>": 0}, blank_token_id=0)
 
@@ -714,7 +714,7 @@ def test_g2p_symbols_to_token_ids_missing_vocab_entry_raises_recognition_error()
         _g2p_symbols_to_token_ids(["a"], {"<pad>": 0}, blank_token_id=0)
 
 
-# --- §5.2 手順7: 強制アライメント(バンド制限Viterbi) ---
+# --- 手順7: 強制アライメント(バンド制限Viterbi) ---
 
 
 def test_voiced_blank_penalty_applies_only_to_voiced_frames_blank_column():
@@ -789,7 +789,7 @@ def test_expand_min_stay_all_blank_sequence_is_unchanged():
     assert sub_to_token == [0, 1]
 
 
-# --- §5.2 手順7: 最小滞在の局所適応(単語タイムスタンプ取得時) ---
+# --- 手順7: 最小滞在の局所適応(単語タイムスタンプ取得時) ---
 
 
 def test_expand_min_stay_local_uses_word_duration_over_phoneme_count():
@@ -851,7 +851,7 @@ def test_expand_min_stay_local_rounds_floating_point_boundary_correctly():
 def test_expand_min_stay_local_rounds_half_up_not_half_to_even():
     from vocal_analysis.recognizer import _expand_min_stay_local
 
-    # 単語の最小長クランプ(§5.2手順3の_MIN_WORD_DURATION_SEC=0.05秒)により、実時間/音素数が
+    # 単語の最小長クランプ(手順3の_MIN_WORD_DURATION_SEC=0.05秒)により、実時間/音素数が
     # ちょうど2.5フレーム(0.05/0.02)になる商へ実際に到達しうる。Python組み込みのround()は
     # 偶数丸めで2.5→2になるが、実装は真の四捨五入(0.5は常に切り上げ)を使うため3になる。
     words_phonemes = [(["a"], 0.0, 0.05)]
@@ -941,7 +941,7 @@ def test_forced_align_follows_dominant_emission_monotonically():
 def test_forced_align_raises_when_fewer_frames_than_tokens():
     from vocal_analysis.recognizer import RecognitionError, _forced_align
 
-    # §5.2 手順7: フレーム数がトークン数未満だと末尾トークンへ理論上到達不能。RecognitionErrorで停止する。
+    # 手順7: フレーム数がトークン数未満だと末尾トークンへ理論上到達不能。RecognitionErrorで停止する。
     log_probs = np.zeros((2, 1))
 
     with pytest.raises(RecognitionError):
@@ -970,7 +970,7 @@ def test_forced_align_band_limit_excludes_out_of_band_favorable_evidence():
     assert all(f not in range(180, 186) for f in state1_frames)
 
 
-# --- §5.2 手順7: 単語窓制約Viterbi(主経路) ---
+# --- 手順7: 単語窓制約Viterbi(主経路) ---
 
 
 def test_forced_align_windowed_follows_dominant_emission_within_window():
@@ -1075,7 +1075,7 @@ def test_viterbi_monotonic_without_state_bias_delays_transition_to_deadline():
     assert first_state1_frame == num_frames - 1
 
 
-# --- §5.2 手順8・9: 区切りの確定とSegment化 ---
+# --- 手順8・9: 区切りの確定とSegment化 ---
 
 
 def test_path_to_segments_builds_gap_and_vowel_segments():
@@ -1097,7 +1097,7 @@ def test_path_to_segments_builds_gap_and_vowel_segments():
 def test_path_to_segments_merges_adjacent_states_with_same_output_symbol():
     from vocal_analysis.recognizer import _path_to_segments
 
-    # 連続する2状態がともに母音"a"(長母音が2モーラに分かれた場合等)は1区間へ結合する(§5.2手順8)。
+    # 連続する2状態がともに母音"a"(長母音が2モーラに分かれた場合等)は1区間へ結合する(手順8)。
     segments = _path_to_segments([0, 0, 1, 1], ["a", "a"], frame_duration_sec=0.02)
 
     assert len(segments) == 1
@@ -1110,7 +1110,7 @@ def test_path_to_segments_merges_adjacent_states_with_same_output_symbol():
 def test_path_to_segments_merges_pau_and_cl_as_same_gap():
     from vocal_analysis.recognizer import _path_to_segments
 
-    # pau由来とcl由来はいずれもblank扱いで同一視し、1つのgap区間へ結合する(§5.2手順8)。
+    # pau由来とcl由来はいずれもblank扱いで同一視し、1つのgap区間へ結合する(手順8)。
     segments = _path_to_segments([0, 0, 1, 1], ["pau", "cl"], frame_duration_sec=0.02)
 
     assert len(segments) == 1

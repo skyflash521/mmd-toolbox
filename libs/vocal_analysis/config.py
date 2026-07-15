@@ -1,13 +1,12 @@
-"""外部モデル委譲ステージの固定推論条件(vocal_analysis.md §5.1・§5.2・§8.3・§4)。
+"""外部モデル委譲ステージの固定推論条件。
 
 S2 の音素モデル(強制アライメント用)・内容認識モデル(既定値・候補値)と S1 分離器のモデル指定
-(id・revision は §8.3、Demucs の shift 平均無効化は §4・§8.3)を固定する。加えて音素モデルは
+(id・revision、Demucs の shift 平均無効化)を固定する。加えて音素モデルは
 実行デバイス・dtype・スレッド・乱数シードも固定し、S-1 測定と実装が同一条件で動くようにする。
 内容認識モデルの実行デバイスは環境依存で自動選択し(GPUが利用可能ならGPUを使う)、この固定の
-対象外(vocal_analysis.md §5.1・§5.2)。これらの固定値は実装が独自に変えない(変更が要れば
-vocal_analysis.md を先に更新する)。
+対象外。これらの固定値は実装が独自に変えない。
 
-§5.1 が固定対象に挙げる条件のうち、mono への downmix・16kHz への再サンプリング方式・バッチは
+固定対象の条件のうち、mono への downmix・16kHz への再サンプリング方式・バッチは
 S2 アダプタの変換/推論の実装内部で確定する(採用ライブラリと実測に依存するため、アダプタ実装が
 その方式を定数として固定し、本 config はアダプタ非依存の目標値・実行条件だけを持つ)。
 """
@@ -19,14 +18,14 @@ from typing import Literal
 
 @dataclass(frozen=True)
 class RecognizerConfig:
-    """S2 音素モデル(強制アライメント用。§5.2)の固定条件(§5.1・§8.3)。
+    """S2 音素モデル(強制アライメント用)の固定条件。
 
-    device・dtype・num_threads・random_seed は音素モデル(強制アライメント。§5.2手順7)専用の
-    決定論のための固定値であり、内容認識モデル(Whisper系。§5.2手順3)には適用しない。内容認識
+    device・dtype・num_threads・random_seed は音素モデル(強制アライメント)専用の
+    決定論のための固定値であり、内容認識モデル(Whisper系)には適用しない。内容認識
     モデルの実行デバイスは環境依存で自動選択する(GPUが利用可能ならGPUを使う。recognizer.py の
     `_select_content_recognizer_device`)。内容認識の貪欲デコード(ビーム幅1・サンプリング無し)は
     サンプリング由来の乱数的非決定性を排除するが、実行デバイス・スレッド数の違いによる浮動小数点
-    演算の丸め誤差までは排除しない。環境が異なれば僅差のトークン選択が割れうる(§5.2「決定論」)。
+    演算の丸め誤差までは排除しない。環境が異なれば僅差のトークン選択が割れうる。
     """
 
     model_id: str = "facebook/wav2vec2-lv-60-espeak-cv-ft"
@@ -40,25 +39,25 @@ class RecognizerConfig:
 
 @dataclass(frozen=True)
 class ContentRecognizerModel:
-    """S2 内容認識モデルの指定(§5.2)。model_revision を省略(None)すると最新リビジョンを使う。"""
+    """S2 内容認識モデルの指定。model_revision を省略(None)すると最新リビジョンを使う。"""
 
     model_id: str
     model_revision: str | None = None
 
 
-# 既定値: 歌唱データで検証済み・高速(§5.2・external-tools.md §2)。
+# 既定値: 歌唱データで検証済み・高速。
 DEFAULT_CONTENT_RECOGNIZER_MODEL = ContentRecognizerModel(
     model_id="openai/whisper-medium",
     model_revision="abdf7c39ab9d0397620ccaea8974cc764cd0953e",
 )
 
-# 候補値: 常にかなを返す。歌唱データでの学習・評価実績は無い(§5.2・external-tools.md §2)。
+# 候補値: 常にかなを返す。歌唱データでの学習・評価実績は無い。
 KANA_WHISPER_MODEL = ContentRecognizerModel(
     model_id="sbintuitions/kana-whisper",
     model_revision="88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82",
 )
 
-# かな限定プロンプト(§5.2・§8.3)。既定値・候補値のどちらにも同じ手順で渡す(モデルによる分岐なし)。
+# かな限定プロンプト。既定値・候補値のどちらにも同じ手順で渡す(モデルによる分岐なし)。
 # 内容認識のトリガ式リトライの再認識には渡さない。
 KANA_PROMPT = "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
 
@@ -87,10 +86,10 @@ DEFAULT_ENGLISH_OOV_KATAKANA_METHOD: EnglishOovKatakanaMethod = "arpakana"
 
 @dataclass(frozen=True)
 class SeparatorConfig:
-    """S1 ボーカル分離器(audio-separator 経由の Demucs v4 htdemucs_ft)の固定条件(§4・§8.3)。"""
+    """S1 ボーカル分離器(audio-separator 経由の Demucs v4 htdemucs_ft)の固定条件。"""
 
     model_filename: str = "htdemucs_ft.yaml"
-    output_single_stem: str = "vocals"  # ボーカルstem以外を書き出させない(§8.3後注)
+    output_single_stem: str = "vocals"  # ボーカルstem以外を書き出させない
     shifts: int = 0  # shift 平均(非決定要素)を無効化
 
 
@@ -100,8 +99,8 @@ DEFAULT_FORCED_ALIGNER: ForcedAlignerId = "wav2vec2-ctc-forcedalign"
 
 @dataclass(frozen=True)
 class SofaAlignerConfig:
-    """S2 SOFA経路(§5.3)の実行環境指定。既定値・同梱チェックポイントは一切持たない(§2.3・§8.3。
-    利用者保護のための方針判断。商用利用が制限されたチェックポイントを既定値にしない)。
+    """S2 SOFA経路の実行環境指定。既定値・同梱チェックポイントは一切持たない
+    (利用者保護のための方針判断。商用利用が制限されたチェックポイントを既定値にしない)。
     """
 
     sofa_python: Path  # 利用者が用意した専用venvのPython実行ファイルパス

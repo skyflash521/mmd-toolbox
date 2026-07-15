@@ -1,4 +1,4 @@
-"""SOFA(Singing-Oriented Forced Aligner)サブプロセス呼び出しコア(vocal_analysis.md §5.3・§8.3)。
+"""SOFA(Singing-Oriented Forced Aligner)サブプロセス呼び出しコア。
 
 利用者提供の専用venv・SOFAリポジトリ・チェックポイントをサブプロセスとして呼び、既知の音素記号列を
 音声へ時刻合わせする。SOFA本体のコード・チェックポイントは本モジュールに一切同梱しない。ここでは
@@ -25,7 +25,7 @@ from .types import Segment
 
 # SOFAの語彙(チェックポイント学習時の音素セット)は無声化母音の専用記号を持たず、通常の母音記号
 # (i/u)のみを認識する。pyopenjtalk-plus由来のG2P記号列に含まれる無声化マーカーI/Uは、SOFAへ渡す
-# 直前にこの写像で正規化する(5.2手順6の「G2P記号→音素モデル語彙の写像表」がI→i・U→ɯのIPA記号へ
+# 直前にこの写像で正規化する(G2P記号→音素モデル語彙の写像表がI→i・U→ɯのIPA記号へ
 # 既に集約しているのと同じ対応関係で、Segmentの最終的なphoneme値には影響しない)。
 _SOFA_VOCAB_SYMBOL_NORMALIZE: dict[str, str] = {"I": "i", "U": "u"}
 
@@ -90,8 +90,8 @@ def _kill_process_tree(pid: int) -> None:
 
 def _check_ascii_paths(work_dir: Path, config: SofaAlignerConfig) -> None:
     """SOFA自身が非ASCIIパスを扱えない技術的制約により、一時ディレクトリ・sofa_root・
-    checkpoint_pathのいずれかに非ASCII文字が含まれる場合はSOFAを起動せず`RecognitionError`にする
-    (cli-interface.md §10の外部プロセス連携の例外規定に基づく)。`sofa_python`は検証対象に含まない。
+    checkpoint_pathのいずれかに非ASCII文字が含まれる場合はSOFAを起動せず`RecognitionError`にする。
+    `sofa_python`は検証対象に含まない。
     """
     for label, path in (
         ("一時ディレクトリ", work_dir),
@@ -143,13 +143,13 @@ def _parse_htk_label_file(path: Path) -> list[tuple[float, float, str]]:
     return segments
 
 
-_SEGMENT_CONTRACT_TOLERANCE_SEC = 0.05  # 一次検証の許容誤差(§5.3確定。SOFA内部リサンプリング由来の丸め誤差を含む)
+_SEGMENT_CONTRACT_TOLERANCE_SEC = 0.05  # 一次検証の許容誤差(SOFA内部リサンプリング由来の丸め誤差を含む)
 
 
 def _check_segment_contract(
     segments: list[tuple[float, float, str]], trim_duration_sec: float, tolerance: float
 ) -> None:
-    """Segment契約(2章・8.1: 隙間なく連続・非重複で全時間軸を被覆)の(a)〜(d)を検証する。
+    """Segment契約(隙間なく連続・非重複で全時間軸を被覆)の(a)〜(d)を検証する。
 
     (b)(c)(d)の一致判定は`tolerance`以内の絶対差で行う(呼び出し元が一次検証は許容誤差付き、
     再検証は0.0=厳密一致で使い分ける)。
@@ -203,7 +203,7 @@ def _normalize_segments(
 def _validate_and_normalize_segments(
     segments: list[tuple[float, float, str]], trim_duration_sec: float
 ) -> list[tuple[float, float, str]]:
-    """Segment契約を検証し、厳密値へ正規化した上で返す(§5.3「Segment契約の検証」)。
+    """Segment契約を検証し、厳密値へ正規化した上で返す。
 
     一次検証(許容誤差50ミリ秒以内)→正規化→再検証(許容誤差なしの厳密な等号/不等号)の2段構成。
     再検証で1件でも違反すれば、一次検証の許容誤差設定がその音声には不適切だったとみなし
@@ -241,7 +241,7 @@ def _align_batch(
 def _clamp_words_to_valid_list(
     words: list[tuple[list[str], float, float]], trim_duration_sec: float
 ) -> list[tuple[list[str], float, float]]:
-    """単語タイムスタンプ列から「有効な単語列」を確定する(cursorベースの逐次クランプ。§5.3)。
+    """単語タイムスタンプ列から「有効な単語列」を確定する(cursorベースの逐次クランプ)。
 
     各wordは(音素記号列, 開始秒, 終了秒)。(1)各単語の終了時刻をトリム後区間の全長以下へ再クランプ
     する。(2) `cursor`を0.0で初期化し単語を時系列順に処理する。各単語の開始時刻を
@@ -264,7 +264,7 @@ def _clamp_words_to_valid_list(
 def _determine_word_gaps(
     valid_words: list[tuple[list[str], float, float]], trim_duration_sec: float
 ) -> list[tuple[float, float]]:
-    """「有効な単語列」の隙間からgap区間を確定する(§5.3「gapの確定」)。
+    """「有効な単語列」の隙間からgap区間を確定する。
 
     先頭から最初の有効単語まで・有効単語同士の間・最後の有効単語からトリム後区間の終端まで、の
     3種類。長さ0の隙間は生成しない。有効な単語列が空なら、トリム後区間全体を単一のgapとする。
@@ -284,18 +284,17 @@ def _determine_word_gaps(
 
 
 def _map_symbol_to_segment_fields(symbol: str) -> tuple[Literal["vowel", "consonant", "gap"], str | None]:
-    """SOFAが返す生の音素記号(G2P由来。AP/SP挿入を含む)をSegmentのtype・phonemeへ変換する(§5.3)。
+    """SOFAが返す生の音素記号(G2P由来。AP/SP挿入を含む)をSegmentのtype・phonemeへ変換する。
 
-    pau・cl(§5.2手順6と同じblank記号)・AP(吸気音・呼吸音)・SP(無音)はいずれもgapへ倒す。
-    それ以外は5.2手順6の「G2P記号→音素モデル語彙の写像表」でIPA記号へ変換してから、5.1の分類基準
-    (写像後のIPA記号が対象)でtypeを定める。写像表に無い記号は`RecognitionError`にする(黙って
-    捨てない。5.2手順6と同じ方針)。
+    pau・cl(blank記号)・AP(吸気音・呼吸音)・SP(無音)はいずれもgapへ倒す。
+    それ以外はG2P記号→音素モデル語彙の写像表でIPA記号へ変換してから、写像後のIPA記号を対象と
+    する分類基準でtypeを定める。写像表に無い記号は`RecognitionError`にする(黙って捨てない)。
     """
     if symbol in _BLANK_G2P_SYMBOLS or symbol in ("AP", "SP"):
         return "gap", None
     vocab_symbol = _G2P_TO_VOCAB_SYMBOL.get(symbol)
     if vocab_symbol is None:
-        raise RecognitionError(f"SOFA出力記号 '{symbol}' の音素モデル語彙への写像が未定義です(§5.2写像表)")
+        raise RecognitionError(f"SOFA出力記号 '{symbol}' の音素モデル語彙への写像が未定義です")
     return _classify_symbol(vocab_symbol), vocab_symbol
 
 

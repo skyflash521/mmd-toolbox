@@ -1,4 +1,4 @@
-"""S0 入力読み込み(vocal_analysis.md §3)。
+"""S0 入力読み込み。
 
 入力音声を復号し、ch/SR を保持したまま入力レベル正規化(ピーク正規化)を適用した AudioPcm を返す。
 soundfile(同梱 libsndfile)で読める WAV/FLAC/OGG/mp3 を最低保証の形式として読み、それ以外は
@@ -23,7 +23,7 @@ class AudioLoadError(Exception):
 
 
 def load_audio(path: Path) -> AudioPcm:
-    """入力音声を読み込み、ch/SR を保持したピーク正規化済み AudioPcm を返す(§3)。"""
+    """入力音声を読み込み、ch/SR を保持したピーク正規化済み AudioPcm を返す。"""
     samples, sample_rate = _read_raw(Path(path))
     return AudioPcm(samples=_normalize_peak(samples), sample_rate=sample_rate)
 
@@ -57,7 +57,7 @@ def _read_via_ffmpeg(path: Path) -> tuple[np.ndarray, int]:
 
 
 def _normalize_peak(samples: np.ndarray) -> np.ndarray:
-    """入力レベル正規化(§3。ピーク正規化・斉次・0除算回避)。"""
+    """入力レベル正規化(ピーク正規化・斉次・0除算回避)。"""
     peak = float(np.max(np.abs(samples))) if samples.size else 0.0
     if peak == 0.0:
         return samples

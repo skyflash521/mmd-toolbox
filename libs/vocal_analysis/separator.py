@@ -1,4 +1,4 @@
-"""S1 ボーカル抽出(vocal_analysis.md §4・§8.1・§8.3後注)。
+"""S1 ボーカル抽出。
 
 S0 の出力(入力レベル正規化済み。ステレオ・元サンプルレート)からボーカルを分離し、ボーカルWAVを得る。
 分離は audio-separator 経由で Demucs v4 htdemucs_ft を in-process 実行する。mode(auto/always/never)は
@@ -22,10 +22,10 @@ class SeparationError(Exception):
 
 
 def separate(pcm: AudioPcm, mode: Literal["auto", "always", "never"]) -> Path:
-    """S0出力からボーカルWAVのパスを得る(§4・§8.1)。
+    """S0出力からボーカルWAVのパスを得る。
 
     戻り値のWAVを格納する作業ディレクトリは呼び出し元に公開せず、プロセスの正常終了時に
-    削除を試みる(強制終了時や削除失敗時は残置を許容する。§4・§8.1)。呼び出し元が削除
+    削除を試みる(強制終了時や削除失敗時は残置を許容する)。呼び出し元が削除
     タイミングを制御する手段は無い。
     """
     if mode not in ("auto", "always", "never"):
@@ -64,7 +64,7 @@ def separate(pcm: AudioPcm, mode: Literal["auto", "always", "never"]) -> Path:
 
 
 def _build_separator(output_dir: Path):
-    """audio-separator の Separator を固定条件(§8.3後注)で構成する。"""
+    """audio-separator の Separator を固定条件で構成する。"""
     from audio_separator.separator import Separator
 
     return Separator(
