@@ -473,7 +473,6 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
     assert first_half_peak < second_half_peak * 0.5
 
 
-@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_path, monkeypatch):
     # 長尺分割時、開き量決定の声量レンジ再正規化はチャンク単位でなく結合後の全曲モーラ集合に
     # 対して1回だけ適用される(confirm_mouth_eventsが結合後のセグメント・RMSで1回だけ

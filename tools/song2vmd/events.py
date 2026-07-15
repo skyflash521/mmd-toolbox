@@ -408,7 +408,7 @@ def _refine_onsets(units, rms):
 
 
 def _map_open_amount(rms_value, *, open_lo, open_hi, open_max, intensity_curve):
-    """段階(6.5): RMS→開き量の写像(累乗則・スタイルレンジ・open_maxへのクランプ)。"""
+    """RMS→開き量の写像(累乗則・スタイルレンジ・open_maxへのクランプ)。"""
     raw = rms_value ** intensity_curve
     clamped = min(max(raw, open_lo), open_hi)
     return min(clamped, open_max)
@@ -419,6 +419,26 @@ def _is_weak_vowel(confidence, rms_value):
     if confidence is not None:
         return confidence < _WEAK_CONFIDENCE_THRESHOLD and rms_value < _WEAK_RMS_WITH_CONFIDENCE
     return rms_value < _WEAK_RMS_WITHOUT_CONFIDENCE
+
+
+_OPEN_RENORM_P_LO = 10.0
+_OPEN_RENORM_P_HI = 90.0
+
+
+def _renormalize_open_rms(values):
+    """開き量決定にだけ使う、曲全体モーラ代表RMS集合のパーセンタイル線形正規化。
+
+    p10→0・p90→1、範囲外はクリップ。p90とp10が完全一致する場合(縮退。モーラ1件・全モーラ
+    同値を含む)は、無音側でなく開閉の中間値0.5へ一律に倒す。
+    """
+    if not values:
+        return []
+    arr = np.array(values, dtype=float)
+    p_lo = np.percentile(arr, _OPEN_RENORM_P_LO, method="linear")
+    p_hi = np.percentile(arr, _OPEN_RENORM_P_HI, method="linear")
+    if p_hi == p_lo:
+        return [0.5] * len(values)
+    return list(np.clip((arr - p_lo) / (p_hi - p_lo), 0.0, 1.0))
 
 
 def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity_curve, silence_on,
@@ -438,13 +458,17 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
     units, merged_morae_2 = _merge_adjacent(units)  # オンセット補正で隣接区間が同一境界に揃うケースを再連結する
     merged_morae = merged_morae_1 + merged_morae_2
 
+    mora_rms_raw = [
+        _mora_representative_rms(rms, u) if u.kind in ("vowel", "n") else None for u in units
+    ]
+    open_rms_iter = iter(_renormalize_open_rms([v for v in mora_rms_raw if v is not None]))
+
     mouth_events = []
     weak_vowels = 0
-    for u in units:
+    for u, mora_rms in zip(units, mora_rms_raw):
         if u.kind in ("vowel", "n"):
-            mora_rms = _mora_representative_rms(rms, u)
             open_amount = _map_open_amount(
-                mora_rms, open_lo=open_lo, open_hi=open_hi, open_max=open_max,
+                next(open_rms_iter), open_lo=open_lo, open_hi=open_hi, open_max=open_max,
                 intensity_curve=intensity_curve,
             )
             if u.kind == "vowel":
