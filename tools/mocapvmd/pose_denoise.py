@@ -93,7 +93,7 @@ def apply_pose_denoise(bone_keys, *, pmx_path=None, preset=None, fit_params=None
     """ボーンキー列に表現空間ノイズ除去を適用し、新しいボーンキー列を返す。
 
     diagnostics_out に dict を渡すと、マーカー数・必須ボーン検証・平滑化前後のマーカー変位・
-    姿勢フィットの改善量などの診断素データを書き込む(レポート層へ渡す。§12)。
+    姿勢フィットの改善量などの診断素データを書き込む(レポート層へ渡す)。
     """
     if not bone_keys:
         return []

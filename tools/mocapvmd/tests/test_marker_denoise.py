@@ -32,7 +32,7 @@ def _flat(value, n):
 # ---------------------------------------------------------------------------
 
 
-# 計画§7.3 の部位別既定値 (window, strength, max_disp)。
+# 部位別既定値 (window, strength, max_disp)。
 _EXPECTED_PRESET = {
     "center": (7, 0.35, 0.15),
     "torso": (5, 0.30, 0.20),

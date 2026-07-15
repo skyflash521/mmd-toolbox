@@ -63,7 +63,7 @@ def test_evaluate_world_poses_delegates_to_common_fk():
 
 
 def test_evaluate_world_poses_with_pmx_profile(tmp_path):
-    # PMX指定由来の profile.model でも共通FKから world pose を取得できる(§10.3)。
+    # PMX指定由来の profile.model でも共通FKから world pose を取得できる。
     path = tmp_path / "model.pmx"
     path.write_bytes(build_standard_pmx(list(STANDARD_BONE_NAMES.values())))
     profile = load_mocap_profile(str(path))

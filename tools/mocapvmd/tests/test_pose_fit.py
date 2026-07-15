@@ -142,7 +142,7 @@ def test_corrections_within_limits():
 
 
 def test_proportional_correction_limit():
-    # §8.4: 補正量上限はマーカー変位量に比例(絶対上限と小さい方)。
+    # 補正量上限はマーカー変位量に比例(絶対上限と小さい方)。
     # 小変位では比例上限(k*d)が効き、絶対上限いっぱいまで補正しない。
     profile = load_mocap_profile(None)
     dense = _dense(profile, {}, range(0, 1))

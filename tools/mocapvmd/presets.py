@@ -1,17 +1,17 @@
-"""プリセットと種別別パラメータの解決(mocapvmd.md §5.2 / §5.3 / §5.4)。
+"""プリセットと種別別パラメータの解決。
 
-クリーニング強度(§5.2): 種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)を
+クリーニング強度: 種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)を
 基準で持ち、`--clean-strength` の倍率を**ブレンド率のみ**に掛けて解決する(窓幅は倍率で変えない)。位置のブレンド率・
 回転のブレンド率は元値と平滑化値のブレンド係数(0で元値保持、1で平滑化値採用)で、倍率適用後は 0〜1 にクランプする。
 
-名前付きプリセット(§5.3)は疎化の許容誤差 `--preset`(PRESET_NAMES)1つに集約する。接地ロック強度(§5.4)は
-resolve_foot_lock、疎化の許容誤差(§5.3。`--preset` の基準値 × 種別スケール)は resolve_reduction_tolerances で
+名前付きプリセットは疎化の許容誤差 `--preset`(PRESET_NAMES)1つに集約する。接地ロック強度は
+resolve_foot_lock、疎化の許容誤差(`--preset` の基準値 × 種別スケール)は resolve_reduction_tolerances で
 解決する。疎化プリセット値は mocapvmd 独自で sparsevmd と共有しない。
 """
 
 import math
 
-# §5.2 種別別クリーニング基準パラメータ表(`--clean-strength` 1.0 基準)。
+# 種別別クリーニング基準パラメータ表(`--clean-strength` 1.0 基準)。
 # 種別 -> (位置の窓幅, 回転の窓幅, 位置のブレンド率, 回転のブレンド率)。
 _BASE = {
     "root": (3, 3, 0.15, 0.10),
@@ -26,7 +26,7 @@ _BASE = {
 }
 
 
-# §4.3 / §5.4 / §5.5 横滑り抑制 S(0〜1)→ 接地ロック・接地検出パラメータ(初期値。実データで調整)。
+# 横滑り抑制 S(0〜1)→ 接地ロック・接地検出パラメータ(初期値。実データで調整)。
 # S=0 で従来の検出のまま X/Z をアンカーへ寄せず滑りを保持、S=1(既定)で高さ主導検出(水平速度ゲートを
 # 緩める)＋強い X/Z 固定＋補正上限緩和により接地中の横滑りを除去する。各値は S で線形に写像する。
 _SLIDE_FOOT_XZ_MAX = 0.97              # S=1 の foot_ik X/Z 接地中央(S=0 は 0.0)
@@ -47,7 +47,7 @@ def _validate_suppression(suppression):
 
 
 def resolve_foot_lock(suppression, category):
-    """横滑り抑制 S(0〜1)と種別(foot_ik / toe_ik)から接地ロック係数 dict を返す(§5.4)。
+    """横滑り抑制 S(0〜1)と種別(foot_ik / toe_ik)から接地ロック係数 dict を返す。
 
     返す dict: xz_center / xz_edge / y_center / y_edge / fade_width。係数は接地アンカーへの
     ブレンド係数(0〜1。1に近いほど強く固定)で倍率でなく直接値。foot_ik の X/Z 接地中央のみ S で
@@ -75,7 +75,7 @@ def resolve_foot_lock(suppression, category):
 
 
 def resolve_foot_detection(suppression):
-    """横滑り抑制 S(0〜1)から接地検出・補正の S 連動パラメータ dict を返す(§4.3 / §5.5)。
+    """横滑り抑制 S(0〜1)から接地検出・補正の S 連動パラメータ dict を返す。
 
     返す dict: horiz_vel_thresh(接地候補の水平速度許容。S が大きいほど高くし、接地高さで水平に
     滑る足も接地として拾う。S=0 は従来の 0.08)/ max_displacement(接地区間内の1フレーム最大変位
@@ -90,7 +90,7 @@ def resolve_foot_detection(suppression):
 
 
 def resolve_cleaning(strength, category):
-    """クリーニング強度の倍率と種別から、クリーニングパラメータ dict を返す(§5.2)。
+    """クリーニング強度の倍率と種別から、クリーニングパラメータ dict を返す。
 
     返す dict: pos_window / rot_window / pos_strength / rot_strength。倍率(`--clean-strength`)は
     ブレンド率のみに掛け、窓幅は据え置く。倍率適用後のブレンド率は 0〜1 にクランプする(1.0=完全平滑化を
@@ -110,7 +110,7 @@ def resolve_cleaning(strength, category):
     }
 
 
-# §5.3 疎化トレランス。プリセット基準値(位置 MMD単位 / 回転 度)と種別スケール(位置, 回転)。
+# 疎化トレランス。プリセット基準値(位置 MMD単位 / 回転 度)と種別スケール(位置, 回転)。
 # mocapvmd 独自値で sparsevmd と共有しない。
 # 速度の観点で命名(遅い=高忠実・キー多・処理遅、速い=高圧縮・キー少・処理速)。既定は中央の
 # medium(0.20 / 1.50)。許容を緩めるほどキーが減り疎化処理も速い(fast / faster)。位置と回転は連動して粗くする。
@@ -142,7 +142,7 @@ def _validate_tolerance(value, name):
 
 
 def resolve_reduction_tolerances(preset, category, override_pos=None, override_rot=None):
-    """プリセットと種別から疎化の許容誤差 dict を返す(§5.3)。
+    """プリセットと種別から疎化の許容誤差 dict を返す。
 
     各ボーンの許容誤差 = プリセット基準値 × その種別のスケール。返す dict: bone_pos / bone_rot。
     override_pos / override_rot を渡すとプリセット基準値を上書きし(種別スケールは引き続き掛ける)、
@@ -168,7 +168,7 @@ def resolve_reduction_tolerances(preset, category, override_pos=None, override_r
 
 
 def reduction_base(name):
-    """疎化プリセット名の基準位置許容・基準回転許容 (pos, rot) を返す(§5.3。--describe の自己記述用)。
+    """疎化プリセット名の基準位置許容・基準回転許容 (pos, rot) を返す(--describe の自己記述用)。
 
     種別スケールを掛ける前のプリセット基準値。未知の疎化プリセット名は ValueError。
     """

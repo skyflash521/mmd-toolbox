@@ -131,7 +131,7 @@ def test_default_role_index_matches_standard_names():
 def test_pmx_profile_loads(tmp_path):
     path = _write_pmx(tmp_path, list(STANDARD_BONE_NAMES.values()))
     p = load_mocap_profile(path)
-    # PMX指定時も既定時と同じ MocapModelProfile 型・binding を返す(§10.2)。
+    # PMX指定時も既定時と同じ MocapModelProfile 型・binding を返す。
     assert isinstance(p, MocapModelProfile)
     assert p.source == "pmx"
     assert isinstance(p.model, PmxModel)

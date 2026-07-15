@@ -144,11 +144,11 @@ def test_no_denoise_pose_mode_needs_no_pmx(tmp_path):
     assert out.is_file()
 
 
-# --- pose モードの診断表示(dry-run。§12) ----------------------------------
+# --- pose モードの診断表示(dry-run) ----------------------------------
 
 
 def test_pose_dry_run_has_pose_denoise_summary(tmp_path, capsys):
-    # pose モードの dry-run に pose_denoise 要約が出る(§12)。
+    # pose モードの dry-run に pose_denoise 要約が出る。
     src = tmp_path / "in.vmd"
     _write_input(src)
     code = cli.main([str(src), "--dry-run", "--denoise-mode", "pose"])
@@ -163,7 +163,7 @@ def test_pose_dry_run_has_pose_denoise_summary(tmp_path, capsys):
 
 
 def test_pose_dry_run_shows_pose_summary(tmp_path, capsys):
-    # pose モードの dry-run 表示に pose_denoise 要約が出る(§12)。
+    # pose モードの dry-run 表示に pose_denoise 要約が出る。
     src = tmp_path / "in.vmd"
     _write_input(src)
     code = cli.main([str(src), "--dry-run", "--denoise-mode", "pose"])

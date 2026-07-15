@@ -1,4 +1,4 @@
-"""ProgressReporter(進捗のライブ表示)の単体テスト(mocapvmd.md 進捗表示)。
+"""ProgressReporter(進捗のライブ表示)の単体テスト。
 
 ProgressReporter は重い処理の進行を stderr へ1本のライブ行で表示する(TTY時のみ)。全段を通して同じ行を
 上書きし(段間で改行しない)、終わった段の行を画面に残さない。close で行を消し、summary で完了行を1行残す。

@@ -42,7 +42,7 @@ _REQUIRED_ROLES = {
 
 _CATEGORIES = {"center", "torso", "head", "arms", "wrists", "legs", "feet"}
 
-# 計画§6.1 の初期マーカー表。
+# 初期マーカー表。
 _EXPECTED_MARKERS = {
     "center",
     "pelvis",
@@ -62,7 +62,7 @@ _EXPECTED_MARKERS = {
     "toe_r",
 }
 
-# 計画§6.2 の派生特徴(肩線・腰線・胴体軸・前腕方向・下腿方向)。
+# 派生特徴(肩線・腰線・胴体軸・前腕方向・下腿方向)。
 _EXPECTED_FEATURES = {
     "shoulder_line",
     "hip_line",

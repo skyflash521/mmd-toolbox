@@ -1,4 +1,4 @@
-"""mocapvmd CLI の進捗表示配線のテスト(mocapvmd.md §3.2 進捗表示)。
+"""mocapvmd CLI の進捗表示配線のテスト。
 
 進捗表示は副作用専用で出力VMDを変えない。--quiet で無効化(表示器 enabled=False)、既定は TTY 自動判定
 (enabled=None)。クリーニング・足IK安定化・疎化の各段を 1 本の行で stage 切り替えし、重い疎化は

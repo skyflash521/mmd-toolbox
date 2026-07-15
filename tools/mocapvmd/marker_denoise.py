@@ -18,7 +18,7 @@ class SmoothParams:
     max_disp: float  # 1フレームあたりの最大変位(MMD単位)
 
 
-# 計画§7.3 の部位別既定値。実データで調整する前提で弱めに置く。
+# 部位別既定値。実データで調整する前提で弱めに置く。
 DEFAULT_PRESET = {
     "center": SmoothParams(7, 0.35, 0.15),
     "torso": SmoothParams(5, 0.30, 0.20),

@@ -1,4 +1,4 @@
-"""dry-run 用の処理計画・診断レポート(mocapvmd.md §4.4)。
+"""dry-run 用の処理計画・診断レポート。
 
 ボーン一覧・分類結果・キー数・フレーム範囲・足IK/つま先IK候補と、各トラックの最大フレーム間
 速度・最大回転角速度・スパイク候補数・保護フレーム数をまとめる。速度はトラックを時系列順に並べ、
@@ -33,7 +33,7 @@ def _track_diagnostics(keys):
 
 
 def _spike_protected_counts(keys, clean_strength, category):
-    """トラックのスパイク候補フレーム数と保護フレーム数を返す(§4.4)。
+    """トラックのスパイク候補フレーム数と保護フレーム数を返す。
 
     種別の窓で検出し、スパイク候補は位置・回転候補フレームの和集合、保護フレームは境界(カット両側・
     範囲端)と位置・回転アクセントの和集合のフレーム数。キー1個以下、または値が検証を通らないトラックは
@@ -57,7 +57,7 @@ def _spike_protected_counts(keys, clean_strength, category):
 
 
 def _stabilization(bone_keys, clean_strength, denoise_on, suppression):
-    """foot_ik/toe_ik トラックを接地安定化し、name -> TrackStabilization を返す(§4.4)。
+    """foot_ik/toe_ik トラックを接地安定化し、name -> TrackStabilization を返す。
 
     パイプライン(一般ノイズ軽減→足IK安定化)と同じ順序で診断を出すため、denoise_on のときは
     クリーニング(apply_denoise)後の位置で安定化する。clean_strength はクリーニングに、横滑り抑制 S は
@@ -97,7 +97,7 @@ def _stabilization(bone_keys, clean_strength, denoise_on, suppression):
 
 
 def _reduction_rate(input_count, output_count):
-    """キー削減率 = 1 - 出力/入力(§4.4)。入力0は0(ゼロ除算しない)。"""
+    """キー削減率 = 1 - 出力/入力。入力0は0(ゼロ除算しない)。"""
     if input_count <= 0:
         return 0.0
     return 1.0 - output_count / input_count
@@ -105,20 +105,20 @@ def _reduction_rate(input_count, output_count):
 
 def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, foot_ik_stabilize=True,
                  reduction=None, suppression=1.0, pose_denoise=None):
-    """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる(§4.4)。
+    """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる。
 
     名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。preset は疎化の
-    許容誤差プリセット名(表示用。§5.3)、clean_strength はクリーニング強度の倍率(§5.2)。各ボーンには、
+    許容誤差プリセット名(表示用)、clean_strength はクリーニング強度の倍率。各ボーンには、
     clean_strength で解決したクリーニングパラメータ(presets.resolve_cleaning の戻り)を付けてチューニングを
-    確認できるようにする(§4.5)。
+    確認できるようにする。
 
     reduction(reduce.reduce_bones の diagnostics_out。トラック名 -> {input_keys, output_keys,
     tol_pos, tol_rot, cuts, errors})を渡すと、トップレベルに reduce フラグ(疎化したか= reduction を
     渡したか)を、該当ボーンに reduction セクション(出力キー数・削減率(入出力から派生)・適用許容・
-    検出カット数・最大再生誤差)を付ける(§4.4)。疎化の実行は呼び出し側(CLI)が行い、本関数は表示のみ。
+    検出カット数・最大再生誤差)を付ける。疎化の実行は呼び出し側(CLI)が行い、本関数は表示のみ。
 
     pose_denoise(pose_denoise.apply_pose_denoise の diagnostics_out)を渡すと、トップレベルに
-    pose_denoise セクションをそのまま載せる(§12)。表現空間ノイズ除去の実行は呼び出し側(CLI)が行う。
+    pose_denoise セクションをそのまま載せる。表現空間ノイズ除去の実行は呼び出し側(CLI)が行う。
     """
     order = []
     groups = {}
@@ -197,7 +197,7 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
 
 
 def format_dry_run(report):
-    """dry-run のテキスト要約を返す(§4.4)。適用プリセットと、各ボーンの診断値・解決済み
+    """dry-run のテキスト要約を返す。適用プリセットと、各ボーンの診断値・解決済み
     クリーニングパラメータ・IK候補を表示する。"""
     lines = [
         f"preset: {report['preset']}",

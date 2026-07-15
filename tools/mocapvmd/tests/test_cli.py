@@ -1,4 +1,4 @@
-"""mocapvmd CLI のテスト(mocapvmd.md §3)。
+"""mocapvmd CLI のテスト。
 
 CLI は引数解析 → VMD読み → 全ボーンの一般ノイズ軽減(クリーニング)→ VMD書き。終了コード:
 0 正常 / 1 入力不正 / 2 引数エラー / 3 出力書き込み失敗。
@@ -577,7 +577,7 @@ def _curve_doc(path):
 
 
 def test_default_output_is_reduced(tmp_path):
-    # 既定でクリーニング後に疎化し(キー数減)、既定の curve-mode は bezier(明示 bezier と一致・linear と相違)(§3.3)。
+    # 既定でクリーニング後に疎化し(キー数減)、既定の curve-mode は bezier(明示 bezier と一致・linear と相違)。
     src = tmp_path / "in.vmd"
     out_default = tmp_path / "default.vmd"
     out_bezier = tmp_path / "bezier.vmd"
@@ -595,7 +595,7 @@ def test_default_output_is_reduced(tmp_path):
 
 
 def test_no_reduce_keeps_dense_linear(tmp_path):
-    # --no-reduce ではクリーニング後の密キー(全フレーム・線形補間)を出力する(§3.3)。
+    # --no-reduce ではクリーニング後の密キー(全フレーム・線形補間)を出力する。
     from vmd.reduce import BONE_LINEAR_INTERP
 
     src = tmp_path / "in.vmd"
@@ -636,7 +636,7 @@ def test_reduce_error_override_validation(tmp_path):
 
 
 def test_denoise_output_is_dense_linear(tmp_path):
-    # クリーニング後は連続フレームの密キーで、補間ブロックは線形(§3.3 のクリーニング後の密キー形式)。
+    # クリーニング後は連続フレームの密キーで、補間ブロックは線形(クリーニング後の密キー形式)。
     from vmd.reduce import BONE_LINEAR_INTERP
 
     src = tmp_path / "in.vmd"
@@ -652,11 +652,11 @@ def test_denoise_output_is_dense_linear(tmp_path):
         assert k.interpolation == BONE_LINEAR_INTERP
 
 
-# --- 疎化レポートの CLI 配線(§4.4。疎化を実行して reduction 診断をレポートへ載せる) ------
+# --- 疎化レポートの CLI 配線(疎化を実行して reduction 診断をレポートへ載せる) ------
 
 
 def test_report_includes_reduction_section(tmp_path, monkeypatch):
-    # 既定(疎化 on)の dry-run は、全ボーン(多キー・単一キー)に疎化レポート(§4.4)を載せる。
+    # 既定(疎化 on)の dry-run は、全ボーン(多キー・単一キー)に疎化レポートを載せる。
     # 特定ボーンだけ診断を渡す不完全な配線を排除する。
     src = tmp_path / "in.vmd"
     keys = [bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0)) for f in range(11)]
@@ -747,7 +747,7 @@ def test_dry_run_invalid_input_is_error(tmp_path, bad_key):
     assert cli.main([str(src), "--dry-run"]) == 1
 
 
-# --- --list-bones(ボーン一覧と分類を表示して終了。§3.2) ------------------------
+# --- --list-bones(ボーン一覧と分類を表示して終了) --------------------------
 
 
 def _list_lines(capsys):
@@ -761,7 +761,7 @@ def _line_with(lines, name):
 
 def test_list_bones_pairs_name_and_category_per_line(tmp_path, capsys):
     # 各ボーンの行に「自分の分類だけ」が並ぶ。他分類を含まないことも検証し、全分類を各行へ出す誤実装
-    # (例「センター center foot_ik unknown」)も排除する(§3.2)。
+    # (例「センター center foot_ik unknown」)も排除する。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("右足ＩＫ", 0), bone("謎ボーン", 0)])
     assert cli.main([str(src), "--list-bones"]) == 0

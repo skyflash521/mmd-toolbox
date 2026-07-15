@@ -120,11 +120,11 @@ def test_output_keys_are_valid_bonekeys():
         assert len(k.interpolation) == 64
 
 
-# --- 診断レポート素データ(§12: diagnostics_out) -----------------------------
+# --- 診断レポート素データ -----------------------------------------------
 
 
 def test_diagnostics_out_populated():
-    # diagnostics_out を渡すと §12 構造(マーカー数・必須ボーン検証・変位・fit診断)を埋める。
+    # diagnostics_out を渡すとマーカー数・必須ボーン検証・変位・fit診断を埋める。
     keys = [
         bone("センター", 0, pos=(0.2, 0.0, 0.0)),
         bone("センター", 5, pos=(0.5, 0.0, 0.0)),

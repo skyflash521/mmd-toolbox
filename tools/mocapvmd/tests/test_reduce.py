@@ -1,4 +1,4 @@
-"""mocapvmd インプロセス疎化のオーケストレーションのテスト(mocapvmd.md §3.3 / §5.3)。
+"""mocapvmd インプロセス疎化のオーケストレーションのテスト。
 
 reduce_bones はクリーニング後の全密ボーントラックを、種別ごとに解決した許容誤差で
 vmd.reduce.reduce_bone_track により疎化する(全範囲・全ボーン・カット検出あり)。本テストは
@@ -124,7 +124,7 @@ def test_deterministic():
     assert mreduce.reduce_bones(keys, "medium") == mreduce.reduce_bones(keys, "medium")
 
 
-# --- 疎化診断(diagnostics_out。レポート §4.4 の削減率・適用許容・カット数・最大再生誤差の素データ) ---
+# --- 疎化診断(diagnostics_out。レポートの削減率・適用許容・カット数・最大再生誤差の素データ) ---
 
 
 def _expected_cuts(track_keys, tol):
@@ -337,7 +337,7 @@ def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch)
 
 # --- 進捗コールバック(progress)。疎化の進行をボーン完了単位で親へ通知する副作用専用フック。 ---
 #
-# 計画 §4 / §6.1 の契約: reduce_bones に任意の progress=None を足し、疎化対象(多キー)トラックの確定時に
+# 契約: reduce_bones に任意の progress=None を足し、疎化対象(多キー)トラックの確定時に
 # progress(0, len(multikey))、各ボーン完了ごとに progress(done, total) を呼ぶ。total は常に多キー本数で、
 # done は 0→total を1ずつ進む(単一キー逐語トラックは数えない)。並列(完了順 unordered)でも done は
 # 単なる完了カウンタなので、(done, total) 列はシリアルと一致する。副作用専用で疎化結果は変えない。
@@ -423,7 +423,7 @@ def test_progress_contract_parallel(monkeypatch):
     assert events == expected
 
 
-# --- 並列ワーカの SIGINT 無視 initializer(mocapvmd.md §10.6) ---
+# --- 並列ワーカの SIGINT 無視 initializer ---
 #
 # Windows の Ctrl-C(CTRL_C_EVENT)は同一コンソールの全プロセスへ配送されるため、ワーカが SIGINT で
 # 任意位置で死ぬとトレースバックが漏れ、失われたタスクを親が待ち続けうる。ワーカに SIGINT を無視させ、
@@ -459,7 +459,7 @@ def test_make_pool_wires_sigint_initializer(monkeypatch):
 
 def test_parallel_progress_values_match_serial():
     # progress の (done, total) 値列が並列(workers=2)と逐次(workers=1)で一致する(完了順=並列では
-    # 非決定だが done は 0→total で値列は不変。§10.6 の決定論)。
+    # 非決定だが done は 0→total で値列は不変)。
     keys = _many_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
     par, ser = [], []
     mreduce.reduce_bones(keys, "medium", workers=2, progress=lambda d, t: par.append((d, t)))
@@ -471,7 +471,7 @@ def test_parallel_progress_values_match_serial():
 
 def test_parallel_keyboard_interrupt_terminates_pool(monkeypatch):
     # 並列疎化ループ中の KeyboardInterrupt でプールが畳まれ(with ブロックの __exit__ が呼ばれ、実プールは
-    # terminate)、中断が親へ伝播する(main が cancelled/130 へ畳む前提。§10.6)。with を外して pool を
+    # terminate)、中断が親へ伝播する(main が cancelled/130 へ畳む前提)。with を外して pool を
     # 畳まない誤実装を弾く。
     exits = []
 
