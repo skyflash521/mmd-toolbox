@@ -1,7 +1,6 @@
 """lipsync コアの公開データ型。
 
-時刻はすべてフレーム(30fps、float)。生成パラメータの意味は lipsync.md §2.3 が
-正本で、既定値はその初期目安。
+時刻はすべてフレーム(30fps、float)。生成パラメータの既定値は初期目安。
 """
 
 from __future__ import annotations

@@ -107,7 +107,7 @@ def test_triangle_multi_segment_uses_length_weighted_average_no_valley():
 def test_single_sided_absorption_reclassifies_without_remerge():
     # 三角形長(4f)の あ の末尾に、別母音の短区間(1.5f<triangle_min=2)が直接隣接し、他に吸収先を
     # 持たず あ へ吸収される(同一口形との再連結を伴わない片側吸収)。吸収の結果 あ の実効長が
-    # 4+1.5=5.5f になり三角形の上限(min_hold+2=5)以上になるため、§4.4の「吸収後の再分類」により
+    # 4+1.5=5.5f になり三角形の上限(min_hold+2=5)以上になるため、吸収後の再分類により
     # 通常グループとして扱われ(三角形の単一ピークへ丸めず)、通常グループとしてアタック/リリースを
     # 持つ。
     groups = generate._normalize_groups(
@@ -127,7 +127,7 @@ def test_single_sided_absorption_reclassifies_without_remerge():
 def test_absorbed_span_extends_effective_boundary_for_valley_and_midpoints():
     # あ[0,4.5]op0.8(FIRM_CLOSURE)→い[4.5,5.0](短区間、吸収対象)→あ[5.0,9.0]op0.8(FIRM_CLOSURE)。
     # い は前側の あ へ吸収され、あ の実効 end が5.0(元の4.5でなく吸収した0.5ぶん広がった位置)
-    # になり、後側の あ と直接隣接して§4.2の連結で1グループへ再連結される。内部境界(実効
+    # になり、後側の あ と直接隣接して同一母音の連結で1グループへ再連結される。内部境界(実効
     # end=5.0)のApertureClassはFIRM_CLOSURE(後側あ自身のクラス)なので谷が生成される。谷の左肩は
     # mid1の量子化後フレームと一致、右肩はmid2と一致し、両者とも谷の肩の値と等しいため独立した
     # 肩キーは生じず、mid1・谷central・mid2の3キーだけが残る。

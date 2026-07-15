@@ -178,7 +178,7 @@ def test_vibrato_extremum_exactly_at_half_period_margin_is_suppressed():
 def test_mora_valley_none_boundary_does_not_disturb_vibrato():
     # あ[0,20]op0.5(ApertureClass.NONE)・あ[20,40]op0.5(ApertureClass.NONE)を連結。境界(b=20)の
     # ApertureClassがNONEなので、モーラ境界の谷は一切生成されず(3点自体が出力されない)、揺らぎの
-    # 極値も一切間引かれず§4.6の規則どおり通常に生成される。両小区間の保持値・ApertureClassが同一
+    # 極値も一切間引かれず通常どおり生成される。両小区間の保持値・ApertureClassが同一
     # (開き量0.5・aperture_scale=1.0)なので、揺らぎは公称保持値0.5で一定のプラトーとして、既存の
     # 単一区間の揺らぎ(あ[0,40]op0.5)と同じ極値(t=5.75,13.25,20.75,28.25,35.75の全5点)を持つ。
     # 中央の強弱節点(mid1=10, mid2=30)は追加されるが値は既存の保持値と同じ0.5なので、それ自体は

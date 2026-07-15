@@ -1,4 +1,4 @@
-"""lipsync コアのモーフキー生成(要求仕様 lipsync.md §4)。
+"""lipsync コアのモーフキー生成。
 
 入力(開き量を同梱した口形イベント列＋生成パラメータ)から、標準口モーフ
 (あ・い・う・え・お・ん)のモーフキー列を決定論的に生成する。VMD への組み立て・
@@ -204,7 +204,7 @@ def _legato_bridge(events: Sequence[MouthEvent], gap_start: float, gap_end: floa
     """区間 [gap_start, gap_end) がレガート間隙(LEGATO_GAP のみで連続被覆)なら True。
 
     無音・両唇閉鎖を1つでも挟む間隙は閉口優先で谷を作らない(False)。間隙分類は呼び出し側が
-    LEGATO_GAP/SILENCE で確定済み(lipsync.md §6)で、本判定はその確定入力を読むだけ。
+    LEGATO_GAP/SILENCE で確定済みで、本判定はその確定入力を読むだけ。
     """
     if gap_end <= gap_start:
         return False
@@ -219,7 +219,7 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
 
     同じ母音が続く区間は1つの連続した保持にする(子音種別が途中で変わっても分けない)。子音変調で生じる
     補助モーフ(ROUNDED の う/お、SPREAD の い)はグループ内のイベントごとに異なりうるが、補助はグループ端
-    および補助が消えるイベントの中央で 0 へフェードさせる(§4.2 のエンベロープ)ので、同母音の連続を子音種別で
+    および補助が消えるイベントの中央で 0 へフェードさせるエンベロープなので、同母音の連続を子音種別で
     分断して短いモーラを別々に立て閉口を挟む不自然さ(同じ母音なのに途中で口が閉じる)を避ける。プロファイル
     対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音のリリース/アタックの
     0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない)。
@@ -313,7 +313,7 @@ def _normalize_groups(
     """
     groups = [_Group(g, g[0].start, g[-1].end, g[0].shape) for g in _vowel_groups(events)]
     # 長さで3分類: L<triangle_min は吸収(short)、triangle_min≤L<min_hold+2 は三角形(triangle、生存)、
-    # それ以上は通常形状。三角形は極短母音を1点ピークで残し、発声中の閉口を防ぐ(§4.9・§4.4)。
+    # それ以上は通常形状。三角形は極短母音を1点ピークで残し、発声中の閉口を防ぐ。
     for g in groups:
         L = g.end - g.start
         g.short = L < params.triangle_min_frames
@@ -336,7 +336,7 @@ def _normalize_groups(
         )
         winner = _absorb_winner(prev_anchor, nxt_anchor, params)
         if winner is prev_anchor and prev_anchor is not None:
-            # 境界イベント自身の実効 end も広げる(§4.4)。元のイベントは変更せず複製で差し替える。
+            # 境界イベント自身の実効 end も広げる。元のイベントは変更せず複製で差し替える。
             prev_anchor.events[-1] = replace(prev_anchor.events[-1], end=run_end)
             prev_anchor.end = run_end
         elif winner is nxt_anchor and nxt_anchor is not None:
@@ -366,7 +366,7 @@ def _normalize_groups(
 def _lerp_morph(
     w_prev: dict[str, float], w_next: dict[str, float], t_prev: float, t_next: float, t: float, morph: str
 ) -> float:
-    """2つの小区間の最終重み(モーフ別)を結ぶ直線を時刻 t で評価する(§4.2 の `lerp_i`)。"""
+    """2つの小区間の最終重み(モーフ別)を結ぶ直線を時刻 t で評価する。"""
     v_prev, v_next = w_prev.get(morph, 0.0), w_next.get(morph, 0.0)
     if t_next == t_prev:
         return v_prev
@@ -375,7 +375,7 @@ def _lerp_morph(
 
 @dataclass
 class _Valley:
-    """モーラ境界の谷の候補(§4.2)。`values` はモーフ名→(左肩, 中央, 右肩) の最終重み。"""
+    """モーラ境界の谷の候補。`values` はモーフ名→(左肩, 中央, 右肩) の最終重み。"""
 
     b: float
     hw: int
@@ -424,7 +424,7 @@ def _mora_valley_candidates(
 
 
 def _select_valleys(candidates: Sequence[_Valley], params: GenerationParams) -> list[_Valley]:
-    """密集回避: 視覚的な変位量の総和を最大化する部分集合を動的計画法で選ぶ(§4.2)。
+    """密集回避: 視覚的な変位量の総和を最大化する部分集合を動的計画法で選ぶ。
 
     互換性判定は整数フレーム化した両端点で行う(`round(L_j) - round(R_i) - 1 ≥
     mora_valley_min_gap_frames`)。同値の場合は必ず採用する側を選ぶ(候補を右端の昇順に処理する
@@ -559,7 +559,7 @@ def _suppressed_by_valley(t: float, sign: float, period: float, valleys: Sequenc
     """揺らぎ極値(時刻 t・符号 sign)が、いずれかの谷(常に負方向)との近接で間引かれるべきか。
 
     谷と逆方向(正)の極値は `|t-b| ≤ max(hw+2, vibrato_period/2)` で、谷と同じ方向(負)の極値は
-    `|t-b| ≤ max(hw+2, vibrato_period)` で間引く(§4.2)。マージンは実際にクランプ済みの半幅
+    `|t-b| ≤ max(hw+2, vibrato_period)` で間引く。マージンは実際にクランプ済みの半幅
     `hw` を使う(パラメータ `mora_valley_frames` そのものは使わない)。
     """
     return any(
@@ -580,7 +580,7 @@ def _vibrato_targets(
     合成手順(手順1〜5相当)で各モーフ重みを出し、最後に開口減衰 `aperture_v(t)`(同じ制御点で
     `aperture_scale` を線形補間したもの)を一律に掛ける。開口減衰を `open_v` の計算に混ぜず最後に
     別途掛けるのは、合成後総量の比例縮小と相殺させないため(`_compose` と同じ理由)。節点は正弦波の
-    極値(`t_k = plateau_start + P·(1/4 + k/2)`)の厳密内側のみ。プラトー内にモーラ境界の谷(§4.2)が
+    極値(`t_k = plateau_start + P·(1/4 + k/2)`)の厳密内側のみ。プラトー内にモーラ境界の谷が
     ある場合、谷と逆方向(正)の極値は半周期、谷と同じ方向(負)の極値は1周期の間引き幅で除外する
     (同符号の二重ディップ・谷直後の近接ディップを防ぐ)。返すのは float 目標
     `(モーフ名, フレーム, 重み)` 列(量子化は後段)。
@@ -629,7 +629,7 @@ def _vibrato_targets(
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
-    """口形イベント列からモーフキー列を生成する(要求仕様 lipsync.md §4)。
+    """口形イベント列からモーフキー列を生成する。
 
     連続する同一母音イベントを1グループへ連結し、長さで3分類(極短は吸収/除去・短いものは三角形ピークで残す・
     通常は競合短縮で実効アタック/リリースを求める)したうえで、グループごとにエンベロープを置く: 通常グループは
@@ -674,7 +674,7 @@ def generate_morph_keys(
     # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、最後に一括量子化する。
     targets: list[tuple[str, float, float]] = []
     plateaus: list[tuple[float, float]] = []  # グループごとの保持プラトー [始端, 終端](伸び表現の対象)。
-    valleys_by_group: dict[int, list[_Valley]] = {}  # モーラ境界の谷(§4.2)。伸び表現の間引きが参照する。
+    valleys_by_group: dict[int, list[_Valley]] = {}  # モーラ境界の谷。伸び表現の間引きが参照する。
     # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
     for i, g in enumerate(groups):
         gw = weights[i]
@@ -753,7 +753,7 @@ def generate_morph_keys(
                 f_mid = (ev.start + ev.end) / 2.0
                 for morph in group_morphs:
                     targets.append((morph, f_mid, w.get(morph, 0.0)))
-            # モーラ境界の谷(§4.2): ApertureClass が NONE でなく半幅が2フレーム以上の内部境界を候補にし、
+            # モーラ境界の谷: ApertureClass が NONE でなく半幅が2フレーム以上の内部境界を候補にし、
             # 密集回避(動的計画法)で採用された谷だけを3点キーとして追加する。
             candidates = _mora_valley_candidates(g, gw, group_morphs, params)
             selected = _select_valleys(candidates, params)
@@ -783,7 +783,7 @@ def generate_morph_keys(
             targets.append((morph, f_e, b))
     # レガート間隙(あ→閉じかけ→う)の谷橋渡し: 完全閉口でなく前後母音の口形を中央で重ねる(オーバーラップ)。
     # 前母音の境界保持値 w_a から、谷値 d·(w_a+w_b)(両母音を加算で重ねた値。d で部分的な閉じ=閉じかけへ抑制)を
-    # 経て、次母音の境界保持値 w_b へ線形に繋ぐ。隣接の自然な移行(§4.3 のクロスフェード)と違い、ここでは加算で
+    # 経て、次母音の境界保持値 w_b へ線形に繋ぐ。隣接の自然な移行(クロスフェード)と違い、ここでは加算で
     # 重ねるが、d<1 が総開き量を抑えるので開きすぎない。前後母音の 0.0 リリース/アタックキーは上で抑制済み。
     for i, (gs, ge) in legato_at.items():
         wa, wb = weights[i][-1], weights[i + 1][0]

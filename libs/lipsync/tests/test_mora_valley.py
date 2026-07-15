@@ -161,7 +161,7 @@ def test_valley_omitted_when_half_width_floors_to_zero():
 
 def test_valley_omitted_when_half_width_floors_to_one():
     # あ[0,10]op0.8(NONE)・あ[10,13](3フレームの短いモーラ、FIRM_CLOSURE)・あ[13,23]op0.5(NONE)。
-    # 境界(b=10)の半幅は1に floor されるが、§4.2の規則は半幅2未満の境界に谷を挿入しないため、
+    # 境界(b=10)の半幅は1に floor されるが、半幅2未満の境界には谷を挿入しないため、
     # (hw=0の場合と同じく)谷の3点は一切出力されず、強弱節点間の直線補間のみになる。
     events = [
         MouthEvent(MouthShape.A, 0.0, 10.0, 0.8, ConsonantClass.NONE, lipsync.ApertureClass.NONE),
