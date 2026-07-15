@@ -1,8 +1,8 @@
-"""モーション適応・境界フェード・停止過渡・インパルス(shakevmd.md §5.1, §6.2, §6.3)。
+"""モーション適応・境界フェード・停止過渡・インパルス。
 
 このモジュールの数値パラメータ(既定値)は暫定値で、実利用に応じた調整余地がある。
 速度解析・正規化・プロファイルブレンドはカットで分割されたセグメント単位で行う
-(カットをまたぐ差分は含めない。§5.3)。
+(カットをまたぐ差分は含めない)。
 """
 
 import numpy as np
@@ -15,20 +15,20 @@ DEFAULT_FADE_SEC = 0.7       # 範囲端の自動フェード時間
 DEFAULT_SETTLE_TIME_SEC = 1.0       # settle 減衰振動の収束時間(内蔵)
 DEFAULT_SETTLE_FREQ_HZ = 2.5        # settle 振動の周波数(内蔵)
 DEFAULT_STOP_SPEED_THRESHOLD = 0.1  # 正規化速度がこれを下回ると停止とみなす(内蔵)
-# 速度正規化の絶対基準(§6.2)。正規化速度 = clamp(絶対速度 / 基準速度, 0, 1)。
+# 速度正規化の絶対基準。正規化速度 = clamp(絶対速度 / 基準速度, 0, 1)。
 DEFAULT_SPEED_REF_WORLD = 1.0       # 暫定。ワールド位置のフレーム間移動がこの値で正規化速度1
 DEFAULT_SPEED_REF_ANGLE = 0.02      # 暫定。回転のフレーム間変化(rad)がこの値で正規化速度1
 
-# 静止/移動プロファイル(§6.2)。オクターブ重みベクトル(長さ=noise.DEFAULT_OCTAVES=3)。
+# 静止/移動プロファイル。オクターブ重みベクトル(長さ=noise.DEFAULT_OCTAVES=3)。
 # 静止: 低周波寄り(急減衰=落ち着いた揺れ)。移動: 高周波寄り(緩減衰=細かい揺れ)。暫定値。
 STILL_PROFILE = (1.0, 0.25, 0.0625)
 MOVING_PROFILE = (1.0, 0.6, 0.36)
-BREATHING_HZ = 0.3                  # 完全静止区間の長周期ドリフト周波数(§6.2 呼吸相当、内蔵)
+BREATHING_HZ = 0.3                  # 完全静止区間の長周期ドリフト周波数(呼吸相当、内蔵)
 BREATHING_AMP_FACTOR = 0.5          # 呼吸ドリフト振幅 = amp_pos × この係数(内蔵、暫定)
 
 
 def profile_weights(normalized_speed, still=STILL_PROFILE, moving=MOVING_PROFILE):
-    """正規化速度に応じて静止/移動プロファイルのオクターブ重みをクロスフェードする(§6.2)。
+    """正規化速度に応じて静止/移動プロファイルのオクターブ重みをクロスフェードする。
 
     weight_i = (1 - s)·still_i + s·moving_i。s はスカラーまたは配列([0,1] 想定)。
     戻り値: スカラー入力なら (n_oct,) の np.ndarray、配列入力なら (n_frames, n_oct)。
@@ -43,18 +43,18 @@ def profile_weights(normalized_speed, still=STILL_PROFILE, moving=MOVING_PROFILE
 
 
 def breathing_drift(t_sec, amp: float, freq: float = BREATHING_HZ):
-    """完全静止区間の長周期ドリフト(呼吸相当、§6.2)。amp·sin(2π·freq·t)。t_sec は秒。"""
+    """完全静止区間の長周期ドリフト(呼吸相当)。amp·sin(2π·freq·t)。t_sec は秒。"""
     t = np.asarray(t_sec, dtype=float)
     return amp * np.sin(2.0 * np.pi * freq * t)
 
 
 def _smoothstep(t: np.ndarray) -> np.ndarray:
-    """3t^2-2t^3。端で値0/1かつ微分0(位置と速度の連続性。§5.1)。"""
+    """3t^2-2t^3。端で値0/1かつ微分0(位置と速度の連続性)。"""
     return t * t * (3.0 - 2.0 * t)
 
 
 def fade_envelope(n_frames: int, fade_sec: float = DEFAULT_FADE_SEC, fps: float = FPS) -> np.ndarray:
-    """セグメント長 n_frames のフェード包絡 [0,1] を返す(§5.1)。
+    """セグメント長 n_frames のフェード包絡 [0,1] を返す。
 
     両端は厳密に0、中央は1。立ち上がり/立ち下がりはイーズイン/アウト(smoothstep)で
     位置・速度を連続接続する。セグメントが 2×fade 秒に満たない場合はフェードを
@@ -76,7 +76,7 @@ def fade_envelope(n_frames: int, fade_sec: float = DEFAULT_FADE_SEC, fps: float 
 
 
 def frame_speeds(values, ref) -> np.ndarray:
-    """フレーム毎の値列から、正規化速度 [0,1] をフレーム毎に返す(§6.2)。
+    """フレーム毎の値列から、正規化速度 [0,1] をフレーム毎に返す。
 
     正規化速度[i] = clamp(|隣接フレーム差| / ref, 0, 1)。速度[0]=0。
     絶対基準 ref で割る(セグメント内ピークでは割らない)ため、同じ絶対速度は
@@ -98,7 +98,7 @@ def frame_speeds(values, ref) -> np.ndarray:
 def adaptive_amplitude(
     base_amp: float, normalized_speed, motion_damp: float = DEFAULT_MOTION_DAMP
 ):
-    """実効振幅 = 基本振幅 × clamp(1 - motion_damp × 正規化速度, 0, 1)(§6.2)。
+    """実効振幅 = 基本振幅 × clamp(1 - motion_damp × 正規化速度, 0, 1)。
 
     速度が上がるほど揺れを減衰させる(静止で最大、高速でほぼ0)。motion_damp=0 で減衰なし。
     normalized_speed はスカラーまたは配列([0,1] 想定)。
@@ -109,7 +109,7 @@ def adaptive_amplitude(
 def detect_stops(
     normalized_speeds, threshold: float = DEFAULT_STOP_SPEED_THRESHOLD
 ) -> list[int]:
-    """速度が threshold を上から下へ横切るフレーム(停止検出点)を昇順で返す(§6.2)。
+    """速度が threshold を上から下へ横切るフレーム(停止検出点)を昇順で返す。
 
     speeds[i-1] >= threshold かつ speeds[i] < threshold となる i を停止点とする。
     """
@@ -140,10 +140,10 @@ def settle_oscillation(
 def impulse_envelope(
     n_frames: int, frame: int, strength: float, decay_sec: float, fps: float = FPS
 ) -> np.ndarray:
-    """フレーム frame 以降に strength·exp(-Δt/decay_sec) の包絡を返す(§6.3)。
+    """フレーム frame 以降に strength·exp(-Δt/decay_sec) の包絡を返す。
 
     frame より前は 0。Δt = (i - frame)/fps 秒。長さ n_frames。
-    実際の揺れはこの包絡 × 高周波ノイズ(§6.1の帯域制限に従う)で、本関数は包絡のみ。
+    実際の揺れはこの包絡 × 高周波ノイズ(帯域制限に従う)で、本関数は包絡のみ。
     """
     env = np.zeros(n_frames)
     idx = np.arange(n_frames)

@@ -1,8 +1,8 @@
-"""shakevmd CLI 移植性のテスト(shakevmd.md §2.8/§12, 規約 §10)。
+"""shakevmd CLI 移植性のテスト。
 
 機械モード標準出力の UTF-8・改行 LF 固定、非ASCIIパスの受理と生成、人間向け標準エラーの
-符号化安全性(ロケール符号化で表せない文字でもプロセスを落とさない)を検証する。テスト方針は
-../../../libs/vmd/vmd.md §4 に準ずる(決定論的・外部依存なし)。
+符号化安全性(ロケール符号化で表せない文字でもプロセスを落とさない)を検証する。
+テストは決定論的・外部依存なしで行う。
 """
 
 import io
@@ -37,7 +37,7 @@ def write_input(path, keys=KEYS, **doc_kwargs):
     return str(path)
 
 
-# --- 機械モード標準出力: UTF-8 + 改行 LF 固定(規約 §10) ---------------------
+# --- 機械モード標準出力: UTF-8 + 改行 LF 固定 ---------------------
 
 
 def test_machine_stdout_uses_lf_only(tmp_path, capsysbinary):
@@ -70,7 +70,7 @@ def test_machine_stdout_non_ascii_is_utf8(tmp_path, capsysbinary):
     assert "出力" in text and "カメラ以外" in text
 
 
-# --- 非ASCIIパスの受理・生成(規約 §10) -------------------------------------
+# --- 非ASCIIパスの受理・生成 -------------------------------------
 
 
 def test_non_ascii_path_roundtrip(tmp_path):
@@ -84,7 +84,7 @@ def test_non_ascii_path_roundtrip(tmp_path):
     assert doc.camera
 
 
-# --- 人間向け標準エラーの符号化安全性(規約 §10) ---------------------------
+# --- 人間向け標準エラーの符号化安全性 ---------------------------
 # ロケール符号化(cp932)相当へ差し替えた標準エラーの下で、表せない文字を含む人間向け出力
 # (argparse 使用法エラー・fail() の error 行・警告ループの warning 行)が UnicodeEncodeError で
 # 本体を異常終了/internal_error へ落とさないことを検証する。この符号化安全性は cli.py が標準エラーの

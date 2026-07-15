@@ -1,4 +1,4 @@
-"""ProgressReporter(進捗のライブ表示)の単体テスト(shakevmd.md §2.7.1)。
+"""ProgressReporter(進捗のライブ表示)の単体テスト。
 
 ProgressReporter は重い処理(ベイク・スムージング)の進行を stderr へ1本のライブ行で表示する(TTY時のみ)。
 全段を通して同じ行を上書きし(段間で改行しない)、終わった段の行を画面に残さない。close で行を消し、

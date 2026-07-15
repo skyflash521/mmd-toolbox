@@ -1,7 +1,7 @@
-"""bake の視線揺れ変換のテスト(shakevmd.md §4.2)。
+"""bake の視線揺れ変換のテスト。
 
 視線揺れの基礎変換 apply_gaze_shake とベイクループ bake() を対象とする。
-§4.2 の実現は「揺れ角度 = 元角度 + ノイズ(オイラー加算)、カメラ位置固定になるよう
+その実現は「揺れ角度 = 元角度 + ノイズ(オイラー加算)、カメラ位置固定になるよう
 中心を逆算」。距離0では素朴な角度加算と一致する。
 """
 
@@ -48,7 +48,7 @@ class TestApplyGazeShake:
         assert res["rotation"][1] == pytest.approx(3.20, abs=1e-9)  # 3.20-2π にならない
 
     def test_rotation_only_keeps_camera_world_position(self):
-        # 回転ノイズのみ → カメラワールド位置は不変(視線だけ揺れる。§4.2)
+        # 回転ノイズのみ → カメラワールド位置は不変(視線だけ揺れる)
         key = cam(distance=-30.0, center=(1.0, 2.0, 3.0), rotation=(0.1, 0.2, 0.0))
         res = bake.apply_gaze_shake(key, (0.05, -0.03, 0.02), (0.0, 0.0, 0.0))
         before = camera.to_world(key).position
@@ -68,7 +68,7 @@ class TestApplyGazeShake:
         assert res["rotation"] == pytest.approx(key.rotation, abs=1e-9)
 
     def test_distance_zero_matches_naive_addition(self):
-        # distance=0: カメラ位置=中心。回転ノイズは中心を動かさず、角度は素朴加算と一致(§4.2)
+        # distance=0: カメラ位置=中心。回転ノイズは中心を動かさず、角度は素朴加算と一致
         key = cam(distance=0.0, center=(1.0, 2.0, 3.0), rotation=(0.2, 0.1, -0.1))
         noise = (0.1, -0.05, 0.03)
         res = bake.apply_gaze_shake(key, noise, (0.0, 0.0, 0.0))
@@ -103,12 +103,12 @@ class TestApplyGazeShake:
 
 
 # ---------------------------------------------------------------------------
-# bake() ループ統合(§3/§4/§5、§7テスト契約)
+# bake() ループ統合
 #
 # このセクション(TestBake)はベイクコアループに集中する: 範囲解決・スナップ、正規化作業ビュー、
 # カット分割と位相独立、毎フレームのサンプリング→ノイズ→視線揺れ変換、視野角丸め・
 # パースホールド、範囲外原本バイト保持、再現性。基本の adaptive_amplitude(motion_damp 連動)と
-# settle(§6.2)もこの節で検証する。静止/移動プロファイルクロスフェード・呼吸ドリフトは
+# settle もこの節で検証する。静止/移動プロファイルクロスフェード・呼吸ドリフトは
 # 別クラス(TestProfileCrossfadeAndBreathing)で検証する。
 # ---------------------------------------------------------------------------
 
@@ -126,8 +126,8 @@ def kf(frame, distance=-30.0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0),
 
 
 # 動きのある原本カメラ列(ソート済み・一意)。距離・中心・角度・パースが変化。
-# FOV は一定(30)とする: FOV が変化する区間は密キーを焼かず元キーを温存する仕様(§3.1)のため、
-# 手ブレ系テストの入力は FOV 一定にして毎フレーム密ベイクを行使する。FOV 温存挙動は
+# 視野角は一定(30)とする: 視野角が変化する区間は密キーを焼かず元キーを温存する仕様のため、
+# 手ブレ系テストの入力は視野角一定にして毎フレーム密ベイクを行使する。視野角温存挙動は
 # TestFovTransitionPreservation で専用フィクスチャを使って検証する。
 SEQ = [
     kf(0, distance=-30.0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), fov=30, perspective=0),
@@ -156,7 +156,7 @@ PAN_STOP = [
 ]
 
 # カット直前まで角速度大・カット直後は角速度ゼロ。カットをまたいで停止検出すると
-# frame30 で誤発動するが、セグメント単位なら発動しない(§5.3-3)の検証用。
+# frame30 で誤発動するが、セグメント単位なら発動しないことの検証用。
 CUT_THEN_STOP = [
     kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
     kf(29, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0), interp_block=_LIN),   # [0,29] 等速パン
@@ -164,21 +164,21 @@ CUT_THEN_STOP = [
     kf(60, center=(40.0, 0.0, 0.0), rotation=(0.0, 0.5, 0.0), interp_block=_LIN),  # [30,60] 角度ホールド(角速度0)
 ]
 
-# 位置のみパン→停止(角度は不変)。settle は角速度ベース(§6.2)なので発動しないことの検証用。
+# 位置のみパン→停止(角度は不変)。settle は角速度ベースなので発動しないことの検証用。
 POS_PAN_STOP = [
     kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
     kf(30, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),  # 位置パン
     kf(60, center=(20.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=_LIN),  # 停止
 ]
 
-# 範囲端近く(frame50)で停止。settle が範囲端でフェード(§5.1)で0になることの検証用。
+# 範囲端近く(frame50)で停止。settle が範囲端でフェードで0になることの検証用。
 LATE_STOP = [
     kf(0, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
     kf(50, rotation=(0.0, 0.5, 0.0), interp_block=_LIN),   # [0,50] 等速パン
     kf(60, rotation=(0.0, 0.5, 0.0), interp_block=_LIN),   # frame50 で停止(範囲端に近い)
 ]
 
-# 無動(完全静止)。impulse(§6.3)成分だけを観測するための土台(base揺れ・settleを切る)。
+# 無動(完全静止)。impulse成分だけを観測するための土台(base揺れ・settleを切る)。
 STATIC = [
     kf(0, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
     kf(60, rotation=(0.0, 0.0, 0.0), interp_block=_LIN),
@@ -219,21 +219,21 @@ class TestBake:
         assert frames == list(range(0, 61))
 
     def test_all_baked_keys_use_linear_interp(self):
-        # 入力が非線形でも、生成キーは全フレーム MMD 線形デフォルト(端も含む。§3.2)
+        # 入力が非線形でも、生成キーは全フレーム MMD 線形デフォルト(端も含む)
         res = bake.bake(SEQ, seed=1)
         for k in res.camera_keys:
             assert k.interpolation == bake.LINEAR_CAMERA_INTERP
 
     def test_empty_camera_keys_raises(self):
-        # カメラキー0件はエラー(§3.1。CLIでは終了コード1。コアAPIでは例外)
+        # カメラキー0件はエラー(CLIでは終了コード1。コアAPIでは例外)
         with pytest.raises(ValueError):
             bake.bake([], seed=1)
 
-    # --- 入力正規化(§3.1 / §7.8) -----------------------------------------
+    # --- 入力正規化 -----------------------------------------
     def test_unsorted_input_uses_normalized_view(self):
         # 順不同入力でも、サンプリング・範囲解決は正規化作業ビュー(ソート済み)を使う。
         # フレーム集合だけでなく全レコードが整列入力と一致することで、正規化ビュー
-        # 経由であることを固定する(§3.1, §7.8)。
+        # 経由であることを固定する。
         shuffled = [SEQ[2], SEQ[0], SEQ[1]]
         a = [key_tuple(k) for k in bake.bake(SEQ, seed=1, amp_rot=8.0, amp_pos=1.0).camera_keys]
         b = [key_tuple(k) for k in bake.bake(shuffled, seed=1, amp_rot=8.0, amp_pos=1.0).camera_keys]
@@ -253,7 +253,7 @@ class TestBake:
         assert res[30].perspective == 0   # パースも後勝ち(SEQ[1]の1ではなくdup_lateの0)
 
     def test_duplicate_frame_emits_normalization_warning(self):
-        # 同一フレーム重複の後勝ち破棄はデータ欠落なので正規化警告を出す(§3.1)。
+        # 同一フレーム重複の後勝ち破棄はデータ欠落なので正規化警告を出す。
         # (順不同は実カメラVMDで常態=警告対象外。重複破棄のみ警告する)
         dup = kf(30, center=(99.0, 99.0, 99.0))
         res_dup = bake.bake([SEQ[0], SEQ[1], dup, SEQ[2]], seed=1)
@@ -261,7 +261,7 @@ class TestBake:
         assert res_dup.warnings           # 重複あり → 警告が出る
         assert not res_clean.warnings     # 重複なし(全範囲) → 余計な警告は出さない
 
-    # --- 再現性(§7.5: バイナリ一致相当) -----------------------------------
+    # --- 再現性(バイナリ一致相当) -----------------------------------
     def test_reproducible_full_record(self):
         a = bake.bake(SEQ, seed=7, amp_rot=8.0, amp_pos=1.0)
         b = bake.bake(SEQ, seed=7, amp_rot=8.0, amp_pos=1.0)
@@ -274,7 +274,7 @@ class TestBake:
         # 中盤フレームで揺れ位相が異なる → 値が変わる
         assert r1[30].rotation != pytest.approx(r2[30].rotation, abs=1e-9)
 
-    # --- 揺れ0忠実性(§7.2 全チャンネル) -----------------------------------
+    # --- 揺れ0忠実性(全チャンネル) -----------------------------------
     def test_zero_amplitude_matches_sampled_all_channels(self):
         # 全揺れ0(amp_rot=amp_pos=settle=0)→ ベイク結果は原本の再サンプリングと一致
         # (全チャンネル+補間線形+パース)。settle は別成分なので明示的に0にする。
@@ -284,10 +284,10 @@ class TestBake:
             assert res[f].position == pytest.approx(s["position"], abs=1e-6)
             assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-6)
             assert res[f].distance == pytest.approx(s["distance"], abs=1e-6)
-            assert res[f].fov == bake.round_half_up(s["fov"])   # 四捨五入(§3)
+            assert res[f].fov == bake.round_half_up(s["fov"])   # 四捨五入
             assert res[f].interpolation == bake.LINEAR_CAMERA_INTERP
 
-    # --- 範囲端フェード・境界連続(§5.1 / §7.4) ----------------------------
+    # --- 範囲端フェード・境界連続 ----------------------------
     def test_fade_zero_at_range_ends(self):
         # 範囲端では揺れ強度0 → 端フレームは原本サンプリングと一致(大振幅でも)
         res = by_frame(bake.bake(SEQ, seed=1, amp_rot=30.0, amp_pos=5.0, fade_sec=0.7))
@@ -297,8 +297,8 @@ class TestBake:
             assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-4)
 
     def test_fade_ramps_in_smoothly_no_jump(self):
-        # 端付近は揺れが滑らかに立ち上がる(C1フェード)。§5.1/§7.4 は範囲端前後の
-        # 値と差分(速度)の両方の連続性を要求する。
+        # 端付近は揺れが滑らかに立ち上がる(C1フェード)。範囲端前後の
+        # 値と差分(速度)の両方の連続性が要求される。
         # 値: 端のずれ(揺れ量)が中盤よりはるかに小さい。
         # 速度: 揺れのフレーム間差分(=揺れ速度。元曲線を引いた残差なので揺れ由来の
         #       速度成分そのもの)が端で中盤よりはるかに小さい(揺れ速度の飛びがない)。
@@ -323,7 +323,7 @@ class TestBake:
         assert res[30].rotation != pytest.approx(s["rotation"], abs=1e-3)
 
     def test_short_range_shortens_fade_with_warning(self):
-        # 範囲長 < 2×fade 秒 → フェードを自動短縮し警告(§5.1)。端は依然0。
+        # 範囲長 < 2×fade 秒 → フェードを自動短縮し警告。端は依然0。
         # fade_sec=0.7 → 2×fade=42フレーム。範囲[0,30]=31フレーム<42 で短縮が起きる。
         res = bake.bake(SEQ, ranges=[(0, 30)], seed=1, amp_rot=20.0, amp_pos=3.0, fade_sec=0.7)
         rm = by_frame(res)
@@ -341,7 +341,7 @@ class TestBake:
         peak = max(rot_dev(res, f) for f in range(10, 51))
         assert 5e-3 < peak < 1.0   # 度として乗っている(ラジアン誤用なら peak≫1)
 
-    # --- 視線揺れの幾何(§4.2 / §7.6) --------------------------------------
+    # --- 視線揺れの幾何 --------------------------------------
     def test_rotation_only_keeps_camera_path(self):
         # 位置振幅0 → 各フレームのカメラワールド位置は原本サンプリングと一致(視線だけ揺れる)
         res = by_frame(bake.bake(SEQ, seed=1, amp_rot=10.0, amp_pos=0.0, fade_sec=0.3))
@@ -353,7 +353,7 @@ class TestBake:
             assert p_baked == pytest.approx(p_orig, abs=1e-4)
 
     def test_position_noise_shifts_camera_world(self):
-        # amp_pos>0(回転0)→ 位置ノイズがカメラワールド位置をずらす(§4.2 手順4)。
+        # amp_pos>0(回転0)→ 位置ノイズがカメラワールド位置をずらす。
         # 端ではフェードで0。位置揺れを無視する実装はここで落ちる。
         res = by_frame(bake.bake(SEQ, seed=1, amp_rot=0.0, amp_pos=3.0, fade_sec=0.3))
 
@@ -367,9 +367,9 @@ class TestBake:
         assert max(world_dev(f) for f in range(10, 51)) > 1e-2   # 位置揺れが効いている
         assert world_dev(0) < 1e-4 and world_dev(60) < 1e-4      # 端は0(フェード)
 
-    # --- モーション適応(§6.2 角速度＋移動速度) ---------------------------
+    # --- モーション適応(角速度＋移動速度) ---------------------------
     def test_motion_adaptation_responds_to_rotation_only(self):
-        # その場回転(中心固定・角度のみ変化)でも motion_damp が効く(§6.2 角速度)。
+        # その場回転(中心固定・角度のみ変化)でも motion_damp が効く(角速度)。
         # カメラ中心位置だけで速度を測る実装は静止扱いになり、ここで落ちる。
         keys = [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-30.0),
                 kf(60, center=(0.0, 0.0, 0.0), rotation=(0.0, 1.0, 0.0), distance=-30.0)]
@@ -378,20 +378,20 @@ class TestBake:
         assert a[30].rotation != pytest.approx(b[30].rotation, abs=1e-4)
 
     def test_motion_adaptation_responds_to_distance_only(self):
-        # ズーム(中心・角度固定・距離のみ変化)でも motion_damp が効く(§6.2 移動速度)。
+        # ズーム(中心・角度固定・距離のみ変化)でも motion_damp が効く(移動速度)。
         keys = [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-50.0),
                 kf(60, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), distance=-10.0)]
         a = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_damp=0.0, fade_sec=0.2))
         b = by_frame(bake.bake(keys, seed=1, amp_rot=5.0, amp_pos=0.0, motion_damp=10.0, fade_sec=0.2))
         assert a[30].rotation != pytest.approx(b[30].rotation, abs=1e-4)
 
-    # --- settle 停止後の減衰振動(§6.2) -----------------------------------
+    # --- settle 停止後の減衰振動 -----------------------------------
     def _settle_rdev(self, fixture, res, f):
         s = interp.sample_camera(fixture, f)
         return np.array(res[f].rotation) - np.array(s["rotation"])   # 回転残差ベクトル(rad)
 
     def test_settle_adds_decaying_oscillation_after_stop(self):
-        # パン(ry)→停止後、settle が直前の回転方向(ry)に減衰振動を加える(§6.2)。
+        # パン(ry)→停止後、settle が直前の回転方向(ry)に減衰振動を加える。
         # base ノイズを切る(amp_rot=0/amp_pos=0)ことで settle 成分だけを観測する。
         res = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
                                  settle=5.0, fade_sec=0.1))
@@ -435,7 +435,7 @@ class TestBake:
         assert resn[30].rotation != pytest.approx(s30["rotation"], abs=1e-3)
 
     def test_settle_is_additive_to_base_noise(self):
-        # settle は通常の揺れに「加算」される(置換しない。§6.2)。回転は sampled+rot_noise で
+        # settle は通常の揺れに「加算」される(置換しない)。回転は sampled+rot_noise で
         # 線形なので、回転残差は base 成分と settle 成分の和に厳密一致する。
         base = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=8.0, amp_pos=0.0, settle=0.0, fade_sec=0.1))
         only = by_frame(bake.bake(PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0, settle=5.0, fade_sec=0.1))
@@ -452,7 +452,7 @@ class TestBake:
         assert settle_seen   # settle 成分が実際に効いている(恒真でない)
 
     def test_settle_faded_at_range_end(self):
-        # settle も範囲端フェードの対象(§5.1: 範囲端で揺れ強度は必ず0)。停止が範囲端近く
+        # settle も範囲端フェードの対象(範囲端で揺れ強度は必ず0)。停止が範囲端近く
         # (frame50)でも、範囲端(frame60)では fade=0 により settle が0になる。
         res = by_frame(bake.bake(LATE_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
                                  settle=10.0, fade_sec=0.2))
@@ -470,7 +470,7 @@ class TestBake:
         assert res[60].rotation == pytest.approx(s60["rotation"], abs=1e-4)
 
     def test_settle_is_angular_not_positional(self):
-        # settle は角速度ベース(§6.2)。位置のみパン→停止(角度不変)では発動しない。
+        # settle は角速度ベース。位置のみパン→停止(角度不変)では発動しない。
         res = by_frame(bake.bake(POS_PAN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
                                  settle=10.0, fade_sec=0.1))
         for f in range(0, 61):
@@ -478,7 +478,7 @@ class TestBake:
             assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-6)
 
     def test_settle_not_triggered_at_cut(self):
-        # カット点では settle を発動しない(§5.3-3)。CUT_THEN_STOP は frame30 のカット直前まで
+        # カット点では settle を発動しない。CUT_THEN_STOP は frame30 のカット直前まで
         # 角速度大・直後ゼロ。カットをまたいで停止検出すると frame30 で誤発動するが、
         # セグメント単位なら発動しない。base ノイズ0・settle 大でも frame30 以降は原本一致。
         res = by_frame(bake.bake(CUT_THEN_STOP, seed=1, amp_rot=0.0, amp_pos=0.0,
@@ -487,7 +487,7 @@ class TestBake:
             s = interp.sample_camera(CUT_THEN_STOP, f)
             assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-4)
 
-    # --- impulse 衝撃(§6.3) ----------------------------------------------
+    # --- impulse 衝撃 ----------------------------------------------
     def _imp_dev(self, res, f):
         s = interp.sample_camera(STATIC, f)
         return np.array(res[f].rotation) - np.array(s["rotation"])   # 回転残差ベクトル(rad)
@@ -496,7 +496,7 @@ class TestBake:
         return float(np.linalg.norm(self._imp_dev(res, f)))
 
     def test_impulse_fires_from_frame_and_decays(self):
-        # フレームF以降に S·exp(-t/D) 包絡の高周波揺れ(§6.3)。base/settle を切り impulse だけ観測。
+        # フレームF以降に S·exp(-t/D) 包絡の高周波揺れ。base/settle を切り impulse だけ観測。
         res = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
                                  impulses=[(30, 10.0, 0.5)], fade_sec=0.1))
         # 発火前(F=30 より前。F-1=29 まで含める=off-by-one検出)はほぼ0
@@ -527,7 +527,7 @@ class TestBake:
                 assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-9)
 
     def test_impulse_seed_derived_direction(self):
-        # 方向・揺れはシードから決定(§6.3)。同一シードで再現、異なるシードで変わる。
+        # 方向・揺れはシードから決定。同一シードで再現、異なるシードで変わる。
         a = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
                                impulses=[(30, 10.0, 0.5)], fade_sec=0.1))
         b = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
@@ -539,7 +539,7 @@ class TestBake:
         assert any(a[f].rotation != pytest.approx(c[f].rotation, abs=1e-6) for f in range(30, 45))  # シード依存
 
     def test_impulses_additive(self):
-        # 複数 impulse は加算合成(§6.3)。重なる2衝撃で残差が各単独の和に一致(max/last-wins を排除)。
+        # 複数 impulse は加算合成。重なる2衝撃で残差が各単独の和に一致(max/last-wins を排除)。
         # 回転は sampled+rot_noise で線形なので和が厳密に成立する。impulse のシードは F 由来
         # (index 非依存)なので、単独/複合で同一 F の衝撃は同じ揺れになる。
         A = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
@@ -557,7 +557,7 @@ class TestBake:
         assert overlap_seen   # 実際に重なっている(恒真でない)
 
     def test_impulse_faded_at_range_end(self):
-        # impulse も範囲端フェード(§5.1)の対象。範囲端近く(F=55)で発火しても frame60 では0。
+        # impulse も範囲端フェードの対象。範囲端近く(F=55)で発火しても frame60 では0。
         res = by_frame(bake.bake(STATIC, seed=1, amp_rot=0.0, amp_pos=0.0, settle=0.0,
                                  impulses=[(55, 10.0, 0.5)], fade_sec=0.2))
         assert max(self._imp_mag(res, f) for f in range(55, 58)) > 1e-3   # 発火直後は乗る
@@ -586,7 +586,7 @@ class TestBake:
                 s = interp.sample_camera(STATIC, f)
                 assert res[f].rotation == pytest.approx(s["rotation"], abs=1e-9)
 
-    # --- 視野角・パース(§3.1 / §7.3) --------------------------------------
+    # --- 視野角・パース --------------------------------------
     def test_fov_equals_rounded_sample_when_constant(self):
         # 視野角は揺れ対象外。FOV 一定の区間(SEQ は FOV=30 一定)では非ゼロ揺れでも
         # 各フレームの視野角=元曲線サンプルの四捨五入(整数度)。
@@ -597,7 +597,7 @@ class TestBake:
             assert res[f].fov == bake.round_half_up(s["fov"])
 
     def test_fov_ramp_interval_is_preserved_not_baked(self):
-        # FOV が変化する区間(隣接キーで FOV が異なる)は密キーを焼かず元キーを温存する(§3.1)。
+        # 視野角が変化する区間(隣接キーで視野角が異なる)は密キーを焼かず元キーを温存する。
         # 36→37 の1区間 [0,2]。frame1 に密キーを生やさず(整数丸めで 37 を焼くのを避ける)、
         # 両端の元キー(0,2)をバイト単位で温存して MMD の実数補間に委ねる
         # (整数 FOV を毎フレーム焼くとズームが階段になるのを避ける)。
@@ -621,7 +621,7 @@ class TestBake:
         assert res[30].perspective == 1    # key1 以降は persp1
         assert res[45].perspective == 1
 
-    # --- FOV 変化区間の温存(§3.1 / §7.3) ---------------------------------
+    # --- 視野角変化区間の温存 ---------------------------------
     def _zoom_seq(self):
         # FOV: [0,20] 一定30 → [20,50] 30→18(ズーム=ランプ) → [50,70] 一定18。
         # 中心は静止させ FOV 挙動を分離(静止区間は速度0で揺れが乗る)。
@@ -656,7 +656,7 @@ class TestBake:
         assert all(k.fov in (30, 18) for k in res.camera_keys)
 
     def test_single_frame_fov_jump_is_baked_not_preserved(self):
-        # 隣接フレーム(間隔1)での瞬間 FOV ジャンプ(カット等)は階段にならないので密ベイクする(§3.1)。
+        # 隣接フレーム(間隔1)での瞬間視野角ジャンプ(カット等)は階段にならないので密ベイクする。
         # 温存すると短いショット内で揺れが急にオン/オフして不連続(ガクつき)になるため、温存しない。
         # 入力補間を非線形にしておき、密ベイクキー(線形補間に再設定)と温存元キー(非線形を保持)を
         # 区別する。出力が線形補間=密ベイク確定(温存=元の非線形補間ではない)。
@@ -675,7 +675,7 @@ class TestBake:
             assert by[f].rotation != pytest.approx(s["rotation"], abs=1e-4)   # 揺れあり
         assert by[20].fov == 30 and by[21].fov == 36   # 瞬間ジャンプはそのまま密キーで再現
 
-    # --- 範囲指定・範囲外保持(§3.2 / §5.2 / §7.1) -------------------------
+    # --- 範囲指定・範囲外保持 -------------------------
     def test_default_range_is_full_span(self):
         res = bake.bake(SEQ, ranges=None, seed=1)
         frames = sorted(k.frame for k in res.camera_keys)
@@ -687,7 +687,7 @@ class TestBake:
         assert baked_frames == list(range(30, 61))
 
     def test_out_of_range_leading_key_preserved(self):
-        # 範囲[30,60] → frame0 は範囲外。原本レコードがバイト相当(全フィールド)で保持(§7.1)。
+        # 範囲[30,60] → frame0 は範囲外。原本レコードがバイト相当(全フィールド)で保持。
         # 非線形補間ブロックのまま透過する(線形化されない)ことを含む。
         res = bake.bake(SEQ, ranges=[(30, 60)], seed=1)
         out = {k.frame: k for k in res.camera_keys if k.frame < 30}
@@ -695,7 +695,7 @@ class TestBake:
         assert key_tuple(out[0]) == key_tuple(SEQ[0])
 
     def test_out_of_range_trailing_key_preserved(self):
-        # 範囲[0,30] → frame60 は範囲外。原本レコードがバイト相当で保持(§7.1)。
+        # 範囲[0,30] → frame60 は範囲外。原本レコードがバイト相当で保持。
         res = bake.bake(SEQ, ranges=[(0, 30)], seed=1)
         out = {k.frame: k for k in res.camera_keys if k.frame > 30}
         assert list(out) == [60]
@@ -703,14 +703,14 @@ class TestBake:
 
     def test_output_is_frame_ordered(self):
         # 出力はフレーム昇順。範囲[30,60]の先頭 frame0(範囲外原本)がベイク群の後ろに
-        # 紛れず先頭に来る(§3.2 の出力。dict/sorted では順序崩れを検出できないため明示)。
+        # 紛れず先頭に来る(dict/sorted では順序崩れを検出できないため明示)。
         res = bake.bake(SEQ, ranges=[(30, 60)], seed=1)
         frames = [k.frame for k in res.camera_keys]
         assert frames == sorted(frames)          # 出力リスト自体が昇順
         assert frames[0] == 0                    # 先頭の範囲外原本が先頭に来る
 
     def test_range_snaps_to_nearest_existing_key(self):
-        # 既存キー上にない範囲端は最近接の既存キーへスナップ(§5.2)。
+        # 既存キー上にない範囲端は最近接の既存キーへスナップ。
         # (25,55) → 25は30へ(|5|<|25|)、55は60へ(|5|<|25|) → 実効[30,60]。
         res = bake.bake(SEQ, ranges=[(25, 55)], seed=1)
         frames = sorted(k.frame for k in res.camera_keys)
@@ -720,12 +720,12 @@ class TestBake:
         assert key_tuple(out0) == key_tuple(SEQ[0])
 
     def test_overlapping_ranges_raise(self):
-        # スナップ後に範囲が重複したらエラー(§5.2)
+        # スナップ後に範囲が重複したらエラー
         with pytest.raises(ValueError):
             bake.bake(SEQ, ranges=[(0, 60), (30, 60)], seed=1)
 
     def test_multiple_nonoverlapping_ranges(self):
-        # 非重複の複数 range は両方とも有効にベイクされ、間隙の原本キーは保持される(§2.2/§5.2)
+        # 非重複の複数 range は両方とも有効にベイクされ、間隙の原本キーは保持される
         seq5 = [
             kf(0, center=(0.0, 0.0, 0.0)),
             kf(15, center=(5.0, 1.0, 0.0)),
@@ -744,9 +744,9 @@ class TestBake:
         out30 = next(k for k in res.camera_keys if k.frame == 30)
         assert key_tuple(out30) == key_tuple(seq5[2])
 
-    # --- カット波及(§5.3 / §7.7) ------------------------------------------
+    # --- カット波及 ------------------------------------------
     def test_cut_boundary_is_not_faded(self):
-        # 内部カット境界(frame31)ではフェードしない → 揺れは非ゼロのまま(§5.3-4)
+        # 内部カット境界(frame31)ではフェードしない → 揺れは非ゼロのまま
         res = bake.bake(SEQ_CUT, seed=1, amp_rot=10.0, amp_pos=0.0, fade_sec=0.2)
         rm = by_frame(res)
         s = interp.sample_camera(SEQ_CUT, 31)
@@ -754,7 +754,7 @@ class TestBake:
         assert dev > 1e-3   # カット直後フレームでも揺れが乗っている(0に落ちない)
 
     def test_cut_makes_segment_phase_independent(self):
-        # カットの有無で後半セグメントの揺れ位相が変わる(セグメント別シード派生。§5.3-1)
+        # カットの有無で後半セグメントの揺れ位相が変わる(セグメント別シード派生)
         with_cut = by_frame(bake.bake(SEQ_CUT, seed=1, amp_rot=10.0, amp_pos=0.0, fade_sec=0.2))
         no_cut = by_frame(bake.bake(SEQ_CUT, seed=1, amp_rot=10.0, amp_pos=0.0,
                                     fade_sec=0.2, manual_cuts_remove=[31]))
@@ -763,7 +763,7 @@ class TestBake:
 
 
 class TestProfileCrossfadeAndBreathing:
-    """§6.2 高度部分の bake 統合: 静止/移動プロファイルのオクターブ重みクロスフェードと
+    """モーション適応の高度部分の bake 統合: 静止/移動プロファイルのオクターブ重みクロスフェードと
     完全静止区間の呼吸ドリフト(0.3Hz)。"""
 
     # N+1=100 サンプル → rfftfreq(100, 1/30) のビン間隔=0.3Hz、bin1 がちょうど 0.3Hz。
@@ -801,7 +801,7 @@ class TestProfileCrossfadeAndBreathing:
         return float(np.std(np.diff(series)) / (np.std(series) + 1e-12))
 
     def test_moving_has_more_high_freq_than_still(self):
-        # プロファイルクロスフェード(§6.2): 移動セグメントは静止より高周波成分が多い。
+        # プロファイルクロスフェード: 移動セグメントは静止より高周波成分が多い。
         # 回転3軸で確認する。クロスフェードの hf 検証は回転チャンネルで行う:
         # 位置チャンネルは呼吸ドリフト(0.3Hz、位置のみ)が静止窓の hf を下げ、クロスフェード
         # 無しでも移動>静止を満たしうるため。位置のクロスフェードは呼吸帯域を
@@ -815,7 +815,7 @@ class TestProfileCrossfadeAndBreathing:
                     > hf(self._rot_shake(rst, src_s, ax))), f"rot{ax}"
 
     def test_per_frame_crossfade_within_single_segment(self):
-        # 速度クロスフェードは「フレーム毎の速度」で効く(§6.2)。同一ノイズ実現(同一 seed)で
+        # 速度クロスフェードは「フレーム毎の速度」で効く。同一ノイズ実現(同一 seed)で
         # 「同じ時間窓」を移動側/静止側に切り替えて比較し、マジックマージンを排す。
         #   decel: 0..50 移動 → 50..99 静止。 accel: 0..50 静止 → 50..99 移動。
         # キーは 0/50/99 で隣接1フレーム差なし → カット無し → 各々単一セグメント。
@@ -852,7 +852,7 @@ class TestProfileCrossfadeAndBreathing:
             assert np.mean(early_d) > np.mean(early_a), f"early rot{ax}"
 
     def test_crossfade_is_speed_proportional_not_binary(self):
-        # §6.2 のクロスフェードは速度比例 (1-s)·still + s·moving。s=0/1 だけでなく中間 s=0.5 が
+        # クロスフェードは速度比例 (1-s)·still + s·moving。s=0/1 だけでなく中間 s=0.5 が
         # 「両端の間」に入ること(厳密単調)を確認し、フレーム毎の二値スイッチを排除する。
         # 絶対基準 ref=1.0 で、同一窓[58:88]の速度を 0 / 0.5 / 1.0(=正規化 0/0.5/1.0)に直接作る
         # 3経路(各々単一セグメント等速)。絶対正規化なので「窓前にピークを置く」相対トリックは不要。
@@ -879,7 +879,7 @@ class TestProfileCrossfadeAndBreathing:
         hful = [hf_rot(sfull, s) for s in range(3)]
         assert np.mean(hful) > np.mean(hh) > np.mean(h0)
 
-    # 呼吸ドリフト(§6.2「完全静止区間: 長周期ドリフト 0.3Hz 相当」)。位置の長周期ドリフトとして
+    # 呼吸ドリフト(完全静止区間の長周期ドリフト 0.3Hz 相当)。位置の長周期ドリフトとして
     # フレーム毎に (1-speed) スケールで加算する(回転=向きの揺れには載せない)。仕様は軸分布を
     # 規定しないので「位置全体の 0.3Hz」で判別する(軸独立性・等振幅は実装裁量、テストで縛らない)。
     def _e03(self, res, src, kind, axis, end, win=slice(None)):
@@ -925,13 +925,13 @@ class TestProfileCrossfadeAndBreathing:
         rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, motion_damp=0.0, settle=0.0, fade_sec=0.3))
         assert self._e03_sum(pst, src_s, "pos", self.N) > 3.0 * self._e03_sum(pmv, src_m, "pos", self.N)
         assert self._e03_sum(rst, src_s, "rot", self.N) < 2.0 * self._e03_sum(rmv, src_m, "rot", self.N)
-        # §6.2「完全静止区間: 高周波微動+長周期ドリフト」: 静止でも高周波微動が残る。
+        # 完全静止区間は「高周波微動+長周期ドリフト」: 静止でも高周波微動が残る。
         # 静止区間の高オクターブを消して呼吸ドリフトだけにする実装はここで落ちる(回転で観測、freq=1.2)。
         for ax in range(3):
             assert self._band_ratio(rst, src_s, ax, self.N, "rot") > 0.1, f"tremor rot{ax}"
 
     def test_breathing_scales_with_inverse_speed_in_single_segment(self):
-        # 呼吸は (1-speed) 比例(§6.2)。同一 seed・同一窓[20:120](100サンプル=0.3Hz整数1周期)に
+        # 呼吸は (1-speed) 比例。同一 seed・同一窓[20:120](100サンプル=0.3Hz整数1周期)に
         # s=0/0.5/1 を与える3経路で、0.3Hz エネルギー合計が s について厳密単調減少することを確認する。
         # 絶対基準 ref=2.0 で窓の速度を 0 / 1.0 / 2.0(=正規化 0/0.5/1.0)に直接作る(各々単一セグメント
         # 等速。絶対正規化なので相対トリックは不要)。セグメント単位の静止ゲート実装(移動セグメントで
@@ -957,7 +957,7 @@ class TestProfileCrossfadeAndBreathing:
 
 
 class TestWalkingGait:
-    """walking プリセットの歩調周期成分(§2.7/§95): 乱数ノイズに加え、位置の左右(pos_x)へ
+    """walking プリセットの歩調周期成分: 乱数ノイズに加え、位置の左右(pos_x)へ
     歩調周波数 f、上下(pos_y)へ 2f の周期成分を混合する。コア引数 gait_freq/gait_amp で制御
     (既定 0=無効)。奥行(pos_z)・回転には載せない。"""
 
@@ -997,7 +997,7 @@ class TestWalkingGait:
         return float(np.max(np.abs(series)))
 
     def test_gait_tracks_freq_lr_f_updown_2f(self):
-        # 左右(x)=歩調f、上下(y)=2f、奥行(z)=なし(§95)。gait_freq を無視して固定周波数を
+        # 左右(x)=歩調f、上下(y)=2f、奥行(z)=なし。gait_freq を無視して固定周波数を
         # 出力する実装を排除するため、2つの f(1.8/2.4Hz、100サンプルで整数周期)で確認する。
         # 支配周波数だけでなく軸別成分分離も課す: x は f が 2f を大きく上回り、y は 2f が f を
         # 大きく上回る(両軸に両周波数を載せる実装を排除)。amp_pos=0/amp_rot=0 で歩調のみ分離。
@@ -1013,7 +1013,7 @@ class TestWalkingGait:
             assert self._maxabs(z) < 1e-6, (f, "z")   # 奥行に歩調なし(定数オフセットも不可)
 
     def test_gait_amplitude_scales_with_gait_amp(self):
-        # 振幅は gait_amp(position units)に比例(§95)。gait_amp を無視して固定振幅にする実装を
+        # 振幅は gait_amp(position units)に比例。gait_amp を無視して固定振幅にする実装を
         # 排除する。gait_amp=0 は歩調なし、gait_amp=2 は =1 の概ね2倍。左右(x)・上下(y)両軸で確認。
         src = self._static()
 
@@ -1029,7 +1029,7 @@ class TestWalkingGait:
             assert s1 > 1e-6 and abs(s2 - 2.0 * s1) < 0.005 * s1, f"axis{axis} scale"  # 線形
 
     def test_gait_not_applied_to_rotation(self):
-        # 歩調は位置のみ(§95 左右/上下)。回転には載せない。amp_rot=0 で回転の乱数も切り、
+        # 歩調は位置のみ(左右/上下)。回転には載せない。amp_rot=0 で回転の乱数も切り、
         # 歩調 ON でも回転揺れがゼロ(定数オフセット含め)のままであることを確認する。
         src = self._static()
         res = by_frame(bake.bake(src, seed=1, amp_rot=0.0, amp_pos=0.0,
@@ -1038,7 +1038,7 @@ class TestWalkingGait:
             assert self._maxabs(self._rot(res, src, ax)) < 1e-9, f"rot{ax}"
 
     def test_gait_mixed_with_random_noise_not_replacing(self):
-        # 「乱数ノイズに歩調成分を混合」(§95): 歩調は乱数へ加算(置換ではない)。
+        # 「乱数ノイズに歩調成分を混合」: 歩調は乱数へ加算(置換ではない)。
         # (1) 差分が左右=f・上下=2f に集中(乱数が相殺=同一 seed で共有 → 混合の証拠)。
         # (2) 歩調 ON/OFF の時間波形の相関が高い(乱数が保持される。FFT リーケージに依らない)。
         #     置換実装は on=歩調のみ → 相関≈0 で落ちる。乱数 ≥ 歩調 になるよう振幅を選ぶ。
@@ -1059,7 +1059,7 @@ class TestWalkingGait:
             assert np.allclose(self._rot(on, src, ax), self._rot(off, src, ax), atol=1e-12), f"rot{ax}"
 
     def test_gait_off_when_freq_zero(self):
-        # gait_freq=0 → 歩調成分なし(§95「0=off」)。既定省略時と明示 0 の両方で、gait_amp>0 でも
+        # gait_freq=0 → 歩調成分なし(0=off)。既定省略時と明示 0 の両方で、gait_amp>0 でも
         # 位置揺れが消える(定数オフセットも不可)。amp_pos=0 で乱数も切り絶対ゼロを検証する。
         src = self._static()
         # (a) gait_freq 省略(既定 0)
@@ -1074,7 +1074,7 @@ class TestWalkingGait:
 
 
 class TestCoreApiTuning:
-    """§8/§2.5: 内蔵パラメータ(静止/移動プロファイル=オクターブ重み構成、settle 収束時間)を
+    """内蔵パラメータ(静止/移動プロファイル=オクターブ重み構成、settle 収束時間)を
     bake() 引数で調整できる(coreAPI)。引数省略時は内蔵定数の既定値で動く。
     オクターブ数はプロファイル長で決まる(別引数を設けず連動を一本化)。"""
 
@@ -1125,7 +1125,7 @@ class TestCoreApiTuning:
             assert self._rot_hf(hi, src, ax) > self._rot_hf(lo, src, ax), ax
 
     def test_profiles_apply_to_position_channels(self, monkeypatch):
-        # プロファイルは回転だけでなく位置チャンネルにも適用される(§2.5 はチャンネル非依存)。
+        # プロファイルは回転だけでなく位置チャンネルにも適用される(チャンネル非依存)。
         # 静止(still_profile)・移動(moving_profile)両レジームで確認する(位置を片側に固定する実装を
         # 排除)。呼吸を切って(BREATHING_AMP_FACTOR=0)位置 std の汚染を除き、相対高周波で判別。
         monkeypatch.setattr(motion, "BREATHING_AMP_FACTOR", 0.0)
@@ -1191,7 +1191,7 @@ class TestCoreApiTuning:
 
 
 class TestNaiveRotation:
-    """§4.2/§8: 素朴な角度加算モード。既定の視線揺れは『角度=元+ノイズ』のオイラー加算に加え、
+    """素朴な角度加算モード。既定の視線揺れは『角度=元+ノイズ』のオイラー加算に加え、
     カメラのワールド位置が固定されるよう中心を逆算する。naive_rotation=True はその中心逆算を行わず、
     中心は元のまま(位置ノイズ分だけシフト)に留める素朴加算にする(coreAPI、CLI 非公開)。"""
 
@@ -1219,7 +1219,7 @@ class TestNaiveRotation:
         assert moved > 1e-3   # 既定は中心が動く(ワールド位置固定で逆算)
 
     def test_naive_still_applies_position_noise(self):
-        # naive でも位置ノイズは適用される(§8: center = 元中心 + pos_noise)。回転ノイズを切れば
+        # naive でも位置ノイズは適用される(center = 元中心 + pos_noise)。回転ノイズを切れば
         # 中心逆算は無関係になり naive/既定は同一の中心(元+pos_noise)になり、かつ中心は元から動く。
         # naive で pos_noise を落とす実装は「中心が動かない/既定と不一致」で落ちる。
         src = self._src()

@@ -1,12 +1,12 @@
-"""shakevmd CLI 機械モードのテスト(shakevmd.md §2.8, §12)。
+"""shakevmd CLI 機械モードのテスト。
 
 機械モード(--machine)を検証する: stdout を JSON Lines のイベント専用にし、result/warning/progress
 イベントを出す。ストリームは result または error のちょうど 1 つで終端する(本モジュールは成功=result
 終端を対象にし、error イベントは構造化エラーのテストで扱う)。非機械モードの既定挙動が不変であること
 (後方互換)も併せて検証する。
 
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テスト方針は
-../../../libs/vmd/vmd.md §4 に準ずる。
+機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。
+テストは決定論的・外部依存なしで行う。
 """
 
 import json
@@ -43,7 +43,7 @@ def machine_events(capsysbinary):
 
 
 def machine_error(capsysbinary):
-    """機械モードの stdout を解析し、終端の error イベントを返す(失敗は error で終端、§12.2)。"""
+    """機械モードの stdout を解析し、終端の error イベントを返す(失敗は error で終端)。"""
     events = machine_events(capsysbinary)
     assert events[-1]["type"] == "error"
     assert sum(1 for e in events if e["type"] in ("result", "error")) == 1  # 終端はちょうど1つ
@@ -111,14 +111,14 @@ def test_machine_emits_warning_event_for_non_camera_sections(tmp_path, capsysbin
     codes = {w["code"] for w in warns}
     assert "non_camera_sections_passthrough" in codes
     w = next(w for w in warns if w["code"] == "non_camera_sections_passthrough")
-    # section は透過した全セクション名の配列(§12.3)。bone と morph の両方を載せる。
+    # section は透過した全セクション名の配列。bone と morph の両方を載せる。
     assert isinstance(w["section"], list)
     assert set(w["section"]) == {"bone", "morph"}
-    assert isinstance(w["message"], str) and w["message"]  # 自由文字列の文言を message に保持(§12.3)
+    assert isinstance(w["message"], str) and w["message"]  # 自由文字列の文言を message に保持
 
 
 def test_machine_emits_warning_event_for_duplicate_frame(tmp_path, capsysbinary):
-    # 同一フレーム重複の後勝ち破棄 → bake_normalize_duplicate の warning イベント(section=["camera"]、§12.3)。
+    # 同一フレーム重複の後勝ち破棄 → bake_normalize_duplicate の warning イベント(section=["camera"])。
     dup = [cam(0), cam(30), cam(30, center=(9.0, 9.0, 9.0)), cam(60)]
     inp = write_input(tmp_path / "in.vmd", keys=dup)
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"])
@@ -133,7 +133,7 @@ def test_machine_emits_warning_event_for_duplicate_frame(tmp_path, capsysbinary)
 
 def test_machine_emits_warning_event_for_octave_clamp(tmp_path, capsysbinary):
     # 実効周波数が帯域上限を超えるオクターブのクランプ → octave_clamped の warning イベント
-    # (section=null、§12.3)。内蔵 octaves=3 では freq×4>8(=freq>2)でクランプが起きる。
+    # (section=null)。内蔵 octaves=3 では freq×4>8(=freq>2)でクランプが起きる。
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth", "--freq", "3.0"])
     assert rc == 0
@@ -146,7 +146,7 @@ def test_machine_emits_warning_event_for_octave_clamp(tmp_path, capsysbinary):
 
 
 def test_machine_emits_warning_event_for_fade_shortened(tmp_path, capsysbinary):
-    # 範囲長が 2×fade 未満でのフェード自動短縮 → fade_shortened の warning イベント(section=null、§12.3)。
+    # 範囲長が 2×fade 未満でのフェード自動短縮 → fade_shortened の warning イベント(section=null)。
     # 既定 fade=0.7 → 2×fade=42 フレーム。範囲[0,30]=31 フレーム<42 で短縮が起きる。
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth", "--range", "0:30"])
@@ -199,7 +199,7 @@ def test_non_machine_default_unchanged(tmp_path, capsys):
 
 def test_machine_version_help_stay_human(capsys):
     # --machine 併用でも --version/--help は人間向けテキストを出して exit 0 で終わり、
-    # イベントストリームには載せない(規約 §3 メタ操作の例外、§12.1)。argparse が両者を
+    # イベントストリームには載せない(メタ操作の例外)。argparse が両者を
     # 処理面より先に短絡するため --machine 追加の前後で不変であることを保証する。
     rc = cli.main(["--machine", "--version"])
     assert rc == 0
@@ -213,14 +213,14 @@ def test_machine_version_help_stay_human(capsys):
 
 def test_help_lists_machine_flag(capsys):
     # --help は人間向けテキストを出して exit 0(main は argparse の SystemExit を握って 0 を返す)。
-    # 新設の --machine がヘルプに現れること(規約 §6 の人間向けヘルプ)を確認する。
+    # 新設の --machine がヘルプに現れること(人間向けヘルプ)を確認する。
     rc = cli.main(["--help"])
     assert rc == 0
     text = capsys.readouterr().out
     assert "--machine" in text
 
 
-# --- 構造化エラー(§12.5) -----------------------------------------------
+# --- 構造化エラー -----------------------------------------------
 # 各失敗経路が機械モードで確定 code/field/exit_code の error イベントを出してストリームを終端し、
 # 終了コードを維持することを検証する。非機械モードは理由を標準エラーへ1行出す。
 
@@ -353,7 +353,7 @@ def test_machine_error_internal_error(tmp_path, capsysbinary, monkeypatch):
 
 
 def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
-    # 非機械モードでも失敗理由を標準エラーへ1行出す(§12.5)。終了コードは維持し、stdout に JSON は出さない。
+    # 非機械モードでも失敗理由を標準エラーへ1行出す。終了コードは維持し、stdout に JSON は出さない。
     bad = tmp_path / "bad.vmd"
     bad.write_bytes(b"not a vmd file")
     rc = cli.main([str(bad)])
@@ -363,7 +363,7 @@ def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
     assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
 
 
-# --- 自己記述 --describe(§12.4) ----------------------------------------
+# --- 自己記述 --describe ----------------------------------------
 
 
 def describe_result(capsysbinary):
@@ -380,7 +380,7 @@ def test_describe_emits_result_without_input(capsysbinary):
     r = describe_result(capsysbinary)
     assert isinstance(r["options"], list) and r["options"]
     assert isinstance(r["presets"], list)
-    # bake/inspect 統計キーは describe には載せない(§12.2)。
+    # bake/inspect 統計キーは describe には載せない。
     for k in ("output", "keys", "applied_ranges", "max_amplitude", "detected_cuts"):
         assert k not in r
 
@@ -397,7 +397,7 @@ def test_describe_options_shape_and_values(capsysbinary):
     assert rc == 0
     r = describe_result(capsysbinary)
     by_name = {o["name"]: o for o in r["options"]}
-    # メタ/モード操作は options に含めない(§12.4)。
+    # メタ/モード操作は options に含めない。
     for meta in ("--describe", "--version", "--help", "--machine"):
         assert meta not in by_name
     # 各要素は常に5キー、help は非空文字列。
@@ -440,7 +440,7 @@ def test_describe_presets_shape(capsysbinary):
     assert set(by_name) == set(presets.PRESET_NAMES)
     for p in r["presets"]:
         assert set(p) == {"name", "values"} and isinstance(p["values"], dict)
-        # 内蔵パラメーターは values に出さない(§12.4)。
+        # 内蔵パラメーターは values に出さない。
         for internal in presets.INTERNAL_PARAM_NAMES:
             assert internal not in p["values"]
 
@@ -456,14 +456,14 @@ def test_describe_type_table_covers_non_meta_args():
 
 def test_describe_mode_arg_error_is_error_event(capsysbinary):
     # --describe(--machine 無し)も構造化出力モードなので、引数エラーは標準エラーでなく error
-    # イベントでストリームを終端する(規約 §3/§4・§12.5)。
+    # イベントでストリームを終端する。
     rc = cli.main(["--describe", "--seed", "abc"])
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["field"] == "--seed" and e["exit_code"] == 2
 
 
-# --- 入力検査 --machine --dry-run(§12.2 mode:"inspect") -----------------
+# --- 入力検査 --machine --dry-run(mode:"inspect") -----------------
 
 
 def test_machine_dry_run_emits_inspect_result(tmp_path, capsysbinary):
@@ -488,7 +488,7 @@ def test_machine_dry_run_emits_inspect_result(tmp_path, capsysbinary):
 
 
 def test_machine_dry_run_inspect_lists_non_camera_sections(tmp_path, capsysbinary):
-    # inspect の sections は camera と混在する非カメラセクションを載せる(§12.2)。
+    # inspect の sections は camera と混在する非カメラセクションを載せる。
     bone = [BoneKey(name_raw=b"bone".ljust(15, b"\x00"), frame=0,
                     position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0),
                     interpolation=bytes(64))]
@@ -511,7 +511,7 @@ def test_non_machine_dry_run_unchanged(tmp_path, capsys):
     assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
 
 
-# --- 中断 §12.6 -----------------------------------------------------------
+# --- 中断 -----------------------------------------------------------
 
 
 def _raise_keyboard_interrupt(*a, **k):

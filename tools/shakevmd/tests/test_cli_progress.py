@@ -1,4 +1,4 @@
-"""shakevmd CLI の進捗表示・バージョン配線のテスト(shakevmd.md §2.7.1, §8)。
+"""shakevmd CLI の進捗表示・バージョン配線のテスト。
 
 進捗表示は副作用専用(出力VMD・終了コード・統計・警告を変えない)で、端末(TTY)のときだけ stderr へ
 1行ライブ表示し、`--quiet` で抑制する。`--version` は `__version__` を表示して終了コード0で返る。
@@ -77,7 +77,7 @@ def _spy(monkeypatch):
     monkeypatch.setattr(progress, "ProgressReporter", _SpyReporter)
 
 
-# --- --version(§8) -------------------------------------------------------
+# --- --version -------------------------------------------------------
 def test_version_shows_version_and_exit0(capsys):
     # --version は __version__ を表示して終了コード0で返る(版の番号源は __version__ 一本)。
     from shakevmd import __version__
@@ -87,7 +87,7 @@ def test_version_shows_version_and_exit0(capsys):
     assert __version__ in out
 
 
-# --- 副作用専用・TTY 限定・no-op(§2.7.1) --------------------------------
+# --- 副作用専用・TTY 限定・no-op --------------------------------
 def test_progress_noop_when_not_tty(tmp_path, capsys):
     # 非TTY(テスト捕捉)では進捗を1バイトも出さない(完全 no-op)。KEYS は警告を出さない入力なので
     # stderr は空でなければならない(マーカー不在だけでなく、消去シーケンス等の進捗由来バイトも出ない)。
