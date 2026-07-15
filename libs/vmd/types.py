@@ -1,4 +1,4 @@
-"""VMDデータモデル(vmd-io.md §2)。
+"""VMDデータモデル。
 
 数値・生バイトはファイル格納値をそのまま保持する。意味的解釈
 (距離の負値、セルフ影distanceのエンコード等)はここでは行わない。
@@ -12,12 +12,12 @@ MAGIC_V1_PREFIX = b"Vocaloid Motion Data file"
 
 
 class VmdFormatError(Exception):
-    """ファイル構造の異常(vmd-io.md §7)。"""
+    """ファイル構造の異常。"""
 
 
 @dataclass
 class VmdWarning:
-    """続行可能な事象の構造化報告(vmd.md §3)。"""
+    """続行可能な事象の構造化報告。"""
 
     code: str
     message: str
@@ -47,8 +47,7 @@ class BoneKey:
         """チャンネル 'X'/'Y'/'Z'/'R' → (x1, y1, x2, y2)。
 
         Byte[2], Byte[3](Z_x1, R_x1の位置)は物理演算フラグで上書きされる
-        ことがあるため、シフトコピー側(Byte[17], Byte[18])から復元する
-        (vmd-io.md §2.2)。
+        ことがあるため、シフトコピー側(Byte[17], Byte[18])から復元する。
         """
         b = self.interpolation
         return {
@@ -122,7 +121,7 @@ class VmdDocument:
     light: list[LightKey] = field(default_factory=list)
     self_shadow: list[SelfShadowKey] = field(default_factory=list)
     ik_property: list[IkPropertyKey] = field(default_factory=list)
-    # 旧版VMDで省略された後方セクションの記録(vmd-io.md §2.1)
+    # 旧版VMDで省略された後方セクションの記録
     has_self_shadow_section: bool = True
     has_ik_section: bool = True
 

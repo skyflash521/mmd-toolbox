@@ -1,9 +1,9 @@
-"""チャンネルの bezier モード採否誤差のテスト(vmd-reduce.md §5.1, §5.3)。
+"""チャンネルの bezier モード採否誤差のテスト。
 
 各チャンネルは mode="bezier" のとき、区間 [a,b] を1本のベジェ曲線で表したときの最大誤差を
 返す(mode="linear" は直線近似の誤差)。曲線的な動きでは bezier 誤差 << linear 誤差となり、
 1本の曲線で許容内に収まる区間は分割されずに済む。分割点(worst_frame)も bezier モードでは
-ベジェ誤差プロファイルから選ぶ(vmd-reduce.md §6: 採否と分割点を同じ正規化誤差基準で揃える)。
+ベジェ誤差プロファイルから選ぶ(採否と分割点を同じ正規化誤差基準で揃える)。
 """
 
 import math
@@ -72,7 +72,7 @@ def test_scalar_bezier_default_mode_is_linear():
 
 
 def test_scalar_bezier_endpoints_equal_uses_deviation():
-    # 端点同値で内部が動く場合(正規化不能)は、平坦曲線からの最大偏差を誤差とする(vmd-reduce.md §5.1)。
+    # 端点同値で内部が動く場合(正規化不能)は、平坦曲線からの最大偏差を誤差とする。
     vals = [0.0, 3.0, 5.0, 3.0, 0.0]
     bez = LinearScalarChannel(0, vals, tol=1.0, mode="bezier")
     err, _ = bez.residual(0, 4)

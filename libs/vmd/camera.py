@@ -1,7 +1,7 @@
-"""カメラモデルの座標変換(vmd-camera.md)。
+"""カメラモデルの座標変換。
 
 「カメラ中心 + 距離 + 角度」表現とワールド座標表現(カメラ位置 + 前方軸 + 上方向)の
-相互変換。回転規約は vmd-camera.md §2・§4 で確定:
+相互変換。回転規約:
   R = Ry(-ry) · Rx(-rx) · Rz(-rz)
   カメラワールド位置 = カメラ中心 + R · (0, 0, distance)
 """
@@ -39,12 +39,12 @@ def _rz(a: float) -> np.ndarray:
 
 
 def _rotation_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
-    """R = Ry(-ry) · Rx(-rx) · Rz(-rz)(vmd-camera.md §2)。"""
+    """R = Ry(-ry) · Rx(-rx) · Rz(-rz)。"""
     return _ry(-ry) @ _rx(-rx) @ _rz(-rz)
 
 
 def to_world(camera_key) -> CameraPose:
-    """カメラキー(中心・距離・角度)からワールド姿勢を算出する(§2)。"""
+    """カメラキー(中心・距離・角度)からワールド姿勢を算出する。"""
     R = _rotation_matrix(*camera_key.rotation)
     center = np.array(camera_key.position, dtype=float)
     forward = R @ np.array([0.0, 0.0, 1.0])
@@ -89,7 +89,7 @@ def _decompose(M: np.ndarray, prev_rotation):
 
 
 def from_world(pose: CameraPose, distance: float, prev_rotation=None) -> dict:
-    """ワールド姿勢から「カメラ中心・角度」を逆算する(§5)。
+    """ワールド姿勢から「カメラ中心・角度」を逆算する。
 
     戻り値: {"position": (cx, cy, cz), "rotation": (rx, ry, rz)}
     prev_rotation: 直前フレームの角度。指定時はオイラー角をこれに最も近い表現へ

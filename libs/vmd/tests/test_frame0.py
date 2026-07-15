@@ -1,4 +1,4 @@
-"""frame-0 中立キー補完のテスト(vmd-io.md §5)。
+"""frame-0 中立キー補完のテスト。
 
 出力VMDの編集・互換のため、名前付きセクション(morph/bone)の参照名へ frame=0 の中立キーを補う
 `ensure_frame0_neutral_keys` を検証する。既存の frame-0 は尊重し、無いものだけ中立値で挿入する。

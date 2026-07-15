@@ -1,7 +1,6 @@
-"""補間曲線評価・サンプリング(vmd-interp.md)。
+"""補間曲線評価・サンプリング。
 
-入力キー列はフレーム昇順前提(vmd-io.md §5 で正規化済みであること)。
-補間ブロックのバイト配置: docs/specs/vmd/VMD_file_format.md
+入力キー列はフレーム昇順前提(正規化済みであること)。
 """
 
 import math
@@ -39,7 +38,7 @@ def _bezier(s: float, c1: float, c2: float) -> float:
 def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
     """制御点 (x1,y1),(x2,y2)(0..127)・正規化時間 x∈[0,1] → 補間係数 y∈[0,1]。
 
-    X(s)=x をニュートン法で解き、非収束時は二分法にフォールバックする(§3)。
+    X(s)=x をニュートン法で解き、非収束時は二分法にフォールバックする。
     Xは単調増加前提(MMDの補間曲線は時間方向に単調)。
     """
     if x <= 0.0:
@@ -112,7 +111,7 @@ def _slerp(q0, q1, t: float):
 
 
 def _control_points(arriving_key, channel: str, is_camera: bool):
-    """区間の到達側(後側)キーから制御点 (x1,y1,x2,y2) を取り出す(§2)。"""
+    """区間の到達側(後側)キーから制御点 (x1,y1,x2,y2) を取り出す。"""
     if is_camera:
         off = CAMERA_CHANNEL_OFFSET[channel]
         ax, bx, ay, by = arriving_key.interpolation[off : off + 4]
@@ -121,7 +120,7 @@ def _control_points(arriving_key, channel: str, is_camera: bool):
 
 
 def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
-    """補間係数 y で区間 [k0, k1] のチャンネル値を算出する(§3)。"""
+    """補間係数 y で区間 [k0, k1] のチャンネル値を算出する。"""
     if channel in _POS_INDEX:
         i = _POS_INDEX[channel]
         return k0.position[i] + (k1.position[i] - k0.position[i]) * y
@@ -153,12 +152,12 @@ def _find_segment(keys, frame: int) -> int:
 
 
 def sample(keys, channel: str, frame: int):
-    """1チャンネルを1フレームで評価する(vmd-interp.md §3・§4)。"""
+    """1チャンネルを1フレームで評価する。"""
     if not keys:
         raise ValueError("キー列が空")
     is_camera = isinstance(keys[0], CameraKey)
 
-    # 範囲外・単一キーは端キーの値で一定(§3 境界)
+    # 範囲外・単一キーは端キーの値で一定(境界規約)
     if frame <= keys[0].frame or len(keys) == 1:
         k = keys[0]
         return _interp_value(k, k, channel, is_camera, 0.0)

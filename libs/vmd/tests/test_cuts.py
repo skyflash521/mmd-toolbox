@@ -1,4 +1,4 @@
-"""不連続検出・必須境界のテスト(vmd-reduce.md §7.2, §7.1, §7.2)。
+"""不連続検出・必須境界のテスト。
 
 cuts は隣接サンプル F-1 と F の差が閾値を超えたフレーム F を不連続境界として返す。
 camera は 中心位置(POS,ユークリッド)・回転(ROT,軸別最小角の最大,度)・距離(DIST,絶対値)、
@@ -53,7 +53,7 @@ def test_camera_rotation_jump_detected():
 
 
 def test_camera_rotation_wraparound_not_detected():
-    # 179度→-179度 は見かけ上 358度差だが実角度差は2度。最小角差で誤検出しない(vmd-reduce.md §7.1)。
+    # 179度→-179度 は見かけ上 358度差だが実角度差は2度。最小角差で誤検出しない。
     positions = [(0.0, 0.0, 0.0)] * 2
     rotations = [(0.0, math.radians(179), 0.0), (0.0, math.radians(-179), 0.0)]
     distances = [-30.0] * 2
@@ -93,7 +93,7 @@ def test_camera_cut_frame_offset_by_start():
 
 
 def test_camera_threshold_exact_value_no_cut():
-    # 「超えた場合」=厳密に超過(vmd-reduce.md §7.1)。ちょうど閾値ならカットしない。
+    # 「超えた場合」=厳密に超過。ちょうど閾値ならカットしない。
     positions = [(0.0, 0.0, 0.0), (5.0, 0.0, 0.0)]  # 距離ちょうど5.0
     rotations = [(0.0, 0.0, 0.0)] * 2
     distances = [-30.0] * 2

@@ -1,4 +1,4 @@
-"""回転チャンネル評価器のテスト(vmd-reduce.md §5.2, §8.2)。
+"""回転チャンネル評価器のテスト。
 
 - CameraRotationChannel: 3軸Euler(ラジアン)を軸ごとに線形補間。誤差はunwrap後の
   軸別角度誤差(度)の最大。360度境界のラップで誤検出しない。
@@ -82,7 +82,7 @@ def test_camera_rotation_max_over_axes():
 
 def test_camera_rotation_prefers_axis_reversal_over_max_error():
     # Y軸 0,30,10,15,90度(端点0→90)。最大誤差は単調区間の frame3(52.5度)、
-    # 軸別速度反転は frame1/frame2。vmd-reduce.md §6 で分割候補は反転中の誤差最大 frame2。
+    # 軸別速度反転は frame1/frame2。分割候補は反転中の誤差最大 frame2。
     ys = [0.0, 30.0, 10.0, 15.0, 90.0]
     eulers = [(0.0, math.radians(y), 0.0) for y in ys]
     ch = CameraRotationChannel(0, eulers, tol=0.05)
@@ -129,7 +129,7 @@ def test_bone_rotation_off_path_detected():
 
 def test_bone_rotation_sign_invariant():
     # q と -q は同じ回転。符号反転したサンプルでも角度距離(|dot|)は不変で誤差0。
-    # vmd-reduce.md §5.2 の符号不連続除去は角度距離評価では |dot| により自然に満たされる。
+    # 符号不連続除去は角度距離評価では |dot| により自然に満たされる。
     quats = [quat_z(i * 9.0) for i in range(11)]
     quats[10] = tuple(-c for c in quats[10])  # 終点を符号反転(同じ回転)
     quats[3] = tuple(-c for c in quats[3])  # 内部サンプルも符号反転
@@ -140,7 +140,7 @@ def test_bone_rotation_sign_invariant():
 
 def test_bone_rotation_prefers_direction_reversal_over_max_error():
     # Z軸が 0,30,10,15,90度(端点0→90)と切り返す。最大誤差は単調区間の frame3、
-    # 回転方向反転(軸の符号反転)は frame1/frame2。vmd-reduce.md §6 で分割候補は反転中の誤差最大 frame2。
+    # 回転方向反転(軸の符号反転)は frame1/frame2。分割候補は反転中の誤差最大 frame2。
     degs = [0.0, 30.0, 10.0, 15.0, 90.0]
     quats = [quat_z(d) for d in degs]
     ch = BoneRotationChannel(0, quats, tol=0.1)
@@ -162,7 +162,7 @@ def test_bone_rotation_normalized_and_zero_tol():
 
 
 def test_bone_rotation_zero_tol_zero_error():
-    # 軌道上(誤差0)で tol=0 なら (0.0, None)(vmd-reduce.md §6)。
+    # 軌道上(誤差0)で tol=0 なら (0.0, None)。
     quats = [quat_z(i * 9.0) for i in range(11)]
     ch = BoneRotationChannel(0, quats, tol=0.0)
     nerr, frame = ch.normalized(0, 10)

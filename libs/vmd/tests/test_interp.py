@@ -1,9 +1,9 @@
-"""vmd-interp のテスト(vmd-interp.md §6 テスト要件1〜6)。
+"""vmd-interp のテスト。
 
-要件6(独立実装との数値クロスバリデーション)のため、本ファイル末尾近くに
-仕様(§2)から独立に書いた素朴なベジェ評価器 _ref_factor を置く。これは
+独立実装との数値クロスバリデーションのため、本ファイル末尾近くに
+実装から独立に書いた素朴なベジェ評価器 _ref_factor を置く。これは
 二分法のみで X(s)=x を解き、ベルンスタイン基底で Y(s) を直接計算する——
-読めば正しさが確認できる「テストの底」として機能する(tests/data/README.md の方針)。
+読めば正しさが確認できる「テストの底」として機能する。
 """
 
 import math
@@ -253,7 +253,7 @@ class TestOutOfRange:
 
 
 # ---------------------------------------------------------------------------
-# ボーン回転スラープ(§3。カメラ回転=オイラー線形 と異なる値パス)
+# ボーン回転スラープ(カメラ回転=オイラー線形 と異なる値パス)
 # ---------------------------------------------------------------------------
 
 
@@ -323,7 +323,7 @@ def _cam_cp(interp_bytes: bytes, channel: str):
 class TestCrossValidationRealFile:
     def test_camera_basic_all_channels(self, camera_basic_bytes):
         doc, _ = read(camera_basic_bytes)
-        # sample() はフレーム昇順を前提とする(vmd-interp.md §4)。
+        # sample() はフレーム昇順を前提とする。
         # 実ファイルのカメラキーはファイル内で順不同なので正規化してから渡す。
         doc, _ = normalize(doc, ["camera"])
         keys = doc.camera

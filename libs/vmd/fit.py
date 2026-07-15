@@ -1,4 +1,4 @@
-"""補間曲線フィット・誤差評価(vmd-reduce.md §5.1, §8.2)。
+"""補間曲線フィット・誤差評価。
 
 本モジュールはチャンネル単位の誤差評価を担う。reduce.py は分割戦略に専念し、
 各チャンネルの「区間 [a,b] を表現したときの正規化誤差と最大誤差フレーム」を
@@ -6,10 +6,10 @@
 
 スカラー(線形)評価器・ベジェ曲線フィット・回転評価器を提供する。
 
-高速化の注意: ベジェフィットは3ツール共有の疎化エンジンで疎化時間の支配項。性能特性と
-「試して棄却した最適化」は vmd.md §6 を正とする。曲線評価(`_bezier_y_at`/`residual`)の
-per-sample numpy ベクトル化は棄却済み(小区間で固定オーバーヘッドが上回り遅化。vmd.md §6.2)。
-高速化するなら評価回数側(`least_squares` の呼び出し数・反復)を削る(vmd.md §6.3)。
+高速化の注意: ベジェフィットは3ツール共有の疎化エンジンで疎化時間の支配項。曲線評価
+(`_bezier_y_at`/`residual`)の per-sample numpy ベクトル化は棄却済み(小区間で固定
+オーバーヘッドが上回り遅化)。高速化するなら評価回数側(`least_squares` の呼び出し数・
+反復)を削る。
 """
 
 import math
@@ -22,7 +22,7 @@ from vmd import interp
 # 実質ゼロ誤差の閾値(回転は unwrap/slerp の浮動小数誤差で厳密0にならないため)。
 _ZERO_EPS = 1e-9
 
-# 定数(無変化)区間判定 is_constant のしきい値(vmd-reduce.md §1)。種別ごとに単位が異なる
+# 定数(無変化)区間判定 is_constant のしきい値。種別ごとに単位が異なる
 # (位置/距離/FOV は各値の単位、カメラ回転は rad、ボーン回転は度)ので種別ごとに持つ。
 # exact-constant(do-nothing・厳密静止区間)を捕らえる量子化下限相当の小さい値から始める。
 _CONST_EPS_SCALAR = 1e-9  # LinearScalarChannel(距離など、値の単位)
@@ -33,7 +33,7 @@ _CONST_EPS_DEG = 1e-9     # BoneRotationChannel(度)
 
 
 def _normalize(err, frame, tol):
-    """誤差・フレームを正規化誤差へ変換する(vmd-reduce.md §6)。
+    """誤差・フレームを正規化誤差へ変換する。
 
     許容0は誤差0で (0.0, None)、誤差が正で (inf, frame)。
     """
@@ -43,12 +43,12 @@ def _normalize(err, frame, tol):
 
 
 def _round_half_up(x):
-    """四捨五入(0.5切り上げ)。視野角は非負なので floor(x+0.5) で表せる(vmd-reduce.md §9)。"""
+    """四捨五入(0.5切り上げ)。視野角は非負なので floor(x+0.5) で表せる。"""
     return math.floor(x + 0.5)
 
 
 def _select_worst(errs, is_reversal):
-    """誤差辞書から分割候補フレームを選ぶ(vmd-reduce.md §6)。
+    """誤差辞書から分割候補フレームを選ぶ。
 
     速度符号反転(局所極値)が区間内にあればその中で誤差最大、無ければ全内部の誤差最大。
     同点は先頭(小さいフレーム)。errs が空または最大が実質0なら None を返す。
@@ -64,12 +64,12 @@ def _select_worst(errs, is_reversal):
 
 
 def _axis_curve(a0, a1, a, b, sample_fn, early_exit_err=None, category=None, skip_fastpath=False):
-    """1軸の量子化ベジェ制御点 (x1,y1,x2,y2) を返す(vmd-reduce.md §5.3)。
+    """1軸の量子化ベジェ制御点 (x1,y1,x2,y2) を返す。
 
     端点同値(正規化不能)や内部点なしは線形制御点。sample_fn(frame) は当該軸のサンプル値。
     採否(_bezier_axis_pred)と出力(curve)が同一の制御点を使うよう、両者はこれを共有する。
     early_exit_err(正規化y単位)は fit_bezier_curve の早期終了閾値へ渡す。
-    skip_fastpath は fit_bezier_curve へ素通しする(vmd.md §6.3 ファストパスのオプトアウト)。
+    skip_fastpath は fit_bezier_curve へ素通しする(ファストパスのオプトアウト)。
     """
     span = b - a
     internal = range(a + 1, b)
@@ -102,11 +102,11 @@ def _bezier_axis_pred(a0, a1, a, b, sample_fn, cp=None):
 
 
 class LinearScalarChannel:
-    """1スカラーチャンネルを評価する(vmd-reduce.md §5.1, §8.2)。
+    """1スカラーチャンネルを評価する。
 
     values[i] はフレーム frame_start + i のサンプル値。mode="linear" は両端を結ぶ直線で、
     mode="bezier" は1本のベジェ曲線で内部フレームを予測し、元サンプルとの最大絶対誤差を測る。
-    分割候補フレームはvmd-reduce.md §6(速度符号反転優先)。
+    分割候補フレームは速度符号反転(局所極値)を優先して選ぶ。
     """
 
     def __init__(self, frame_start, values, tol, mode="linear", force_bezier=False):
@@ -114,7 +114,7 @@ class LinearScalarChannel:
         self.values = list(values)
         self.tol = float(tol)
         self.mode = mode
-        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(vmd.md §6.3)
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制
         self._cp_cache = {}  # (a, b) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _value(self, frame):
@@ -161,7 +161,7 @@ class LinearScalarChannel:
         return d_prev * d_next < 0.0
 
     def normalized(self, a, b):
-        """正規化誤差(誤差/許容)と最大誤差フレームを返す(vmd-reduce.md §6)。
+        """正規化誤差(誤差/許容)と最大誤差フレームを返す。
 
         許容0のチャンネルは、誤差0なら (0.0, None)、誤差が正なら (inf, frame)。
         """
@@ -169,13 +169,13 @@ class LinearScalarChannel:
         return _normalize(err, frame, self.tol)
 
     def curve(self, a, b):
-        """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す(vmd-reduce.md §5.3)。"""
+        """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す。"""
         if self.mode != "bezier":
             return _BEZIER_LINEAR_CP
         return self._axis_cp(a, b)
 
     def is_constant(self, a, b):
-        """区間 [a,b] のサンプル変動幅(max-min)がしきい値以下なら定数とみなす(vmd-reduce.md §1)。
+        """区間 [a,b] のサンプル変動幅(max-min)がしきい値以下なら定数とみなす。
 
         最初の逸脱で早期に False を返す(無駄走査の抑制)。
         """
@@ -192,10 +192,10 @@ class LinearScalarChannel:
 
 
 class EuclideanVectorChannel:
-    """カメラ中心位置などのベクトルチャンネル(vmd-reduce.md §1, §8.2)。
+    """カメラ中心位置などのベクトルチャンネル。
 
     各軸を線形補間し、採否・分割はサンプルベクトルとのユークリッド距離で測る。
-    分割候補は最大ユークリッド誤差フレーム(vmd-reduce.md §4 の基本)。
+    分割候補は最大ユークリッド誤差フレーム。
     """
 
     def __init__(self, frame_start, vectors, tol, mode="linear", force_bezier=False):
@@ -203,7 +203,7 @@ class EuclideanVectorChannel:
         self.vectors = [tuple(float(c) for c in v) for v in vectors]
         self.tol = float(tol)
         self.mode = mode
-        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(vmd.md §6.3)
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制
         self._cp_cache = {}  # (a, b, axis) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _vec(self, frame):
@@ -235,7 +235,7 @@ class EuclideanVectorChannel:
         if not internal:
             return (0.0, None)
         if self.mode == "bezier":
-            # 各軸を個別にベジェ近似し(vmd-reduce.md §1)、採否はユークリッド距離(vmd-reduce.md §8.2)。
+            # 各軸を個別にベジェ近似し、採否はユークリッド距離で測る。
             axis_pred = [
                 _bezier_axis_pred(
                     va[i], vb[i], a, b, lambda f, i=i: self._vec(f)[i], cp=self._axis_cp(a, b, i)
@@ -268,13 +268,13 @@ class EuclideanVectorChannel:
         return _normalize(err, frame, self.tol)
 
     def curve(self, a, b):
-        """各軸の出力用制御点を (cp_x, cp_y, cp_z) で返す(vmd-reduce.md §1, §5.3)。"""
+        """各軸の出力用制御点を (cp_x, cp_y, cp_z) で返す。"""
         if self.mode != "bezier":
             return (_BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP, _BEZIER_LINEAR_CP)
         return tuple(self._axis_cp(a, b, i) for i in range(3))
 
     def is_constant(self, a, b):
-        """各成分 X/Y/Z の区間サンプル変動幅(max-min)がいずれもしきい値以下なら定数(vmd-reduce.md §1)。
+        """各成分 X/Y/Z の区間サンプル変動幅(max-min)がいずれもしきい値以下なら定数。
 
         いずれかの軸が最初に逸脱した時点で早期に False を返す。
         """
@@ -294,11 +294,11 @@ class EuclideanVectorChannel:
 
 
 class FovChannel:
-    """視野角チャンネル(vmd-reduce.md §1, §8.2)。
+    """視野角チャンネル。
 
     出力は整数度保存のため、線形補間値を四捨五入した整数で再評価し、元サンプルとの
-    差(丸めを含む総誤差)を測る。許容は vmd-reduce.md §2 で0.5度以上に制限される。
-    分割候補は速度符号反転(局所極値)を優先し、無ければ最大誤差フレーム(vmd-reduce.md §6)。
+    差(丸めを含む総誤差)を測る。許容は0.5度以上に制限される。
+    分割候補は速度符号反転(局所極値)を優先し、無ければ最大誤差フレーム。
     """
 
     def __init__(self, frame_start, values, tol, mode="linear", force_bezier=False):
@@ -306,7 +306,7 @@ class FovChannel:
         self.values = [float(v) for v in values]
         self.tol = float(tol)
         self.mode = mode
-        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(vmd.md §6.3)
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制
         self._cp_cache = {}  # (a, b) -> 量子化済みベジェ制御点(区間フィットのメモ化)
 
     def _value(self, frame):
@@ -339,7 +339,7 @@ class FovChannel:
         else:
             va, vb, span = self._value(a), self._value(b), b - a
             pred = {f: va + (vb - va) * (f - a) / span for f in range(a + 1, b)}
-        # 出力は整数度保存。丸めを含む総誤差で測る(vmd-reduce.md §8.2)。
+        # 出力は整数度保存。丸めを含む総誤差で測る。
         errs = {f: abs(_round_half_up(pred[f]) - self._value(f)) for f in pred}
         if not errs:
             return (0.0, None)
@@ -358,13 +358,13 @@ class FovChannel:
         return _normalize(err, frame, self.tol)
 
     def curve(self, a, b):
-        """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す(vmd-reduce.md §5.3)。"""
+        """区間 [a,b] の出力用制御点 (x1,y1,x2,y2) を返す。"""
         if self.mode != "bezier":
             return _BEZIER_LINEAR_CP
         return self._axis_cp(a, b)
 
     def is_constant(self, a, b):
-        """生サンプルの変動幅(max-min)がしきい値以下なら定数(vmd-reduce.md §1)。
+        """生サンプルの変動幅(max-min)がしきい値以下なら定数。
 
         出力時の整数丸めは判定に使わない(丸めで畳まれる微小変動も非定数として残す)。
         最初の逸脱で早期に False を返す。
@@ -439,10 +439,10 @@ def _quat_angle_deg(a, b):
 
 
 class CameraRotationChannel:
-    """カメラ回転(3軸Euler共通曲線、vmd-reduce.md §5.2, §8.2)。
+    """カメラ回転(3軸Euler共通曲線)。
 
     各軸を線形補間で評価し、誤差は unwrap 後の軸別角度誤差(度)の最大。360度境界の
-    ラップは __init__ の軸別 unwrap で除去する。分割候補は軸別速度反転を優先(vmd-reduce.md §6)。
+    ラップは __init__ の軸別 unwrap で除去する。分割候補は軸別速度反転を優先。
     """
 
     def __init__(self, frame_start, eulers, tol, mode="linear", force_bezier=False):
@@ -451,7 +451,7 @@ class CameraRotationChannel:
         self.eulers = np.column_stack([np.unwrap(arr[:, i]) for i in range(3)])
         self.tol = float(tol)
         self.mode = mode
-        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制(vmd.md §6.3)
+        self._force_bezier = force_bezier  # True で線形ファストパスを切り実フィットを強制
         self._cp_cache = {}  # (a, b) -> 共通係数曲線の量子化制御点(区間フィットのメモ化)
 
     def _euler(self, frame):
@@ -463,7 +463,7 @@ class CameraRotationChannel:
         span = b - a
         internal = range(a + 1, b)
         if self.mode == "bezier":
-            # 3軸が1本の共通係数曲線を共有する(vmd-reduce.md §5.2)。出力と同一の量子化制御点
+            # 3軸が1本の共通係数曲線を共有する。出力と同一の量子化制御点
             # (self.curve)で各軸予測 ea[i]+(eb[i]-ea[i])*y を再評価し誤差を測る。
             cp = self.curve(a, b)
             errs = {}
@@ -510,7 +510,7 @@ class CameraRotationChannel:
         return _normalize(err, frame, self.tol)
 
     def curve(self, a, b):
-        """3軸共通の出力用制御点 (x1,y1,x2,y2) を返す(vmd-reduce.md §5.2, §5.3)。
+        """3軸共通の出力用制御点 (x1,y1,x2,y2) を返す。
 
         各軸予測 ea[i]+(eb[i]-ea[i])*y(x) の軸別角度誤差(度)の二乗和を最小化して
         共通係数曲線 y(x) をフィットする。内部点なしは線形。
@@ -546,7 +546,7 @@ class CameraRotationChannel:
         return cp
 
     def is_constant(self, a, b):
-        """unwrap 済み Euler の各軸変動幅(max-min)がいずれもしきい値(rad)以下なら定数(vmd-reduce.md §1)。
+        """unwrap 済み Euler の各軸変動幅(max-min)がいずれもしきい値(rad)以下なら定数。
 
         __init__ で軸別 unwrap 済みのため、±π をまたぐ定値オリエンテーションも変動幅0に畳まれる。
         いずれかの軸が最初に逸脱した時点で早期に False を返す。
@@ -567,11 +567,11 @@ class CameraRotationChannel:
 
 
 class BoneRotationChannel:
-    """ボーン回転(quaternion slerp、vmd-reduce.md §5.2, §8.2)。
+    """ボーン回転(quaternion slerp)。
 
     端点 quaternion の slerp(線形係数)で予測し、サンプルとの角度距離(度)で誤差を測る。
     __init__ で正規化と同一半球整列を行う。分割候補は回転方向反転(相対回転軸の符号
-    反転)を優先する(vmd-reduce.md §6)。
+    反転)を優先する。
     """
 
     def __init__(self, frame_start, quats, tol, mode="linear"):
@@ -596,7 +596,7 @@ class BoneRotationChannel:
         span = b - a
         internal = range(a + 1, b)
         if self.mode == "bezier":
-            # slerp 係数を1本のベジェ曲線で表す(vmd-reduce.md §5.2)。出力と同一の量子化制御点
+            # slerp 係数を1本のベジェ曲線で表す。出力と同一の量子化制御点
             # (self.curve)で予測 slerp(q0,q1,y) を再評価し角度距離(度)で誤差を測る。
             cp = self.curve(a, b)
             errs = {
@@ -639,7 +639,7 @@ class BoneRotationChannel:
         return _normalize(err, frame, self.tol)
 
     def curve(self, a, b):
-        """slerp 係数の出力用制御点 (x1,y1,x2,y2) を返す(vmd-reduce.md §5.2, §5.3)。
+        """slerp 係数の出力用制御点 (x1,y1,x2,y2) を返す。
 
         予測 slerp(q0,q1,y(x)) とサンプルの角度距離(度)の二乗和を最小化して係数曲線
         y(x) をフィットする。内部点なしは線形。
@@ -671,7 +671,7 @@ class BoneRotationChannel:
         return cp
 
     def is_constant(self, a, b):
-        """各サンプルと先頭 quaternion の角度距離(度)の最大がしきい値以下なら定数(vmd-reduce.md §1)。
+        """各サンプルと先頭 quaternion の角度距離(度)の最大がしきい値以下なら定数。
 
         __init__ で正規化・同一半球整列済みのため q と -q(同一回転)は角度0扱い。
         最初の逸脱で早期に False を返す。
@@ -684,11 +684,11 @@ class BoneRotationChannel:
 
 
 # ---------------------------------------------------------------------------
-# スカラー ベジェ曲線フィット(vmd-reduce.md §5.1, §5.3)
+# スカラー ベジェ曲線フィット
 # ---------------------------------------------------------------------------
 
-# 制御点探索の初期値(正規化 [0,1] の (x1,y1,x2,y2))。vmd-reduce.md §5.3 の固定順:
-# 線形 / ease-in / ease-out / ease-in-out。先勝ち選択のため順序を仕様に合わせる。
+# 制御点探索の初期値(正規化 [0,1] の (x1,y1,x2,y2))。固定順:
+# 線形 / ease-in / ease-out / ease-in-out。先勝ち選択のためこの順序を保つ。
 _BEZIER_INITS = (
     (20.0 / 127, 20.0 / 127, 107.0 / 127, 107.0 / 127),  # 線形
     (0.42, 0.0, 1.0, 1.0),   # ease-in
@@ -699,7 +699,7 @@ _BEZIER_INITS = (
 _BEZIER_INITS_LARGE = (_BEZIER_INITS[0], _BEZIER_INITS[3])
 _BEZIER_LINEAR_CP = (20, 20, 107, 107)
 
-# cheap accept(vmd-reduce.md §5.3): least_squares の前に試す固定 ease 制御点(_BEZIER_INITS の ease 3種=
+# cheap accept: least_squares の前に試す固定 ease 制御点(_BEZIER_INITS の ease 3種=
 # ease-in/ease-out/ease-in-out を 0..127 量子化したもの)。線形は線形ファストパスが担うので含めない。
 # 候補を量子化後誤差で評価し許容内に収まれば least_squares を呼ばず即採用する。
 _CHEAP_EASE_CPS = ((53, 0, 127, 127), (0, 0, 74, 127), (53, 0, 74, 127))
@@ -745,7 +745,7 @@ def read_fit_counters_by_category():
     return {cat: dict(counts) for cat, counts in _FIT_COUNTERS_BY_CAT.items()}
 
 
-# least_squares の収束許容(vmd.md §6.3)。采否は量子化後誤差で判定するので scipy 既定精度(~1e-8)まで
+# least_squares の収束許容。采否は量子化後誤差で判定するので scipy 既定精度(~1e-8)まで
 # 詰める必要はない。緩めると反復が減って速くなるが、緩めすぎるとフィット精度が必要精度に届かず
 # 分割が増えて圧縮率が落ちる。緩和の速度効果は「区間のサンプル数 × 反復」に比例するので、サンプル数が
 # 多い高コスト区間だけ緩める(小区間は緩めても速度効果がほぼ無く、圧縮劣化だけ招くので締めたまま)。
@@ -754,7 +754,7 @@ _LSQ_LOOSEN_MIN_SAMPLES = 30  # この数以上のサンプルを持つ区間だ
 
 
 def _lsq_kwargs(n_samples):
-    """サンプル数に応じた least_squares 収束許容(ftol/xtol/gtol)を返す(vmd.md §6.3)。
+    """サンプル数に応じた least_squares 収束許容(ftol/xtol/gtol)を返す。
 
     緩和の速度効果はサンプル数に比例する。少数サンプルの区間を緩めても効果は乏しく圧縮劣化だけ
     招くため、サンプル数が閾値以上の高コスト区間に限って緩める。閾値未満は既定の高精度のまま。
@@ -765,7 +765,7 @@ def _lsq_kwargs(n_samples):
 
 
 def _bezier_inits(n_samples):
-    """サンプル数に応じて試す初期値集合を返す(vmd.md §6.3)。
+    """サンプル数に応じて試す初期値集合を返す。
 
     初期値数を減らすと least_squares 呼び出しが減って速くなるが、当たる曲線形が減るので
     フィットが悪化し分割が増えうる。削減の速度効果はサンプル数に比例するため、閾値以上の高コスト
@@ -823,20 +823,20 @@ def _bezier_y_at(px1, py1, px2, py2, x):
 
 
 def _quantize_solution(sol_x):
-    """最適化解 (x1,t,y1,y2) を 0..127 整数の制御点 (x1,y1,x2,y2) へ量子化する(vmd-reduce.md §5.3)。"""
+    """最適化解 (x1,t,y1,y2) を 0..127 整数の制御点 (x1,y1,x2,y2) へ量子化する。"""
     x1, t, y1, y2 = sol_x
     x2 = x1 + (1.0 - x1) * t
     x1q = _quantize_cp(x1)
     x2q = _quantize_cp(x2)
     y1q = _quantize_cp(y1)
     y2q = _quantize_cp(y2)
-    if x1q > x2q:  # 量子化後の X 単調を担保(vmd-reduce.md §5.3)
+    if x1q > x2q:  # 量子化後の X 単調を担保
         x2q = x1q
     return (x1q, y1q, x2q, y2q)
 
 
 def fit_bezier_curve(xs, ys, early_exit_err=None, category=None, skip_fastpath=False):
-    """正規化サンプル (xs, ys) に VMD補間曲線をフィットする(vmd-reduce.md §5.1, §5.3)。
+    """正規化サンプル (xs, ys) に VMD補間曲線をフィットする。
 
     制御点 (x1,y1,x2,y2) を 0..127 整数に量子化して返し、最大絶対誤差は量子化後の曲線を
     interp._solve_factor で再評価して測る(正規化y単位)。内部点が無ければ線形・誤差0。
@@ -850,7 +850,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None, skip_fastpath=F
     None なら早期終了せず全初期値を試す。
 
     skip_fastpath=True のとき、線形ファストパスと cheap accept を丸ごとスキップし least_squares
-    へ直行する(vmd.md §6.3)。ファストパスは採否・キー数は不変だが許容内の区間の出力曲線を線形/固定 ease
+    へ直行する。ファストパスは採否・キー数は不変だが許容内の区間の出力曲線を線形/固定 ease
     へ寄せるため、曲線形状の忠実度が要る呼び出し側(滑らかさ目的)向けのオプトアウト。across-init
     早期終了(early_exit_err によるループ内打ち切り)は skip_fastpath でも温存する。既定 False。
     """
@@ -868,7 +868,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None, skip_fastpath=F
     def quantized_err(cp):
         return max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
 
-    # 線形ファストパス(vmd.md §6.3): 線形制御点で許容内に収まる区間は least_squares を呼ばず即採用する。
+    # 線形ファストパス: 線形制御点で許容内に収まる区間は least_squares を呼ばず即採用する。
     # 采否は量子化後誤差 <= 許容 の二値なので区間境界(キー数)は変わらず、最適化呼び出しを丸ごと
     # 省ける。閾値(early_exit_err)が無い全探索では行わない。skip_fastpath で曲線形状の忠実度を
     # 優先する呼び出し側はこのブロックを切る。
@@ -911,7 +911,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None, skip_fastpath=F
 
 
 def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None, skip_fastpath=False):
-    """共通の係数曲線 y(x)∈[0,1] をフィットし量子化制御点を返す(vmd-reduce.md §5.2)。
+    """共通の係数曲線 y(x)∈[0,1] をフィットし量子化制御点を返す。
 
     回転チャンネル用。fit_bezier_curve がスカラー (xs,ys) を直接合わせるのに対し、
     こちらは「曲線係数 y を介した誤差」を resid_at(coeff_fn) で受け取り最小化する
@@ -925,7 +925,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None, skip_fast
     None なら早期終了せず全初期値を試す。
 
     skip_fastpath=True のとき、線形ファストパスと cheap accept を丸ごとスキップし least_squares
-    へ直行する(vmd.md §6.3。fit_bezier_curve と同じオプトアウト)。across-init 早期終了は温存。既定 False。
+    へ直行する(fit_bezier_curve と同じオプトアウト)。across-init 早期終了は温存。既定 False。
     """
     if not xs:
         return _BEZIER_LINEAR_CP
@@ -940,7 +940,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None, skip_fast
         res = resid_at(lambda x: interp._solve_factor(*cp, x))
         return max((abs(r) for r in res), default=0.0)
 
-    # 線形ファストパス(vmd.md §6.3): 線形制御点で許容内に収まれば least_squares を呼ばず即採用する。
+    # 線形ファストパス: 線形制御点で許容内に収まれば least_squares を呼ばず即採用する。
     # 閾値(early_exit_err)が無い全探索では行わない。skip_fastpath で曲線形状の忠実度を優先する
     # 呼び出し側はこのブロックを切る。
     if early_exit_err is not None and not skip_fastpath:
