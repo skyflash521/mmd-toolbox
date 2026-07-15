@@ -1,7 +1,4 @@
-"""vpr 読み込み(vpr.md §3)。
-
-形式レイアウトの正: docs/specs/vpr/VPR_file_format.md
-"""
+"""vpr 読み込み。"""
 
 import io
 import json
@@ -26,7 +23,7 @@ _SINGING_TRACK_TYPE = 2
 
 
 def _require(obj, key, path, type_=None):
-    """obj[key] を返す。欠落・型不一致は構造異常 VprFormatError(§3.1)。
+    """obj[key] を返す。欠落・型不一致は構造異常 VprFormatError。
 
     type_ を与えると値の型を検証する。原因特定のため path・key・value を付与する。
     """
@@ -42,12 +39,12 @@ def _require(obj, key, path, type_=None):
 
 
 def _optional(obj, key, default):
-    """obj[key] を返す。obj が辞書でない/キーが無ければ default(許容入力。§3.1)。"""
+    """obj[key] を返す。obj が辞書でない/キーが無ければ default(許容入力)。"""
     return obj.get(key, default) if isinstance(obj, dict) else default
 
 
 def _optional_list(obj, key, path):
-    """obj[key] を返す。キーが無ければ []。値が配列でなければ VprFormatError(§3.1)。"""
+    """obj[key] を返す。キーが無ければ []。値が配列でなければ VprFormatError。"""
     if not isinstance(obj, dict) or key not in obj:
         return []
     value = obj[key]
@@ -191,7 +188,7 @@ def _tracks(raw_tracks) -> list[Track]:
 
 
 def _overlap_warnings(tracks) -> list[VprWarning]:
-    """同一パート内で発音区間が重なる音符ペアを警告する(単音想定違反。vpr.md §3.2)。
+    """同一パート内で発音区間が重なる音符ペアを警告する(単音想定違反)。
 
     notes は start_tick 昇順。各音符について、まだ終端に達していない先行音符(active)を残し、その
     全てと重なるとみなして音符ペアごとに1件報告する。半開区間 [start, start+duration) なので終端 ==
@@ -220,7 +217,7 @@ def _overlap_warnings(tracks) -> list[VprWarning]:
 
 
 def read(src) -> tuple[VprProject, list[VprWarning]]:
-    """vpr を読み、データモデル(vpr.md §2)と警告を返す。"""
+    """vpr を読み、データモデルと警告を返す。"""
     sequence = _load_sequence(src)
     master = _require(sequence, "masterTrack", "", dict)
     raw_tracks = _require(sequence, "tracks", "", list)

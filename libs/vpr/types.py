@@ -1,4 +1,4 @@
-"""vpr データモデル(vpr.md §2)。
+"""vpr データモデル。
 
 VOCALOID プロジェクト(vpr)の音楽情報を、特定の CLI に依らない正規化モデルとして公開する。
 時刻は vpr ネイティブの tick(整数)で保持し、音符の時刻はプロジェクト絶対 tick で正規化する。
@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 
 class VprFormatError(Exception):
-    """vpr の構造異常(vpr.md §3.1)。
+    """vpr の構造異常。
 
     原因特定のため path(ZIP エントリ名または JSON パス)・key(欠落/型不一致の対象キー)・
     value(問題になった実値)を持つ。
@@ -26,7 +26,7 @@ class VprFormatError(Exception):
 
 @dataclass
 class VprWarning:
-    """続行可能な事象の構造化報告(vpr.md §3.2)。
+    """続行可能な事象の構造化報告。
 
     ロケータ(添字・tick)は公開データモデルの階層に対応する。VMD 固有の section/frame は持たない。
     """
@@ -66,7 +66,7 @@ class ControllerCurve:
 
     vpr の各パートが持つ連続パラメータ自動化を生値のまま保持する。どれが声量かの選別・値域の正規化・
     開き量への写像は呼び出し側(各CLI)の責務で、vpr は形式の事実(名前と (tick, 生値) 列)だけ
-    公開する(vpr.md §2)。
+    公開する。
     """
 
     name: str  # vpr の controller 名(例 "dynamics"・"s5Expression")
@@ -108,5 +108,5 @@ class VprProject:
     tempos: list[TempoEvent] = field(default_factory=list)
     time_signatures: list[TimeSignature] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
-    # 未解釈データのロスレス保持。read は sequence.json 全体を保持し、手組み時は None(vpr.md §3.3)。
+    # 未解釈データのロスレス保持。read は sequence.json 全体を保持し、手組み時は None。
     raw_sequence: dict | None = None

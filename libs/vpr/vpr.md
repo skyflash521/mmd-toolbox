@@ -75,7 +75,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 
 ### 2.1 公開する具体型と関数
 
-型は Python の dataclass、公開関数はモジュール関数とし、`vmd`(`types.py` / `io.py`)の作法に倣う。
+型は Python の dataclass、公開関数はモジュール関数とする。
 時刻は vpr ネイティブの **tick(整数)** で保持し、秒/フレーム/拍への変換は持たない(§6)。
 
 - `VprProject`: `resolution: int`(tick/四分音符)、`tempos: list[TempoEvent]`、

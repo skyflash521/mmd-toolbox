@@ -1,4 +1,4 @@
-"""vpr read のテスト(vpr.md §3、docs/specs/vpr/VPR_file_format.md)。
+"""vpr read のテスト。
 
 テスト用 vpr は最小の sequence.json を zip 化してテスト内で合成する(実素材に依存しない)。
 """
@@ -174,7 +174,7 @@ def test_read_splits_multi_token_phoneme():
 def test_read_notes_sorted_by_start_tick():
     from vpr import read
 
-    # 入力順が start_tick 昇順でなくても、モデルは昇順で返す(vpr.md §2.1)。
+    # 入力順が start_tick 昇順でなくても、モデルは昇順で返す。
     notes = [
         _note(pos=960, duration=240, number=62, lyric="そ", phoneme="s o", velocity=64),
         _note(pos=480, duration=240, number=60, lyric="ら", phoneme="r a", velocity=64),
@@ -232,7 +232,7 @@ def test_read_accepts_bytes_str_and_path(tmp_path):
     assert from_bytes.resolution == from_path.resolution == from_str.resolution == 480
 
 
-# --- 構造異常(VprFormatError)と許容入力(vpr.md §3.1) ---
+# --- 構造異常(VprFormatError)と許容入力 ---
 
 
 def _zip_with(entries: dict) -> bytes:
@@ -268,7 +268,7 @@ def test_read_raises_format_error_on_invalid_json():
 def test_read_raises_format_error_on_invalid_utf8_sequence_json():
     from vpr import VprFormatError, read
 
-    # sequence.json が UTF-8 として復号できない(vpr.md §3.1)。
+    # sequence.json が UTF-8 として復号できない。
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("Project/sequence.json", b"\x80\x81\x82\xff")
@@ -297,7 +297,7 @@ def test_read_raises_format_error_on_missing_tracks():
 def test_read_raises_format_error_on_malformed_tempo_event():
     from vpr import VprFormatError, read
 
-    # TempoEvent を構築するための必須キー(value)が無い(vpr.md §3.1)。
+    # TempoEvent を構築するための必須キー(value)が無い。
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -306,7 +306,7 @@ def test_read_raises_format_error_on_malformed_tempo_event():
 def test_read_raises_format_error_on_tempo_event_type_error():
     from vpr import VprFormatError, read
 
-    # value が数値でない(bpm 構築で型不正。vpr.md §3.1)。
+    # value が数値でない(bpm 構築で型不正)。
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0, "value": "fast"}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -315,7 +315,7 @@ def test_read_raises_format_error_on_tempo_event_type_error():
 def test_read_raises_format_error_on_malformed_timesig_event():
     from vpr import VprFormatError, read
 
-    # TimeSignature を構築するための必須キー(numer)が無い(vpr.md §3.1)。
+    # TimeSignature を構築するための必須キー(numer)が無い。
     seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "denom": 4}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -324,7 +324,7 @@ def test_read_raises_format_error_on_malformed_timesig_event():
 def test_read_raises_format_error_on_timesig_event_type_error():
     from vpr import VprFormatError, read
 
-    # denom が数値でない(小節長 tick 構築で型不正。vpr.md §3.1)。
+    # denom が数値でない(小節長 tick 構築で型不正)。
     seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "numer": 4, "denom": "x"}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -346,7 +346,7 @@ def test_read_format_error_carries_locator():
     del note["number"]
     with pytest.raises(VprFormatError) as exc:
         read(_make_vpr(_sequence([_singing_track([note])])))
-    # 原因特定のためのロケータ(JSON パスと欠落キー)を持つ(vpr.md §3.1)。
+    # 原因特定のためのロケータ(JSON パスと欠落キー)を持つ。
     assert exc.value.path is not None
     assert exc.value.key == "number"
 
@@ -354,7 +354,7 @@ def test_read_format_error_carries_locator():
 def test_read_raises_format_error_on_missing_track_name():
     from vpr import VprFormatError, read
 
-    # 歌唱トラックの公開モデル対象フィールド(name)が欠落(vpr.md §3.1)。
+    # 歌唱トラックの公開モデル対象フィールド(name)が欠落。
     track = {"type": 2, "parts": [{"name": "p", "pos": 0, "duration": 1920, "notes": []}]}
     with pytest.raises(VprFormatError):
         read(_make_vpr(_sequence([track])))
@@ -363,7 +363,7 @@ def test_read_raises_format_error_on_missing_track_name():
 def test_read_raises_format_error_on_missing_part_pos():
     from vpr import VprFormatError, read
 
-    # パートの公開モデル対象フィールド(pos)が欠落(vpr.md §3.1)。
+    # パートの公開モデル対象フィールド(pos)が欠落。
     track = {"type": 2, "name": "vocal", "parts": [{"name": "p", "duration": 1920, "notes": []}]}
     with pytest.raises(VprFormatError):
         read(_make_vpr(_sequence([track])))
@@ -372,7 +372,7 @@ def test_read_raises_format_error_on_missing_part_pos():
 def test_read_raises_format_error_on_note_field_type_error():
     from vpr import VprFormatError, read
 
-    # 音符の公開モデル対象フィールド(number)の型が不正(vpr.md §3.1)。ロケータは欠落キーを指す。
+    # 音符の公開モデル対象フィールド(number)の型が不正。ロケータは欠落キーを指す。
     note = _note(pos=0, duration=240, number="x", lyric="あ", phoneme="a", velocity=64)
     with pytest.raises(VprFormatError) as exc:
         read(_make_vpr(_sequence([_singing_track([note])])))
@@ -382,7 +382,7 @@ def test_read_raises_format_error_on_note_field_type_error():
 def test_read_raises_format_error_on_bool_as_int_field():
     from vpr import VprFormatError, read
 
-    # JSON の bool は int フィールドの型不正(bool は int のサブクラスだが値として不正。vpr.md §3.1)。
+    # JSON の bool は int フィールドの型不正(bool は int のサブクラスだが値として不正)。
     seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "numer": 4, "denom": False}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -391,7 +391,7 @@ def test_read_raises_format_error_on_bool_as_int_field():
 def test_read_raises_format_error_on_tempo_pos_type_error():
     from vpr import VprFormatError, read
 
-    # tempo event の pos が整数でない(vpr.md §3.1)。
+    # tempo event の pos が整数でない。
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": "zero", "value": 12000}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -400,7 +400,7 @@ def test_read_raises_format_error_on_tempo_pos_type_error():
 def test_read_raises_format_error_on_non_list_tempo_events():
     from vpr import VprFormatError, read
 
-    # tempo.events が配列でない(null)場合、生の TypeError を漏らさず VprFormatError(vpr.md §3.1)。
+    # tempo.events が配列でない(null)場合、生の TypeError を漏らさず VprFormatError。
     seq = _sequence([_singing_track([])])
     seq["masterTrack"]["tempo"]["events"] = None
     with pytest.raises(VprFormatError):
@@ -410,7 +410,7 @@ def test_read_raises_format_error_on_non_list_tempo_events():
 def test_read_raises_format_error_on_non_list_parts():
     from vpr import VprFormatError, read
 
-    # 歌唱トラックの parts が配列でない(null)場合も VprFormatError(vpr.md §3.1)。
+    # 歌唱トラックの parts が配列でない(null)場合も VprFormatError。
     track = {"type": 2, "name": "vocal", "parts": None}
     with pytest.raises(VprFormatError):
         read(_make_vpr(_sequence([track])))
@@ -435,7 +435,7 @@ def test_read_tolerates_unknown_top_level_keys():
     assert project.resolution == 480
 
 
-# --- 発音区間の重なり警告(VprWarning。vpr.md §3.2) ---
+# --- 発音区間の重なり警告(VprWarning) ---
 
 
 def test_read_warns_on_overlapping_notes_in_part():
@@ -521,7 +521,7 @@ def test_read_no_warning_for_adjacent_notes():
 def test_read_no_overlap_warning_across_parts():
     from vpr import read
 
-    # クロスパートの重なりは初期スコープ外(検出は同一パート内のみ。vpr.md §3.2)。
+    # クロスパートの重なりは初期スコープ外(検出は同一パート内のみ)。
     track = {
         "type": 2,
         "name": "vocal",
@@ -534,7 +534,7 @@ def test_read_no_overlap_warning_across_parts():
     assert warnings == []
 
 
-# --- 未解釈データのロスレス保持(raw_sequence。vpr.md §3.3) ---
+# --- 未解釈データのロスレス保持(raw_sequence) ---
 
 
 def test_read_retains_raw_sequence():
