@@ -890,11 +890,12 @@ def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypa
 
     captured = {}
 
-    def fake_pipeline(task, model=None, revision=None, device=None, **kwargs):
+    def fake_pipeline(task, model=None, revision=None, device=None, dtype=None, **kwargs):
         captured["task"] = task
         captured["model"] = model
         captured["revision"] = revision
         captured["device"] = device
+        captured["dtype"] = dtype
         return object()
 
     monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
@@ -910,6 +911,7 @@ def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypa
     assert captured["revision"] == DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision
     # §5.1: GPU不在時はCPUを使う(強制アライメント用音素モデルとは独立の自動選択)。
     assert captured["device"] == "cpu"
+    assert captured["dtype"] == torch.float32
 
 
 def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
@@ -921,8 +923,9 @@ def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
 
     captured = {}
 
-    def fake_pipeline(task, model=None, revision=None, device=None, **kwargs):
+    def fake_pipeline(task, model=None, revision=None, device=None, dtype=None, **kwargs):
         captured["device"] = device
+        captured["dtype"] = dtype
         return object()
 
     monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
@@ -934,6 +937,8 @@ def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
 
     # §5.1: GPUが利用可能なら自動的にGPUを使う(強制アライメント用音素モデルはCPU固定のまま)。
     assert captured["device"] == "cuda"
+    # GPU実行時はfp16でロードし、重み・アクティベーションのメモリ使用量を半減させる。
+    assert captured["dtype"] == torch.float16
 
 
 def test_load_content_recognizer_pipeline_evicts_previous_model_before_loading_next(monkeypatch):
@@ -1033,6 +1038,58 @@ def test_transcribe_segment_returns_none_words_when_pipeline_has_no_chunks(monke
 
     assert text == "あ"
     assert words is None
+
+
+def test_transcribe_segment_bounds_generation_length(monkeypatch):
+    """_transcribe_segment は反復ハルシネーション時の生成時間を有界化するため、生成トークン数の
+    上限をgenerate_kwargsへ指定してパイプラインへ渡す(§5.2手順3)。"""
+    from vocal_analysis import recognizer as recognizer_module
+
+    class _FakePromptIds:
+        def to(self, device):
+            return "PROMPT_IDS"
+
+    captured = {}
+
+    class _FakePipeline:
+        device = "cpu"
+
+        class tokenizer:
+            @staticmethod
+            def get_prompt_ids(prompt, return_tensors):
+                return _FakePromptIds()
+
+        def __call__(self, samples, return_timestamps, generate_kwargs):
+            captured["generate_kwargs"] = generate_kwargs
+            return {"text": "あ"}
+
+    recognizer_module._transcribe_segment(_FakePipeline(), np.zeros(16000, dtype=np.float32))
+
+    assert captured["generate_kwargs"]["max_new_tokens"] == 380
+
+
+def test_transcribe_text_only_bounds_generation_length(monkeypatch):
+    """_transcribe_text_only(トリガ式リトライの再認識用)も同様に生成トークン数の上限を
+    generate_kwargsへ指定する(§5.2手順3)。"""
+    from vocal_analysis import ContentRecognizerModel
+    from vocal_analysis import recognizer as recognizer_module
+
+    captured = {}
+
+    class _FakePipeline:
+        def __call__(self, samples, generate_kwargs):
+            captured["generate_kwargs"] = generate_kwargs
+            return {"text": "あ"}
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline", lambda model: _FakePipeline()
+    )
+
+    recognizer_module._transcribe_text_only(
+        np.zeros(16000, dtype=np.float32), ContentRecognizerModel(model_id="org/model")
+    )
+
+    assert captured["generate_kwargs"]["max_new_tokens"] == 420
 
 
 def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_path, monkeypatch):

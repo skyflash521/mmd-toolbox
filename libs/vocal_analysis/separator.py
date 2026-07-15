@@ -48,6 +48,16 @@ def separate(pcm: AudioPcm, mode: Literal["auto", "always", "never"]) -> Path:
     separator.load_model(model_filename=SEPARATOR_CONFIG.model_filename)
     output_files = separator.separate(str(input_wav))
     output_path = Path(output_files[0])
+    # S1のGPUメモリをS2(内容認識・音素モデル)のロード前に返す。保持したままだと、後続の
+    # 内容認識パイプラインのロード・推論時にVRAMが逼迫し、処理時間が大きく悪化する。
+    del separator
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
     # audio-separator は output_dir 相対のファイル名だけを返すことがある(絶対パスの
     # 保証はない)。相対パスの場合は分離器の output_dir(work_dir)を基準に解決する。
     return output_path if output_path.is_absolute() else work_dir / output_path

@@ -163,6 +163,12 @@ _REPEAT_MIN_COUNT = 3  # 末尾反復として検出する最小繰り返し数
 _REPEAT_MIN_TOTAL_CHARS = 8  # 末尾反復として検出する最小総長(文字)
 _REPEAT_NORMALIZE_MORA_RATE = 3.5  # 全文反復の個数正規化レート(モーラ/秒)
 _MORA_G2P_SYMBOLS = frozenset({"a", "i", "u", "e", "o", "I", "U", "N"})
+# 反復ハルシネーション時の1呼び出しあたりの生成時間を有界化する上限(貪欲デコードは接頭辞不変のため、
+# 上限未到達の正常な書き起こしの結果は変わらない)。プロンプト無しの再認識(リトライ)はプロンプト分の
+# トークンを消費しない分、区間書き起こし(プロンプトあり)より上限を大きく取れる。いずれもWhisperの
+# 最大コンテキスト長を超えないよう選定済み。
+_SEGMENT_MAX_NEW_TOKENS = 380
+_RETRY_MAX_NEW_TOKENS = 420
 
 
 def _normalize_sentence(sentence: str) -> str:
@@ -1034,14 +1040,16 @@ def _transcribe_text_only(samples: np.ndarray, content_recognizer_model: Content
     リトライは区間全体のテキストを丸ごと採用し単語タイムスタンプを使わないため、単語単位の
     タイムスタンプ抽出(呼び出しコストが増す)は不要。プロンプトは渡さない(プロンプト起因の
     エコー幻覚を再発させないため)。温度フォールバックも無効化して1呼び出しの所要時間を
-    有界化する(温度0固定の貪欲1パスに限定する)。パイプラインは
-    _load_content_recognizer_pipeline のプロセス内キャッシュを共有する(主モデルと同じ
-    デバイス自動選択・ロード済み再利用が効く)。
+    有界化する(温度0固定の貪欲1パスに限定する)。上限で打ち切られた出力は後段の音素密度
+    チェックへ通常どおり渡り、密度超過ならgap確定に落ちる(_SEGMENT_MAX_NEW_TOKENS・
+    _RETRY_MAX_NEW_TOKENS)。パイプラインは _load_content_recognizer_pipeline の
+    プロセス内キャッシュを共有する(主モデルと同じデバイス自動選択・ロード済み再利用が効く)。
     """
     pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
     generate_kwargs = {
         "language": "japanese", "task": "transcribe",
         "num_beams": 1, "do_sample": False, "temperature": 0.0,
+        "max_new_tokens": _RETRY_MAX_NEW_TOKENS,
     }
     result = pipeline(samples, generate_kwargs=generate_kwargs)
     return result["text"]
@@ -1056,7 +1064,9 @@ def _transcribe_segment(
     使い回す(区間ごとの再ロードによるモデル転送コストの浪費を避ける)。
     どの content_recognizer_model でも同じ手順(かな限定プロンプトでprompt_ids取得→単語
     タイムスタンプ付き貪欲デコード)を適用する(モデルによる分岐は持たない)。単語タイムスタンプを
-    返さないモデルは None を返す(§5.2手順7のフォールバックに帰着)。
+    返さないモデルは None を返す(§5.2手順7のフォールバックに帰着)。生成トークン数の上限
+    (_SEGMENT_MAX_NEW_TOKENS)も指定し、反復ハルシネーション時の生成時間を有界化する
+    (貪欲デコードは接頭辞不変のため、上限に達しない正常な書き起こしの結果は変わらない)。
     """
     prompt_ids = pipeline.tokenizer.get_prompt_ids(KANA_PROMPT, return_tensors="pt").to(pipeline.device)
     result = pipeline(
@@ -1068,6 +1078,7 @@ def _transcribe_segment(
             "num_beams": 1,
             "do_sample": False,
             "prompt_ids": prompt_ids,
+            "max_new_tokens": _SEGMENT_MAX_NEW_TOKENS,
         },
     )
     chunks = result.get("chunks")
@@ -1115,13 +1126,20 @@ def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognize
         del cached_model, cached_pipeline
         _content_recognizer_pipeline_cache = None
 
+    import torch
     from transformers import pipeline as transformers_pipeline
 
+    device = _select_content_recognizer_device()
+    # GPU実行時はfp16でロードし、既定のfp32に対して重み・アクティベーションのメモリ使用量を
+    # 半減させる(限られたVRAMでの他モデル(音素モデル・分離器)との競合・アロケータの逼迫による
+    # 速度低下を避ける)。CPU実行時はfp16未対応のためfp32のまま。
+    dtype = torch.float16 if device == "cuda" else torch.float32
     pipeline = transformers_pipeline(
         "automatic-speech-recognition",
         model=content_recognizer_model.model_id,
         revision=content_recognizer_model.model_revision,
-        device=_select_content_recognizer_device(),
+        device=device,
+        dtype=dtype,
     )
     _content_recognizer_pipeline_cache = (content_recognizer_model, pipeline)
     return pipeline
