@@ -356,6 +356,37 @@ def test_aperture_class_independent_from_consonant_class():
     assert mouth_events[-1].aperture_class == ApertureClass.FIRM_CLOSURE
 
 
+def test_consonant_run_yields_independent_classes_on_both_axes():
+    # k(SLIGHT_CLOSURE)→w(ROUNDED)→aの連続子音では、ConsonantClassは最後の子音(w)から、
+    # ApertureClassは列内の最強クラス(k)から、それぞれ独立に決まる(song2vmd.md 6.3)。
+    segments = [
+        seg("consonant", 0.0, 0.03, phoneme="k"),
+        seg("consonant", 0.03, 0.06, phoneme="w"),
+        seg("vowel", 0.06, 0.36, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.36, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert mouth_events[-1].consonant_class == ConsonantClass.ROUNDED
+    assert mouth_events[-1].aperture_class == ApertureClass.SLIGHT_CLOSURE
+
+
+def test_aperture_class_resets_after_vowel_boundary():
+    # 母音イベント自体も区切りとして扱われ、それより前の子音による開口減衰は次のモーラへ
+    # 引き継がない(song2vmd.md 6.3)。t(FIRM_CLOSURE)の後の母音でリセットされないままだと、
+    # 2モーラ目のkはFIRM_CLOSURE(tとの併合で強い方が残る)になってしまうが、正しくは
+    # k単独のSLIGHT_CLOSUREになる。
+    segments = [
+        seg("consonant", 0.0, 0.03, phoneme="t"),
+        seg("vowel", 0.03, 0.33, phoneme="a", confidence=0.9),
+        seg("consonant", 0.33, 0.36, phoneme="k"),
+        seg("vowel", 0.36, 0.66, phoneme="i", confidence=0.9),
+    ]
+    rms = flat_rms(0.66, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    i_event = next(e for e in mouth_events if e.shape == MouthShape.I)
+    assert i_event.aperture_class == ApertureClass.SLIGHT_CLOSURE
+
+
 # --- gap解決(RMS依存)・低ダイナミクス抑制 -----------------------------------
 
 
