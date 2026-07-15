@@ -13,7 +13,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from vocal_analysis import ContentRecognizerModel, Segment
+from lipsync import MouthShape
+from vocal_analysis import ContentRecognizerModel, RmsEnvelope, Segment
 from vocal_analysis.types import AudioPcm
 
 from song2vmd import pipeline, presets
@@ -470,6 +471,79 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
     # ピーク正規化がチャンクごとにかかっていれば両半分とも同じ目標振幅になり見分けがつかない。
     # 個別正規化を経ていなければ、静かな前半(0.1)と大きい後半(0.9)の振幅差が保たれる。
     assert first_half_peak < second_half_peak * 0.5
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_path, monkeypatch):
+    # 長尺分割時、開き量決定の声量レンジ再正規化はチャンク単位でなく結合後の全曲モーラ集合に
+    # 対して1回だけ適用される(confirm_mouth_eventsが結合後のセグメント・RMSで1回だけ
+    # 呼ばれる配線のため追加のチャンク対応は不要)。最終的にmorphs.build_vmd_documentへ
+    # 渡されるmouth_eventsのopen_amountで検証する。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=6.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=6.0, amplitude=0.5)
+
+    # 境界(3.0秒)の前後で異なる母音にし、_merge_adjacentで1件へ統合されないようにする。
+    combined_segments = [
+        seg("vowel", 0.0, 1.0, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 1.0, 2.0, phoneme="e̞", confidence=0.9),
+        seg("vowel", 2.0, 3.0, phoneme="a", confidence=0.9),  # 境界直前(第1チャンク)
+        seg("vowel", 3.0, 4.0, phoneme="i", confidence=0.9),  # 境界直後(第2チャンク)
+        seg("vowel", 4.0, 5.0, phoneme="o̞", confidence=0.9),
+        seg("vowel", 5.0, 6.0, phoneme="ɯ", confidence=0.9),
+    ]
+    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [3.0])
+    monkeypatch.setattr(pipeline.chunking, "merge_chunk_segments", lambda *a, **k: combined_segments)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    raw_values = [0.10, 0.30, 0.50, 0.60, 0.80, 0.99]  # モーラ(0〜5番目)ごとにRMSを変える
+    hop = 0.010
+    n = round(6.0 / hop) + 1
+    times = np.array([0.0125 + i * hop for i in range(n)])
+    values = np.array([raw_values[min(int(t // 1.0), 5)] for t in times])
+    compute_rms_call_count = [0]
+    real_compute_rms = pipeline._va_rms.compute_rms
+
+    def fake_compute_rms(pcm):
+        compute_rms_call_count[0] += 1
+        if compute_rms_call_count[0] == 1:
+            return real_compute_rms(pcm)  # 境界決定用(生音声側)はそのまま実関数を通す
+        return RmsEnvelope(times_sec=times, values=values, dynamic_range_db=20.0)
+
+    monkeypatch.setattr(pipeline._va_rms, "compute_rms", fake_compute_rms)
+
+    captured = {}
+    real_build_vmd_document = pipeline.morphs.build_vmd_document
+
+    def spy_build_vmd_document(mouth_events, gen_params, model_name):
+        captured["mouth_events"] = mouth_events
+        return real_build_vmd_document(mouth_events, gen_params, model_name)
+
+    monkeypatch.setattr(pipeline.morphs, "build_vmd_document", spy_build_vmd_document)
+
+    openness = presets.OpennessParams(open_lo=0.0, open_hi=1.0, open_max=1.0)
+    pipeline.run(input_path, **_common_kwargs(
+        max_duration_sec=3.0, openness=openness, intensity_curve=1.0))
+
+    mouth_events = captured["mouth_events"]
+    boundary_next_event = next(e for e in mouth_events if e.shape == MouthShape.I)
+
+    whole_song_arr = np.array(raw_values)
+    p10 = np.percentile(whole_song_arr, 10, method="linear")
+    p90 = np.percentile(whole_song_arr, 90, method="linear")
+    expected = np.clip((0.60 - p10) / (p90 - p10), 0.0, 1.0)
+
+    chunk2_arr = np.array([0.60, 0.80, 0.99])  # 第2チャンク単体のモーラ集合
+    p10_chunk = np.percentile(chunk2_arr, 10, method="linear")
+    p90_chunk = np.percentile(chunk2_arr, 90, method="linear")
+    per_chunk_only = np.clip((0.60 - p10_chunk) / (p90_chunk - p10_chunk), 0.0, 1.0)
+
+    assert boundary_next_event.open_amount == pytest.approx(float(expected), abs=1e-6)
+    assert boundary_next_event.open_amount != pytest.approx(float(per_chunk_only), abs=1e-3)
 
 
 def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monkeypatch):

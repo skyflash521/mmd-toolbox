@@ -59,6 +59,56 @@ def confirm(segments, rms, **overrides):
     return events.confirm_mouth_events(segments, rms, **kw)
 
 
+# --- モーラ代表RMSの声量レンジ再正規化を検証するための較正ヘルパー ------------------
+#
+# 開き量の決定は、生のモーラ代表RMSではなく、曲全体の全モーラ集合を
+# パーセンタイル(p10/p90)線形正規化した値を使う。対象モーラが1件だけの
+# フィクスチャでは、その1件だけでp10==p90となり縮退して常に0.5に丸まるため、生RMSへの
+# 依存性を検証できない。そこで下記アンカー2件(下限・上限)を対象モーラの前後に追加し、
+# 曲全体のモーラ集合を3件(下アンカー・対象・上アンカー)に固定する。3件・p10/p90の線形補間
+# では、下アンカー<対象<上アンカーの並びのとき正規化後の値が
+# (対象の生RMS - 下アンカー) / (上アンカー - 下アンカー) という厳密な線形写像になる
+# (p10・p90の補間位置がちょうど打ち消し合うため)。下アンカーは無音しきい値(既定0.06)を
+# 上回る0.10、上アンカーは1.00とし、対象の生RMSはこの開区間(0.10, 1.00)に収まる値を使う。
+
+_ANCHOR_LO_RMS = 0.10
+_ANCHOR_HI_RMS = 1.00
+
+
+def _anchor_normalized(raw_rms):
+    """上記アンカー較正のもとでの再正規化後RMS(既知の線形写像)。"""
+    return (raw_rms - _ANCHOR_LO_RMS) / (_ANCHOR_HI_RMS - _ANCHOR_LO_RMS)
+
+
+def confirm_flat_calibrated(target_rms_value, *, kind="vowel", vowel_phoneme="a",
+                             confidence=0.9, mora_dur=0.3, **kw):
+    """対象モーラ1件(区間内RMS一定)を下アンカー・上アンカーの母音モーラで挟んでconfirmし、
+    対象モーラのイベントだけを返す(_anchor_normalizedの前提を満たす3モーラ構成)。
+    """
+    lo_end = mora_dur
+    target_end = 2 * mora_dur
+    hi_end = 3 * mora_dur
+    if kind == "vowel":
+        target_seg = seg("vowel", lo_end, target_end, phoneme=vowel_phoneme, confidence=confidence)
+    else:  # kind == "n"
+        target_seg = seg("consonant", lo_end, target_end, phoneme="ɴ")
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        target_seg,
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    values = [
+        _ANCHOR_LO_RMS if t < lo_end else (target_rms_value if t < target_end else _ANCHOR_HI_RMS)
+        for t in times
+    ]
+    rms = rms_env(times, values)
+    mouth_events, diag = confirm(segments, rms, **kw)
+    return mouth_events[1], diag  # [下アンカー, 対象, 上アンカー] の中央が対象
+
+
 # --- 音素由来分類(IPA写像・両唇閉鎖・撥音「ん」。RMS非依存) --------------------
 
 
@@ -616,12 +666,43 @@ def test_vowel_with_quiet_core_but_loud_mora_span_is_not_silenced():
     assert mouth_events[0].shape == MouthShape.I
 
 
+def _loud_consonant_quiet_core_fixture_calibrated():
+    """_loud_consonant_quiet_core_fixture を0.3秒後ろへずらし、アンカー較正
+    (_anchor_normalized の前提)の下アンカー・上アンカーで挟む。"""
+    offset = 0.3
+    hi_end = offset + 0.92 + offset
+    segments = [
+        seg("vowel", 0.0, offset, phoneme="ɯ", confidence=0.9),
+        seg("consonant", offset, offset + 0.9, phoneme="n"),
+        seg("vowel", offset + 0.9, offset + 0.92, phoneme="i", confidence=0.9),
+        seg("vowel", offset + 0.92, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    values = []
+    for t in times:
+        if t < offset:
+            values.append(_ANCHOR_LO_RMS)
+        elif t <= offset + 0.85:
+            values.append(0.9)
+        elif t < offset + 0.92:
+            values.append(0.02)
+        else:
+            values.append(_ANCHOR_HI_RMS)
+    return segments, rms_env(times, values)
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_vowel_with_quiet_core_but_loud_mora_span_opens_from_the_louder_window():
-    segments, rms = _loud_consonant_quiet_core_fixture()
+    segments, rms = _loud_consonant_quiet_core_fixture_calibrated()
     mouth_events, _diag = confirm(
         segments, rms, intensity_curve=1.0, open_lo=0.0, open_hi=1.0, open_max=1.0)
-    # モーラ区間全体[0.0,0.92]の中央60%はほぼ0.9。母音核だけの窓(≈0.02)に引きずられない。
-    assert mouth_events[0].open_amount == pytest.approx(0.9, abs=0.05)
+    i_event = next(e for e in mouth_events if e.shape == MouthShape.I)
+    # モーラ区間全体の中央60%窓平均はほぼ0.9(母音核だけの窓≈0.02に引きずられない)。単独
+    # モーラでは再正規化が縮退して常に0.5になりこの窓ロジックを開き量から検証できないため、
+    # アンカー2件で曲全体のモーラ集合(3件)を模し、_anchor_normalized(0.9) に厳密一致させる。
+    assert i_event.open_amount == pytest.approx(_anchor_normalized(0.9), abs=1e-6)
 
 
 def test_vowel_with_absorbed_consonant_still_silenced_when_whole_mora_is_quiet():
@@ -759,60 +840,65 @@ def test_vowel_onset_keeps_token_boundary_when_no_rise_nearby():
 # --- 低信頼・無声母音判定 -----------------------------------------------------
 
 
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_low_confidence_and_low_rms_vowel_is_weakened():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.2)]
-    rms = flat_rms(0.3, 0.25)  # 無音しきい値は超えるが弱い判定のRMS閾値(0.3)未満
-    mouth_events, _diag = confirm(segments, rms)
-    expected_base = min(max(0.25 ** 0.6, 0.30), 0.75)
-    assert mouth_events[0].open_amount == pytest.approx(expected_base * 0.5)
+    # 単独モーラでは再正規化が縮退し常に0.5になり生RMS依存の弱判定を開き量から検証できない
+    # ため、アンカー較正(confirm_flat_calibrated)で曲全体のモーラ集合を模す。
+    target_event, _diag = confirm_flat_calibrated(0.25, confidence=0.2)  # 無音しきい値は超えるが弱判定のRMS閾値(0.3)未満
+    normalized = _anchor_normalized(0.25)
+    expected_base = min(max(normalized ** 0.6, 0.30), 0.75)
+    assert target_event.open_amount == pytest.approx(expected_base * 0.5)
 
 
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_vowel_not_weakened_when_confidence_is_high_even_with_low_rms():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.9)]
-    rms = flat_rms(0.3, 0.25)  # RMS<0.3 だが信頼度が高いので弱判定にならない
-    mouth_events, _diag = confirm(segments, rms)
-    expected = min(max(0.25 ** 0.6, 0.30), 0.75)
-    assert mouth_events[0].open_amount == pytest.approx(expected)
+    target_event, _diag = confirm_flat_calibrated(0.25, confidence=0.9)  # RMS<0.3 だが信頼度が高いので弱判定にならない
+    normalized = _anchor_normalized(0.25)
+    expected = min(max(normalized ** 0.6, 0.30), 0.75)
+    assert target_event.open_amount == pytest.approx(expected)
 
 
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_vowel_not_weakened_when_rms_is_high_even_with_low_confidence():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.2)]
-    rms = flat_rms(0.3, 0.5)  # RMS>=0.3 なので信頼度が低くても弱判定にならない
-    mouth_events, _diag = confirm(segments, rms)
-    expected = min(max(0.5 ** 0.6, 0.30), 0.75)
-    assert mouth_events[0].open_amount == pytest.approx(expected)
+    target_event, _diag = confirm_flat_calibrated(0.5, confidence=0.2)  # RMS>=0.3 なので信頼度が低くても弱判定にならない
+    normalized = _anchor_normalized(0.5)
+    expected = min(max(normalized ** 0.6, 0.30), 0.75)
+    assert target_event.open_amount == pytest.approx(expected)
 
 
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_low_rms_without_confidence_uses_lower_weak_threshold():
     # 信頼度を出さないバックエンド(confidence=None)ではRMS<0.2(0.3ではなく)で弱判定になる。
-    weak_segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=None)]
-    weak_events, _ = confirm(weak_segments, flat_rms(0.3, 0.15))  # < 0.2
-    expected_weak_base = min(max(0.15 ** 0.6, 0.30), 0.75)
-    assert weak_events[0].open_amount == pytest.approx(expected_weak_base * 0.5)
+    weak_event, _ = confirm_flat_calibrated(0.15, confidence=None)  # < 0.2
+    weak_normalized = _anchor_normalized(0.15)
+    expected_weak_base = min(max(weak_normalized ** 0.6, 0.30), 0.75)
+    assert weak_event.open_amount == pytest.approx(expected_weak_base * 0.5)
 
-    strong_segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=None)]
-    strong_events, _ = confirm(strong_segments, flat_rms(0.3, 0.25))  # >= 0.2, 弱判定にならない
-    expected_strong = min(max(0.25 ** 0.6, 0.30), 0.75)
-    assert strong_events[0].open_amount == pytest.approx(expected_strong)
+    strong_event, _ = confirm_flat_calibrated(0.25, confidence=None)  # >= 0.2, 弱判定にならない
+    strong_normalized = _anchor_normalized(0.25)
+    expected_strong = min(max(strong_normalized ** 0.6, 0.30), 0.75)
+    assert strong_event.open_amount == pytest.approx(expected_strong)
 
 
 # --- 開き量の決定(RMS→開き量写像) -------------------------------------------
 
 
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_open_amount_uses_intensity_curve_and_clamps_to_style_range():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.9)]
-    rms = flat_rms(0.3, 0.5)
-    mouth_events, _diag = confirm(segments, rms, open_lo=0.30, open_hi=0.75, intensity_curve=0.6)
-    expected = min(max(0.5 ** 0.6, 0.30), 0.75)
-    assert mouth_events[0].open_amount == pytest.approx(expected)
+    # 単独モーラでは再正規化が縮退し常に0.5になり生RMS依存を開き量から検証できないため、
+    # アンカー較正(confirm_flat_calibrated)で曲全体のモーラ集合を模す。
+    target_event, _diag = confirm_flat_calibrated(0.5, open_lo=0.30, open_hi=0.75, intensity_curve=0.6)
+    normalized = _anchor_normalized(0.5)
+    expected = min(max(normalized ** 0.6, 0.30), 0.75)
+    assert target_event.open_amount == pytest.approx(expected)
 
 
 def test_open_amount_respects_open_max_upper_bound():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.9)]
-    rms = flat_rms(0.3, 0.99)
-    mouth_events, _diag = confirm(
-        segments, rms, open_lo=0.30, open_hi=0.95, open_max=0.5, intensity_curve=1.0)
-    assert mouth_events[0].open_amount == pytest.approx(0.5)
+    # open_maxのクランプは、入力(母音代表RMSの写像値)がopen_hiを上回っていれば、その具体的な
+    # 値によらずopen_maxで一律に飽和する。
+    target_event, _diag = confirm_flat_calibrated(
+        0.99, open_lo=0.30, open_hi=0.95, open_max=0.5, intensity_curve=1.0)
+    assert target_event.open_amount == pytest.approx(0.5)
 
 
 def test_bilabial_and_silence_have_zero_open_amount():
@@ -825,34 +911,260 @@ def test_bilabial_and_silence_have_zero_open_amount():
     assert all(e.open_amount == 0.0 for e in mouth_events)
 
 
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_open_amount_uses_middle_60_percent_of_vowel_segment():
-    # 母音区間[0,1.0]の中央60%([0.2,0.8])だけ高RMS、両端(子音トランジェント相当)は低RMSにする
-    # (モーラ代表RMS)。中央60%平均(≈0.8)を使うはずで、両端に引きずられる
-    # 区間全体平均より明らかに大きくなる。
+    # 母音区間の中央60%だけ高RMS、両端(子音トランジェント相当)は低RMSにする(モーラ代表RMS)。
+    # 中央60%平均(≈0.8)を使うはずで、両端に引きずられる区間全体平均より明らかに大きくなる。
+    # 単独モーラでは再正規化が縮退し常に0.5になりこの窓ロジックを開き量から検証できないため、
+    # アンカー2件(下限・上限)を対象モーラの前後に置き、曲全体のモーラ集合(3件)を模す。
+    offset = 0.3
+    target_dur = 1.0
+    hi_end = offset + target_dur + offset
     hop = 0.010
-    n = 101
+    n = round(hi_end / hop) + 1
     times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
-    values = [0.8 if 0.2 <= t <= 0.8 else 0.05 for t in times]
+    values = []
+    target_values = []
+    for t in times:
+        if t < offset:
+            values.append(_ANCHOR_LO_RMS)
+        elif t < offset + target_dur:
+            v = 0.8 if 0.2 <= (t - offset) <= 0.8 else 0.05
+            values.append(v)
+            target_values.append(v)
+        else:
+            values.append(_ANCHOR_HI_RMS)
     rms = rms_env(times, values)
-    segments = [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+    segments = [
+        seg("vowel", 0.0, offset, phoneme="ɯ", confidence=0.9),
+        seg("vowel", offset, offset + target_dur, phoneme="a", confidence=0.9),
+        seg("vowel", offset + target_dur, hi_end, phoneme="o̞", confidence=0.9),
+    ]
     mouth_events, _diag = confirm(
         segments, rms, intensity_curve=1.0, open_lo=0.0, open_hi=1.0, open_max=1.0)
-    naive_full_average = sum(values) / len(values)
-    assert mouth_events[0].open_amount > naive_full_average + 0.1
-    assert mouth_events[0].open_amount == pytest.approx(0.8, abs=0.05)
+    a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
+    naive_full_average = sum(target_values) / len(target_values)
+    assert a_event.open_amount > _anchor_normalized(naive_full_average) + 0.1
+    assert a_event.open_amount == pytest.approx(_anchor_normalized(0.8), abs=1e-6)
 
 
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
 def test_n_mora_open_amount_is_derived_from_rms():
-    # 撥音「ん」も母音的口形として区間代表RMSから開き量を決める。
+    # 撥音「ん」も母音的口形として区間代表RMSから開き量を決める。単独モーラでは再正規化が
+    # 縮退し常に0.5になりRMS依存を検証できないため、アンカー較正で曲全体のモーラ集合を模す。
+    target_event, _diag = confirm_flat_calibrated(
+        0.7, kind="n", open_lo=0.0, open_hi=1.0, open_max=1.0, intensity_curve=1.0)
+    assert target_event.shape == MouthShape.N
+    assert target_event.open_amount == pytest.approx(_anchor_normalized(0.7), abs=1e-6)
+
+
+# --- モーラ代表RMSの声量レンジ再正規化そのもの -------------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_renormalize_open_rms_stretches_skewed_distribution():
+    # 曲全体のモーラ代表RMSが高い側に偏っていても、パーセンタイル(p10/p90)線形正規化で
+    # 0〜1のレンジへ引き伸ばされる。
+    values = [0.70, 0.75, 0.80, 0.81, 0.85, 0.89, 0.90, 0.95, 0.98, 1.00]
+    result = events._renormalize_open_rms(values)
+    arr = np.array(values)
+    p10 = np.percentile(arr, 10, method="linear")
+    p90 = np.percentile(arr, 90, method="linear")
+    expected = np.clip((arr - p10) / (p90 - p10), 0.0, 1.0)
+    assert result == pytest.approx(list(expected))
+    # 少なくとも1件はレンジ下限(0)近傍・1件は上限(1)近傍まで引き伸ばされている
+    # (偏った入力のまま0.5〜1.0付近に固まっていた不具合の再発を防ぐ)。
+    assert min(result) < 0.15
+    assert max(result) > 0.85
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_renormalize_open_rms_single_value_is_degenerate_midpoint():
+    # モーラが1件だけの曲はp90==p10で縮退し、無音側(0.0)でなく開閉の中間値0.5に倒す
+    # (無音判定用の正規化とは異なり、開き量という用途では無音側に倒すと不自然なため)。
+    assert events._renormalize_open_rms([0.42]) == [0.5]
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_renormalize_open_rms_all_identical_values_are_degenerate_midpoint():
+    assert events._renormalize_open_rms([0.6, 0.6, 0.6, 0.6]) == [0.5, 0.5, 0.5, 0.5]
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_renormalize_open_rms_tiny_positive_range_is_not_degenerate():
+    # p90とp10の差がnp.iscloseの既定許容誤差(0.5付近でおよそ5e-6)より小さい、完全一致では
+    # ない極めて小さい正のレンジ(差は約1e-6)では、縮退扱い(0.5への丸め)にせず通常の線形
+    # 正規化(0〜1へ大きく引き伸ばす)を適用する(完全一致のみを縮退とする方針の実装が
+    # np.isclose等の許容誤差判定へ後退していないかを検出する)。
+    values = [0.500000, 0.500000, 0.5000005, 0.500001]
+    result = events._renormalize_open_rms(values)
+    arr = np.array(values)
+    p10 = np.percentile(arr, 10, method="linear")
+    p90 = np.percentile(arr, 90, method="linear")
+    assert p90 != p10  # 完全一致ではない(このテストの前提)
+    assert np.isclose(p90, p10)  # ただしnp.iscloseの既定許容誤差では縮退と誤判定されうる差
+    expected = np.clip((arr - p10) / (p90 - p10), 0.0, 1.0)
+    assert result == pytest.approx(list(expected))
+    assert result != pytest.approx([0.5] * len(values))  # 縮退扱い(全件0.5)になっていない
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_renormalize_open_rms_empty_list_returns_empty():
+    assert events._renormalize_open_rms([]) == []
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_renormalize_open_rms_is_invariant_to_uniform_gain():
+    # パーセンタイル比の相対計算であるため、入力ゲイン(一様なスケール)に不変。
+    values = [0.10, 0.35, 0.62, 0.77, 0.91]
+    scaled = [v * 0.4 for v in values]  # 一様なゲイン(同じ相対分布・絶対値だけ異なる)
+    assert events._renormalize_open_rms(values) == pytest.approx(
+        events._renormalize_open_rms(scaled))
+
+
+def test_zero_mora_song_does_not_crash_renormalization():
+    # 母音・撥音「ん」が1件も無い曲(gapのみ)では、再正規化処理自体を行わない。
+    # 空リストを渡してもクラッシュしないことを確認する。
+    segments = [seg("gap", 0.0, 0.5)]
+    rms = flat_rms(0.5, 0.01)
+    mouth_events, _diag = confirm(segments, rms)
+    assert len(mouth_events) == 1
+    assert mouth_events[0].shape == MouthShape.SILENCE
+    assert mouth_events[0].open_amount == 0.0
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_degenerate_uniform_morae_all_get_midpoint_open_amount():
+    # 全モーラの代表RMSが完全に同一な曲(縮退)では、再正規化により全モーラの開き量が一律に
+    # 中間値(0.5をintensity-curveで写像した値)になる(生RMSの値そのもの——ここでは0.73——
+    # には依存しない)。
     segments = [
-        seg("vowel", 0.0, 0.1, phoneme="a", confidence=0.9),
-        seg("consonant", 0.1, 0.3, phoneme="ɴ"),
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.2, 0.4, phoneme="i", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="ɯ", confidence=0.9),
     ]
-    rms = flat_rms(0.3, 0.5)
+    rms = flat_rms(0.6, 0.73)
     mouth_events, _diag = confirm(
         segments, rms, open_lo=0.0, open_hi=1.0, open_max=1.0, intensity_curve=1.0)
-    n_event = next(e for e in mouth_events if e.shape == MouthShape.N)
-    assert n_event.open_amount == pytest.approx(0.5, abs=1e-6)
+    assert [e.open_amount for e in mouth_events] == pytest.approx([0.5, 0.5, 0.5])
+
+
+@pytest.mark.xfail(reason="impl pending: モーラ代表RMSの声量レンジ再正規化", strict=False)
+def test_open_amount_uses_whole_song_percentiles_not_a_chunk_subset():
+    # 長尺分割時、confirm_mouth_eventsにはチャンク境界をまたいだ結合後の全曲セグメント・
+    # RMSが1回だけ渡される。この再正規化は渡された全モーラ集合のp10/p90を使うため、
+    # チャンク単位で個別正規化した場合とは異なる値になることを、境界前後で異なる母音の
+    # 6モーラ構成で検証する。
+    segments = [
+        seg("vowel", 0.0, 1.0, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 1.0, 2.0, phoneme="e̞", confidence=0.9),
+        seg("vowel", 2.0, 3.0, phoneme="a", confidence=0.9),   # 境界直前(第1チャンク相当)
+        seg("vowel", 3.0, 4.0, phoneme="i", confidence=0.9),   # 境界直後(第2チャンク相当)
+        seg("vowel", 4.0, 5.0, phoneme="o̞", confidence=0.9),
+        seg("vowel", 5.0, 6.0, phoneme="ɯ", confidence=0.9),
+    ]
+    raw_values = [0.10, 0.30, 0.50, 0.60, 0.80, 0.99]
+    hop = 0.010
+    n = round(6.0 / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    values = [raw_values[min(int(t // 1.0), 5)] for t in times]
+    rms = rms_env(times, values)
+
+    mouth_events, _diag = confirm(
+        segments, rms, open_lo=0.0, open_hi=1.0, open_max=1.0, intensity_curve=1.0)
+
+    whole_song_arr = np.array(raw_values)
+    p10 = np.percentile(whole_song_arr, 10, method="linear")
+    p90 = np.percentile(whole_song_arr, 90, method="linear")
+    expected_boundary_next = np.clip((0.60 - p10) / (p90 - p10), 0.0, 1.0)
+
+    # チャンク単位(第2チャンク=[0.60, 0.80, 0.99]の3モーラ)だけで個別正規化した場合の値。
+    chunk2_arr = np.array([0.60, 0.80, 0.99])
+    p10_chunk = np.percentile(chunk2_arr, 10, method="linear")
+    p90_chunk = np.percentile(chunk2_arr, 90, method="linear")
+    per_chunk_boundary_next = np.clip((0.60 - p10_chunk) / (p90_chunk - p10_chunk), 0.0, 1.0)
+
+    boundary_next_event = mouth_events[3]  # 境界直後モーラ(i)
+    assert boundary_next_event.open_amount == pytest.approx(float(expected_boundary_next), abs=1e-6)
+    assert boundary_next_event.open_amount != pytest.approx(float(per_chunk_boundary_next), abs=1e-3)
+
+
+def test_silence_classification_unaffected_by_other_loud_morae_context():
+    # 母音区間の無音補正は元のRMSのまま使い、再正規化の対象にしない。対象モーラが1件だけ
+    # (曲全体のモーラ集合も1件で縮退し常に0.5になる)でも、他に大声のモーラが同居しても、
+    # 無音しきい値以下の対象モーラは常にSILENCEになる(縮退時の0.5を無音判定へ誤って
+    # 使う実装だと、単独モーラの場合に無音判定が崩れて検出できる)。
+    def build(with_other_mora):
+        base = 0.3 if with_other_mora else 0.0
+        segments = []
+        if with_other_mora:
+            segments.append(seg("vowel", 0.0, base, phoneme="i", confidence=0.9))  # 大声の他モーラ
+        segments.append(seg("vowel", base, base + 0.3, phoneme="a", confidence=0.95))  # 無音しきい値以下(判定対象)
+        hop = 0.010
+        n = round((base + 0.3) / hop) + 1
+        times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+        values = [0.9 if t < base else 0.01 for t in times]
+        rms = rms_env(times, values)
+        mouth_events, _diag = confirm(segments, rms)
+        return mouth_events[-1].shape
+
+    assert build(with_other_mora=False) == MouthShape.SILENCE
+    assert build(with_other_mora=True) == MouthShape.SILENCE
+
+
+def test_weak_vowel_classification_unaffected_by_other_loud_morae_context():
+    # 低信頼/無声の母音判定は元のRMSのまま使い、再正規化の対象にしない。対象モーラが1件だけ
+    # (曲全体のモーラ集合も1件で縮退し常に0.5になる)でも、他に大声のモーラが同居しても、
+    # 弱判定(0.5倍スケール)の適用有無・スケール量は変わらない(縮退時の0.5を弱判定の
+    # RMS閾値判定へ誤って使う実装だと、単独モーラの場合に弱判定が崩れて検出できる)。
+    def build(confidence, with_other_mora):
+        base = 0.3 if with_other_mora else 0.0
+        segments = []
+        if with_other_mora:
+            segments.append(seg("vowel", 0.0, base, phoneme="i", confidence=0.9))  # 大声の他モーラ
+        segments.append(seg("vowel", base, base + 0.3, phoneme="a", confidence=confidence))
+        hop = 0.010
+        n = round((base + 0.3) / hop) + 1
+        times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+        values = [0.9 if t < base else 0.25 for t in times]  # 対象は弱判定のRMS閾値(0.3)未満
+        rms = rms_env(times, values)
+        mouth_events, _diag = confirm(segments, rms)
+        return next(e for e in mouth_events if e.shape == MouthShape.A)
+
+    for with_other_mora in (False, True):
+        weak_event = build(confidence=0.2, with_other_mora=with_other_mora)  # 低信頼→弱判定
+        strong_event = build(confidence=0.9, with_other_mora=with_other_mora)  # 高信頼→弱判定にならない
+        assert weak_event.open_amount == pytest.approx(strong_event.open_amount * 0.5)
+
+
+def test_low_dynamics_suppression_unaffected_by_other_morae_context():
+    # 低ダイナミクス曲での無音化抑制は元のdynamic_range_dbのまま使い、再正規化の対象にしない。
+    # 他モーラの有無で抑制の発動有無が変わらないことを、同一の対象区間を他モーラあり/なしの
+    # 両方で確認して検証する。
+    def build(with_other_mora):
+        base = 0.2 if with_other_mora else 0.0
+        segments = []
+        if with_other_mora:
+            segments.append(seg("vowel", 0.0, base, phoneme="i", confidence=0.9))  # 追加の他モーラ
+        # gap直前の母音(先頭gapによる強制無音と混同しないよう、他モーラの有無に関わらず常に置く)。
+        segments.append(seg("vowel", base, base + 0.2, phoneme="a", confidence=0.9))
+        segments.append(seg("gap", base + 0.2, base + 0.4))
+        segments.append(seg("vowel", base + 0.4, base + 0.6, phoneme="a", confidence=0.9))
+        total = base + 0.6
+        rms = flat_rms(total, 0.5, dynamic_range_db=5.0)  # 低ダイナミクス(閾値12dB未満)
+        idx_lo = int((base + 0.2) / 0.010)
+        idx_hi = int((base + 0.4) / 0.010)
+        for i in range(idx_lo, idx_hi + 1):
+            rms.values[i] = 0.01  # 低RMSでも低ダイナミクスなら無音化を抑制
+        mouth_events, _diag = confirm(segments, rms)
+        return [e.shape for e in mouth_events]
+
+    without_other_mora = build(with_other_mora=False)
+    with_other_mora = build(with_other_mora=True)
+    # gapが継続扱いされ前後の同母音(A)と連結する(SILENCEにならない)。他モーラを足しても
+    # 対象部分の判定(末尾)は変わらない。
+    assert without_other_mora == [MouthShape.A]
+    assert with_other_mora[-len(without_other_mora):] == without_other_mora
 
 
 # --- 全体被覆・時間順・非重複(lipsyncの入力契約) -----------------------------
