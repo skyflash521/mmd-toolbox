@@ -1,11 +1,11 @@
-"""sparsevmd CLI の中断(Ctrl-C 等)のテスト(sparsevmd.md §12.5 / §9)。
+"""sparsevmd CLI の中断(Ctrl-C 等)のテスト。
 
 削減段の KeyboardInterrupt を機械モードでは cancelled(exit 130)の終端イベント、非機械モードでは
 理由を標準エラーへ 1 行(exit 130)で畳む。書き込みは全計算後に 1 回だけなので、中断で出力ファイルは
 残らない。進捗のライブ表示は中断経路でも行を閉じてから終える(_Progress の finish を try/finally で保証)。
 
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テスト方針は
-../../../libs/vmd/vmd.md §4 に準ずる(決定論的・外部依存なし)。
+機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テストは
+決定論的に実行し、外部依存を使わない。
 """
 
 import json
@@ -102,7 +102,7 @@ def test_non_machine_cancelled_on_interrupt(tmp_path, capsys, monkeypatch):
 
 
 def test_progress_line_closed_on_interrupt(tmp_path, capsys, monkeypatch):
-    # ライブ表示が有効(TTY・非機械)なとき、中断でも進捗行を閉じてから終える(§12.5)。
+    # ライブ表示が有効(TTY・非機械)なとき、中断でも進捗行を閉じてから終える。
     # 進捗ラベルの行に error 行が連結されない(finish の \n で閉じられている)ことで確認する。
     monkeypatch.setattr("sys.stderr.isatty", lambda: True, raising=False)
     monkeypatch.setattr(cli, "reduce_camera_track", _raise_keyboard_interrupt)
@@ -116,7 +116,7 @@ def test_progress_line_closed_on_interrupt(tmp_path, capsys, monkeypatch):
 
 
 def test_progress_line_closed_on_strict_error(tmp_path, capsys, monkeypatch):
-    # strict で許容を満たせず終了(exit 4)する例外経路でも、error 行を出す前に進捗行を閉じる(§12.5)。
+    # strict で許容を満たせず終了(exit 4)する例外経路でも、error 行を出す前に進捗行を閉じる。
     monkeypatch.setattr("sys.stderr.isatty", lambda: True, raising=False)
     src = tmp_path / "in.vmd"
     # ジグザグは線形表現不能。min-segment を大きくし strict にすると分割下限まで割っても許容を満たせない。

@@ -1,8 +1,8 @@
-"""sparsevmd CLI 移植性・既定挙動回帰のテスト(sparsevmd.md §12 / 規約 §10、§9 項目9・10)。
+"""sparsevmd CLI 移植性・既定挙動回帰のテスト。
 
 非ASCIIパスの受理・生成、人間向け標準エラーの符号化安全性(ロケール符号化で表せない文字でもプロセスを
 落とさない)、機械モードが出力VMDを変えない(--machine の有無で出力バイト一致)ことを検証する。テスト
-方針は ../../../libs/vmd/vmd.md §4 に準ずる(決定論的・外部依存なし)。
+は決定論的に実行し、外部依存を使わない。
 """
 
 import io
@@ -52,7 +52,7 @@ def ramp_bone_doc(name="センター"):
     return [bone(name, f, pos=(0.0, float(f), 0.0)) for f in range(31)]
 
 
-# --- 非ASCIIパスの受理・生成(規約 §10、§9 項目10) --------------------------
+# --- 非ASCIIパスの受理・生成 --------------------------
 
 
 def test_non_ascii_path_roundtrip_non_machine(tmp_path):
@@ -67,7 +67,7 @@ def test_non_ascii_path_roundtrip_non_machine(tmp_path):
     assert doc.camera
 
 
-# --- 人間向け標準エラーの符号化安全性(規約 §10、§9 項目10) -----------------
+# --- 人間向け標準エラーの符号化安全性 -----------------
 # ロケール符号化(cp932)相当へ差し替えた標準エラーの下で、表せない文字を含む人間向け出力
 # (argparse 使用法エラー・警告ループの warning 行)が UnicodeEncodeError で本体を異常終了させない
 # ことを検証する。cli.py が標準エラーのエラーハンドラを backslashreplace へ緩めることで担う。
@@ -105,11 +105,11 @@ def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
     assert rc == 0
 
 
-# --- 既定挙動の回帰: 機械モードは出力VMDを変えない(§9 項目9) ---------------
+# --- 既定挙動の回帰: 機械モードは出力VMDを変えない ---------------
 
 
 def test_machine_output_equals_non_machine_output(tmp_path):
-    # --machine の有無で出力VMDはバイト一致(機械モードは出力ファイル・削減結果を変えない。§9 項目9)。
+    # --machine の有無で出力VMDはバイト一致(機械モードは出力ファイル・削減結果を変えない)。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc(), bone=ramp_bone_doc())
     out_h = tmp_path / "human.vmd"

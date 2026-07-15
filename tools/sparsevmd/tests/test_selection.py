@@ -1,4 +1,4 @@
-"""ボーン選択ルールのテスト(sparsevmd.md §2.2)。
+"""ボーン選択ルールのテスト。
 
 selection.resolve_selection は、入力VMDのボーン名集合に対して include/exclude
 セレクタを適用し、処理対象ボーン名と警告を返す。ハード エラー(--bone 不在、
@@ -48,7 +48,7 @@ def warned_about(result_or_exc, needle):
 
 
 def test_no_include_selects_all():
-    # include 指定が無ければ全ボーンを include 扱い(§2.2)。
+    # include 指定が無ければ全ボーンを include 扱い。
     r = resolve_selection(BONES, includes=[], excludes=[])
     assert set(names(r)) == set(BONES)
 
@@ -59,13 +59,13 @@ def test_name_include_exact():
 
 
 def test_name_include_partial_does_not_match():
-    # 部分一致しない(§2.2)。"上半身" は "上半身2" を含まない。
+    # 部分一致しない。"上半身" は "上半身2" を含まない。
     r = resolve_selection(BONES, includes=[Selector("name", "上半身")], excludes=[])
     assert names(r) == ["上半身"]
 
 
 def test_glob_case_sensitive():
-    # GLOB は fnmatchcase 相当で大文字小文字を区別(§2.2)。"head" は "Head" に一致しない。
+    # GLOB は fnmatchcase 相当で大文字小文字を区別。"head" は "Head" に一致しない。
     r = resolve_selection(BONES, includes=[Selector("glob", "head")], excludes=[])
     assert names(r) == ["head"]
 
@@ -119,7 +119,7 @@ def test_no_include_then_exclude_glob():
     assert "センター" in names(r)
 
 
-# --- groups の定義(§2.2 の表に厳密一致) ------------------------------------
+# --- groups の定義(全グループの中身を厳密一致で固定) -----------------------
 
 
 def test_groups_exact_contents():
@@ -152,7 +152,7 @@ def test_mocap_is_union_without_ik_globs():
         | set(selection.GROUPS["fingers"])
     )
     assert mocap == expected
-    # ik 固有のグロブは含まない(§2.2)。
+    # ik 固有のグロブは含まない。
     assert not (set(selection.GROUPS["ik"]) & mocap)
 
 
@@ -188,19 +188,19 @@ def test_include_exclude_same_name_raises():
     ],
 )
 def test_empty_name_raises(includes, excludes):
-    # include 側・exclude 側いずれの空文字 NAME もエラー(§2.2)。
+    # include 側・exclude 側いずれの空文字 NAME もエラー。
     with pytest.raises(SelectionError):
         resolve_selection(BONES, includes=includes, excludes=excludes)
 
 
 def test_final_zero_with_bones_present_raises():
-    # 全 include 後に全 exclude で0件(ボーンキーは存在) → エラー(§2.2)。
+    # 全 include 後に全 exclude で0件(ボーンキーは存在) → エラー。
     with pytest.raises(SelectionError):
         resolve_selection(BONES, includes=[], excludes=[Selector("glob", "*")])
 
 
 def test_sole_unmatched_glob_warns_then_errors():
-    # 唯一の include が不一致 glob → 警告を出した上で最終0件 → SelectionError(§2.2)。
+    # 唯一の include が不一致 glob → 警告を出した上で最終0件 → SelectionError。
     # 警告はエラーに載せて観測できる。
     with pytest.raises(SelectionError) as exc:
         resolve_selection(BONES, includes=[Selector("glob", "存在しない*")], excludes=[])
@@ -247,13 +247,13 @@ def test_unmatched_exclude_glob_warns():
 
 def test_empty_universe_no_include_is_empty_no_error():
     # ボーンセクションが空(キー無し)で include 指定も無ければ0件を返しエラーにしない
-    # (空セクションの扱いは CLI 側 §3.1)。
+    # (空セクションのエラー化は CLI 側の責務)。
     r = resolve_selection([], includes=[], excludes=[])
     assert names(r) == []
 
 
 def test_empty_universe_explicit_name_raises():
-    # 空 universe でも --bone NAME 明示名が不在ならエラー(§2.2、ボーンセクション空を含む)。
+    # 空 universe でも --bone NAME 明示名が不在ならエラー(ボーンセクション空を含む)。
     with pytest.raises(SelectionError):
         resolve_selection([], includes=[Selector("name", "センター")], excludes=[])
 
@@ -299,13 +299,13 @@ def test_parse_bone_file_basic():
     ],
 )
 def test_parse_bone_file_dedup(text, expect_inc, expect_exc):
-    # 同じ選択子の重複は1つに正規化(§2.2)。
+    # 同じ選択子の重複は1つに正規化。
     includes, excludes = selection.parse_bone_file(text)
     assert includes == expect_inc
     assert excludes == expect_exc
 
 
-# --- デコード不能名は name 一致不可(§2.2) ----------------------------------
+# --- デコード不能名は name 一致不可 ----------------------------------
 
 UNDEC = "�"  # CP932 デコード不能ボーン名の置換文字表示
 

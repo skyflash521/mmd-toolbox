@@ -1,7 +1,7 @@
-"""品質プリセットと許容誤差の解決(sparsevmd.md §2.3, §2.4)。
+"""品質プリセットと許容誤差の解決。
 
-`--preset NAME` から §2.4 の既定許容誤差を引き、個別オプションの明示値があれば
-それを優先する(§2.3)。値の検証もここで集中管理する:
+`--preset NAME` から既定許容誤差を引き、個別オプションの明示値があれば
+それを優先する。値の検証もここで集中管理する:
 FOV以外は0以上の有限値(0は整数フレーム上の完全一致を要求する)、FOVは0.5以上。
 未知プリセット名・未知フィールド・NaN/Inf/負値・FOV<0.5 は ValueError。
 CLI 層はこの ValueError を引数エラー(終了コード2)に対応づける。
@@ -15,11 +15,11 @@ from dataclasses import fields
 # 旧 import パス(sparsevmd.presets.Tolerances)維持のため再公開する。
 from vmd.reduce import Tolerances  # noqa: F401
 
-# 品質プリセット名(§2.3)。
+# 品質プリセット名。
 PRESET_NAMES = ("precise", "balanced", "aggressive")
 
 
-# §2.4 の許容誤差表(precise / balanced / aggressive)。
+# プリセットごとの許容誤差表(precise / balanced / aggressive)。
 _PRESETS = {
     "precise": dict(
         bone_pos=0.005,
@@ -49,12 +49,12 @@ _PRESETS = {
 
 _FIELD_NAMES = frozenset(f.name for f in fields(Tolerances))
 
-# FOV はVMDが整数度保存のため、丸めだけで最大0.5度の誤差が出る(§2.4 / §7.2)。
+# 視野角はVMDが整数度保存のため、丸めだけで最大0.5度の誤差が出る。
 _CAMERA_FOV_MIN = 0.5
 
 
 def resolve_tolerances(preset_name, overrides=None):
-    """プリセット名と個別上書きから `Tolerances` を構築する(§2.3, §2.4)。
+    """プリセット名と個別上書きから `Tolerances` を構築する。
 
     overrides は {フィールド名: 値} の dict。明示値はプリセット値より優先する。
     検証に失敗した場合は ValueError を送出する。
@@ -79,7 +79,7 @@ def resolve_tolerances(preset_name, overrides=None):
 
 
 def _validate(name, value):
-    """単一の許容誤差値を検証し、float へ変換して返す(§2.4)。不正なら ValueError。
+    """単一の許容誤差値を検証し、float へ変換して返す。不正なら ValueError。
 
     float() 可能な値(int/float/数値文字列)は変換して受理する。None や非数値
     オブジェクト、単位付き文字列など float() できない値は ValueError とする

@@ -229,7 +229,7 @@ NaN/Inf、負値、単位付き文字列はエラー(終了コード2)。
 | `--quiet` | 進捗のライブ表示を抑制する(警告・統計・終了コードは抑制しない) |
 | `--machine` | 出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない(§12) |
 | `--describe` | VMD を読まずにオプション定義とプリセット一覧の result イベントを出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作(§12.3) |
-| `--version` | バージョンを表示して終了する(§8 の `__version__` を表示) |
+| `--version` | バージョンを表示して終了する |
 
 削減処理中は、対話端末(stderr が tty)のとき処理経過を stderr の1行に上書き表示する。
 カメラは処理済みフレーム数の割合で進捗を示し、bezier の重い区間でも再帰分割の途中で
@@ -368,32 +368,11 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 
 ## 8. パッケージ構成
 
-    mmd-toolbox/
-      libs/
-        vmd/                # フォーマット層ライブラリ
-          types.py, io.py, interp.py, camera.py
-          sample.py       # サンプリング小ヘルパ(perspective 直近ホールド)
-          cuts.py         # 不連続検出・必須境界管理
-          fit.py          # VMD補間曲線フィット・量子化・誤差評価
-          reduce.py       # 区間分割・キー削減の全体制御
-      tools/
-        sparsevmd/
-          __init__.py
-          sample.py       # 対象トラックの正規化・分割・サンプリング(評価は vmd.interp に委譲)
-          ranges.py       # --range の解析・展開・積集合
-          selection.py    # ボーン選択ルールの解決
-          cuts.py         # 閾値文字列パース(検出本体は vmd.cuts を再公開)
-          fit.py          # vmd.fit の後方互換 re-export
-          reduce.py       # vmd.reduce の後方互換 re-export
-          report.py       # dry-run レポート
-          presets.py      # 品質プリセット
-          cli.py          # CLI(コアの薄いラッパー)
-
-- VMD読み書き・補間評価・カメラ座標変換はvmdに委譲する。
+- VMD読み書き・補間評価・カメラ座標変換・補間曲線フィット・分割戦略・不連続検出は
+  共通ライブラリ vmd に委譲する。移設前からの利用者向けに、旧来の公開 import パス
+  (`sparsevmd.fit`・`sparsevmd.reduce`・`sparsevmd.cuts`)は後方互換として維持し、
+  同名モジュールが vmd の実装を re-export する。
 - コアはCLI非依存。Jupyter等からトラック単位で試行できるAPIを提供する。
-- 補間曲線の制約集中管理(fit)・分割戦略(reduce)・不連続検出(cuts)は共通ライブラリ
-  vmd に置き、sparsevmd は旧 import パス維持のため同名モジュールで re-export する。
-- バージョンの正本は `__init__.py` の `__version__`。`--version` はこれを表示する。
 
 ---
 
@@ -481,7 +460,7 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 
 - `bezier` モードは高品質だが `linear` より計算量が大きい。出力後検証(§7.3)で許容超過があれば
   区間を密化して再フィットするため、長尺・高密度入力ではフィット回数が増えて処理時間が伸びる
-  (フィットコストの支配項は共有エンジンの正本 [vmd.md §6.1](../../libs/vmd/vmd.md#61-コストモデルどこが支配的か))。
+  (フィットコストの支配項は共有エンジンの正本 [vmd.md](../../libs/vmd/vmd.md) §6)。
 - 長尺・高密度入力で待ち時間が問題になる場合の運用回避策:
   - `--range` で区間を分割して必要部分だけ処理する。
   - `--preset aggressive` で許容を緩めてキー数とフィット回数を減らす。
@@ -490,8 +469,8 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 - `shakevmd --smooth` は `curve-mode=bezier` + aggressive 相当 + `max-segment-frames=5` を
   固定設定として使う(短い区間で高速にフィットする)。
 - 既定設定で対話的に待てない時間まで未完了になる状態は性能回帰として扱う。
-- フィットコストの支配項・棄却済み最適化(曲線評価の numpy ベクトル化は遅化するため不採用)・
-  有効な高速化方向は、共有エンジンの正本 [vmd.md §6](../../libs/vmd/vmd.md#6-疎化フィットの性能特性棄却済み最適化) を参照する(ここに重複して書かない)。
+- フィットの性能契約(采否の不変条件・ファストパスの既定と `force_bezier` によるオプトアウト)は、
+  共有エンジンの正本 [vmd.md](../../libs/vmd/vmd.md) §6 を参照する(ここに重複して書かない)。
 
 ---
 
@@ -500,22 +479,22 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 機械モードは、他のソフトウェアが sparsevmd を子プロセスとして呼ぶための構造化出力を提供する。
 共通契約(イベント種別の語彙・終端規則・チャネル固定・stdout の UTF-8/LF 固定・終了コードの基底)は
 規約 §3〜§6・§8・§10 と、共有基盤 [cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は
-sparsevmd 固有のイベントペイロードと `code` 値だけを定める。イベント送出は cli_events の `EventEmitter` を用いる。
+sparsevmd 固有のイベントペイロードと `code` 値だけを定める。イベント送出は共有基盤 cli_events に委譲する。
 
 ### 12.1 チャネルと終端
 
 - **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 §3。`--describe` は人間向け
-  既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定してエミッタと
-  `MachineArgumentParser`(§12.4)を使い、使用法エラー・想定外エラーも error イベントで終端する
+  既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定し、
+  使用法エラー・想定外エラーも error イベントで終端する
   (例: `--describe` と未知オプションの併用も `bad_argument` イベント+終了コード 2)。
-- 構造化出力モードの標準出力は §12.2 のイベントのみ。エミッタ(`cli_events.EventEmitter`)はバイナリ
-  標準出力(`sys.stdout.buffer`)へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない
+- 構造化出力モードの標準出力は §12.2 のイベントのみ。バイナリストリームとして
+  標準出力へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない
   (規約 §10)。
-- 人間向け標準エラーは `sys.stderr.reconfigure(errors="backslashreplace")` で符号化失敗時もプロセスを
+- 人間向け標準エラーは、ロケール符号化で表せない文字を置換して出し、符号化失敗でプロセスを
   落とさない(規約 §10。機械モードに限らず常に適用する)。`--verbose` の詳細ログは機械モードでも
   従来どおり標準エラーへ出す(機械利用側は解釈しない)。
-- ストリームは result または error のちょうど 1 つで終端する。終端は `main()` の単一経路で送出し、
-  終端後の送出はしない(cli_events が `StreamTerminatedError` で拒否する)。
+- ストリームは result または error のちょうど 1 つで終端する。終端は CLI 本体の単一経路で送出し、
+  終端後の送出は拒否される。
 - `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベント
   ストリームには載せない(規約 §3 のメタ操作の例外)。
 - イベント契約の進化は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
@@ -536,10 +515,10 @@ sparsevmd 固有のイベントペイロードと `code` 値だけを定める�
     `sections-missing`)をそのまま透過し、`section` は `VmdWarning.section` があれば単一要素配列
     `[section]`、無ければ `null`(`sections-missing` は `section` を持たない)。人間向け経路と
     同じ基準(code・section・message の同一組は 1 件)で重複をまとめる。
-  - ボーン選択の不一致警告(不在の exclude 名・1 件も一致しない glob/group。`SelectionError` 到達前の
-    蓄積分を含む): `selector_unmatched`、`section` は `null`。文言は現行の警告文字列を `message` に
-    載せる。
-  - `--list-bones` で選択子が解決不能(`SelectionError`。通常経路なら §12.4 の `bone_selection_invalid`
+  - ボーン選択の不一致警告(不在の exclude 名・1 件も一致しない glob/group。選択解決ハードエラー
+    到達前の蓄積分を含む): `selector_unmatched`、`section` は `null`。文言は現行の警告文字列を
+    `message` に載せる。
+  - `--list-bones` で選択子が解決不能(通常経路なら §12.4 の `bone_selection_invalid`
     で終了コード 2)な場合のその理由: `selection_unresolved`、`section` は `null`、`message` は例外の
     文言。検査モードは現行どおり一覧表示を続けて終了コード 0 なので error ではなく warning とし、
     蓄積分(`selector_unmatched`)の後に 1 件出す。
@@ -587,7 +566,7 @@ sparsevmd 固有のイベントペイロードと `code` 値だけを定める�
   (規約 §6 の `--x/--no-x` 様式。呼び出し側は `default` が `true` のフラグを無効化するとき否定形を
   発行する)。否定形を別要素として重複列挙しない。
 - `--bone-group`/`--exclude-bone-group` の `enum` は自己記述上の値域であり、**argparse の `choices`
-  へは追加しない**。未知グループの検証は現行どおり選択解決時の `SelectionError`(§12.4 の
+  へは追加しない**。未知グループの検証は現行どおり選択解決時のハードエラー(§12.4 の
   `bone_selection_invalid`)であり、§2.2 の検証位置・順序を変えない。
 
 全 31 要素を確定する:
@@ -643,40 +622,38 @@ camera_distance_tol, camera_fov_tol}`(§2.4 の表の値)。
 |---|---|---|---|
 | argparse 検出(未知オプション・型エラー・choices 外・positional 欠落・`--range`/`--keep-frame`/カット閾値の書式不正)、および解析後の単一オプション検証(`--min-segment-frames` < 1・`--max-segment-frames` < 1) | `bad_argument` | argparse が示す引数名、解析後検証は該当オプション名 | 2 |
 | `--min-segment-frames` > `--max-segment-frames` | `segment_bounds_conflict` | `null`(2 オプションにまたがる) | 2 |
-| 許容誤差の検証失敗(`presets.resolve_tolerances` の ValueError。負値・非有限・fov < 0.5) | `bad_tolerance` | `null`(起因フィールド名は例外文言として `message` に載る) | 2 |
+| 許容誤差の検証失敗(負値・非有限・fov < 0.5) | `bad_tolerance` | `null`(起因フィールド名は例外文言として `message` に載る) | 2 |
 | 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 2 |
 | `--bone-file` パスが不在・通常ファイルでない | `bone_file_not_file` | `"--bone-file"` | 2 |
 | `--bone-file` の読み込み・解析失敗(UTF-8 デコード不能等) | `bad_bone_file` | `"--bone-file"` | 2 |
 | `--target camera` とボーン選択の同時指定 | `target_selection_conflict` | `null` | 2 |
 | 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
-| ボーン選択のハードエラー(空文字名・include/exclude 重複名・明示 `--bone` 名の不在・選択結果 0 件。`SelectionError`) | `bone_selection_invalid` | `null`(対象名は `message` に載る) | 2 |
-| `--range` の展開・正規化失敗(重複・省略端解決後の逆順。`ranges.RangeError`) | `range_invalid` | `"--range"` | 2 |
+| ボーン選択のハードエラー(空文字名・include/exclude 重複名・明示 `--bone` 名の不在・選択結果 0 件) | `bone_selection_invalid` | `null`(対象名は `message` に載る) | 2 |
+| `--range` の展開・正規化失敗(重複・省略端解決後の逆順) | `range_invalid` | `"--range"` | 2 |
 | 入力が VMD でない・破損 | `not_vmd` | `"input"` | 1 |
 | 指定 `--target` の対象セクションにキーが無い | `no_target_keys` | `"input"` | 1 |
-| `--strict` で許容誤差を満たせない(`StrictError`) | `strict_tolerance_unmet` | `null` | 4 |
+| `--strict` で許容誤差を満たせない | `strict_tolerance_unmet` | `null` | 4 |
 | 出力書き込み失敗 | `write_failed` | `"--output"`(+ `path`) | 3 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
 
 - `not_vmd` は現在握り潰している例外の種別・文言を `message` に載せる。`bone_selection_invalid` の
-  送出前に、蓄積済みの不一致警告(`SelectionError.warnings`)を warning イベントとして先に出す
+  送出前に、蓄積済みの不一致警告を warning イベントとして先に出す
   (人間向け経路の順序と同じ)。
-- 構造化出力モードの argparse エラーは `cli_events.MachineArgumentParser` で `ArgumentParseError` に
-  振り替え、`argparse_error_event` で `bad_argument` イベントにする。`field` の抽出は共有ヘルパ
-  `cli_events.argparse_error_field(message)` を使う(抽出規則は
-  [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正)。
+- 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は
+  [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正。
 - `internal_error` は引数解析後の本体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
   なく中断(`cancelled`/130)として手前で分岐する(§12.5)。
 
 ### 12.5 中断と出力の原子性
 
-- VMD 出力は `vmd.io.write_file` の一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
+- VMD 出力は一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
   起きるため、途中終了で中途半端な出力ファイルは残らない。
-- `main()` は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
+- CLI は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
   error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130
   で終える。POSIX シグナル API には依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む(sparsevmd の
   削減は単一プロセスで走り、子プロセスは持たない)。
-- 進捗のライブ表示は中断・例外経路でも行を閉じてから終える(`_Progress` の finish を try/finally で
-  保証する)。機械モードではライブ表示自体を無効化する。
+- 進捗のライブ表示は中断・例外経路でも行を閉じてから終える(try/finally で保証する)。
+  機械モードではライブ表示自体を無効化する。
 - 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の終端保証の
   唯一の例外。§8)。出力の原子性により中途半端な出力ファイルは残らない。

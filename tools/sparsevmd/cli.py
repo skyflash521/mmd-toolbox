@@ -1,8 +1,8 @@
-"""sparsevmd CLI(コアの薄いラッパー。sparsevmd.md §2, §9)。
+"""sparsevmd CLI(コアの薄いラッパー)。
 
 引数解析 → VMD読み(vmd.io)→ ボーン選択・範囲解決 → トラック削減
 (reduce.reduce_camera_track / reduce_bone_track)→ VMD書き。
-終了コード(§9): 0 正常 / 1 入力不正 / 2 引数エラー / 3 出力書き込み失敗 /
+終了コード: 0 正常 / 1 入力不正 / 2 引数エラー / 3 出力書き込み失敗 /
 4 strict で許容誤差を満たせない。
 
 --curve-mode は bezier(既定)/linear。bezier は各区間を1本のベジェ曲線で表現して
@@ -45,7 +45,7 @@ _TOL_ARGS = {
     "camera_fov_tol": "camera_fov",
 }
 
-# 個別許容誤差オプションの help(§2.4)。明示値はプリセットに優先する。
+# 個別許容誤差オプションの help。明示値はプリセットに優先する。
 _TOL_HELP = {
     "bone_pos_tol": "ボーン位置の最大許容誤差(MMD距離単位)。明示値はプリセットに優先",
     "bone_rot_tol": "ボーン回転の最大角度誤差(度)。明示値はプリセットに優先",
@@ -55,7 +55,7 @@ _TOL_HELP = {
     "camera_fov_tol": "視野角の最大許容誤差(度)。整数度保存のため 0.5 以上。明示値はプリセットに優先",
 }
 
-# --describe(§12.3)の型/制約表。dest → (type, constraint)。help/default/repeat は parser の
+# --describe の型/制約表。dest → (type, constraint)。help/default/repeat は parser の
 # 各 action から機械導出する。メタ/モード操作(describe/version/help/machine)は _D_TYPE に無いので
 # describe の options から除外される。type 関数と1対1で対応しないので型と制約の形は明示表で持つ。
 _D_NN = {"min": 0, "max": None, "exclusive_min": False}      # 非負・上限なし
@@ -65,7 +65,7 @@ _D_GROUPS = {"choices": ["core", "arms", "legs", "fingers", "ik", "mocap"]}
 
 
 def _compound(fmt, *fields):
-    """compound 型の constraint を組む(§12.3)。fields は (name, type, min) の並び。"""
+    """compound 型の constraint を組む。fields は (name, type, min) の並び。"""
     return {"format": fmt,
             "fields": [{"name": n, "type": t, "min": m, "max": None, "exclusive_min": False}
                        for n, t, m in fields]}
@@ -109,7 +109,7 @@ _D_TYPE = {
 
 
 class _Progress:
-    """削減処理の経過を stderr の1行に上書き表示する(§2.7)。
+    """削減処理の経過を stderr の1行に上書き表示する。
 
     フェーズ単位で start→update→finish と使う。stderr が端末でない場合
     (リダイレクト・パイプ・テスト捕捉)は無効化し、通常の出力・警告を汚さない。
@@ -156,7 +156,7 @@ class _Progress:
 
 
 def _nonneg_int(text):
-    """非負整数(フレーム番号)。負値・非整数は引数エラー(§2.6)。"""
+    """非負整数(フレーム番号)。負値・非整数は引数エラー。"""
     v = int(text)  # 非整数は ValueError → argparse が exit 2
     if v < 0:
         raise argparse.ArgumentTypeError(f"フレーム番号は非負: {text!r}")
@@ -166,7 +166,7 @@ def _nonneg_int(text):
 def _build_parser(machine=False):
     # 構造化出力モード(--machine / --describe)は使用法エラーを error イベントへ振り替えるため、
     # SystemExit の代わりに ArgumentParseError を送出する MachineArgumentParser を使う(--help/--version は
-    # error() を経由しないので影響を受けず、従来どおり SystemExit で短絡する。§12.1)。
+    # error() を経由しないので影響を受けず、従来どおり SystemExit で短絡する)。
     cls = MachineArgumentParser if machine else argparse.ArgumentParser
     p = cls(prog="sparsevmd", allow_abbrev=False)
     # input は nargs="?"(--describe を入力無しで成立させるため)。describe 以外の実行では main() が欠落を検査する。
@@ -225,7 +225,7 @@ def _build_parser(machine=False):
         default=(1.0, 30.0),
         help="ボーンの不連続検出閾値 POS,ROT(既定 1.0,30.0)",
     )
-    # --cut-detect / --no-cut-detect は既定 on の対(§2.6)。dest=cut_detect を共有する。
+    # --cut-detect / --no-cut-detect は既定 on の対。dest=cut_detect を共有する。
     p.add_argument("--cut-detect", dest="cut_detect", action="store_true", default=True,
                    help="閾値による自動境界検出を有効化(既定 on)。--no-cut-detect の対の明示形")
     p.add_argument("--no-cut-detect", dest="cut_detect", action="store_false",
@@ -263,7 +263,7 @@ def _same_path(a, b):
 
 
 def _build_selectors(args):
-    """CLI 引数とボーンファイルから (includes, excludes) を組み立てる(§2.2)。"""
+    """CLI 引数とボーンファイルから (includes, excludes) を組み立てる。"""
     includes = [selection.Selector("name", v) for v in args.bone]
     includes += [selection.Selector("glob", v) for v in args.bone_glob]
     includes += [selection.Selector("group", v) for v in args.bone_group]
@@ -303,9 +303,9 @@ def _bone_names_in_order(bone_keys):
 
 
 def _undecodable_bone_names(bone_keys):
-    """CP932 でデコードできないボーン名フィールドの表示名(置換文字入り)の集合(§2.2)。
+    """CP932 でデコードできないボーン名フィールドの表示名(置換文字入り)の集合。
 
-    これらの名前は `--bone` / `--exclude-bone` の name 一致では使えない(§2.2)ため、
+    これらの名前は `--bone` / `--exclude-bone` の name 一致では使えないため、
     selection に渡して name 種別の照合から除外させる。
     """
     undecodable = set()
@@ -326,7 +326,7 @@ def _bone_keys_by_name(bone_keys):
 
 
 def _bone_reduced(bone_keys, selected, global_ranges):
-    """選択ボーンのうち、キー2件以上かつ有効処理範囲が空でないものが1つでもあるか(§2.2/§3.1)。"""
+    """選択ボーンのうち、キー2件以上かつ有効処理範囲が空でないものが1つでもあるか。"""
     groups = _bone_keys_by_name(bone_keys)
     for name, keys in groups.items():
         if name not in selected or len(keys) < 2:
@@ -338,7 +338,7 @@ def _bone_reduced(bone_keys, selected, global_ranges):
 
 
 def _log_diagnostics(camera_diag, bone_diag):
-    """verbose 時に不連続検出位置・継ぎ目書き換え・分割理由・出力後検証を stderr に出す(§2.7/§6.3/§7.3)。"""
+    """verbose 時に不連続検出位置・継ぎ目書き換え・分割理由・出力後検証を stderr に出す。"""
     def emit(label, d):
         if not d:
             return
@@ -362,7 +362,7 @@ def _log_diagnostics(camera_diag, bone_diag):
 
 
 def _describe_options(parser):
-    """--describe の options を parser 定義から機械導出する(§12.3)。順序は add_argument 順。
+    """--describe の options を parser 定義から機械導出する。順序は add_argument 順。
 
     メタ/モード操作(--describe/--version/--help/--machine)は _D_TYPE に無いので除外される。真偽フラグの
     否定形(--no-cut-detect)は肯定形の長形式で既に載るのでスキップする(重複列挙しない)。type/constraint は
@@ -396,9 +396,9 @@ def _describe_options(parser):
 
 
 def _describe_presets():
-    """--describe の presets を presets モジュールから導出する(§12.3)。
+    """--describe の presets を presets モジュールから導出する。
 
-    各要素は {name, values}。values は §2.4 の許容誤差(個別オプション名 → 値)。プリセット既定の
+    各要素は {name, values}。values は許容誤差(個別オプション名 → 値)。プリセット既定の
     Tolerances を公開 API で解決し、_TOL_ARGS の対応で個別許容誤差オプション名へ写す。
     """
     out = []
@@ -410,7 +410,7 @@ def _describe_presets():
 
 
 def _machine_progress(emitter, stage):
-    """機械モードの段別 progress コールバックを返す(§12.2)。
+    """機械モードの段別 progress コールバックを返す。
 
     開始時に `done=0, total=null, note:"", elapsed:0.0` を 1 本出し、以後の呼び出しを progress イベントへ
     写す(`elapsed` は段開始からの経過秒)。返り値は (done, total, note) を受けるコールバック。
@@ -426,7 +426,7 @@ def _machine_progress(emitter, stage):
 
 
 def _emit_selector_unmatched(emitter, message):
-    """ボーン選択の不一致警告を surface する(§12.2)。機械=warning イベント(section null)、人間=stderr 1 行。"""
+    """ボーン選択の不一致警告を surface する。機械=warning イベント(section null)、人間=stderr 1 行。"""
     if emitter is not None:
         emitter.warning(code="selector_unmatched", message=message, section=None)
     else:
@@ -435,7 +435,7 @@ def _emit_selector_unmatched(emitter, message):
 
 def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
                    new_camera, new_bone, camera_errors, bone_errors, camera_diag, bone_diag, reduced):
-    """`--machine --dry-run` の inspect result ペイロードを組む(§12.2)。VMD は書かない。
+    """`--machine --dry-run` の inspect result ペイロードを組む。VMD は書かない。
 
     camera は処理したとき `{input_keys, output_keys, errors, cuts}`、それ以外 null。bones は処理したとき
     初出順の `{name, selected, input_keys, output_keys, errors, cuts}` 配列で、非選択・削減不能(1 キー)
@@ -467,7 +467,7 @@ def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
         bones = []
         for name in _bone_names_in_order(doc.bone):
             inp, out = io_counts.get(name, (0, 0))
-            reducible = name in selected and inp >= 2  # 選択かつ 2 キー以上のみ削減対象(§3.1)
+            reducible = name in selected and inp >= 2  # 選択かつ 2 キー以上のみ削減対象
             bones.append({
                 "name": name,
                 "selected": name in selected,
@@ -492,10 +492,10 @@ def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
 
 
 def main(argv=None):
-    """CLI エントリポイント。終了コードを返す(§9: 0/1/2/3/4、中断 130)。"""
+    """CLI エントリポイント。終了コードを返す(0/1/2/3/4、中断 130)。"""
     # 人間向け標準エラーはロケール符号化(cp932 等)で表せない文字を含んでも UnicodeEncodeError で
-    # プロセスを落とさない(規約 §10)。表せない文字は退避表記へ置換して出す。機械モードの stdout は
-    # バイナリ + UTF-8 の別経路(cli_events)なので影響しない(§12.1)。
+    # プロセスを落とさない。表せない文字は退避表記へ置換して出す。機械モードの stdout は
+    # バイナリ + UTF-8 の別経路(cli_events)なので影響しない。
     if hasattr(sys.stderr, "reconfigure"):
         try:
             sys.stderr.reconfigure(errors="backslashreplace")
@@ -504,7 +504,7 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
 
-    # 構造化出力モード判定(§12.1)。解析前に argv で先取りする(引数エラー時も出力チャネルを決めるため)。
+    # 構造化出力モード判定。解析前に argv で先取りする(引数エラー時も出力チャネルを決めるため)。
     # --describe は --machine を要さない独立メタ操作。どちらかがあれば emitter を用意し、
     # MachineArgumentParser で使用法エラーも error イベントへ振り替える。emitter はバイナリ stdout へ
     # UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None(従来の人間向け経路)。
@@ -513,7 +513,7 @@ def main(argv=None):
     emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
 
     def fail(code, message, exit_code, *, field=None, path=None):
-        """失敗を報告して終了コードを返す(§12.4)。構造化出力モードは error イベントでストリームを終端し、
+        """失敗を報告して終了コードを返す。構造化出力モードは error イベントでストリームを終端し、
         それ以外は理由を標準エラーへ 1 行出す(トレースバックは出さない)。"""
         if emitter is not None:
             emitter.error(**error_event(
@@ -530,11 +530,11 @@ def main(argv=None):
         return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
     except SystemExit as e:
         # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
-        # (メタ操作・code 0)。例外を握って終了コードへ変換する(§12.1)。
+        # (メタ操作・code 0)。例外を握って終了コードへ変換する。
         code = e.code
         return code if isinstance(code, int) else (0 if code is None else 2)
 
-    # 自己記述(§12.3)。VMD を読まず options/presets の result を出して終了する独立メタ操作。
+    # 自己記述。VMD を読まず options/presets の result を出して終了する独立メタ操作。
     if args.describe:
         emitter.result(mode="describe", options=_describe_options(parser),
                        presets=_describe_presets())
@@ -543,13 +543,13 @@ def main(argv=None):
     if args.input is None:
         return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
 
-    # 引数解析後の本体を畳む。KeyboardInterrupt は中断(§12.5)として cancelled/130 へ、それ以外の
-    # 想定外例外は internal_error(§12.4)へ。どちらもトレースバックを漏らさない。
+    # 引数解析後の本体を畳む。KeyboardInterrupt は中断として cancelled/130 へ、それ以外の
+    # 想定外例外は internal_errorへ。どちらもトレースバックを漏らさない。
     try:
         return _run(args, emitter, fail)
     except KeyboardInterrupt:
         # 協調的な中断(Ctrl-C / 親プロセスの中断)。書き込みは全計算後に 1 回だけで原子的なので、
-        # ここに来た時点で出力は未書き込みか原子置換済みのいずれかで、中途半端な出力は残らない(§12.5)。
+        # ここに来た時点で出力は未書き込みか原子置換済みのいずれかで、中途半端な出力は残らない。
         return fail("cancelled", "中断された(Ctrl-C 等)", 130)
     except Exception as e:
         return fail("internal_error", f"{type(e).__name__}: {e}", 1)
@@ -558,17 +558,17 @@ def main(argv=None):
 def _run(args, emitter, fail):
     """引数解析済みの本体処理(検証 → 読み込み → 選択・範囲解決 → 削減 → 書き込み)。
 
-    失敗は fail() 経由で終了コードを返す(§12.4)。検証の位置・順序は現行のまま(§1)。
+    失敗は fail() 経由で終了コードを返す。検証の位置・順序は現行のまま。
     """
-    # 入力パス検証(§2.2)。
+    # 入力パス検証。
     if not os.path.isfile(args.input):
         return fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 2, field="input")
-    # --bone-file パス検証(§2.2)。不在・非通常ファイルは引数エラー。
+    # --bone-file パス検証。不在・非通常ファイルは引数エラー。
     if args.bone_file is not None and not os.path.isfile(args.bone_file):
         return fail("bone_file_not_file",
                     f"--bone-file が存在しないか通常ファイルでない: {args.bone_file}", 2, field="--bone-file")
 
-    # フィット制御の検証(§2.5)。max_segment_frames=None は無制限で上限検証の対象外。
+    # フィット制御の検証。max_segment_frames=None は無制限で上限検証の対象外。
     if args.min_segment_frames < 1:
         return fail("bad_argument", f"--min-segment-frames は 1 以上が必要: {args.min_segment_frames}",
                     2, field="--min-segment-frames")
@@ -580,7 +580,7 @@ def _run(args, emitter, fail):
                     f"--min-segment-frames({args.min_segment_frames})が "
                     f"--max-segment-frames({args.max_segment_frames})を超えている", 2)
 
-    # 許容誤差解決(明示 > プリセット。§2.3/§2.4)。検証は presets.resolve_tolerances に集中(§1)。
+    # 許容誤差解決(明示 > プリセット)。検証は presets.resolve_tolerances に集中。
     overrides = {
         field: getattr(args, arg)
         for arg, field in _TOL_ARGS.items()
@@ -591,24 +591,24 @@ def _run(args, emitter, fail):
     except ValueError as e:
         return fail("bad_tolerance", str(e), 2)
 
-    # --target camera とボーン選択の同時指定はエラー(§2.2)。ただし --list-bones は検査モード。
+    # --target camera とボーン選択の同時指定はエラー。ただし --list-bones は検査モード。
     if args.target == "camera" and _has_bone_selection(args) and not args.list_bones:
         return fail("target_selection_conflict",
                     "--target camera とボーン選択オプションは同時指定できない", 2)
 
-    # 出力先・上書きガード(§2.2)。list-bones は出力しないので不要。
+    # 出力先・上書きガード。list-bones は出力しないので不要。
     output = args.output if args.output is not None else _default_output(args.input)
     if not args.list_bones and not args.overwrite and _same_path(output, args.input):
         return fail("output_overwrites_input",
                     f"出力先が入力と同一パス。上書きには --overwrite が必要: {output}", 2, field="--output")
 
-    # 入力読み込み(VMDでない等 → 入力不正 §9 コード1)。
+    # 入力読み込み(VMDでない等 → 入力不正 コード1)。
     try:
         doc, read_warnings = io.read(args.input)
     except Exception as e:
         return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
 
-    # 読み込み時の警告(デコード不能な名前フィールド等)を surface する(§2.2/§12.2)。
+    # 読み込み時の警告(デコード不能な名前フィールド等)を surface する。
     # 同一(コード・セクション・メッセージ)はキー毎の重複を避けて1件にまとめる。機械=warning
     # イベント(section は単一要素配列 or null)、人間=stderr 1 行。
     seen_warn = set()
@@ -624,7 +624,7 @@ def _run(args, emitter, fail):
             where = f"({w.section})" if w.section else ""
             print(f"警告: {w.message}{where}", file=sys.stderr)
 
-    # 対象セクションを内部作業ビューで正規化する(フレーム順ソート・同一キー後勝ち。§3.1)。
+    # 対象セクションを内部作業ビューで正規化する(フレーム順ソート・同一キー後勝ち)。
     # 対象外セクションは無加工で保持される。
     norm_sections = []
     if args.target in ("camera", "all"):
@@ -633,14 +633,14 @@ def _run(args, emitter, fail):
         norm_sections.append("bone")
     doc, _ = io.normalize(doc, sections=norm_sections)
 
-    # --bone-file の読み込み・解析失敗(UTF-8 デコード不能等)は引数エラー(§2.2/§9 コード2)。
+    # --bone-file の読み込み・解析失敗(UTF-8 デコード不能等)は引数エラー(コード2)。
     try:
         includes, excludes = _build_selectors(args)
     except (UnicodeDecodeError, OSError, ValueError) as e:
         return fail("bad_bone_file", f"--bone-file を読めない: {type(e).__name__}: {e}", 2,
                     field="--bone-file")
 
-    # --list-bones: ボーン名・キー数・選択状態を表示して終了(§2.7)。
+    # --list-bones: ボーン名・キー数・選択状態を表示して終了。
     if args.list_bones:
         return _list_bones(doc, includes, excludes, emitter=emitter)
 
@@ -654,7 +654,7 @@ def _run(args, emitter, fail):
     )
 
     # ボーン選択を先に解決する。明示 --bone 名が不在なら SelectionError → コード2
-    # (ボーンセクションが空の場合を含む。§2.2)。これは §3.1 の空セクション コード1 より
+    # (ボーンセクションが空の場合を含む)。これは空セクションの入力不正 コード1 より
     # 優先する(明示名の引数エラーが勝つ)。
     bone_names = _bone_names_in_order(doc.bone)
     undecodable = _undecodable_bone_names(doc.bone)
@@ -664,7 +664,7 @@ def _run(args, emitter, fail):
                 bone_names, includes, excludes, undecodable=undecodable
             )
         except selection.SelectionError as e:
-            # エラーで終了する前に、蓄積済みの不一致警告を出力する(§2.2/§12.2)。
+            # エラーで終了する前に、蓄積済みの不一致警告を出力する。
             for w in e.warnings:
                 _emit_selector_unmatched(emitter, w)
             return fail("bone_selection_invalid", str(e), 2)
@@ -674,7 +674,7 @@ def _run(args, emitter, fail):
     else:
         selected = set(bone_names)
 
-    # 対象セクションにキーが無い(§3.1)。target all は片側のみでも続行。
+    # 対象セクションにキーが無い。target all は片側のみでも続行。
     if args.target == "camera" and not doc.camera:
         return fail("no_target_keys", "--target camera だがカメラキーが無い", 1, field="input")
     if args.target == "bone" and not doc.bone:
@@ -685,7 +685,7 @@ def _run(args, emitter, fail):
     do_camera = args.target in ("camera", "all") and bool(doc.camera)
     do_bone = args.target in ("bone", "all") and bool(doc.bone)
 
-    # 対象トラック全体の最小/最大フレームでグローバル範囲を1回だけ展開する(§2.2)。
+    # 対象トラック全体の最小/最大フレームでグローバル範囲を1回だけ展開する。
     target_frames = []
     if do_camera:
         target_frames += [k.frame for k in doc.camera]
@@ -696,7 +696,7 @@ def _run(args, emitter, fail):
     except ranges.RangeError as e:
         return fail("range_invalid", f"--range: {e}", 2, field="--range")
 
-    # 全削減範囲外の keep-frame は警告して無視する(§2.6/§12.2)。機械=keep_frame_ignored イベント。
+    # 全削減範囲外の keep-frame は警告して無視する。機械=keep_frame_ignored イベント。
     for f in args.keep_frames:
         if not any(lo <= f <= hi for lo, hi in global_ranges):
             msg = f"keep-frame {f} は削減範囲外のため無視します"
@@ -706,16 +706,16 @@ def _run(args, emitter, fail):
                 print(f"警告: {msg}", file=sys.stderr)
 
     want_report = args.dry_run
-    want_diag = want_report or args.verbose  # verbose は診断を stderr ログに出す(§2.7/§6.3)
+    want_diag = want_report or args.verbose  # verbose は診断を stderr ログに出す
     new_camera = doc.camera
     new_bone = doc.bone
     camera_errors = None
     bone_errors = None
     camera_diag = None
     bone_diag = None
-    # 削減中の処理経過を stderr に上書き表示する(§2.7)。対話端末時のみ、かつ人間向け経路
+    # 削減中の処理経過を stderr に上書き表示する。対話端末時のみ、かつ人間向け経路
     # (構造化出力モードでない)で --quiet 未指定のときだけ有効。機械モードはライブ表示せず
-    # 同じ進捗を progress イベントで出す(§12.1)。emitter が非 None なら構造化出力(機械/自己記述)。
+    # 同じ進捗を progress イベントで出す。emitter が非 None なら構造化出力(機械/自己記述)。
     reporter = _Progress(enabled=sys.stderr.isatty() and not args.quiet and emitter is None)
     did_reduce = False
     try:
@@ -723,10 +723,10 @@ def _run(args, emitter, fail):
             cam = _sorted_camera(doc.camera)
             cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
             # 機械モードは camera 段の開始イベントを、処理対象なら len に依らず必ず 1 本出す
-            # (bone 段と同様。§12.2)。人間モードのライブ表示は削減が走る len>=2 のときのみ。
+            # (bone 段と同様)。人間モードのライブ表示は削減が走る len>=2 のときのみ。
             cam_cb = _machine_progress(emitter, "camera") if emitter is not None else None
             if len(cam) >= 2:
-                if cam_ranges:  # 有効範囲が空なら実際には削減されない(§2.2/§3.1)
+                if cam_ranges:  # 有効範囲が空なら実際には削減されない
                     did_reduce = True
                 camera_diag = {} if want_diag else None
                 cam_total = sum(f1 - f0 for f0, f1 in cam_ranges)
@@ -740,12 +740,12 @@ def _run(args, emitter, fail):
                 if emitter is None:
                     reporter.finish()
             else:
-                new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持(§3.1/§3.2)
+                new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持
             if want_report:
                 camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
         if do_bone:
             bone_diag = {} if want_diag else None
-            # 機械モードは bone 段の開始イベントを出し、完了ごとの progress を on_progress で写す(§12.2)。
+            # 機械モードは bone 段の開始イベントを出し、完了ごとの progress を on_progress で写す。
             bone_cb = _machine_progress(emitter, "bone") if emitter is not None else None
             new_bone = _reduce_bones(
                 doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
@@ -756,20 +756,20 @@ def _run(args, emitter, fail):
             if want_report:
                 bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
     except StrictError:
-        # エラー理由を出す前にライブ表示の行を閉じる(fail の error 行が進捗行へ連結されないように。§12.5)。
+        # エラー理由を出す前にライブ表示の行を閉じる(fail の error 行が進捗行へ連結されないように)。
         reporter.finish()
         return fail("strict_tolerance_unmet", "--strict 指定で許容誤差を満たせない", 4)
     finally:
         # 中断(KeyboardInterrupt)・その他の例外が _run 外へ伝播する経路でもライブ表示の行を閉じてから
-        # 抜ける(§12.5)。finish は冪等(既に閉じていれば何もしない)で、機械モードでは reporter 自体が無効。
+        # 抜ける。finish は冪等(既に閉じていれば何もしない)で、機械モードでは reporter 自体が無効。
         reporter.finish()
 
-    # verbose: 不連続検出位置・分割理由・継ぎ目書き換えを stderr に出す(§2.7/§6.3)。
+    # verbose: 不連続検出位置・分割理由・継ぎ目書き換えを stderr に出す。
     if args.verbose:
         _log_diagnostics(camera_diag, bone_diag)
 
-    # dry-run 統計。誤差・診断を含む report dict を作り、テキスト要約を標準出力へ出す(§2.7)。
-    # 機械モードの標準出力はイベント専用(§12.1)なので人間向けテキストは出さない。
+    # dry-run 統計。誤差・診断を含む report dict を作り、テキスト要約を標準出力へ出す。
+    # 機械モードの標準出力はイベント専用なので人間向けテキストは出さない。
     if want_report:
         rep = report.build_report(
             target=args.target,
@@ -787,7 +787,7 @@ def _run(args, emitter, fail):
         if args.dry_run and emitter is None:
             print(report.format_dry_run(rep))
 
-    # dry-run は出力を書かずに終える。機械モードは入力検査(inspect)の result でストリームを終端する(§12.2)。
+    # dry-run は出力を書かずに終える。機械モードは入力検査(inspect)の result でストリームを終端する。
     if args.dry_run:
         if emitter is not None:
             emitter.result(mode="inspect", **_build_inspect(
@@ -802,7 +802,7 @@ def _run(args, emitter, fail):
         return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}", 3,
                     field="--output", path=output)
 
-    # 書き込み成功後に reduce result でストリームを終端する(§12.2)。
+    # 書き込み成功後に reduce result でストリームを終端する。
     if emitter is not None:
         emitter.result(
             mode="reduce", output=output, target=args.target,
@@ -824,7 +824,7 @@ def _sorted_camera(camera):
 
 
 def _global_ranges(parsed_ranges, target_frames):
-    """対象トラック全体の最小/最大で --range を1回展開する(§2.2)。
+    """対象トラック全体の最小/最大で --range を1回展開する。
 
     --range 未指定なら全体[min,max]。target_frames が空なら空リスト。
     """
@@ -838,12 +838,12 @@ def _global_ranges(parsed_ranges, target_frames):
 
 def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_kw,
                   diagnostics_out=None, reporter=None, on_progress=None):
-    """選択ボーンを削減し非選択ボーンは保持して、全ボーンキー列を返す(§3.2)。
+    """選択ボーンを削減し非選択ボーンは保持して、全ボーンキー列を返す。
 
-    各トラックの実処理範囲はグローバル範囲とトラック区間の積集合(§2.2)。diagnostics_out に
-    dict を渡すと、選択ボーンごとに {name: 診断dict} を埋める(§2.7/§6.3)。reporter を渡すと
-    削減対象ボーン1件ごとに処理経過を表示する(§2.7)。on_progress(done, total, name) を渡すと
-    削減対象ボーン1件の完了ごとに呼ぶ(機械モードの progress イベント用。§12.2)。
+    各トラックの実処理範囲はグローバル範囲とトラック区間の積集合。diagnostics_out に
+    dict を渡すと、選択ボーンごとに {name: 診断dict} を埋める。reporter を渡すと
+    削減対象ボーン1件ごとに処理経過を表示する。on_progress(done, total, name) を渡すと
+    削減対象ボーン1件の完了ごとに呼ぶ(機械モードの progress イベント用)。
     """
     groups = _bone_keys_by_name(bone_keys)
     total = sum(1 for name, keys in groups.items() if name in selected and len(keys) >= 2)
@@ -870,17 +870,17 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
             if on_progress is not None:
                 on_progress(done, total, name)
         else:
-            # 非選択トラック、および選択でもキー1件以下(削減不能)は逐語保持(§3.1/§3.2)。
+            # 非選択トラック、および選択でもキー1件以下(削減不能)は逐語保持。
             out.extend(ks)
     if reporter is not None and total:
         reporter.finish()
-    # ボーン名(生バイト)・フレーム順に安定ソート(§3.2)。
+    # ボーン名(生バイト)・フレーム順に安定ソート。
     out.sort(key=lambda k: (k.name_raw, k.frame))
     return out
 
 
 def _measure_bone_errors(in_bone, out_bone, selected, global_ranges):
-    """選択ボーンごとに出力 vs 元サンプルの軸別最大誤差を測る(§7.2)。{name: 誤差dict}。"""
+    """選択ボーンごとに出力 vs 元サンプルの軸別最大誤差を測る。{name: 誤差dict}。"""
     in_groups = _bone_keys_by_name(in_bone)
     out_groups = _bone_keys_by_name(out_bone)
     errors = {}
@@ -895,13 +895,13 @@ def _measure_bone_errors(in_bone, out_bone, selected, global_ranges):
 
 
 def _list_bones(doc, includes, excludes, emitter=None):
-    """ボーン名・キー数・選択状態を表示して 0 を返す(§2.7)。"""
+    """ボーン名・キー数・選択状態を表示して 0 を返す。"""
     names = _bone_names_in_order(doc.bone)
     counts = {}
     for k in doc.bone:
         counts[k.name] = counts.get(k.name, 0) + 1
 
-    # ボーン0件でも選択子の解決を試み、未一致選択子の警告を出す(§2.7)。0件かつ選択子なしなら無警告。
+    # ボーン0件でも選択子の解決を試み、未一致選択子の警告を出す。0件かつ選択子なしなら無警告。
     selected = set()
     try:
         result = selection.resolve_selection(
@@ -912,7 +912,7 @@ def _list_bones(doc, includes, excludes, emitter=None):
             _emit_selector_unmatched(emitter, w)
     except selection.SelectionError as e:
         # 選択不能でも一覧表示は行う(検査モード)。蓄積済みの不一致警告(selector_unmatched)の後に
-        # 理由(selection_unresolved)を出す。検査モードは終了コード 0 のまま warning とする(§12.2)。
+        # 理由(selection_unresolved)を出す。検査モードは終了コード 0 のまま warning とする。
         for w in e.warnings:
             _emit_selector_unmatched(emitter, w)
         if emitter is not None:
@@ -920,7 +920,7 @@ def _list_bones(doc, includes, excludes, emitter=None):
         else:
             print("警告: " + str(e), file=sys.stderr)
 
-    # 構造化出力モード(機械/自己記述)は list_bones result で終端(§12.2)。人間向けは一覧テキスト。
+    # 構造化出力モード(機械/自己記述)は list_bones result で終端。人間向けは一覧テキスト。
     if emitter is not None:
         emitter.result(mode="list_bones", bones=[
             {"name": name, "keys": counts[name], "selected": name in selected} for name in names

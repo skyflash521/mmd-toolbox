@@ -1,4 +1,4 @@
-"""範囲指定の解析・展開・積集合のテスト(sparsevmd.md §2.2 の RANGE)。
+"""範囲指定(--range の RANGE)の解析・展開・積集合のテスト。
 
 - parse_range: START:END / START: / :END を (start, end)(省略側は None)に解析。
   両端は0以上の10進整数、両端含む。両方指定で START>END はエラー。
@@ -50,8 +50,8 @@ def test_parse_malformed_raises(bad):
 
 
 def test_parse_both_omitted_raises():
-    # §2.2 は START:END / START: / :END を挙げ「一方は省略可」とする。
-    # 両端省略(:)は仕様外でエラー。
+    # RANGE の形は START:END / START: / :END で、省略できるのは一方だけ。
+    # 両端省略(:)は受理しない形でエラー。
     with pytest.raises(ValueError):
         parse_range(":")
 
@@ -75,7 +75,7 @@ def test_normalize_sorts_ascending():
 
 
 def test_touching_ranges_overlap_error():
-    # 10:20 と 20:30 は 20 が重複 → エラー(§2.2)。
+    # 10:20 と 20:30 は 20 が重複 → エラー。
     with pytest.raises(RangeError):
         expand_and_normalize([(10, 20), (20, 30)], 0, 100)
 
@@ -103,7 +103,7 @@ def test_adjacent_non_touching_ok():
 
 
 def test_start_greater_than_end_after_expansion_error():
-    # 999: は END=末尾60 に展開され 999>60 → エラー(§2.2)。
+    # 999: は END=末尾60 に展開され 999>60 → エラー。
     with pytest.raises(RangeError):
         expand_and_normalize([(999, None)], 0, 60)
 
@@ -127,7 +127,7 @@ def test_intersect_partial_clip():
 def test_intersect_empty_when_outside():
     # トラックがグローバル範囲外 → 積集合は空。
     # (空=削減対象なし。トラックを元のまま保持する処理は呼び出し側の責務で、
-    #  後段の reducer/CLI テストで検証する。§2.2/§3.1)
+    #  後段の reducer/CLI テストで検証する)
     assert intersect([(0, 240)], 600, 700) == []
 
 

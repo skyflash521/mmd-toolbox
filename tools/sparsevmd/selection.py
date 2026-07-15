@@ -1,9 +1,9 @@
-"""ボーン選択ルールの解決(sparsevmd.md §2.2)。
+"""ボーン選択ルールの解決。
 
 入力VMDのボーン名集合に対して include / exclude セレクタを適用し、処理対象の
 ボーン名と警告を返す。セレクタは名前完全一致(name)、glob、組み込みグループ(group)。
 
-選択の流れ(§2.2):
+選択の流れ:
 - include 指定が1つも無ければ全ボーンを include 扱いとする。その後 exclude を引く。
 - ハード エラー(SelectionError、CLI で終了コード2に対応づけ):
   空文字 NAME、include と exclude の同名衝突、--bone 明示名が入力に存在しない
@@ -17,7 +17,7 @@ SelectionError はそこまでに蓄積した警告を .warnings に保持する
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 
-# 組み込みグループ(§2.2 の表)。各グループは glob の集合として定義する。
+# 組み込みグループ。各グループは glob の集合として定義する。
 _CORE = (
     "センター", "グルーブ", "全ての親", "上半身*", "下半身", "首", "頭",
     "center", "groove", "root", "upper body*", "lower body", "neck", "head",
@@ -36,7 +36,7 @@ _FINGERS = (
 )
 _IK = ("*IK*", "*ＩＫ*", "*ik*")
 
-# mocap は core + arms + legs + fingers の glob 集合。ik 固有の glob は含めない(§2.2)。
+# mocap は core + arms + legs + fingers の glob 集合。ik 固有の glob は含めない。
 GROUPS = {
     "core": _CORE,
     "arms": _ARMS,
@@ -58,7 +58,7 @@ class Selector:
 
 
 class SelectionError(ValueError):
-    """ボーン選択のハード エラー(§2.2、CLI で終了コード2)。
+    """ボーン選択のハード エラー(CLI で終了コード2)。
 
     .warnings にエラーまでに蓄積したソフト警告を保持する。
     """
@@ -96,10 +96,10 @@ def _matched_names(bone_names, selector):
 
 
 def resolve_selection(bone_names, includes, excludes, undecodable=None):
-    """include/exclude セレクタを適用し SelectionResult を返す(§2.2)。
+    """include/exclude セレクタを適用し SelectionResult を返す。
 
     undecodable はデコード不能なボーン名(置換文字入りの表示名)の集合。これらは
-    name 種別の `--bone` / `--exclude-bone` では一致不可とする(§2.2)。glob/group
+    name 種別の `--bone` / `--exclude-bone` では一致不可とする。glob/group
     やデフォルト全件選択では通常どおり対象になる。
     """
     includes = list(includes or [])
@@ -107,12 +107,12 @@ def resolve_selection(bone_names, includes, excludes, undecodable=None):
     undecodable = set(undecodable or ())
     warnings = []
 
-    # 空文字 NAME はエラー(§2.2)。
+    # 空文字 NAME はエラー。
     for sel in includes + excludes:
         if sel.kind == "name" and sel.value == "":
             raise SelectionError("空文字のボーン名は指定できない", warnings)
 
-    # include と exclude に同じ NAME → エラー(§2.2)。
+    # include と exclude に同じ NAME → エラー。
     inc_names = {s.value for s in includes if s.kind == "name"}
     exc_names = {s.value for s in excludes if s.kind == "name"}
     dup = inc_names & exc_names
@@ -123,7 +123,7 @@ def resolve_selection(bone_names, includes, excludes, undecodable=None):
 
     universe = list(bone_names)
     universe_set = set(universe)
-    # name 種別の照合に使う集合。デコード不能名は一致不可とする(§2.2)。
+    # name 種別の照合に使う集合。デコード不能名は一致不可とする。
     name_universe = universe_set - undecodable
 
     # include 集合を構築。
@@ -138,7 +138,7 @@ def resolve_selection(bone_names, includes, excludes, undecodable=None):
                     included.add(sel.value)
                 else:
                     # --bone 明示名が不在(デコード不能名も含む)→ ハード エラー
-                    # (空 universe を含む。§2.2)。
+                    # (空 universe を含む)。
                     missing_names.append(sel.value)
             else:
                 hit = _matched_names(universe, sel)
@@ -174,7 +174,7 @@ def resolve_selection(bone_names, includes, excludes, undecodable=None):
 
     selected = [n for n in universe if n in included and n not in excluded]
 
-    # ボーンキーが存在するのに最終0件 → エラー(§2.2)。空 universe は CLI 側(§3.1)。
+    # ボーンキーが存在するのに最終0件 → エラー。空 universe の扱いは CLI 側の責務。
     if universe and not selected:
         raise SelectionError("ボーン選択の結果が0件です", warnings)
 
@@ -182,7 +182,7 @@ def resolve_selection(bone_names, includes, excludes, undecodable=None):
 
 
 def parse_bone_file(text):
-    """bone-file テキストを (includes, excludes) のセレクタ列に解析する(§2.2)。
+    """bone-file テキストを (includes, excludes) のセレクタ列に解析する。
 
     空行と # で始まる行は無視。各行は name:/glob:/group:/exclude:name:/
     exclude:glob:/exclude:group: のいずれか。接頭辞なしは name: 扱い。

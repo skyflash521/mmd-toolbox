@@ -1,4 +1,4 @@
-"""削減範囲(--range)の解析・展開・積集合(sparsevmd.md §2.2 の RANGE)。
+"""削減範囲(--range)の解析・展開・積集合。
 
 - parse_range: 1個の RANGE 文字列(START:END / START: / :END)を (start, end) に解析。
   省略側は None。両端は0以上の10進整数(両端含む)。両方指定で START>END はエラー。
@@ -10,7 +10,7 @@
 
 
 class RangeError(ValueError):
-    """範囲指定のエラー(§2.2、CLI で終了コード2)。"""
+    """範囲指定のエラー(CLI で終了コード2)。"""
 
 
 def parse_range(text):
@@ -37,7 +37,7 @@ def _parse_endpoint(part, text):
 
 
 def expand_and_normalize(parsed_ranges, global_min, global_max):
-    """省略端を展開し、昇順正規化と重複検査を行う(§2.2)。
+    """省略端を展開し、昇順正規化と重複検査を行う。
 
     parsed_ranges は parse_range の戻り値((start|None, end|None))のリスト。
     省略端は global_min / global_max に1回だけ展開する。
@@ -52,14 +52,14 @@ def expand_and_normalize(parsed_ranges, global_min, global_max):
 
     expanded.sort()
     for prev, cur in zip(expanded, expanded[1:]):
-        # 端の接触(cur.start == prev.end)も1フレーム重複としてエラー(§2.2)。
+        # 端の接触(cur.start == prev.end)も1フレーム重複としてエラー。
         if cur[0] <= prev[1]:
             raise RangeError(f"範囲が重複しています: {prev} と {cur}")
     return expanded
 
 
 def intersect(global_ranges, first, last):
-    """グローバル範囲(正規化済み)とトラック範囲 [first, last] の積集合(§2.2)。"""
+    """グローバル範囲(正規化済み)とトラック範囲 [first, last] の積集合。"""
     result = []
     for s, e in global_ranges:
         lo = max(s, first)

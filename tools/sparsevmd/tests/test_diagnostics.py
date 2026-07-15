@@ -1,7 +1,7 @@
-"""削減診断の surface と dry-run レポートのテスト(sparsevmd.md §2.7, §6.3)。
+"""削減診断の surface と dry-run レポートのテスト。
 
-§2.7 はレポートに「不連続検出位置」・「分割理由」を求める。§6.3 は
-継ぎ目の補間曲線書き換えを「レポートに明示する」と求める。reduce_*_track は diagnostics
+レポートには不連続検出位置・分割理由に加え、継ぎ目の補間曲線書き換えも
+明示する。reduce_*_track は diagnostics
 out-param(dict)を受け取り、cuts(検出カット位置)・splits(分割フレームと駆動チャンネル)・
 seam_rewrites(継ぎ目で曲線を書き換えたフレーム)を埋める。build_report はこれを各トラック
 エントリに載せ、dry-run に出す。
@@ -189,7 +189,7 @@ def test_build_report_includes_splits_and_seams():
 
 def _force_linear_curve(monkeypatch):
     """全チャンネルの curve を線形固定にし、bezier 採否で受理した区間でも出力段で誤差を
-    起こして §7.3 出力後検証の密化ループを励起する(test_verify._bad_curve と同趣旨)。"""
+    起こして出力後検証の密化ループを励起する(test_verify._bad_curve と同趣旨)。"""
     import vmd.fit as fit
 
     linear_cp = (20, 20, 107, 107)

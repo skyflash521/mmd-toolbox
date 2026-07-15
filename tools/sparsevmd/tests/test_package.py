@@ -1,4 +1,4 @@
-"""sparsevmd パッケージ土台のスモークテスト(sparsevmd.md §8)。
+"""sparsevmd パッケージ土台のスモークテスト。
 
 パッケージがインポート可能で、コア(presets)と console script のエントリ(cli.main)が
 公開されていることを確認する。
@@ -8,7 +8,7 @@
 def test_package_imports():
     import sparsevmd
 
-    # namespace package(__init__.py 不在)ではなく実パッケージであること(§8)。
+    # namespace package(__init__.py 不在)ではなく実パッケージであること。
     assert sparsevmd.__file__ is not None
 
 

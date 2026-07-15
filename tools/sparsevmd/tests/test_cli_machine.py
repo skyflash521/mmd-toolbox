@@ -1,4 +1,4 @@
-"""sparsevmd CLI 機械モード骨格・構造化エラーのテスト(sparsevmd.md §9/§12)。
+"""sparsevmd CLI 機械モード骨格・構造化エラーのテスト。
 
 機械モードは stdout を JSON Lines のイベント専用にし、失敗は確定 code/field/exit_code の error
 イベントで終端する。非機械モードは失敗理由を標準エラーへ 1 行出す。既定(非機械)挙動が不変である
@@ -6,11 +6,11 @@
 
 本モジュールは骨格(--version / --machine / --describe / --quiet / --cut-detect フラグ・
 MachineArgumentParser 切替・emitter・fail() 単一失敗経路・stderr の backslashreplace 再構成・
-help= 付与・input の nargs="?" 化)と §12.4 の構造化エラー全経路を対象にする。成功経路のイベント
+help= 付与・input の nargs="?" 化)と構造化エラーの全経路を対象にする。成功経路のイベント
 (progress / warning / result)・自己記述 result・中断は本モジュールの対象外とする。
 
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テスト方針は
-../../../libs/vmd/vmd.md §4 に準ずる(決定論的・外部依存なし)。
+機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テストは
+決定論的に実行し、外部依存を使わない。
 """
 
 import json
@@ -76,18 +76,18 @@ def ramp_camera(path):
 
 
 def test_version_prints_and_exits_zero(capsys):
-    # --version は __version__ を表示して終了コード0(§2/§12.1)。番号源は __version__ 一本。
+    # --version は __version__ を表示して終了コード0。番号源は __version__ 一本。
     from sparsevmd import __version__
 
     rc = cli.main(["--version"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "sparsevmd" in out and __version__ in out
-    assert __version__ == "0.0.1"  # §2 の初期版(§10 完了条件)
+    assert __version__ == "0.0.1"  # 初期版の番号を固定する
 
 
 def test_machine_version_stays_human(capsys):
-    # --machine 併用でも --version は人間向けテキスト+exit 0、イベントに載せない(§12.1)。
+    # --machine 併用でも --version は人間向けテキスト+exit 0、イベントに載せない。
     rc = cli.main(["--machine", "--version"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -102,7 +102,7 @@ def test_machine_help_stays_human(capsys):
 
 
 def test_help_lists_new_flags(capsys):
-    # --help に新設フラグが現れる(規約 §6 の人間向けヘルプ)。
+    # --help に新設フラグが現れる(人間向けヘルプ)。
     rc = cli.main(["--help"])
     assert rc == 0
     text = capsys.readouterr().out
@@ -120,7 +120,7 @@ def test_machine_error_bad_argument_unknown_option(tmp_path, capsysbinary):
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["exit_code"] == 2
-    assert e["field"] == "--bogus"   # unrecognized arguments: の先頭トークン(§12.4 / cli_events §4)
+    assert e["field"] == "--bogus"   # unrecognized arguments: の先頭トークン
     assert isinstance(e["message"], str) and e["message"]
 
 
@@ -324,7 +324,7 @@ def test_machine_error_stdout_is_valid_json_lines_lf_only(tmp_path, capsysbinary
             assert "type" in obj
 
 
-# --- 非機械モードの理由 1 行(§12.4 / §6)-----------------------------------
+# --- 非機械モードの理由 1 行-----------------------------------
 
 
 def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
@@ -345,11 +345,11 @@ def test_non_machine_missing_input_is_arg_error(capsys):
     assert "error:" in capsys.readouterr().err.lower()
 
 
-# --- 進捗のライブ表示抑制(§2.7 / §12.1)------------------------------------
+# --- 進捗のライブ表示抑制------------------------------------
 
 
 def test_quiet_disables_live_progress_even_on_tty(tmp_path, capsys, monkeypatch):
-    # --quiet は標準エラーが端末でもライブ進捗表示を抑制する(§2.7)。TTY を擬装して検証する。
+    # --quiet は標準エラーが端末でもライブ進捗表示を抑制する。TTY を擬装して検証する。
     import sys as _sys
     monkeypatch.setattr(_sys.stderr, "isatty", lambda: True, raising=False)
     src = tmp_path / "in.vmd"

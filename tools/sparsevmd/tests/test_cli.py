@@ -1,7 +1,7 @@
-"""CLI のテスト(sparsevmd.md §2, §9)。
+"""CLI のテスト。
 
 CLI はコアの薄いラッパー: 引数解析 → VMD読み(vmd.io)→ トラック削減 →
-VMD書き。終了コード(§9): 0 正常 / 1 入力不正(VMDでない・対象セクションにキーなし)/
+VMD書き。終了コード: 0 正常 / 1 入力不正(VMDでない・対象セクションにキーなし)/
 2 引数エラー / 3 出力書き込み失敗 / 4 strict で許容誤差を満たせない。
 """
 
@@ -156,11 +156,11 @@ def test_non_target_section_passthrough(tmp_path):
     assert len(doc.bone) < 31
 
 
-# --- 入力正規化(§3.1) ------------------------------------------------------
+# --- 入力正規化 ------------------------------------------------------
 
 
 def test_duplicate_frame_camera_last_wins(tmp_path):
-    # 同一フレーム重複は後勝ち(§3.1)。frame0 を 2 回入れ、後の値が採用される。
+    # 同一フレーム重複は後勝ち。frame0 を 2 回入れ、後の値が採用される。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     keys = [cam(0, center=(0.0, 0.0, 0.0)), cam(0, center=(5.0, 0.0, 0.0)),
@@ -175,7 +175,7 @@ def test_duplicate_frame_camera_last_wins(tmp_path):
 
 
 def test_single_key_camera_preserved_verbatim(tmp_path):
-    # 1 キー以下のトラックは削減不能として逐語保持(値・補間ブロック不変、§3.1/§3.2)。
+    # 1 キー以下のトラックは削減不能として逐語保持(値・補間ブロック不変)。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     ease_blk = bytes([40, 90, 10, 118]) + bytes([20, 107, 20, 107]) * 5
@@ -202,11 +202,11 @@ def test_single_key_bone_preserved_verbatim(tmp_path):
     assert doc.bone == [key]
 
 
-# --- 削減対象なし記録 / verbose(§2.2 / §3.1 / §2.7 / §6.3) ---------------
+# --- 削減対象なし記録 / verbose ---------------
 
 
 def test_dry_run_records_no_reduction_target(tmp_path, capsys):
-    # 全トラック1キー以下 → dry-run に「削減対象なし」を記録(§3.1)。
+    # 全トラック1キー以下 → dry-run に「削減対象なし」を記録。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=[cam(7, center=(3.0, 0.0, 0.0))])
     code = cli.main([str(src), "--target", "camera", "--dry-run"])
@@ -215,7 +215,7 @@ def test_dry_run_records_no_reduction_target(tmp_path, capsys):
 
 
 def test_verbose_logs_diagnostics(tmp_path, capsys):
-    # -v 指定で不連続検出位置などの診断を stderr に出す(§2.7/§6.3)。レポート系フラグ無しでも。
+    # -v 指定で不連続検出位置などの診断を stderr に出す。レポート系フラグ無しでも。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     keys = [cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0))
@@ -226,11 +226,11 @@ def test_verbose_logs_diagnostics(tmp_path, capsys):
     assert "15" in capsys.readouterr().err  # 不連続検出位置 frame15 が verbose ログに出る
 
 
-# --- CLI 堅牢化(§2.2 / §2.6 / §9) -----------------------------------------
+# --- CLI 堅牢化 -----------------------------------------
 
 
 def test_bone_file_decode_error_is_arg_error(tmp_path):
-    # --bone-file が UTF-8 でデコードできない場合は引数エラー(終了コード2、§2.2/§9)。
+    # --bone-file が UTF-8 でデコードできない場合は引数エラー(終了コード2)。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
     bf = tmp_path / "bones.txt"
@@ -241,7 +241,7 @@ def test_bone_file_decode_error_is_arg_error(tmp_path):
 
 
 def test_keep_frame_out_of_range_warns(tmp_path, capsys):
-    # 全削減範囲外の keep-frame は警告して無視する(§2.6)。
+    # 全削減範囲外の keep-frame は警告して無視する。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     write_vmd(src, camera=linear_camera_doc())
@@ -253,7 +253,7 @@ def test_keep_frame_out_of_range_warns(tmp_path, capsys):
 
 
 def test_list_bones_zero_bones_warns_unmatched(tmp_path, capsys):
-    # ボーン0件の VMD で --bone 指定 + --list-bones → 未一致選択子を警告(§2.7)。
+    # ボーン0件の VMD で --bone 指定 + --list-bones → 未一致選択子を警告。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=[cam(0), cam(30)])
     code = cli.main([str(src), "--list-bones", "--bone", "存在しない"])
@@ -266,7 +266,7 @@ def test_list_bones_zero_bones_warns_unmatched(tmp_path, capsys):
 
 
 def test_list_bones_shows_name_count_and_selection(tmp_path, capsys):
-    # ボーン名・キー数・選択状態を表示する(§2.7)。
+    # ボーン名・キー数・選択状態を表示する。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("センター", 30), bone("頭", 0)])
     code = cli.main([str(src), "--bone", "センター", "--list-bones"])
@@ -292,7 +292,7 @@ def test_list_bones_does_not_write_output_and_exits_zero(tmp_path):
 
 
 def test_missing_input_is_arg_error(tmp_path):
-    # 入力パスが存在しない → 引数エラー(コード2、読み込み前のパス検証。§2.2)。
+    # 入力パスが存在しない → 引数エラー(コード2、読み込み前のパス検証)。
     code = cli.main([str(tmp_path / "nope.vmd"), "--target", "camera"])
     assert code == 2
 
@@ -355,7 +355,7 @@ def test_keep_frame_negative_is_arg_error(tmp_path):
 
 
 def test_target_all_explicit_bone_absent_section_is_arg_error(tmp_path):
-    # target all・カメラあり・ボーンキー無し・明示 --bone NAME → 引数エラー(§2.2)。
+    # target all・カメラあり・ボーンキー無し・明示 --bone NAME → 引数エラー。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     code = cli.main([str(src), "--target", "all", "--bone", "存在しない"])
@@ -363,7 +363,7 @@ def test_target_all_explicit_bone_absent_section_is_arg_error(tmp_path):
 
 
 def test_target_bone_explicit_missing_name_is_arg_error_not_input(tmp_path):
-    # target bone・ボーンキー無し・明示 --bone NAME → 引数エラー2(空セクションの入力不正1より優先。§2.2)。
+    # target bone・ボーンキー無し・明示 --bone NAME → 引数エラー2(空セクションの入力不正1より優先)。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())  # bone セクション無し
     code = cli.main([str(src), "--target", "bone", "--bone", "存在しない"])
@@ -386,7 +386,7 @@ def test_unmatched_glob_warns_in_reduce_path(tmp_path, capsys):
 
 def test_sole_unmatched_glob_warns_before_exit2(tmp_path, capsys):
     # 唯一の include が不一致 glob → 最終0件で SelectionError(コード2)。
-    # 終了前に不一致警告を stderr に出す(§2.2)。
+    # 終了前に不一致警告を stderr に出す。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("頭", 0), bone("頭", 30)])
     code = cli.main([str(src), "--target", "bone", "--bone-glob", "幻*"])
@@ -412,7 +412,7 @@ def test_range_intersect_preserves_outside(tmp_path):
 
 
 def test_range_expand_start_after_end_is_arg_error(tmp_path):
-    # 999: は対象トラック末尾(30)に展開され 999>30 → 引数エラー(§2.2)。
+    # 999: は対象トラック末尾(30)に展開され 999>30 → 引数エラー。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     code = cli.main([str(src), "--target", "camera", "--range", "999:"])
@@ -445,7 +445,7 @@ def test_preview_csv_option_is_removed(tmp_path):
 
 
 def test_output_parent_missing_is_write_error(tmp_path):
-    # 出力先の親ディレクトリが存在しない → 出力書き込み失敗(コード3。§9)。
+    # 出力先の親ディレクトリが存在しない → 出力書き込み失敗(コード3)。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     out = tmp_path / "nodir" / "out.vmd"
@@ -455,7 +455,7 @@ def test_output_parent_missing_is_write_error(tmp_path):
 
 def test_strict_unsatisfiable_is_exit_4(tmp_path):
     # ジグザグで線形表現不能。min-segment-frames を大きくし strict にすると、分割下限まで
-    # 分割しても許容を満たせず終了コード4(§9)。
+    # 分割しても許容を満たせず終了コード4。
     src = tmp_path / "in.vmd"
     cam_keys = [cam(f, center=(0.0, 0.0 if f % 2 == 0 else 5.0, 0.0)) for f in range(9)]
     write_vmd(src, camera=cam_keys)
@@ -479,7 +479,7 @@ def test_strict_unsatisfiable_is_exit_4(tmp_path):
     assert code == 4
 
 
-# --- デコード不能ボーン名(§2.2) -------------------------------------------
+# --- デコード不能ボーン名 -------------------------------------------
 
 def undec_bone(frame, pos=(0.0, 0.0, 0.0)):
     # CP932 デコード不能なボーン名フィールド(孤立したリードバイト 0x81)。
@@ -487,7 +487,7 @@ def undec_bone(frame, pos=(0.0, 0.0, 0.0)):
 
 
 def test_undecodable_bone_name_warns_and_reduces(tmp_path, capsys):
-    # デコード不能名は警告しつつ、トラックの削減自体は継続する(§2.2)。
+    # デコード不能名は警告しつつ、トラックの削減自体は継続する。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     keys = [undec_bone(0), undec_bone(10, (1.0, 0.0, 0.0)), undec_bone(20, (2.0, 0.0, 0.0))]
@@ -503,7 +503,7 @@ def test_undecodable_bone_name_warns_and_reduces(tmp_path, capsys):
 
 
 def test_undecodable_name_not_targetable_by_bone(tmp_path):
-    # 置換文字名を --bone で明示しても一致せず、入力に存在しない扱いでコード2(§2.2)。
+    # 置換文字名を --bone で明示しても一致せず、入力に存在しない扱いでコード2。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     keys = [undec_bone(0), undec_bone(10), undec_bone(20)]

@@ -1,4 +1,4 @@
-"""sparsevmd CLI 自己記述 --describe のテスト(sparsevmd.md §12.3)。
+"""sparsevmd CLI 自己記述 --describe のテスト。
 
 --describe は VMD を読まず、オプション定義とプリセット一覧の result イベント(mode:"describe")を
 出して終了する独立メタ操作。--machine を要さず単独で起動でき、入力 positional も要求しない。
@@ -6,8 +6,8 @@ options は処理を駆動する引数の配列で、各要素は {name, type, c
 6 キー。真偽フラグの否定形(--no-cut-detect)とメタ/モード操作(--describe/--version/--help/--machine)は
 options に載せない。
 
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テスト方針は
-../../../libs/vmd/vmd.md §4 に準ずる(決定論的・外部依存なし)。
+機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テストは
+決定論的に実行し、外部依存を使わない。
 """
 
 import json
@@ -25,7 +25,7 @@ def _num_field(name, type_, mn):
     return {"name": name, "type": type_, "min": mn, "max": None, "exclusive_min": False}
 
 
-# §12.3 の 31 行表。name → (type, constraint, default, repeat)。JSON 経由で tuple は list、None は null。
+# 公開オプション全 31 件の期待表。name → (type, constraint, default, repeat)。JSON 経由で tuple は list、None は null。
 EXPECTED = {
     "input": ("str", None, None, False),
     "--output": ("str", None, None, False),
@@ -86,7 +86,7 @@ def test_describe_emits_result_without_input(capsysbinary):
     r = describe_result(capsysbinary)
     assert isinstance(r["options"], list) and r["options"]
     assert isinstance(r["presets"], list)
-    # describe の result は options/presets のみ(§12.3)。reduce/inspect/list_bones のキーは載せない。
+    # describe の result は options/presets のみ。reduce/inspect/list_bones のキーは載せない。
     assert set(r) == {"type", "mode", "options", "presets"}
 
 
@@ -98,7 +98,7 @@ def test_describe_works_without_machine_flag(capsysbinary):
 
 
 def test_describe_ignores_input_and_does_not_read_vmd(capsysbinary):
-    # --describe は VMD を読まない独立メタ操作(§12.3)。存在しない入力パスを渡しても、パス検証・
+    # --describe は VMD を読まない独立メタ操作。存在しない入力パスを渡しても、パス検証・
     # 読み込みをせず describe result を出して exit 0(入力 positional に阻まれない)。
     rc = cli.main(["--describe", "does_not_exist.vmd"])
     assert rc == 0
@@ -121,7 +121,7 @@ def test_describe_options_shape_and_repeat(capsysbinary):
         assert set(o) == {"name", "type", "constraint", "default", "help", "repeat"}
         assert isinstance(o["help"], str) and o["help"]
         assert isinstance(o["repeat"], bool)
-    # §12.3 の 31 行表を全要素の {type, constraint, default, repeat} で固定する。
+    # 公開オプション全 31 件を全要素の {type, constraint, default, repeat} で固定する。
     assert set(by_name) == set(EXPECTED)
     for name, (type_, constraint, default, repeat) in EXPECTED.items():
         o = by_name[name]
@@ -139,7 +139,7 @@ def test_describe_presets_shape_and_values(capsysbinary):
         assert set(p) == {"name", "values"}
         assert set(p["values"]) == {"bone_pos_tol", "bone_rot_tol", "camera_pos_tol",
                                     "camera_rot_tol", "camera_distance_tol", "camera_fov_tol"}
-    # 3 プリセットの §2.4 の値を全件固定する。
+    # 3 プリセットの許容誤差既定値を全件固定する。
     expected = {
         "precise": {"bone_pos_tol": 0.005, "bone_rot_tol": 0.05, "camera_pos_tol": 0.01,
                     "camera_rot_tol": 0.02, "camera_distance_tol": 0.01, "camera_fov_tol": 0.50},
@@ -162,7 +162,7 @@ def test_describe_type_table_covers_non_meta_args():
 
 def test_describe_mode_arg_error_is_error_event(capsysbinary):
     # --describe(--machine 無し)も構造化出力モードなので、引数エラーは標準エラーでなく error
-    # イベントでストリームを終端する(§12.1)。
+    # イベントでストリームを終端する。
     rc = cli.main(["--describe", "--max-segment-frames", "abc"])
     assert rc == 2
     out = capsysbinary.readouterr().out
