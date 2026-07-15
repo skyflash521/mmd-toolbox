@@ -1,4 +1,4 @@
-"""argparse のエラーを機械モードの error イベントへ橋渡しする(cli_events.md §4)。
+"""argparse のエラーを機械モードの error イベントへ橋渡しする。
 
 argparse は既定で使用法エラーを標準エラーへ出して終了する。機械モードではこの経路を error
 イベントへ振り替えるため、エラー時に終了する代わりに例外を送出する ArgumentParser と、その例外を
@@ -21,7 +21,7 @@ class ArgumentParseError(Exception):
 class MachineArgumentParser(argparse.ArgumentParser):
     """エラー時に標準エラーへ出して終了する代わりに ArgumentParseError を送出する ArgumentParser。
 
-    機械モードで argparse の使用法エラーを error イベントへ変換できるようにする(cli_events.md §4)。
+    機械モードで argparse の使用法エラーを error イベントへ変換できるようにする。
     --help/--version などのメタ操作は ArgumentParser の既定どおり(error() を経由しないため、
     本クラスの影響を受けない)。
     """
@@ -31,16 +31,16 @@ class MachineArgumentParser(argparse.ArgumentParser):
 
 
 def argparse_error_event(error, *, code, field=None):
-    """ArgumentParseError を error イベントへ変換する(cli_events.md §4)。
+    """ArgumentParseError を error イベントへ変換する。
 
-    argparse のエラーは引数エラーなので exit_code は基底共通の 2 で固定する(規約 §5)。
+    argparse のエラーは引数エラーなので exit_code は基底共通の 2 で固定する。
     安定 code 値・該当 field は呼び出し側が渡し、message は argparse のメッセージを載せる。
     """
     return error_event(code=code, message=error.message, exit_code=2, field=field)
 
 
 def argparse_error_field(message):
-    """argparse の使用法エラー文言から対象引数名(bad_argument の field)を取り出す(cli_events.md §4)。
+    """argparse の使用法エラー文言から対象引数名(bad_argument の field)を取り出す。
 
     argparse は起因引数を構造化して渡さないので、標準の文言形からベストエフォートで抽出する。
     文言に依存するため、既知のどの形にも当たらなければ None(field なし)へ退避し、詳細は message 側に残す。
