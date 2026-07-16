@@ -13,7 +13,8 @@ import numpy as np
 import pytest
 
 from lipsync import ApertureClass, ConsonantClass, MouthShape
-from vocal_analysis import RmsEnvelope, Segment
+from vocal_analysis import AudioPcm, RmsEnvelope, Segment
+from vocal_analysis import rms as _va_rms
 
 from song2vmd import events
 
@@ -1006,6 +1007,65 @@ def test_renormalize_open_rms_is_invariant_to_uniform_gain():
     scaled = [v * 0.4 for v in values]  # 一様なゲイン(同じ相対分布・絶対値だけ異なる)
     assert events._renormalize_open_rms(values) == pytest.approx(
         events._renormalize_open_rms(scaled))
+
+
+def test_confirm_mouth_events_output_is_invariant_to_uniform_audio_gain():
+    # 上記の数値レベルの不変性が、実際の音声振幅からRMSを算出する経路(vocal_analysis.rms.
+    # compute_rms)を通しても保たれることを、同一波形を異なる振幅でスケールした2入力で確認する。
+    #
+    # 6段階の振幅包絡(捨てフロア・下アンカー・対象3モーラ・上アンカー)を使う。曲全体パーセン
+    # タイル正規化の性質上、複数モーラを均等な振幅包絡で並べると最も静かなモーラが必ずp10
+    # percentileの境界にちょうど乗って厳密に0.0へ丸められる(無音しきい値以下になり無音判定に
+    # 落ちることもある)。捨てフロアを対象より一段静かな区間として最下段に追加すると、捨てフロア
+    # 自身が無音判定に落ちて開き量決定の母集団(母音的口形のみ)から除外され、残る5区間(下アンカー・
+    # 対象3モーラ・上アンカー)のうち下アンカー・上アンカーがその母集団内の新たな最小・最大として
+    # 正規化後0.0・1.0にちょうど張り付き、対象3モーラだけがその間の中間パーセンタイルへ収まる。
+    sample_rate = 8000
+    seg_dur_sec = 0.4
+    n_per_seg = int(seg_dur_sec * sample_rate)
+    levels = [0.05, 0.20, 0.40, 0.50, 0.60, 0.95]  # 捨てフロア・下アンカー・対象a・対象i・対象u・上アンカー
+    n = n_per_seg * len(levels)
+    t = np.arange(n) / sample_rate
+    envelope = np.concatenate([np.full(n_per_seg, lv) for lv in levels])
+    tone = (np.sin(2 * np.pi * 220 * t) * envelope).astype(np.float32).reshape(-1, 1)
+
+    bounds = [i * seg_dur_sec for i in range(len(levels) + 1)]
+    segments = [
+        seg("vowel", bounds[0], bounds[1], phoneme="o̞", confidence=0.9),  # 捨てフロア
+        seg("vowel", bounds[1], bounds[2], phoneme="ɯ", confidence=0.9),  # 下アンカー
+        seg("vowel", bounds[2], bounds[3], phoneme="a", confidence=0.9),
+        seg("vowel", bounds[3], bounds[4], phoneme="i", confidence=0.9),
+        seg("vowel", bounds[4], bounds[5], phoneme="u", confidence=0.9),
+        seg("vowel", bounds[5], bounds[6], phoneme="e̞", confidence=0.9),  # 上アンカー
+    ]
+
+    def confirm_at_gain(gain):
+        pcm = AudioPcm(samples=tone * gain, sample_rate=sample_rate)
+        rms_envelope = _va_rms.compute_rms(pcm)
+        return confirm(segments, rms_envelope)
+
+    events_full_gain, diag_full_gain = confirm_at_gain(1.0)
+    events_low_gain, diag_low_gain = confirm_at_gain(0.3)
+
+    # start/end/consonant_class/aperture_classも含め全フィールドを比較する。オンセット補正・
+    # 無音境界もRMSに依存するため、開き量だけの比較では見逃しうる差を検出する。float32音声
+    # サンプルの絶対値スケール差に伴う浮動小数点丸め誤差(1e-6程度)は許容し近似比較する。
+    assert len(events_full_gain) == len(events_low_gain)
+    for e_full, e_low in zip(events_full_gain, events_low_gain):
+        assert e_full.shape == e_low.shape
+        assert e_full.consonant_class == e_low.consonant_class
+        assert e_full.aperture_class == e_low.aperture_class
+        assert e_full.start == pytest.approx(e_low.start, abs=1e-3)
+        assert e_full.end == pytest.approx(e_low.end, abs=1e-3)
+        assert e_full.open_amount == pytest.approx(e_low.open_amount, abs=1e-5)
+    assert diag_full_gain == diag_low_gain
+    # このテストの前提(縮退した比較になっていないこと)を明示的に確認する: 捨てフロアは無音
+    # 判定に落ち、対象3モーラ(events_full_gain[2:5])は開き量レンジの上下限へクランプされない
+    # 中間値を持ち、かつ互いに異なる値であること。
+    assert events_full_gain[0].shape == MouthShape.SILENCE
+    target_amounts = [e.open_amount for e in events_full_gain[2:5]]
+    assert all(0.30 < a < 0.75 for a in target_amounts)
+    assert len(set(target_amounts)) == len(target_amounts)
 
 
 def test_zero_mora_song_does_not_crash_renormalization():
