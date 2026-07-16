@@ -198,3 +198,57 @@ def test_result_inspect_fields_adds_input_metadata_and_null_output_with_diag_val
     assert fields["closed_ranges"] == diag.closed_ranges == 0
     assert fields["max_opening"] == diag.max_opening == pytest.approx(0.4)
     assert fields["duration_sec"] == diag.duration_sec == 1.0
+
+
+# --- 長時間モーラのサブウィンドウ分割時のモーラ単位集計 -------------------------
+#
+# events.confirm_mouth_events の3件目の戻り値(母音的口形ユニットごとの生成MouthEvent数の
+# 列)を build_diagnostics が受け取り、morae・mora_details をサブウィンドウ単位でなく実際の
+# モーラ単位で集計することを検証する。
+
+
+_XFAIL_SPLIT_REPORT = pytest.mark.xfail(reason="impl pending: 長時間モーラのサブウィンドウ分割", strict=True)
+
+
+@_XFAIL_SPLIT_REPORT
+def test_split_mora_counts_as_one_mora_with_averaged_open_amount_and_summed_hold_frames():
+    mouth_events = [
+        mev(MouthShape.A, 0, 10, 0.2),
+        mev(MouthShape.A, 10, 25, 0.5),
+        mev(MouthShape.A, 25, 40, 0.8),
+    ]
+    diag = diag_of(mouth_events=mouth_events, keys=3, mora_event_group_sizes=[3])
+    assert diag.morae == 1
+    assert len(diag.mora_details) == 1
+    assert diag.mora_details[0].shape == "a"
+    assert diag.mora_details[0].open_amount == pytest.approx((0.2 + 0.5 + 0.8) / 3)
+    assert diag.mora_details[0].hold_frames == pytest.approx(40.0)  # 40-0 の合計
+
+
+@_XFAIL_SPLIT_REPORT
+def test_unsplit_morae_alongside_split_mora_count_correctly():
+    # 分割されない短いモーラ(先頭・末尾)と分割されたモーラ(中央、2分割)が混在する場合の集計。
+    mouth_events = [
+        mev(MouthShape.I, 0, 5, 0.3),
+        mev(MouthShape.A, 5, 15, 0.2),
+        mev(MouthShape.A, 15, 30, 0.6),
+        mev(MouthShape.O, 30, 35, 0.4),
+    ]
+    diag = diag_of(mouth_events=mouth_events, keys=4, mora_event_group_sizes=[1, 2, 1])
+    assert diag.morae == 3
+    assert [m.shape for m in diag.mora_details] == ["i", "a", "o"]
+    assert diag.mora_details[1].open_amount == pytest.approx((0.2 + 0.6) / 2)
+    assert diag.mora_details[1].hold_frames == pytest.approx(25.0)  # 30-5 の合計
+
+
+@_XFAIL_SPLIT_REPORT
+def test_closed_ranges_and_max_opening_unaffected_by_split():
+    # closed_ranges・max_openingは分割数列の影響を受けない(全MouthEventを対象に集計する
+    # 既存どおり変更しない)。
+    mouth_events = [
+        mev(MouthShape.A, 0, 10, 0.2), mev(MouthShape.A, 10, 20, 0.9),
+        mev(MouthShape.BILABIAL, 20, 22), mev(MouthShape.SILENCE, 22, 30),
+    ]
+    diag = diag_of(mouth_events=mouth_events, keys=4, mora_event_group_sizes=[2])
+    assert diag.closed_ranges == 2
+    assert diag.max_opening == pytest.approx(0.9)

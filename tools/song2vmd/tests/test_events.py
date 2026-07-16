@@ -57,7 +57,8 @@ _DEFAULT_KW = dict(
 def confirm(segments, rms, **overrides):
     kw = dict(_DEFAULT_KW)
     kw.update(overrides)
-    return events.confirm_mouth_events(segments, rms, **kw)
+    result = events.confirm_mouth_events(segments, rms, **kw)
+    return result[0], result[1]  # mouth_events, EventDiagnostics(3件目のモーラ分割数列は無視)
 
 
 # --- モーラ代表RMSの声量レンジ再正規化を検証するための較正ヘルパー ------------------
@@ -1255,3 +1256,402 @@ def test_confirmation_is_deterministic():
     first, _ = confirm(segments, rms)
     second, _ = confirm(segments, rms)
     assert first == second
+
+
+# --- 長時間モーラのサブウィンドウ分割 -----------------------------------------
+#
+# 区間長が閾値(初期値1.0秒)以上のモーラは、複数の等時間幅サブウィンドウへ分割され、
+# 同じ母音的口形を持つ、時間順・隙間なく連続する複数のMouthEventとしてlipsyncへ渡される。
+# confirm_mouth_eventsの3件目の戻り値(母音的口形ユニットごとの生成MouthEvent数の列)を
+# 直接検証するテストは、confirmヘルパー(2件目までしか返さない)でなく
+# events.confirm_mouth_events を直接呼ぶ。
+
+
+_XFAIL_SUBWINDOW = pytest.mark.xfail(reason="impl pending: 長時間モーラのサブウィンドウ分割", strict=True)
+
+
+@_XFAIL_SUBWINDOW
+@pytest.mark.parametrize("duration_sec,expected_count", [
+    (0.3, 2),   # 0.3/0.3=1.0 -> 四捨五入1 -> 最低2へ引き上げ
+    (0.6, 2),   # 0.6/0.3=2.0 -> 2
+    (0.9, 3),   # 0.9/0.3=3.0 -> 3
+    (1.0, 3),   # 1.0/0.3=3.333... -> 四捨五入3
+    (1.05, 4),  # 1.05/0.3=3.5 -> 四捨五入(0.5は切り上げ)で4
+    (1.5, 5),   # 1.5/0.3=5.0 -> 5
+])
+def test_subwindow_count_rounds_and_enforces_minimum_two(duration_sec, expected_count):
+    assert events._subwindow_count(duration_sec) == expected_count
+
+
+@_XFAIL_SUBWINDOW
+def test_split_into_subwindows_are_contiguous_equal_width_and_cover_range():
+    start, end = 10.0, 11.5  # duration=1.5, count=5
+    bounds = events._split_into_subwindows(start, end)
+    assert len(bounds) == 5
+    assert bounds[0][0] == pytest.approx(start)
+    assert bounds[-1][1] == pytest.approx(end)
+    width = (end - start) / 5
+    for sub_start, sub_end in bounds:
+        assert sub_end - sub_start == pytest.approx(width)
+    for (_, e1), (s2, _) in zip(bounds, bounds[1:]):
+        assert e1 == pytest.approx(s2)  # 隙間なく連続
+
+
+def test_mora_below_threshold_remains_single_event():
+    # 区間長が閾値(1.0秒)未満のモーラは分割されない(既存挙動の回帰)。
+    segments = [seg("vowel", 0.0, 0.99, phoneme="a", confidence=0.9)]
+    rms = flat_rms(0.99, 0.8)
+    mouth_events, _diag = confirm(segments, rms)
+    assert len(mouth_events) == 1
+
+
+@_XFAIL_SUBWINDOW
+def test_long_mora_splits_into_contiguous_events_tracking_rms_changes():
+    # 1.5秒の長いモーラ(分割数5)内でRMSを5段階に単調上昇させ、生成される各サブウィンドウの
+    # 開き量がRMSの上昇に追従して単調に増加することを検証する。
+    anchor_dur = 0.2
+    mora_dur = 1.5
+    lo_end = anchor_dur
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", lo_end, target_end, phoneme="e̞", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    step_values = [0.20, 0.35, 0.50, 0.65, 0.80]
+    step_dur = mora_dur / 5
+    values = []
+    for t in times:
+        if t < lo_end:
+            values.append(_ANCHOR_LO_RMS)
+        elif t < target_end:
+            step_idx = min(4, int((t - lo_end) / step_dur))
+            values.append(step_values[step_idx])
+        else:
+            values.append(_ANCHOR_HI_RMS)
+    rms = rms_env(times, values)
+    # open_lo=0.0・open_hi=1.0・open_max=1.0・intensity_curve=1.0 でRMS→開き量の写像を恒等に近づけ、
+    # 既定の開き量レンジ(0.30〜0.75)へのクランプで上位の値が飽和し重複するのを避ける
+    # (5段階のRMSがクランプを経ても互いに異なる値のまま保たれることを保証するため)。
+    kw = dict(_DEFAULT_KW, open_lo=0.0, open_hi=1.0, open_max=1.0, intensity_curve=1.0)
+    mouth_events, _diag, group_sizes = events.confirm_mouth_events(segments, rms, **kw)
+    e_events = [e for e in mouth_events if e.shape == MouthShape.E]
+    assert len(e_events) == 5
+    assert group_sizes == [1, 5, 1]  # 下アンカー(1)・対象(5分割)・上アンカー(1)
+    assert e_events[0].start == pytest.approx(lo_end * FRAME_RATE)
+    assert e_events[-1].end == pytest.approx(target_end * FRAME_RATE)
+    for prev, nxt in zip(e_events, e_events[1:]):
+        assert prev.end == pytest.approx(nxt.start)  # 隙間なく連続
+    amounts = [e.open_amount for e in e_events]
+    assert amounts == sorted(amounts)
+    assert len(set(amounts)) == 5  # RMSが高いサブウィンドウほど開き量が大きい(単調・非退化)
+
+
+@_XFAIL_SUBWINDOW
+def test_mora_at_exactly_threshold_is_split():
+    # 区間長がちょうど閾値(1.0秒)のモーラも分割対象になる(1.0/0.3=3.333... -> 四捨五入3分割)。
+    anchor_dur = 0.2
+    mora_dur = 1.0
+    lo_end = anchor_dur
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    rms = flat_rms(hi_end, 0.6)
+    mouth_events, _diag, group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+    a_events = [e for e in mouth_events if e.shape == MouthShape.A]
+    assert len(a_events) == 3
+    assert group_sizes == [1, 3, 1]
+
+
+@_XFAIL_SUBWINDOW
+def test_split_subwindow_rms_uses_middle_60_percent_not_whole_subwindow_average():
+    # 各サブウィンドウの代表RMSは、そのサブウィンドウ区間の中央60%窓平均であり、
+    # サブウィンドウ全体の単純平均ではない。2番目以降のサブウィンドウを一律の高値(center_value)
+    # にして基準を作り、先頭サブウィンドウだけ両端(トランジェント相当)を低く・中央を高くした
+    # パターンにする。先頭サブウィンドウが正しく中央60%窓平均を使えば、その代表RMSは
+    # center_valueのみになり、2番目以降(一律center_value)とほぼ同じ開き量になる。誤って
+    # サブウィンドウ全体の単純平均を使う実装では、先頭の代表RMSが両端の低値に引きずられて
+    # 明確に低くなり、この一致が崩れる。
+    anchor_dur = 0.2
+    mora_dur = 1.2  # 4分割、各サブウィンドウ長0.3秒
+    lo_end = anchor_dur
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    sub_dur = mora_dur / 4  # 0.3秒
+    center_value, edge_value = 0.9, 0.0
+    sub0_lo, sub0_hi = 0.2 * sub_dur, 0.8 * sub_dur  # 先頭サブウィンドウの中央60%窓
+
+    values = []
+    for t in times:
+        if t < lo_end:
+            values.append(_ANCHOR_LO_RMS)
+        elif t < target_end:
+            offset = t - lo_end
+            if offset < sub_dur:
+                values.append(center_value if sub0_lo <= offset < sub0_hi else edge_value)
+            else:
+                values.append(center_value)  # 2番目以降のサブウィンドウは全区間centr_value
+        else:
+            values.append(_ANCHOR_HI_RMS)
+    rms = rms_env(times, values)
+    kw = dict(_DEFAULT_KW, open_lo=0.0, open_hi=1.0, open_max=1.0, intensity_curve=1.0)
+    mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **kw)
+    a_events = [e for e in mouth_events if e.shape == MouthShape.A]
+    assert len(a_events) == 4
+    assert a_events[0].open_amount == pytest.approx(a_events[1].open_amount, abs=1e-6)
+
+
+@_XFAIL_SUBWINDOW
+def test_split_head_only_keeps_consonant_and_aperture_class_others_are_none():
+    # 先行子音(t: ConsonantClass=NEUTRAL, ApertureClass=FIRM_CLOSURE)を持つ長いモーラを分割し、
+    # 先頭サブウィンドウだけが元の先頭子音種別・開口減衰種別を持ち、2番目以降はNONEになる
+    # ことを検証する。
+    anchor_dur = 0.2
+    mora_dur = 1.2  # 4分割
+    lo_end = anchor_dur
+    cons_end = lo_end + 0.05
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("consonant", lo_end, cons_end, phoneme="t"),
+        seg("vowel", cons_end, target_end, phoneme="a", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    values = [
+        _ANCHOR_LO_RMS if t < lo_end else (0.6 if t < target_end else _ANCHOR_HI_RMS)
+        for t in times
+    ]
+    rms = rms_env(times, values)
+    mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+    a_events = [e for e in mouth_events if e.shape == MouthShape.A]
+    assert len(a_events) == 4
+    assert a_events[0].consonant_class == ConsonantClass.NEUTRAL
+    assert a_events[0].aperture_class == ApertureClass.FIRM_CLOSURE
+    for e in a_events[1:]:
+        assert e.consonant_class == ConsonantClass.NONE
+        assert e.aperture_class == ApertureClass.NONE
+
+
+@_XFAIL_SUBWINDOW
+def test_split_preserves_none_head_classes_when_original_has_no_preceding_consonant():
+    # 元のユニットの先頭子音種別・開口減衰種別が元々NONEの場合、全サブウィンドウがNONEの
+    # ままであることを確認する。
+    anchor_dur = 0.2
+    mora_dur = 1.2
+    lo_end = anchor_dur
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    values = [
+        _ANCHOR_LO_RMS if t < lo_end else (0.6 if t < target_end else _ANCHOR_HI_RMS)
+        for t in times
+    ]
+    rms = rms_env(times, values)
+    mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+    a_events = [e for e in mouth_events if e.shape == MouthShape.A]
+    assert len(a_events) == 4
+    for e in a_events:
+        assert e.consonant_class == ConsonantClass.NONE
+        assert e.aperture_class == ApertureClass.NONE
+
+
+@_XFAIL_SUBWINDOW
+def test_split_weak_vowel_scaling_applies_uniformly_to_all_subwindows():
+    # 低信頼/無声で弱判定となった長いモーラが分割された場合、全サブウィンドウの開き量が
+    # 弱判定なしの場合のちょうど0.5倍になることを検証する(弱判定はモーラ全体の代表RMSと
+    # 信頼度から一度だけ行い、サブウィンドウごとにやり直さない)。
+    anchor_dur = 0.2
+    mora_dur = 1.2  # 4分割
+    lo_end = anchor_dur
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+
+    def build(confidence):
+        segments = [
+            seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+            seg("vowel", lo_end, target_end, phoneme="a", confidence=confidence),
+            seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        ]
+        hop = 0.010
+        n = round(hi_end / hop) + 1
+        times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+        half = mora_dur / 2
+        values = []
+        for t in times:
+            if t < lo_end:
+                values.append(_ANCHOR_LO_RMS)
+            elif t < target_end:
+                offset = t - lo_end
+                values.append(0.25 if offset < half else 0.28)  # 弱判定RMS閾値(0.3)未満に収める
+            else:
+                values.append(_ANCHOR_HI_RMS)
+        rms = rms_env(times, values)
+        mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+        return [e for e in mouth_events if e.shape == MouthShape.A]
+
+    weak_events = build(confidence=0.2)  # 低信頼 -> モーラ全体の代表RMSも弱判定閾値未満 -> 弱判定
+    strong_events = build(confidence=0.9)  # 高信頼 -> 弱判定にならない
+    assert len(weak_events) == len(strong_events) == 4
+    for w, s in zip(weak_events, strong_events):
+        assert w.open_amount == pytest.approx(s.open_amount * 0.5)
+
+
+@_XFAIL_SUBWINDOW
+def test_split_does_not_affect_population_percentiles_for_other_morae():
+    # 長いモーラの区間長だけを変える(分割数が変わる)2パターンで、その区間のRMSサンプルを
+    # 両パターンで同一の単一定数にする(区間長を変えても中央60%窓・区間全体窓いずれの平均も
+    # 変わらないため、モーラ代表RMSは両パターンで完全一致する)。比較対象の短いモーラ2件は、
+    # 母集団の最小値・最大値(下限アンカー・上限アンカー)ではなく中間パーセンタイル領域に
+    # 来る値にする(比較対象が母集団の外側にありパーセンタイル正規化でクリップされる値だと、
+    # 母集団の内訳が変わっても常に同じクリップ値になり、サブウィンドウ混入という不具合を
+    # 検出できないため)。この条件のもとで、比較対象の開き量が両パターンで完全一致することを
+    # 確認する(サブウィンドウの代表RMSがパーセンタイル母集団に混入していないことの回帰)。
+    def build(long_mora_dur):
+        segments = [
+            seg("vowel", 0.0, 0.2, phoneme="ɯ", confidence=0.9),  # 下限アンカー
+            seg("vowel", 0.2, 0.4, phoneme="i", confidence=0.9),  # 比較対象1(中間値)
+            seg("vowel", 0.4, 0.4 + long_mora_dur, phoneme="e̞", confidence=0.9),  # 長いモーラ
+            seg("vowel", 0.4 + long_mora_dur, 0.6 + long_mora_dur, phoneme="a", confidence=0.9),  # 比較対象2
+            seg("vowel", 0.6 + long_mora_dur, 0.8 + long_mora_dur, phoneme="o̞", confidence=0.9),  # 上限アンカー
+        ]
+        hop = 0.010
+        total = 0.8 + long_mora_dur
+        n = round(total / hop) + 1
+        times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+        values = []
+        for t in times:
+            if t < 0.2:
+                values.append(0.10)
+            elif t < 0.4:
+                values.append(0.40)
+            elif t < 0.4 + long_mora_dur:
+                values.append(0.60)  # 長いモーラの区間は両パターンで同一の定数
+            elif t < 0.6 + long_mora_dur:
+                values.append(0.50)
+            else:
+                values.append(0.99)
+        rms = rms_env(times, values)
+        mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+        target1 = next(e for e in mouth_events if e.shape == MouthShape.I)
+        target2 = next(e for e in mouth_events if e.shape == MouthShape.A)
+        return target1.open_amount, target2.open_amount
+
+    short_split_result = build(1.2)  # 4分割
+    long_split_result = build(1.8)  # 6分割
+    assert short_split_result == pytest.approx(long_split_result)
+    # 比較対象がクランプ(0.30または0.75への飽和)された値になっていないことを確認し、
+    # このテストの弁別力が保たれていることを担保する。
+    assert 0.30 < short_split_result[0] < 0.75
+    assert 0.30 < short_split_result[1] < 0.75
+
+
+@_XFAIL_SUBWINDOW
+def test_zero_mora_song_group_sizes_is_empty():
+    # 母音的口形のユニットが1件も無い曲では、3件目の戻り値(分割数列)も空になる。
+    segments = [seg("gap", 0.0, 0.5)]
+    rms = flat_rms(0.5, 0.01)
+    mouth_events, _diag, group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+    assert len(mouth_events) == 1
+    assert group_sizes == []
+
+
+@_XFAIL_SUBWINDOW
+def test_split_subwindows_get_same_open_amount_when_population_is_degenerate():
+    # 曲全体のモーラ代表RMSの母集団が縮退(p10==p90)している場合、分割される長時間モーラの
+    # サブウィンドウ間で代表RMSに意図的な差を持たせても、全サブウィンドウの開き量が互いに
+    # 同一の値になることを検証する(縮退判定は分割前のモーラ代表RMSの母集団に対して行われ、
+    # サブウィンドウの生RMSはこの母集団に含まれないため)。
+    mora_dur = 1.2  # 4分割
+    other_value = 0.5
+    delta = 0.3
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="ɯ", confidence=0.9),  # 他のモーラ(代表RMS=other_value)
+        seg("vowel", 0.2, 0.2 + mora_dur, phoneme="a", confidence=0.9),  # 長いモーラ(分割対象)
+    ]
+    hop = 0.010
+    total = 0.2 + mora_dur
+    n = round(total / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    half = mora_dur / 2
+    values = []
+    for t in times:
+        if t < 0.2:
+            values.append(other_value)
+        else:
+            offset = t - 0.2
+            # 対称な値のペア(前半・後半)にすることで、長いモーラの中央60%窓平均を
+            # other_valueへちょうど一致させ、曲全体の母集団(2件)を縮退させる。
+            values.append(other_value - delta if offset < half else other_value + delta)
+    rms = rms_env(times, values)
+    mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+    a_events = [e for e in mouth_events if e.shape == MouthShape.A]
+    assert len(a_events) == 4
+    amounts = [e.open_amount for e in a_events]
+    assert amounts == pytest.approx([amounts[0]] * 4)
+
+
+@_XFAIL_SUBWINDOW
+def test_n_mora_splits_when_long():
+    # 長く伸ばす撥音「ん」も母音と同様に分割対象になることを検証する。
+    anchor_dur = 0.2
+    mora_dur = 1.2  # 4分割
+    lo_end = anchor_dur
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("consonant", lo_end, target_end, phoneme="ɴ"),
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    step_values = [0.2, 0.4, 0.6, 0.8]
+    step_dur = mora_dur / 4
+    values = []
+    for t in times:
+        if t < lo_end:
+            values.append(_ANCHOR_LO_RMS)
+        elif t < target_end:
+            idx = min(3, int((t - lo_end) / step_dur))
+            values.append(step_values[idx])
+        else:
+            values.append(_ANCHOR_HI_RMS)
+    rms = rms_env(times, values)
+    # RMS追従テストと同様に、既定の開き量レンジ(0.30〜0.75)へのクランプで上位の値が
+    # 飽和し重複するのを避けるため、写像を恒等に近づけるパラメータを明示する。
+    kw = dict(_DEFAULT_KW, open_lo=0.0, open_hi=1.0, open_max=1.0, intensity_curve=1.0)
+    mouth_events, _diag, group_sizes = events.confirm_mouth_events(segments, rms, **kw)
+    n_events = [e for e in mouth_events if e.shape == MouthShape.N]
+    assert len(n_events) == 4
+    assert group_sizes == [1, 4, 1]
+    amounts = [e.open_amount for e in n_events]
+    assert amounts == sorted(amounts)
+    assert len(set(amounts)) == 4

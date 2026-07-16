@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from lipsync import MouthShape
+from lipsync import MouthEvent, MouthShape
 from vocal_analysis import ContentRecognizerModel, RmsEnvelope, Segment
 from vocal_analysis.types import AudioPcm
 
@@ -166,6 +166,50 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
         "open_lo": openness.open_lo, "open_hi": openness.open_hi, "open_max": openness.open_max,
         "intensity_curve": 0.7, "silence_on": 0.05, "use_n_morph": False,
     }
+
+
+@pytest.mark.xfail(reason="impl pending: 長時間モーラのサブウィンドウ分割", strict=True)
+def test_single_run_forwards_mora_event_group_sizes_to_build_diagnostics(tmp_path, monkeypatch):
+    # events.confirm_mouth_events の3件目の戻り値(母音的口形ユニットごとの分割数列)が、
+    # report.build_diagnostics へ mora_event_group_sizes として正しく中継されることを検証する。
+    # confirm_mouth_events自体を完全にモックし、pipeline.pyの配線だけをevents.pyの分割ロジック
+    # から独立に検証する(実際の分割数計算が正しいかどうかに依存させない)。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    fake_group_sizes = [3]  # 1モーラが3件のMouthEventへ分割されたことを模擬
+
+    def fake_confirm(segments, rms, **kwargs):
+        fake_events = [
+            MouthEvent(shape=MouthShape.A, start=0.0, end=10.0, open_amount=0.5),
+            MouthEvent(shape=MouthShape.A, start=10.0, end=20.0, open_amount=0.6),
+            MouthEvent(shape=MouthShape.A, start=20.0, end=30.0, open_amount=0.7),
+        ]
+        fake_diag = pipeline.events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0)
+        return fake_events, fake_diag, fake_group_sizes
+
+    monkeypatch.setattr(pipeline.events, "confirm_mouth_events", fake_confirm)
+
+    real_build_diagnostics = pipeline.report.build_diagnostics
+    captured = {}
+
+    def spy_build_diagnostics(**kwargs):
+        captured["kwargs"] = kwargs
+        return real_build_diagnostics(**kwargs)
+
+    monkeypatch.setattr(pipeline.report, "build_diagnostics", spy_build_diagnostics)
+
+    result = pipeline.run(input_path, progress=None, **_common_kwargs())
+
+    assert captured["kwargs"]["mora_event_group_sizes"] == fake_group_sizes
+    assert result.diagnostics.morae == 1  # 3件のMouthEventが1モーラとして集計される
 
 
 def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, monkeypatch):
