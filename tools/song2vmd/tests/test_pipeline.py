@@ -168,7 +168,6 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
     }
 
 
-@pytest.mark.xfail(reason="impl pending: 長時間モーラのサブウィンドウ分割", strict=True)
 def test_single_run_forwards_mora_event_group_sizes_to_build_diagnostics(tmp_path, monkeypatch):
     # events.confirm_mouth_events の3件目の戻り値(母音的口形ユニットごとの分割数列)が、
     # report.build_diagnostics へ mora_event_group_sizes として正しく中継されることを検証する。

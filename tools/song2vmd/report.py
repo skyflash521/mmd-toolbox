@@ -52,18 +52,40 @@ class Diagnostics:
     low_dynamics: bool
 
 
-def build_diagnostics(*, segments, mouth_events, event_diagnostics, backends, style, separated,
-                       duration_sec, keys) -> Diagnostics:
+def _group_mora_events(mouth_events, mora_event_group_sizes):
+    """mouth_events のうち母音的口形(vowel/n)の連続MouthEventを、mora_event_group_sizes の列
+    (events.confirm_mouth_events の3件目の戻り値)に従って、実際のモーラ単位へグループ化する。
+    分割されないモーラは要素数1のグループになる。"""
+    groups = []
+    sizes = iter(mora_event_group_sizes)
+    i, n = 0, len(mouth_events)
+    while i < n:
+        if mouth_events[i].shape in _MORA_SHAPES:
+            count = next(sizes)
+            groups.append(mouth_events[i:i + count])
+            i += count
+        else:
+            i += 1
+    return groups
+
+
+def build_diagnostics(*, segments, mouth_events, event_diagnostics, mora_event_group_sizes, backends,
+                       style, separated, duration_sec, keys) -> Diagnostics:
     """音素セグメント列・口形イベント列・EventDiagnosticsからDiagnosticsを組み立てる。"""
     phonemes = sum(1 for s in segments if s.type in ("vowel", "consonant"))
     gap_duration = sum(s.end_sec - s.start_sec for s in segments if s.type == "gap")
     coverage = 1.0 - gap_duration / duration_sec if duration_sec > 0 else 0.0
-    morae = sum(1 for e in mouth_events if e.shape in _MORA_SHAPES)
+    mora_groups = _group_mora_events(mouth_events, mora_event_group_sizes)
+    morae = len(mora_groups)
     closed_ranges = sum(1 for e in mouth_events if e.shape in _CLOSED_SHAPES)
     max_opening = max((e.open_amount for e in mouth_events), default=0.0)
     mora_details = tuple(
-        MoraReport(shape=e.shape.value, open_amount=e.open_amount, hold_frames=e.end - e.start)
-        for e in mouth_events if e.shape in _MORA_SHAPES
+        MoraReport(
+            shape=group[0].shape.value,
+            open_amount=sum(e.open_amount for e in group) / len(group),
+            hold_frames=sum(e.end - e.start for e in group),
+        )
+        for group in mora_groups
     )
     return Diagnostics(
         backends=dict(backends), style=style, separated=separated, phonemes=phonemes, morae=morae,

@@ -9,6 +9,7 @@ vocal_analysis の音素セグメント列(母音/子音/gap)と相対正規化R
 撥音「ん」は専用記号 ɴ、ま行/ば行/ぱ行頭子音は m/mʲ・b/bʲ・p/pʲ。
 """
 
+import math
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -53,6 +54,9 @@ _WEAK_CONFIDENCE_THRESHOLD = 0.5  # 低信頼判定のしきい値(初期値)。
 _WEAK_RMS_WITH_CONFIDENCE = 0.3
 _WEAK_RMS_WITHOUT_CONFIDENCE = 0.2
 _WEAK_SCALE = 0.5
+
+_LONG_MORA_THRESHOLD_SEC = 1.0  # 長時間モーラのサブウィンドウ分割閾値(初期値)。
+_SUBWINDOW_TARGET_SEC = 0.3  # 目標サブウィンドウ長(初期値)。
 
 
 def _consonant_class(phoneme):
@@ -166,6 +170,19 @@ def _mora_representative_rms(rms, unit):
     if (unit.start_sec, unit.end_sec) != (content_start, content_end):
         value = max(value, _mora_rms(rms, unit.start_sec, unit.end_sec))
     return value
+
+
+def _subwindow_count(duration_sec):
+    """長時間モーラのサブウィンドウ数(四捨五入・0.5は切り上げ・最低2)。"""
+    n = math.floor(duration_sec / _SUBWINDOW_TARGET_SEC + 0.5)
+    return max(2, n)
+
+
+def _split_into_subwindows(start_sec, end_sec):
+    """モーラ区間を等時間幅のサブウィンドウ境界へ分割する(端数を残さず均等割り)。"""
+    count = _subwindow_count(end_sec - start_sec)
+    width = (end_sec - start_sec) / count
+    return [(start_sec + i * width, start_sec + (i + 1) * width) for i in range(count)]
 
 
 def _classify_phonetic(segments, use_n_morph):
@@ -425,6 +442,24 @@ _OPEN_RENORM_P_LO = 10.0
 _OPEN_RENORM_P_HI = 90.0
 
 
+def _percentile_bounds(values):
+    """値のリストから開き量再正規化のp10/p90境界を計算する。空リストなら境界なし(None, None)。"""
+    if not values:
+        return None, None
+    arr = np.array(values, dtype=float)
+    p_lo = np.percentile(arr, _OPEN_RENORM_P_LO, method="linear")
+    p_hi = np.percentile(arr, _OPEN_RENORM_P_HI, method="linear")
+    return p_lo, p_hi
+
+
+def _normalize_with_bounds(value, p_lo, p_hi):
+    """1つの値をp10/p90境界で線形正規化する。p_hiとp_loが完全一致する場合(縮退)は
+    無音側でなく開閉の中間値0.5を返す。"""
+    if p_hi == p_lo:
+        return 0.5
+    return float(np.clip((value - p_lo) / (p_hi - p_lo), 0.0, 1.0))
+
+
 def _renormalize_open_rms(values):
     """開き量決定にだけ使う、曲全体モーラ代表RMS集合のパーセンタイル線形正規化。
 
@@ -433,12 +468,8 @@ def _renormalize_open_rms(values):
     """
     if not values:
         return []
-    arr = np.array(values, dtype=float)
-    p_lo = np.percentile(arr, _OPEN_RENORM_P_LO, method="linear")
-    p_hi = np.percentile(arr, _OPEN_RENORM_P_HI, method="linear")
-    if p_hi == p_lo:
-        return [0.5] * len(values)
-    return list(np.clip((arr - p_lo) / (p_hi - p_lo), 0.0, 1.0))
+    p_lo, p_hi = _percentile_bounds(values)
+    return [_normalize_with_bounds(v, p_lo, p_hi) for v in values]
 
 
 def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity_curve, silence_on,
@@ -446,9 +477,13 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
     """音素セグメント列とRMSから口形イベント列(MouthEvent)と開き量を確定する。
 
     段階(6)の先頭子音種別付与とフレーム変換(30fps)は本関数内で行い、`lipsync` へ渡す最終形を返す。
+    3件目の戻り値は、母音的口形(vowel/n)の各ユニットが生成した連続MouthEvent数の列(分割
+    されないユニットは1、長時間モーラのサブウィンドウ分割で複数に分かれたユニットはその
+    サブウィンドウ数)。`report.build_diagnostics` がモーラ単位の集計を復元するための内部の
+    受け渡し専用の値であり、`EventDiagnostics` へのフィールド追加ではない。
     """
     if not segments:
-        return [], EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0)
+        return [], EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0), []
 
     low_dynamics = rms.dynamic_range_db < _LOW_DYNAMICS_THRESHOLD_DB
     units = _classify_phonetic(segments, use_n_morph)
@@ -461,36 +496,56 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
     mora_rms_raw = [
         _mora_representative_rms(rms, u) if u.kind in ("vowel", "n") else None for u in units
     ]
-    open_rms_iter = iter(_renormalize_open_rms([v for v in mora_rms_raw if v is not None]))
+    p_lo, p_hi = _percentile_bounds([v for v in mora_rms_raw if v is not None])
 
     mouth_events = []
+    mora_event_group_sizes = []
     weak_vowels = 0
     for u, mora_rms in zip(units, mora_rms_raw):
         if u.kind in ("vowel", "n"):
-            open_amount = _map_open_amount(
-                next(open_rms_iter), open_lo=open_lo, open_hi=open_hi, open_max=open_max,
-                intensity_curve=intensity_curve,
-            )
+            is_weak = u.kind == "vowel" and _is_weak_vowel(u.confidence, mora_rms)
+            if is_weak:
+                weak_vowels += 1
             if u.kind == "vowel":
-                if _is_weak_vowel(u.confidence, mora_rms):
-                    open_amount *= _WEAK_SCALE
-                    weak_vowels += 1
                 shape = _VOWEL_SHAPES[u.letter]
-                consonant_class = _consonant_class(u.consonant_ipa)
-                aperture_class = _strongest_aperture_class(u.aperture_ipas)
+                head_consonant_class = _consonant_class(u.consonant_ipa)
+                head_aperture_class = _strongest_aperture_class(u.aperture_ipas)
             else:
                 shape = MouthShape.N
-                consonant_class = ConsonantClass.NONE
-                aperture_class = ApertureClass.NONE
+                head_consonant_class = ConsonantClass.NONE
+                head_aperture_class = ApertureClass.NONE
+
+            duration = u.end_sec - u.start_sec
+            if duration >= _LONG_MORA_THRESHOLD_SEC:
+                bounds = _split_into_subwindows(u.start_sec, u.end_sec)
+            else:
+                bounds = [(u.start_sec, u.end_sec)]
+
+            for i, (sub_start, sub_end) in enumerate(bounds):
+                sub_rms = mora_rms if len(bounds) == 1 else _mora_rms(rms, sub_start, sub_end)
+                open_amount = _map_open_amount(
+                    _normalize_with_bounds(sub_rms, p_lo, p_hi), open_lo=open_lo, open_hi=open_hi,
+                    open_max=open_max, intensity_curve=intensity_curve,
+                )
+                if is_weak:
+                    open_amount *= _WEAK_SCALE
+                if i == 0:
+                    consonant_class, aperture_class = head_consonant_class, head_aperture_class
+                else:
+                    consonant_class, aperture_class = ConsonantClass.NONE, ApertureClass.NONE
+                mouth_events.append(MouthEvent(
+                    shape=shape, start=sub_start * FRAME_RATE, end=sub_end * FRAME_RATE,
+                    open_amount=open_amount, consonant_class=consonant_class,
+                    aperture_class=aperture_class,
+                ))
+            mora_event_group_sizes.append(len(bounds))
         else:  # "bilabial" | "silence"
             shape = MouthShape.BILABIAL if u.kind == "bilabial" else MouthShape.SILENCE
-            open_amount = 0.0
-            consonant_class = ConsonantClass.NONE
-            aperture_class = ApertureClass.NONE
-        mouth_events.append(MouthEvent(
-            shape=shape, start=u.start_sec * FRAME_RATE, end=u.end_sec * FRAME_RATE,
-            open_amount=open_amount, consonant_class=consonant_class, aperture_class=aperture_class,
-        ))
+            mouth_events.append(MouthEvent(
+                shape=shape, start=u.start_sec * FRAME_RATE, end=u.end_sec * FRAME_RATE,
+                open_amount=0.0, consonant_class=ConsonantClass.NONE, aperture_class=ApertureClass.NONE,
+            ))
 
     return mouth_events, EventDiagnostics(
-        weak_vowels=weak_vowels, low_dynamics=low_dynamics, merged_morae=merged_morae)
+        weak_vowels=weak_vowels, low_dynamics=low_dynamics, merged_morae=merged_morae
+    ), mora_event_group_sizes

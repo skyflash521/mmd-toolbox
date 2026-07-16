@@ -162,7 +162,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments)
 
     _report_stage(progress, "events")
-    mouth_events, event_diag = events.confirm_mouth_events(
+    mouth_events, event_diag, mora_event_group_sizes = events.confirm_mouth_events(
         segments, rms_envelope, open_lo=openness.open_lo, open_hi=openness.open_hi,
         open_max=openness.open_max, intensity_curve=intensity_curve, silence_on=silence_on,
         use_n_morph=use_n_morph)
@@ -173,6 +173,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
 
     diagnostics = report.build_diagnostics(
         segments=segments, mouth_events=mouth_events, event_diagnostics=event_diag,
+        mora_event_group_sizes=mora_event_group_sizes,
         backends={"separator": separator_name, "recognizer": content_recognizer_model.model_id,
                   "forced_aligner": forced_aligner,
                   "english_oov_katakana_method": english_oov_katakana_method},

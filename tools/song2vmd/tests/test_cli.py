@@ -25,7 +25,7 @@ def _touch(path):
 def _stub_pipeline_result():
     document = VmdDocument(model_name_raw=b"\x00" * 20, morph=[])
     diagnostics = _report.build_diagnostics(
-        segments=[], mouth_events=[],
+        segments=[], mouth_events=[], mora_event_group_sizes=[],
         event_diagnostics=_events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
         backends={"separator": "audio-separator-htdemucs-ft", "recognizer": "openai/whisper-medium"},
         style="pop", separated=True, duration_sec=1.0, keys=0,

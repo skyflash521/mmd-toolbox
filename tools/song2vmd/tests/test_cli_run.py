@@ -30,7 +30,7 @@ def _touch(path):
 def _make_result(*, keys=3, low_dynamics=False, sample_rate=44100, channels=2):
     document = VmdDocument(model_name_raw=b"\x00" * 20, morph=[])
     diagnostics = _report.build_diagnostics(
-        segments=[], mouth_events=[],
+        segments=[], mouth_events=[], mora_event_group_sizes=[],
         event_diagnostics=_events.EventDiagnostics(weak_vowels=0, low_dynamics=low_dynamics, merged_morae=0),
         backends={"separator": "audio-separator-htdemucs-ft", "recognizer": "openai/whisper-medium"},
         style="pop", separated=True, duration_sec=2.5, keys=keys,

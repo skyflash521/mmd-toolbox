@@ -29,6 +29,10 @@ def diag_of(**overrides):
         backends={}, style="pop", separated=False, duration_sec=1.0, keys=0,
     )
     kw.update(overrides)
+    if "mora_event_group_sizes" not in overrides:
+        # 明示指定が無ければ、各MouthEventを1モーラ(分割なし)として自動導出する。
+        mora_count = sum(1 for e in kw["mouth_events"] if e.shape in report._MORA_SHAPES)
+        kw["mora_event_group_sizes"] = [1] * mora_count
     return report.build_diagnostics(**kw)
 
 
@@ -207,10 +211,6 @@ def test_result_inspect_fields_adds_input_metadata_and_null_output_with_diag_val
 # モーラ単位で集計することを検証する。
 
 
-_XFAIL_SPLIT_REPORT = pytest.mark.xfail(reason="impl pending: 長時間モーラのサブウィンドウ分割", strict=True)
-
-
-@_XFAIL_SPLIT_REPORT
 def test_split_mora_counts_as_one_mora_with_averaged_open_amount_and_summed_hold_frames():
     mouth_events = [
         mev(MouthShape.A, 0, 10, 0.2),
@@ -225,7 +225,6 @@ def test_split_mora_counts_as_one_mora_with_averaged_open_amount_and_summed_hold
     assert diag.mora_details[0].hold_frames == pytest.approx(40.0)  # 40-0 の合計
 
 
-@_XFAIL_SPLIT_REPORT
 def test_unsplit_morae_alongside_split_mora_count_correctly():
     # 分割されない短いモーラ(先頭・末尾)と分割されたモーラ(中央、2分割)が混在する場合の集計。
     mouth_events = [
@@ -241,10 +240,8 @@ def test_unsplit_morae_alongside_split_mora_count_correctly():
     assert diag.mora_details[1].hold_frames == pytest.approx(25.0)  # 30-5 の合計
 
 
-@_XFAIL_SPLIT_REPORT
 def test_closed_ranges_and_max_opening_unaffected_by_split():
-    # closed_ranges・max_openingは分割数列の影響を受けない(全MouthEventを対象に集計する
-    # 既存どおり変更しない)。
+    # closed_ranges・max_openingは分割数列の影響を受けず、全MouthEventを対象に集計する。
     mouth_events = [
         mev(MouthShape.A, 0, 10, 0.2), mev(MouthShape.A, 10, 20, 0.9),
         mev(MouthShape.BILABIAL, 20, 22), mev(MouthShape.SILENCE, 22, 30),
