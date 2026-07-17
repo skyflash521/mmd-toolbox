@@ -502,7 +502,6 @@ def test_no_adopted_notes_warns_and_succeeds(tmp_path, capsys, monkeypatch):
     assert "発音" in capsys.readouterr().err
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd-warning-line", strict=True)
 def test_read_warning_line_uses_common_format(tmp_path, capsys, monkeypatch):
     # vpr 読み込みが返す構造化警告も同じ共通書式(warning: コード: 本文)で1行にまとめる。
     src = _touch(tmp_path / "in.vpr")
@@ -528,7 +527,6 @@ def test_read_warning_line_uses_common_format(tmp_path, capsys, monkeypatch):
     assert "警告:" not in err
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd-warning-line", strict=True)
 def test_no_adopted_notes_warning_line_uses_common_format(tmp_path, capsys, monkeypatch):
     # 採用音符が空のときの警告も同じ共通書式(warning: コード: 本文)で1行にまとめる。
     src = _touch(tmp_path / "in.vpr")

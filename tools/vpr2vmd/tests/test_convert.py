@@ -362,7 +362,7 @@ def test_dry_run_empty_track_warns_on_stderr(monkeypatch, tmp_path, capsys):
     # 採用音符列が空 → 標準エラーへ警告を出す(--dry-run でも、出力VMDは書かない・exit 0)。
     rc, _out, err = _dry_run(monkeypatch, tmp_path, _project([]), capsys)
     assert rc == 0
-    assert "警告" in err
+    assert "warning: no_adopted_notes: " in err
 
 
 def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys):
@@ -370,4 +370,4 @@ def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys
     rc, out = _run(monkeypatch, tmp_path, _project([]))
     assert rc == 0
     assert out.exists()
-    assert "警告" in capsys.readouterr().err
+    assert "warning: no_adopted_notes: " in capsys.readouterr().err

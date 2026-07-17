@@ -553,7 +553,7 @@ def _surface_warnings(warnings, emitter) -> None:
         if key in seen:
             continue
         seen.add(key)
-        print(f"警告: {w.message} ({w.code})", file=sys.stderr)
+        print(f"warning: {w.code}: {w.message}", file=sys.stderr)
 
 
 def main(argv=None) -> int:
@@ -651,7 +651,7 @@ def _run(args, emitter, fail) -> int:
                 track_index=None, part_index=None, note_index=None, related_note_index=None, tick=None,
             )
         else:
-            print("警告: 対象トラックに有効な発音がありません", file=sys.stderr)
+            print("warning: no_adopted_notes: 対象トラックに有効な発音がありません", file=sys.stderr)
 
     # --dry-run / --verbose は処理計画と診断を標準出力へ出す。機械モードは標準出力をイベント専用に保つ
     # ため人間向け表示は出さない。
