@@ -510,3 +510,94 @@ def test_undecodable_name_not_targetable_by_bone(tmp_path):
     write_vmd(src, bone=keys)
     code = cli.main([str(src), "-o", str(out), "--target", "bone", "--bone", "�"])
     assert code == 2
+
+
+# --- 警告行の共通書式 -------------------------------------------------
+
+
+def _single_stderr_line(err):
+    lines = err.splitlines()
+    assert len(lines) == 1
+    return lines[0]
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
+def test_read_warning_line_uses_common_format(tmp_path, capsys):
+    # デコード不能なボーン名の読み込み警告(vmd.io の decode-error)が共通書式で1行にまとまる。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    keys = [undec_bone(0), undec_bone(10, (1.0, 0.0, 0.0)), undec_bone(20, (2.0, 0.0, 0.0))]
+    write_vmd(src, bone=keys)
+    rc = cli.main([str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear"])
+    assert rc == 0
+    out_text, err = capsys.readouterr()
+    assert out_text == ""
+    line = _single_stderr_line(err)
+    prefix = "warning: decode-error: "
+    assert line.startswith(prefix)
+    body = line[len(prefix):]
+    assert body.strip()
+    assert body.lstrip() == body
+    assert "警告:" not in err
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
+def test_selector_unmatched_warning_line_uses_common_format(tmp_path, capsys):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=[bone("頭", f) for f in range(31)])
+    rc = cli.main([str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear",
+                   "--bone", "頭", "--bone-glob", "幻*"])
+    assert rc == 0
+    out_text, err = capsys.readouterr()
+    assert out_text == ""
+    line = _single_stderr_line(err)
+    prefix = "warning: selector_unmatched: "
+    assert line.startswith(prefix)
+    body = line[len(prefix):]
+    assert body.strip()
+    assert body.lstrip() == body
+    assert "警告:" not in err
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
+def test_keep_frame_ignored_warning_line_uses_common_format(tmp_path, capsys):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
+                   "--range", "0:10", "--keep-frame", "50"])
+    assert rc == 0
+    out_text, err = capsys.readouterr()
+    assert out_text == ""
+    line = _single_stderr_line(err)
+    prefix = "warning: keep_frame_ignored: "
+    assert line.startswith(prefix)
+    body = line[len(prefix):]
+    assert body.strip()
+    assert body.lstrip() == body
+    assert "警告:" not in err
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
+def test_selection_unresolved_warning_line_uses_common_format(tmp_path, capsys):
+    # selector_unmatched(蓄積分)と selection_unresolved(理由)の2行が、それぞれ共通書式になる。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("頭", 0), bone("頭", 30)])
+    rc = cli.main([str(src), "--list-bones", "--bone-glob", "幻*"])
+    assert rc == 0
+    out_text, err = capsys.readouterr()
+    # --list-bones の一覧テキストは仕様どおり標準出力へ出るが(name\tkeys=n\tstate)、
+    # 警告(旧ラベル含む)が標準出力へ紛れ込んでいないことを確認する。
+    assert "warning" not in out_text
+    assert "警告:" not in out_text
+    lines = err.splitlines()
+    assert len(lines) == 2
+    assert lines[0].startswith("warning: selector_unmatched: ")
+    assert lines[1].startswith("warning: selection_unresolved: ")
+    for line in lines:
+        label, code, body = line.split(": ", 2)
+        assert label == "warning" and code
+        assert body.strip()
+        assert body.lstrip() == body
+    assert "警告:" not in err
