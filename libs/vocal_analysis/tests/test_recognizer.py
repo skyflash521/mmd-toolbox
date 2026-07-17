@@ -1291,3 +1291,221 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
         assert before_fragments == after_fragments
     finally:
         oov_module._conversion_cache.clear()
+
+
+# --- ダウンロード中の実バイト進捗を on_progress へ中継 --------------------------
+#
+# huggingface_hub の tqdm_class 差し込み口(hf_hub_download/snapshot_download が公式サポートする
+# 拡張点。呼び出し元が任意の tqdm 派生クラスを渡すと、そのインスタンスの update(n) 経由で実際の
+# ダウンロード済みバイト数を受け取れる)を使い、実際にダウンロードが発生した区間だけ
+# on_progress(f"ダウンロード中: {model_id} {percent}%") を呼ぶ。
+#
+# 導入済み huggingface_hub(_snapshot_download.py)の実装を直接確認すると、snapshot_download は
+# 1回の呼び出しで tqdm_class を2種類の別目的で生成する:
+#   (1) ファイル数バー(`thread_map(..., desc="Fetching N files", tqdm_class=tqdm_class)`)。
+#       全ファイルがキャッシュ済みでも対象ファイル数ぶん必ず update される(unit 指定なし)。
+#   (2) バイト集約バー(`_create_progress_bar(cls=tqdm_class, total=0, unit="B", unit_scale=True,
+#       desc="Downloading (incomplete total...)")`)。実際に転送したバイト数だけ増える。
+# (1)は「キャッシュ済みでも動く」ため、これに反応すると「キャッシュ時は on_progress を一度も
+# 呼ばない」という契約が壊れる。(2)だけを unit=="B" で見分けて反応する実装が正しい。以下のフェイクは
+# 両方のバーを生成し、(1)だけが動く(キャッシュ)ケースと両方動く(ダウンロード)ケースを区別して
+# 検証する。huggingface_hub のドキュメントが求める「tqdm_class は tqdm.auto.tqdm を継承する」契約
+# (dry_run 節と同じ docstring)も、渡された tqdm_class 自体で確認する。
+
+
+def _fake_file_count_bar(tqdm_class, n=2):
+    """実ライブラリの thread_map ファイル数バーを模す。unit 指定なし。キャッシュの有無に関わらず
+    対象ファイル数ぶん update される(このバーへの反応は on_progress を誤発火させる)。"""
+    import tqdm.auto
+
+    assert issubclass(tqdm_class, tqdm.auto.tqdm)
+    bar = tqdm_class(total=n, desc=f"Fetching {n} files")
+    for _ in range(n):
+        bar.update(1)
+    bar.close()
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
+def test_load_model_and_processor_reports_live_download_percentage(monkeypatch):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from vocal_analysis import recognizer as recognizer_module
+
+    calls = []
+    # snapshot_download・on_progress・processor/modelロードを単一の時系列へ記録し、
+    # 「事前フェッチ→ダウンロード進捗の各通知→実ロード→完了時のクリア通知」という順序を
+    # 1本のリストで厳密に検証する(別リストに分けると、クリア通知が実ロードより前に
+    # 発火する誤実装でも見た目上の各assertだけは通ってしまうため)。
+    timeline = []
+
+    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+        calls.append((repo_id, revision))
+        timeline.append("snapshot")
+        _fake_file_count_bar(tqdm_class)
+        byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
+        byte_bar.total += 100
+        byte_bar.update(40)
+        byte_bar.update(60)
+        byte_bar.close()
+
+    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
+
+    class _FakeTokenizer:
+        pad_token_id = 0
+
+        def get_vocab(self):
+            return {}
+
+    class _FakeProc:
+        tokenizer = _FakeTokenizer()
+
+    class _FakeModel:
+        def to(self, device):
+            return self
+
+        def eval(self):
+            return self
+
+    def fake_processor_from_pretrained(*a, **k):
+        timeline.append("processor")
+        return _FakeProc()
+
+    def fake_model_from_pretrained(*a, **k):
+        timeline.append("model")
+        return _FakeModel()
+
+    monkeypatch.setattr(recognizer_module, "_transformers_auto_processor_from_pretrained",
+                         fake_processor_from_pretrained)
+    monkeypatch.setattr(recognizer_module, "_transformers_auto_model_for_ctc_from_pretrained",
+                         fake_model_from_pretrained)
+
+    def on_progress(note):
+        timeline.append(("on_progress", note))
+
+    recognizer_module._load_model_and_processor(on_progress=on_progress)
+
+    model_id = recognizer_module.RECOGNIZER_CONFIG.model_id
+    model_revision = recognizer_module.RECOGNIZER_CONFIG.model_revision
+    # 事前フェッチ(snapshot_download)は正しい repo_id・revision で呼ばれる。
+    assert calls == [(model_id, model_revision)]
+    # 事前フェッチ→バイト集約バーの update だけに反応した進捗通知→実ロード→ロード完了後の
+    # クリア通知、という順序。ファイル数バーの update では発火しない。クリア通知("")が実ロード
+    # (processor/model)より前に出ていないことも、この1本のタイムラインで固定する。
+    assert timeline == [
+        "snapshot",
+        ("on_progress", f"ダウンロード中: {model_id} 40%"),
+        ("on_progress", f"ダウンロード中: {model_id} 100%"),
+        "processor", "model",
+        ("on_progress", ""),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
+def test_load_model_and_processor_no_on_progress_when_already_cached(monkeypatch):
+    # キャッシュ済みでもファイル数バーは update されるが、バイト集約バーの total は 0 のまま
+    # (転送バイト無し)。on_progress はこの場合一度も呼ばれない。
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from vocal_analysis import recognizer as recognizer_module
+
+    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+        _fake_file_count_bar(tqdm_class)
+        byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
+        byte_bar.close()  # total は 0 のまま(何も転送していない)
+
+    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
+
+    class _FakeTokenizer:
+        pad_token_id = 0
+
+        def get_vocab(self):
+            return {}
+
+    class _FakeProc:
+        tokenizer = _FakeTokenizer()
+
+    class _FakeModel:
+        def to(self, device):
+            return self
+
+        def eval(self):
+            return self
+
+    monkeypatch.setattr(recognizer_module, "_transformers_auto_processor_from_pretrained",
+                         lambda *a, **k: _FakeProc())
+    monkeypatch.setattr(recognizer_module, "_transformers_auto_model_for_ctc_from_pretrained",
+                         lambda *a, **k: _FakeModel())
+
+    calls = []
+    recognizer_module._load_model_and_processor(on_progress=lambda note: calls.append(note))
+
+    assert calls == []
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
+def test_load_content_recognizer_pipeline_reports_live_download_percentage(monkeypatch):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis import ContentRecognizerModel
+
+    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
+    calls = []
+    # test_load_model_and_processor_reports_live_download_percentage と同じ理由で、
+    # snapshot_download・on_progress・pipeline生成を単一の時系列へ記録する。
+    timeline = []
+
+    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+        calls.append((repo_id, revision))
+        timeline.append("snapshot")
+        _fake_file_count_bar(tqdm_class)
+        byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
+        byte_bar.total += 100
+        byte_bar.update(100)
+        byte_bar.close()
+
+    def fake_transformers_pipeline(*a, **k):
+        timeline.append("pipeline")
+        return object()
+
+    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
+    monkeypatch.setattr(recognizer_module, "_transformers_pipeline", fake_transformers_pipeline)
+
+    content_recognizer_model = ContentRecognizerModel(model_id="dummy/model", model_revision="main")
+    recognizer_module._load_content_recognizer_pipeline(
+        content_recognizer_model, on_progress=lambda note: timeline.append(("on_progress", note))
+    )
+
+    assert calls == [("dummy/model", "main")]
+    assert timeline == [
+        "snapshot",
+        ("on_progress", "ダウンロード中: dummy/model 100%"),
+        "pipeline",
+        ("on_progress", ""),
+    ]
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
+def test_load_content_recognizer_pipeline_no_on_progress_when_already_cached(monkeypatch):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis import ContentRecognizerModel
+
+    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
+
+    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+        _fake_file_count_bar(tqdm_class)
+        byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
+        byte_bar.close()
+
+    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
+    monkeypatch.setattr(recognizer_module, "_transformers_pipeline", lambda *a, **k: object())
+
+    calls = []
+    content_recognizer_model = ContentRecognizerModel(model_id="dummy/model", model_revision="main")
+    recognizer_module._load_content_recognizer_pipeline(
+        content_recognizer_model, on_progress=lambda note: calls.append(note)
+    )
+
+    assert calls == []

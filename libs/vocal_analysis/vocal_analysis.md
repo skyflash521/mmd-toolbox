@@ -157,6 +157,7 @@
       forced_aligner: ForcedAlignerId = "wav2vec2-ctc-forcedalign",
       sofa_aligner: SofaAlignerConfig | None = None,
       english_oov_katakana_method: EnglishOovKatakanaMethod = "arpakana",
+      on_progress: Callable[[str], None] | None = None,
   ) -> list[Segment]: ...
   ```
 
@@ -167,9 +168,15 @@
   `english_oov_katakana_method`で英語未知語カタカナ化フォールバック(5.2手順4)の変換方式を選択
   できる(既定`arpakana`。選択式`tinyllama-katakana-converter`)。
   `content_recognizer_model`は既存どおり第2位置引数のままとし、`retry`・`forced_aligner`・
-  `sofa_aligner`・`english_oov_katakana_method`はキーワード専用引数とする。
+  `sofa_aligner`・`english_oov_katakana_method`・`on_progress`はキーワード専用引数とする。
   ライブラリ未導入時、またはモデル取得に失敗した場合は `RecognitionError` で失敗する(8.3章)。
   `forced_aligner="sofa-forcedalign"`で`sofa_aligner`が`None`の場合も同様に`RecognitionError`とする。
+  `on_progress`はモデル(内容認識モデル・音素モデルのいずれも)の初回取得が実際にネットワーク
+  ダウンロードを要した区間だけ、進捗文言(`f"ダウンロード中: {model_id} {percent}%"`。
+  `percent`は取得済みバイト数の百分率)を都度渡して呼ぶ。取得済みモデル(キャッシュ済み)を使う場合や
+  `on_progress`省略時は一切呼ばない。ダウンロードが発生した場合、そのモデルのロードが完了した時点で
+  空文字列を渡して1回呼び、通知を終える。呼び出し元(利用先)はこの文言をそのまま利用者向け表示へ
+  使ってよい。
 
 ### 5.1 母音/子音の判定基準とフレーム時間(RMS不要)
 
@@ -777,7 +784,7 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
   出力は「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・分離トラック構成・一時ファイルは各実装に
   閉じる。`mode`(`auto`/`always`/`never`)もこの抽象が解釈する。
 - **Recognizer**: `recognize(vocal_wav_path, content_recognizer_model, *, retry, forced_aligner, sofa_aligner,
-  english_oov_katakana_method) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
+  english_oov_katakana_method, on_progress) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
   (文字列なしの音素認識)。
   `content_recognizer_model`(`ContentRecognizerModel`。5.2・8.3)は既定値を持つ省略可能引数。
   `retry`(内容認識のトリガ式リトライの有効/無効。`bool`。既定`True`。5.2)はキーワード専用の
@@ -786,7 +793,8 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
   `forced_aligner="sofa-forcedalign"`を選ぶときのみ`sofa_aligner`(`SofaAlignerConfig`。8.3)が
   必須になる(それ以外では無視する)。`english_oov_katakana_method`(英語未知語カタカナ化
   フォールバックの変換方式選択。`EnglishOovKatakanaMethod`。既定`arpakana`。5.2手順4)は
-  キーワード専用の省略可能引数。
+  キーワード専用の省略可能引数。`on_progress`(モデル初回取得の進捗通知。5章)もキーワード専用の
+  省略可能引数(既定`None`)。
   `type` は **母音/子音/gap** の3種で、出力は全時間軸を重複・欠落なく被覆する。
   アダプタは言語非依存の音素分割(母音/子音/gap)までに責務を限定し、RMS を必要としない(IPA→母音写像の
   適用・無音/閉口確定は利用先)。この契約(引数・戻り値の型・責務範囲)は`forced_aligner`の選択に

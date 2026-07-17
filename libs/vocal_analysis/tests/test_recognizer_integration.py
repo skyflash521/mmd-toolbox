@@ -219,6 +219,76 @@ def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(
     assert load_calls["count"] == 1  # 2区間とも内容認識を呼ぶが、パイプラインは使い回す
 
 
+@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
+def test_recognize_forwards_on_progress_to_model_loaders(tmp_path, monkeypatch):
+    # recognize() は on_progress をモデルロード関数(_load_content_recognizer_pipeline・
+    # _load_model_and_processor)へそのまま転送する。ダウンロード有無の判定・note文言の組み立ては
+    # 各ロード関数自身の責務(test_recognizer.py で個別に検証する)。ここでは recognize() が
+    # 正しい on_progress を正しい引数名で渡していることだけを検証する。
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+    received = {}
+
+    def fake_load_pipeline(content_recognizer_model, on_progress=None):
+        received["pipeline_on_progress"] = on_progress
+        return object()
+
+    def fake_load_model_and_processor(on_progress=None):
+        received["model_on_progress"] = on_progress
+        return _FakeProcessor(decoder), object()
+
+    monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fake_load_model_and_processor)
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    def sentinel_on_progress(note):
+        pass
+
+    recognizer_module.recognize(wav_path, on_progress=sentinel_on_progress)
+
+    assert received["pipeline_on_progress"] is sentinel_on_progress
+    assert received["model_on_progress"] is sentinel_on_progress
+
+
+@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
+def test_recognize_without_on_progress_still_works(tmp_path, monkeypatch):
+    # on_progress 省略(既定 None)時も、モデルロード関数への転送を含めて既存の呼び出しを壊さない。
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array(
+        [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
+    )
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model, on_progress=None: object(),
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object()),
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    segments = recognizer_module.recognize(wav_path, on_progress=None)  # 明示的に省略扱い
+
+    assert len(segments) == 3
+
+
 def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
