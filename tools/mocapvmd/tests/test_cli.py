@@ -827,6 +827,30 @@ def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "nan"]) == 2
 
 
+@pytest.mark.xfail(reason="impl pending: mocapvmd-warning-line", strict=True)
+def test_human_warning_line_uses_common_format(tmp_path, capsys):
+    # 警告行は共通コードのラベルで1行にまとめて標準エラーへ出す(安定コードは機械モードの
+    # warning イベントと同じ値)。旧来の日本語ラベルは出さず、標準出力には何も漏らさない。
+    from vmd.types import BoneKey, VmdDocument
+    from vmd.reduce import BONE_LINEAR_INTERP
+    bad_name = b"\x81\x20name".ljust(15, b"\x00")  # cp932 で復号できないバイト列
+    keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
+            for f in range(4)]
+    io.write_file(VmdDocument(bone=keys), str(tmp_path / "in.vmd"))
+    rc = cli.main([str(tmp_path / "in.vmd"), "-o", str(tmp_path / "out.vmd"), "--no-reduce"])
+    assert rc == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    lines = err.splitlines()  # 空行混入も検出するため除外しない
+    assert len(lines) == 1
+    prefix = "warning: decode-error: "
+    assert lines[0].startswith(prefix)
+    body = lines[0][len(prefix):]
+    assert body.strip()  # 本文が空白のみでない
+    assert not body.startswith(" ")  # 接頭辞直後の空白が1つだけ(既に prefix に含む)
+    assert "警告:" not in err
+
+
 def test_version_flag_prints_name_and_version_and_exits_zero(capsys):
     # --version は版を表示して終了コード0。argparse の version アクションは SystemExit を投げるが、
     # main はそれを捕捉して終了コードへ変換する(--help と同じ)ため戻り値で確認する。
