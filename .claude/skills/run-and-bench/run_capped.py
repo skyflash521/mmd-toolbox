@@ -17,12 +17,22 @@ Exit code: 124 if the cap was exceeded (regardless of whether the kill itself
 fully succeeded), otherwise the child's exit code.
 """
 import math
+import os
 import subprocess
 import sys
 import threading
 
 _POST_KILL_WAIT_SEC = 10.0
 _RELAY_JOIN_TIMEOUT_SEC = 5.0
+
+
+def _resolve_executable(token):
+    """パス区切りを含む相対パスは絶対パスへ解決して返す。Windowsのsubprocess.Popen
+    (shell=False)は相対パス(特にスラッシュ区切り)の実行ファイルを見つけられないことが
+    あるため。パス区切りを含まないbare名(PATH検索に委ねるコマンド名)はそのまま返す。"""
+    if ("/" in token or "\\" in token) and not os.path.isabs(token):
+        return os.path.abspath(token)
+    return token
 
 
 def _parse_args(args):
@@ -37,6 +47,7 @@ def _parse_args(args):
     command = args[2:]
     if not command:
         return None, None
+    command = [_resolve_executable(command[0])] + command[1:]
     return cap_seconds, command
 
 
