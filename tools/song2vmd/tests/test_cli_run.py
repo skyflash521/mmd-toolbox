@@ -7,6 +7,7 @@ cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(
 """
 
 import json
+import sys
 
 import pytest
 
@@ -479,3 +480,118 @@ def test_write_failure_machine_mode_emits_write_failed_error(tmp_path, monkeypat
     assert events[-1]["field"] == "--output"
     assert events[-1]["path"] == str(out)
     assert events[-1]["exit_code"] == 3
+
+
+# --- 進捗ライブ表示の終端処理(全終了経路で close、正常終了時のみ完了行) -------------------
+
+
+class _SpyProgressReporter:
+    """ProgressReporter の差し替え。close/summary の呼び出しを、共有の calls リストへ記録する
+    (下記 spy_progress フィクスチャが標準エラー出力の print 呼び出しも同じリストへ記録するため、
+    close とエラー行表示の相対順序を1本のタイムラインで検証できる)。"""
+
+    calls = None  # クラス変数: monkeypatch 先のコンストラクタから書けるよう、テストごとにリセットする
+
+    def __init__(self, **kwargs):
+        pass
+
+    def stage(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        _SpyProgressReporter.calls.append("close")
+
+    def summary(self, message):
+        _SpyProgressReporter.calls.append(("summary", message))
+
+
+@pytest.fixture
+def spy_progress(monkeypatch):
+    calls = []
+    _SpyProgressReporter.calls = calls
+    monkeypatch.setattr(cli._progress, "ProgressReporter", _SpyProgressReporter)
+
+    real_print = print
+
+    def spy_print(*args, **kwargs):
+        if kwargs.get("file") is sys.stderr and args:
+            calls.append(("stderr_print", args[0]))
+        real_print(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "print", spy_print, raising=False)
+    return calls
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
+def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch, spy_progress):
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "out.vmd"
+    _capture_run_kwargs(monkeypatch, result=_make_result())
+
+    rc = cli.main([src, "-o", str(out)])
+    assert rc == 0
+    assert spy_progress == ["close", ("summary", f"完了 {out}")]
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
+def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, spy_progress):
+    # --dry-run は VMD を書かないため完了行を出さない(close はライブ行の終端として必ず呼ぶ)。
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch, result=_make_result())
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 0
+    assert spy_progress == ["close"]
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
+@pytest.mark.parametrize("make_exc", [
+    lambda: AudioLoadError("no ffmpeg"),
+    lambda: SeparationError("sep failed"),
+    lambda: RecognitionError("rec failed"),
+])
+def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress, make_exc):
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(make_exc()))
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 4
+    # close がエラー行の標準エラー出力より前に呼ばれる(ライブ行を消してからエラーを表示する)。
+    assert spy_progress[0] == "close"
+    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
+def test_intermediate_write_error_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(
+        cli._pipeline, "run",
+        lambda *a, **k: (_ for _ in ()).throw(_pipeline.IntermediateWriteError("disk full")))
+
+    rc = cli.main([src, "--keep-intermediate", "--dry-run"])
+    assert rc == 3
+    assert spy_progress[0] == "close"
+    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
+def test_write_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "missing_parent" / "out.vmd"
+    _capture_run_kwargs(monkeypatch, result=_make_result())
+
+    rc = cli.main([src, "-o", str(out)])
+    assert rc == 3
+    assert spy_progress[0] == "close"
+    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
+def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 130
+    assert spy_progress[0] == "close"
+    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
