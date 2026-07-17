@@ -25,7 +25,9 @@ codex:rescue(read-only)にレビューさせ、Claude が各指摘を実コー�
 起動・監視まわりの無プロンプト運用(companion 起動 glob・watchdog 起動 glob)は `codex-watchdog`
 スキルの契約に従う。このスキルが追加で使う Bash コマンドは以下に限る:
 
-- 照合・テスト: 読み取り専用コマンド(`cat`/`sed -n`/`grep`/`rg`/`git` 系)と `pytest`
+- 照合: 読み取り専用コマンド(`cat`/`sed -n`/`grep`/`rg`/`git` 系)。**`pytest` はレビュー中に
+  実行しない**(照合・仕分けはコードの読解と読み取り専用コマンドで行う。テストの実行・グリーン確認は
+  レビューループの外(`autonomous-dev` の各フェーズ手順等)で別途担保する)
 - 結果取得・修正・停止: Read / Edit / `TaskStop` ツール(プロンプト無し)
 
 **複合コマンド(`A && B`、`until …; do …; done`)やインラインのループは許可パターンに一致せず毎回
