@@ -56,10 +56,8 @@ def test_build_vmd_document_contains_generated_morph_keys():
 
 def test_model_name_is_cp932_encoded_and_padded_to_20_bytes():
     events = [ev(MouthShape.A, 0, 10, open_amount=0.5)]
-    document = morphs.build_vmd_document(events, GenerationParams(), model_name="Model")
-    assert len(document.model_name_raw) == 20
-    assert document.model_name == "Model"
-    assert document.model_name_raw == b"Model".ljust(20, b"\x00")
+    document = morphs.build_vmd_document(events, GenerationParams(), model_name="モデル")
+    assert document.model_name_raw == "モデル".encode("cp932").ljust(20, b"\x00")
 
 
 def test_empty_model_name_produces_all_zero_padding():

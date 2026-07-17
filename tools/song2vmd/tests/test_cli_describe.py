@@ -12,6 +12,9 @@ options に載せない。
 
 import json
 
+import pytest
+
+from song2vmd import __version__
 from song2vmd import cli
 
 _NONNEG_INT = {"min": 0, "max": None, "exclusive_min": False}
@@ -28,7 +31,7 @@ EXPECTED = {
     "input": ("str", None, None),
     "--output": ("str", None, None),
     "--overwrite": ("flag", None, False),
-    "--model-name": ("str", None, ""),
+    "--model-name": ("str", None, f"song2vmd {__version__}"),
     "--style": ("enum", {"choices": ["pop", "ballad", "powerful", "whisper", "rap"]}, "pop"),
     "--separate-vocals": ("enum", {"choices": ["auto", "always", "never"]}, "auto"),
     "--separator": ("enum", {"choices": ["audio-separator-htdemucs-ft"]}, "audio-separator-htdemucs-ft"),
@@ -116,6 +119,7 @@ def test_describe_ignores_input_and_does_not_read_audio(capsysbinary):
     assert describe_result(capsysbinary)["mode"] == "describe"
 
 
+@pytest.mark.xfail(reason="impl pending: song2vmd --model-name default", strict=True)
 def test_describe_options_shape_and_values(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0

@@ -18,6 +18,7 @@ from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
 from vocal_analysis.separator import SeparationError
 
+from song2vmd import __version__
 from song2vmd import cli
 from song2vmd import events as _events
 from song2vmd import pipeline as _pipeline
@@ -61,6 +62,7 @@ def _events_of(capsysbinary):
 # --- pipeline.run への引数の受け渡し -------------------------------------------
 
 
+@pytest.mark.xfail(reason="impl pending: song2vmd --model-name default", strict=True)
 def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)
@@ -84,7 +86,7 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["style_gen"].vowel_scale == _presets.resolve("pop")[1].vowel_scale
     assert kwargs["intensity_curve"] == 0.6
     assert kwargs["silence_on"] == 0.06
-    assert kwargs["model_name"] == ""
+    assert kwargs["model_name"] == f"song2vmd {__version__}"
     assert kwargs["progress"] is not None
     assert kwargs["keep_intermediate_dir"] is None
     assert kwargs["forced_aligner"] == "wav2vec2-ctc-forcedalign"
