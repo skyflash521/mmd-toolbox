@@ -1325,7 +1325,6 @@ def _fake_file_count_bar(tqdm_class, n=2):
     bar.close()
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
 def test_load_model_and_processor_reports_live_download_percentage(monkeypatch):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
@@ -1400,7 +1399,6 @@ def test_load_model_and_processor_reports_live_download_percentage(monkeypatch):
     ]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
 def test_load_model_and_processor_no_on_progress_when_already_cached(monkeypatch):
     # キャッシュ済みでもファイル数バーは update されるが、バイト集約バーの total は 0 のまま
     # (転送バイト無し)。on_progress はこの場合一度も呼ばれない。
@@ -1442,7 +1440,6 @@ def test_load_model_and_processor_no_on_progress_when_already_cached(monkeypatch
     assert calls == []
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
 def test_load_content_recognizer_pipeline_reports_live_download_percentage(monkeypatch):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
@@ -1485,7 +1482,6 @@ def test_load_content_recognizer_pipeline_reports_live_download_percentage(monke
     ]
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
 def test_load_content_recognizer_pipeline_no_on_progress_when_already_cached(monkeypatch):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")

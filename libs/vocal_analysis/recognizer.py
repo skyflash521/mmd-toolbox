@@ -11,6 +11,7 @@
 
 import math
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -679,6 +680,7 @@ def recognize(
     forced_aligner: ForcedAlignerId = DEFAULT_FORCED_ALIGNER,
     sofa_aligner: SofaAlignerConfig | None = None,
     english_oov_katakana_method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
 ) -> list[Segment]:
     """ボーカルWAVから母音/子音/gapのセグメント列を認識する(Recognizerアダプタ契約)。
 
@@ -689,7 +691,10 @@ def recognize(
     (既定`wav2vec2-ctc-forcedalign`)。`forced_aligner="sofa-forcedalign"`を選ぶ場合は
     sofa_aligner(`SofaAlignerConfig`)が必須で、省略(`None`)すると`RecognitionError`にする
     (黙ってwav2vec2へフォールバックしない)。english_oov_katakana_method で英語未知語カタカナ化
-    フォールバックの変換方式を選択する(既定`arpakana`)。
+    フォールバックの変換方式を選択する(既定`arpakana`)。on_progress はモデル(内容認識モデル・
+    音素モデル)の初回取得がネットワークダウンロードを要した区間だけ、進捗文言を都度渡して呼ぶ
+    (キャッシュ済みなら一切呼ばない。モデルロード関数へそのまま転送するだけで、判定・文言の
+    組み立ては行わない)。
     """
     if forced_aligner not in ("wav2vec2-ctc-forcedalign", "sofa-forcedalign"):
         raise RecognitionError(f"未知の forced_aligner です: {forced_aligner!r}")
@@ -750,7 +755,8 @@ def recognize(
 
         try:
             if content_pipeline is None:
-                content_pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
+                content_pipeline = _load_content_recognizer_pipeline(
+                    content_recognizer_model, on_progress=on_progress)
             text, words = _transcribe_segment(content_pipeline, chunk_samples)
         except ImportError as e:
             raise RecognitionError(
@@ -823,7 +829,7 @@ def recognize(
         if forced_aligner == "wav2vec2-ctc-forcedalign":
             if processor is None:
                 try:
-                    processor, model = _load_model_and_processor()
+                    processor, model = _load_model_and_processor(on_progress=on_progress)
                 except ImportError as e:
                     raise RecognitionError(
                         "transformers または torch が見つかりません。導入してください"
@@ -1100,14 +1106,75 @@ def _select_device() -> str:
 _content_recognizer_pipeline_cache: tuple[ContentRecognizerModel, object] | None = None
 
 
-def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognizerModel):
+def _hf_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+    """huggingface_hub.snapshot_download への薄いラッパー(モンキーパッチの受け口)。"""
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(repo_id, revision=revision, tqdm_class=tqdm_class)
+
+
+def _transformers_pipeline(*args, **kwargs):
+    """transformers.pipeline への薄いラッパー(モンキーパッチの受け口)。"""
+    from transformers import pipeline as transformers_pipeline
+
+    return transformers_pipeline(*args, **kwargs)
+
+
+def _transformers_auto_processor_from_pretrained(*args, **kwargs):
+    """transformers.AutoProcessor.from_pretrained への薄いラッパー(モンキーパッチの受け口)。"""
+    from transformers import AutoProcessor
+
+    return AutoProcessor.from_pretrained(*args, **kwargs)
+
+
+def _transformers_auto_model_for_ctc_from_pretrained(*args, **kwargs):
+    """transformers.AutoModelForCTC.from_pretrained への薄いラッパー(モンキーパッチの受け口)。"""
+    from transformers import AutoModelForCTC
+
+    return AutoModelForCTC.from_pretrained(*args, **kwargs)
+
+
+def _prefetch_with_progress(repo_id: str, revision: str | None, on_progress: Callable[[str], None]) -> bool:
+    """repo_id のファイル群を事前フェッチし、実際にバイト転送が発生した区間だけ
+    on_progress(f"ダウンロード中: {repo_id} {percent}%") を呼ぶ。事前フェッチ後に呼び出し元が
+    通常どおり from_pretrained 等でロードすると、キャッシュ済みのため高速に完了する。戻り値は
+    実際にダウンロードが発生したか(呼び出し元がロード完了後の空文字列クリア通知を出すべきか)。
+
+    huggingface_hub の snapshot_download は tqdm_class 差し込み口(公式拡張点)で2種類のバーを
+    生成する: 対象ファイル数バー(unit指定なし。キャッシュ済みでも全ファイルぶん update される)と、
+    実転送バイト集約バー(unit="B"。total=0 で生成後、実際に転送したバイト数だけ加算される)。
+    ファイル数バーには反応せず、バイト集約バーの update だけに反応することで、キャッシュ済み
+    (実転送無し)のときは on_progress を一度も呼ばない。
+    """
+    from huggingface_hub.utils import tqdm as hf_tqdm
+
+    state = {"shown": False}
+
+    class _RelayTqdm(hf_tqdm):
+        def update(self, n=1):
+            result = super().update(n)
+            if self.unit == "B" and self.total:
+                state["shown"] = True
+                percent = min(100, int(self.n * 100 / self.total))
+                on_progress(f"ダウンロード中: {repo_id} {percent}%")
+            return result
+
+    _hf_snapshot_download(repo_id, revision=revision, tqdm_class=_RelayTqdm)
+    return state["shown"]
+
+
+def _load_content_recognizer_pipeline(
+    content_recognizer_model: ContentRecognizerModel,
+    on_progress: Callable[[str], None] | None = None,
+):
     """内容認識器を content_recognizer_model が指すモデル・revisionでロードする。
 
     実行デバイスは環境から自動選択する(_select_device)。1呼び出し中は
     区間ごと・トリガ式リトライごとに同じ content_recognizer_model を使い回すため、直前に
     ロードした1件だけを保持する単一枠キャッシュで足りる(再ロードを避ける)。別の
     content_recognizer_model が指定されると、直前のキャッシュは破棄して差し替える(複数の
-    モデルを同時にプロセス内保持しない)。
+    モデルを同時にプロセス内保持しない)。on_progress はモデルの初回取得が実際にネットワーク
+    ダウンロードを要した区間だけ、進捗文言を渡して呼ぶ(vocal_analysis.md §5)。
     """
     global _content_recognizer_pipeline_cache
     if _content_recognizer_pipeline_cache is not None:
@@ -1122,20 +1189,30 @@ def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognize
         _content_recognizer_pipeline_cache = None
 
     import torch
-    from transformers import pipeline as transformers_pipeline
+
+    downloaded = False
+    if on_progress is not None:
+        downloaded = _prefetch_with_progress(
+            content_recognizer_model.model_id, content_recognizer_model.model_revision, on_progress)
 
     device = _select_device()
     # GPU実行時はfp16でロードし、既定のfp32に対して重み・アクティベーションのメモリ使用量を
     # 半減させる(限られたVRAMでの他モデル(音素モデル・分離器)との競合・アロケータの逼迫による
     # 速度低下を避ける)。CPU実行時はfp16未対応のためfp32のまま。
     dtype = torch.float16 if device == "cuda" else torch.float32
-    pipeline = transformers_pipeline(
-        "automatic-speech-recognition",
-        model=content_recognizer_model.model_id,
-        revision=content_recognizer_model.model_revision,
-        device=device,
-        dtype=dtype,
-    )
+    try:
+        pipeline = _transformers_pipeline(
+            "automatic-speech-recognition",
+            model=content_recognizer_model.model_id,
+            revision=content_recognizer_model.model_revision,
+            device=device,
+            dtype=dtype,
+        )
+    finally:
+        # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ。
+        # vocal_analysis.md §5)。例外時もライブ表示側の後始末に合わせクリアする。
+        if downloaded:
+            on_progress("")
     _content_recognizer_pipeline_cache = (content_recognizer_model, pipeline)
     return pipeline
 
@@ -1156,28 +1233,40 @@ def _compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:
     return log_probs[0].cpu().numpy()
 
 
-def _load_model_and_processor():
+def _load_model_and_processor(on_progress: Callable[[str], None] | None = None):
     """音素モデル(強制アライメント用)をロードする。
 
     モデル id・revision・dtype は S-1 測定の固定条件どおりに適用し、実行デバイスは
-    _select_device() の自動選択で決める(実行デバイスは固定条件に含まれない)。
+    _select_device() の自動選択で決める(実行デバイスは固定条件に含まれない)。on_progress は
+    モデルの初回取得が実際にネットワークダウンロードを要した区間だけ、進捗文言を渡して呼ぶ
+    (vocal_analysis.md §5)。
     """
     import torch
-    from transformers import AutoModelForCTC, AutoProcessor
 
-    # wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
-    # 要求する。音素IDのデコードのみが必要で音素へのエンコードは不要なため do_phonemize=False
-    # でこの依存を回避する。
-    processor = AutoProcessor.from_pretrained(
-        RECOGNIZER_CONFIG.model_id,
-        revision=RECOGNIZER_CONFIG.model_revision,
-        do_phonemize=False,
-    )
-    model = AutoModelForCTC.from_pretrained(
-        RECOGNIZER_CONFIG.model_id,
-        revision=RECOGNIZER_CONFIG.model_revision,
-        torch_dtype=getattr(torch, RECOGNIZER_CONFIG.dtype),
-    )
+    downloaded = False
+    if on_progress is not None:
+        downloaded = _prefetch_with_progress(
+            RECOGNIZER_CONFIG.model_id, RECOGNIZER_CONFIG.model_revision, on_progress)
+
+    try:
+        # wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
+        # 要求する。音素IDのデコードのみが必要で音素へのエンコードは不要なため do_phonemize=False
+        # でこの依存を回避する。
+        processor = _transformers_auto_processor_from_pretrained(
+            RECOGNIZER_CONFIG.model_id,
+            revision=RECOGNIZER_CONFIG.model_revision,
+            do_phonemize=False,
+        )
+        model = _transformers_auto_model_for_ctc_from_pretrained(
+            RECOGNIZER_CONFIG.model_id,
+            revision=RECOGNIZER_CONFIG.model_revision,
+            torch_dtype=getattr(torch, RECOGNIZER_CONFIG.dtype),
+        )
+    finally:
+        # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ。
+        # vocal_analysis.md §5)。例外時もライブ表示側の後始末に合わせクリアする。
+        if downloaded:
+            on_progress("")
     model.to(_select_device())
     model.eval()
     return processor, model

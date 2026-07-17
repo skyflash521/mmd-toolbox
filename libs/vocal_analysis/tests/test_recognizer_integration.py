@@ -108,12 +108,13 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -158,12 +159,13 @@ def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkey
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -197,7 +199,7 @@ def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(
     )
     load_calls = {"count": 0}
 
-    def fake_load_pipeline(content_recognizer_model):
+    def fake_load_pipeline(content_recognizer_model, on_progress=None):
         load_calls["count"] += 1
         return object()
 
@@ -208,7 +210,8 @@ def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -219,7 +222,6 @@ def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(
     assert load_calls["count"] == 1  # 2区間とも内容認識を呼ぶが、パイプラインは使い回す
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
 def test_recognize_forwards_on_progress_to_model_loaders(tmp_path, monkeypatch):
     # recognize() は on_progress をモデルロード関数(_load_content_recognizer_pipeline・
     # _load_model_and_processor)へそのまま転送する。ダウンロード有無の判定・note文言の組み立ては
@@ -259,7 +261,6 @@ def test_recognize_forwards_on_progress_to_model_loaders(tmp_path, monkeypatch):
     assert received["model_on_progress"] is sentinel_on_progress
 
 
-@pytest.mark.xfail(reason="impl pending: vocal_analysis-on_progress-model_load", strict=True)
 def test_recognize_without_on_progress_still_works(tmp_path, monkeypatch):
     # on_progress 省略(既定 None)時も、モデルロード関数への転送を含めて既存の呼び出しを壊さない。
     from vocal_analysis import recognizer as recognizer_module
@@ -308,12 +309,13 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -348,7 +350,7 @@ def test_recognize_treats_high_phoneme_density_chunk_as_gap(tmp_path, monkeypatc
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment",
@@ -381,7 +383,7 @@ def test_recognize_empty_transcription_confirms_gap_without_g2p_or_model(tmp_pat
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment",
@@ -428,12 +430,13 @@ def test_recognize_computes_and_passes_word_windows(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -477,12 +480,13 @@ def test_recognize_falls_back_to_band_alignment_when_word_window_infeasible(tmp_
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -528,12 +532,13 @@ def test_recognize_falls_back_to_global_min_stay_when_windowed_alignment_fails(t
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -578,7 +583,7 @@ def test_recognize_places_multiple_words_via_per_word_g2p_and_inter_word_window(
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     # 全文("あ い"。トリガ判定の密度算出に使う)と単語ごとの両方の呼び出しに応える。
@@ -586,7 +591,8 @@ def test_recognize_places_multiple_words_via_per_word_g2p_and_inter_word_window(
         recognizer_module, "_g2p",
         lambda text, method=None: {"あ": ["a"], "い": ["i"], "あ い": ["a", "i"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -611,7 +617,7 @@ def test_recognize_hallucination_density_sums_across_words(tmp_path, monkeypatch
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment",
@@ -648,13 +654,14 @@ def test_recognize_empty_word_list_with_nonempty_text_falls_back_like_no_timesta
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", []))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -702,12 +709,13 @@ def test_recognize_last_local_segment_extends_exactly_to_segment_boundary(tmp_pa
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -727,7 +735,8 @@ def test_recognize_content_recognizer_missing_library_raises_clear_error(tmp_pat
     original_error = ImportError("no transformers")
     decoder = {0: "<pad>"}
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
 
     def fake_transcribe(pipeline, samples):
@@ -735,7 +744,7 @@ def test_recognize_content_recognizer_missing_library_raises_clear_error(tmp_pat
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
 
@@ -758,7 +767,8 @@ def test_recognize_content_recognizer_model_fetch_failure_raises_clear_error(tmp
     original_error = OSError("model not found in cache and offline")
     decoder = {0: "<pad>"}
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
 
     def fake_transcribe(pipeline, samples):
@@ -766,7 +776,7 @@ def test_recognize_content_recognizer_model_fetch_failure_raises_clear_error(tmp
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
 
@@ -784,11 +794,12 @@ def test_recognize_g2p_missing_library_raises_clear_error(tmp_path, monkeypatch)
     original_error = ImportError("no pyopenjtalk")
     decoder = {0: "<pad>"}
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
 
@@ -813,7 +824,7 @@ def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, mo
     original_error = ImportError("no transformers")
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: ["a"])
@@ -838,7 +849,7 @@ def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monk
     original_error = OSError("model not found in cache and offline")
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: ["a"])
@@ -1154,14 +1165,15 @@ def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_pa
             calls["return_timestamps"] = return_timestamps
             return {"text": "あ"}
 
-    def fake_load_pipeline(content_recognizer_model):
+    def fake_load_pipeline(content_recognizer_model, on_progress=None):
         calls["loaded_model"] = content_recognizer_model
         return _FakePipeline()
 
     monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -1205,14 +1217,15 @@ def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, m
         def __call__(self, samples, return_timestamps, generate_kwargs):
             return {"text": "あ"}
 
-    def fake_load_pipeline(content_recognizer_model):
+    def fake_load_pipeline(content_recognizer_model, on_progress=None):
         calls["loaded_model"] = content_recognizer_model
         return _FakePipeline()
 
     monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -1242,12 +1255,13 @@ def test_recognize_english_oov_katakana_method_is_passed_through_to_g2p(tmp_path
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", fake_g2p)
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -1288,12 +1302,13 @@ def test_recognize_english_oov_katakana_method_reaches_per_word_g2p(tmp_path, mo
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", fake_g2p)
     monkeypatch.setattr(
-        recognizer_module, "_load_model_and_processor", lambda: (_FakeProcessor(decoder), object())
+        recognizer_module, "_load_model_and_processor",
+        lambda on_progress=None: (_FakeProcessor(decoder), object())
     )
     monkeypatch.setattr(
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
@@ -1319,7 +1334,7 @@ def test_recognize_content_recognizer_model_fetch_failure_names_that_model(tmp_p
 
     original_error = OSError("model not found in cache and offline")
 
-    def fail_load_pipeline(content_recognizer_model):
+    def fail_load_pipeline(content_recognizer_model, on_progress=None):
         raise original_error
 
     monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fail_load_pipeline)
@@ -1392,7 +1407,7 @@ def test_recognize_sofa_path_splits_words_and_reassembles_segments(tmp_path, mon
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(
         recognizer_module, "_transcribe_segment",
@@ -1454,7 +1469,7 @@ def test_recognize_sofa_path_uses_whole_region_when_no_word_timestamps(tmp_path,
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
@@ -1490,7 +1505,7 @@ def test_recognize_sofa_path_never_loads_wav2vec2_model(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         recognizer_module, "_load_content_recognizer_pipeline",
-        lambda content_recognizer_model: object(),
+        lambda content_recognizer_model, on_progress=None: object(),
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
