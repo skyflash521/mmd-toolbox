@@ -8,6 +8,8 @@ cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(
 
 import json
 
+import pytest
+
 from vmd import VmdDocument
 from vmd import read as vmd_read
 from vocal_analysis import ContentRecognizerModel, DEFAULT_CONTENT_RECOGNIZER_MODEL
@@ -309,6 +311,27 @@ def test_low_dynamics_suppressed_warning_survives_quiet(tmp_path, monkeypatch, c
     assert rc == 0
     err = capsys.readouterr().err
     assert "low_dynamics_suppressed" in err or "ダイナミックレンジ" in err
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-warning-line", strict=True)
+def test_human_warning_line_uses_common_format(tmp_path, monkeypatch, capsys):
+    # 警告行は共通コードのラベルで1行にまとめて標準エラーへ出す(安定コードは機械モードの
+    # warning イベントと同じ値)。通常実行(--dry-run なし)で標準出力には何も漏らさない。
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "out.vmd"
+    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
+
+    rc = cli.main([src, "-o", str(out)])
+    assert rc == 0
+    stdout, err = capsys.readouterr()
+    assert stdout == ""
+    lines = err.splitlines()
+    assert len(lines) == 1
+    prefix = "warning: low_dynamics_suppressed: "
+    assert lines[0].startswith(prefix)
+    body = lines[0][len(prefix):]
+    assert body.strip()
+    assert body.lstrip() == body  # 接頭辞直後に空白文字(タブ・全角空白等)が無い
 
 
 # --- エラー変換(音声前段の失敗。12.3) -----------------------------------------
