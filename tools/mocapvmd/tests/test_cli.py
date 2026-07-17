@@ -27,13 +27,14 @@ from .helpers import (
 _FORMAT_DRY_RUN = mocap_report.format_dry_run
 
 
-def _full_doc(path):
+def _full_doc(path, *, model_name_raw=b"TestModel".ljust(20, b"\x00")):
     """全セクションにキーを持つVMDを書き出す。透過確認用。
 
     ボーン・カメラには非線形の補間バイトを入れ、再構築・線形化されれば検出できるようにする。
     """
     write_vmd(
         path,
+        model_name_raw=model_name_raw,
         bone=[
             bone("センター", 0, interp=BONE_NONLINEAR),
             bone("センター", 1, pos=(1.0, 0.0, 0.0), interp=BONE_NONLINEAR),
@@ -204,7 +205,8 @@ def test_explicit_output_written(tmp_path):
 
 
 def test_nonbone_sections_passthrough_with_denoise(tmp_path):
-    # 既定(denoise on)でも対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)は無加工透過。
+    # 既定(denoise on)でも対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)と
+    # ヘッダの model_name は無加工透過。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
@@ -218,6 +220,7 @@ def test_nonbone_sections_passthrough_with_denoise(tmp_path):
     assert out_doc.self_shadow == in_doc.self_shadow
     assert out_doc.ik_property == in_doc.ik_property
     assert out_doc.camera[0].interpolation == CAM_NONLINEAR
+    assert out_doc.model_name_raw == in_doc.model_name_raw
 
 
 def test_no_denoise_keeps_bones_verbatim(tmp_path):
