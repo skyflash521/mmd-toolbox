@@ -642,7 +642,6 @@ def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_reco
 # 進捗(分割時はチャンク進捗)をそのまま保つ(0/None へ巻き戻さない)。
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
 def test_non_chunked_recognize_on_progress_forwards_download_note(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
@@ -670,7 +669,6 @@ def test_non_chunked_recognize_on_progress_forwards_download_note(tmp_path, monk
     assert all(c["done"] == 0 and c["total"] is None for c in recognize_calls)
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
 def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0)
@@ -699,7 +697,6 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monk
     assert [(c["done"], c["total"]) for c in download_notes] == [(0, 2), (1, 2)]
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
 def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_path, monkeypatch):
     # progress 省略時は recognize() へ on_progress=None を渡す(存在しない進捗表示へ橋渡しする
     # 無意味なコールバックを作らない)。on_progress を必須キーワード引数にして、現行の
@@ -724,7 +721,6 @@ def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_
     assert captured["on_progress"] is None
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
 def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_path, monkeypatch):
     # 上と同じ契約(progress省略→on_progress=None)を、_run_chunked 側の recognize 呼び出し箇所
     # (_run_single とは別のコード経路)でも独立に固定する。

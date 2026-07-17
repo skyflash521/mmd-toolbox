@@ -16,6 +16,7 @@ vocal_analysis.io.load_audio のピーク正規化を経ずに読み込む(正�
 """
 
 import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -108,6 +109,26 @@ def _report_stage(progress, stage, *, done=0, total=None, note=""):
         progress.stage(stage, done=done, total=total, note=note, elapsed=0.0)
 
 
+def _model_download_progress(progress, stage, *, done, total):
+    """vocal_analysis.recognizer.recognize() の on_progress へ渡すコールバックを組み立てる。
+
+    モデル初回取得のダウンロード進捗文言を、呼び出し時点の完了数/総数(長尺分割時はチャンク進捗)を
+    保ったまま progress.stage() の note へ反映する(通知のたびに 0/None へ巻き戻さない)。elapsed は
+    このコールバックを組み立てた時点(直前の _report_stage 呼び出しと同時)からの実経過秒で、
+    段開始からの経過秒という機械モードイベントの契約(song2vmd.md §12.1)を満たす。progress が
+    None(進捗レポータ省略時)なら None を返し、存在しない進捗表示への橋渡しコールバックを作らない。
+    """
+    if progress is None:
+        return None
+
+    start = time.monotonic()
+
+    def on_progress(note):
+        progress.stage(stage, done=done, total=total, note=note, elapsed=time.monotonic() - start)
+
+    return on_progress
+
+
 def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
     """--keep-intermediate 指定時に中間生成物を保存する。
 
@@ -194,7 +215,8 @@ def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
     segments = _va_recognizer.recognize(
         vocal_path, content_recognizer_model=content_recognizer_model,
         retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
-        english_oov_katakana_method=english_oov_katakana_method)
+        english_oov_katakana_method=english_oov_katakana_method,
+        on_progress=_model_download_progress(progress, "recognize", done=0, total=None))
     _report_stage(progress, "rms")
     vocal_pcm = _va_io.load_audio(vocal_path)
     rms_envelope = _va_rms.compute_rms(vocal_pcm)
@@ -230,7 +252,8 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
             _va_recognizer.recognize(
                 vocal_path, content_recognizer_model=content_recognizer_model,
                 retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
-                english_oov_katakana_method=english_oov_katakana_method))
+                english_oov_katakana_method=english_oov_katakana_method,
+                on_progress=_model_download_progress(progress, "recognize", done=i, total=n)))
 
         chunk_vocal_pcm = _read_pcm_raw(vocal_path)
         vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))
