@@ -249,7 +249,7 @@ def test_keep_frame_out_of_range_warns(tmp_path, capsys):
                      "--range", "0:10", "--keep-frame", "50"])
     assert code == 0
     err = capsys.readouterr().err
-    assert "50" in err and ("警告" in err or "keep" in err.lower())
+    assert "50" in err and "warning: keep_frame_ignored: " in err
 
 
 def test_list_bones_zero_bones_warns_unmatched(tmp_path, capsys):
@@ -259,7 +259,7 @@ def test_list_bones_zero_bones_warns_unmatched(tmp_path, capsys):
     code = cli.main([str(src), "--list-bones", "--bone", "存在しない"])
     assert code == 0
     err = capsys.readouterr().err
-    assert "警告" in err
+    assert "warning: selection_unresolved: " in err
 
 
 # --- list-bones -------------------------------------------------------------
@@ -521,7 +521,6 @@ def _single_stderr_line(err):
     return lines[0]
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
 def test_read_warning_line_uses_common_format(tmp_path, capsys):
     # デコード不能なボーン名の読み込み警告(vmd.io の decode-error)が共通書式で1行にまとまる。
     src = tmp_path / "in.vmd"
@@ -541,7 +540,6 @@ def test_read_warning_line_uses_common_format(tmp_path, capsys):
     assert "警告:" not in err
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
 def test_selector_unmatched_warning_line_uses_common_format(tmp_path, capsys):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -560,7 +558,6 @@ def test_selector_unmatched_warning_line_uses_common_format(tmp_path, capsys):
     assert "警告:" not in err
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
 def test_keep_frame_ignored_warning_line_uses_common_format(tmp_path, capsys):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -579,7 +576,6 @@ def test_keep_frame_ignored_warning_line_uses_common_format(tmp_path, capsys):
     assert "警告:" not in err
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-warning-line", strict=True)
 def test_selection_unresolved_warning_line_uses_common_format(tmp_path, capsys):
     # selector_unmatched(蓄積分)と selection_unresolved(理由)の2行が、それぞれ共通書式になる。
     src = tmp_path / "in.vmd"

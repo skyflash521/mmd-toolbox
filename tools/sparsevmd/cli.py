@@ -430,7 +430,7 @@ def _emit_selector_unmatched(emitter, message):
     if emitter is not None:
         emitter.warning(code="selector_unmatched", message=message, section=None)
     else:
-        print("警告: " + message, file=sys.stderr)
+        print("warning: selector_unmatched: " + message, file=sys.stderr)
 
 
 def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
@@ -622,7 +622,7 @@ def _run(args, emitter, fail):
                             section=[w.section] if w.section else None)
         else:
             where = f"({w.section})" if w.section else ""
-            print(f"警告: {w.message}{where}", file=sys.stderr)
+            print(f"warning: {w.code}: {w.message}{where}", file=sys.stderr)
 
     # 対象セクションを内部作業ビューで正規化する(フレーム順ソート・同一キー後勝ち)。
     # 対象外セクションは無加工で保持される。
@@ -703,7 +703,7 @@ def _run(args, emitter, fail):
             if emitter is not None:
                 emitter.warning(code="keep_frame_ignored", message=msg, section=None)
             else:
-                print(f"警告: {msg}", file=sys.stderr)
+                print(f"warning: keep_frame_ignored: {msg}", file=sys.stderr)
 
     want_report = args.dry_run
     want_diag = want_report or args.verbose  # verbose は診断を stderr ログに出す
@@ -918,7 +918,7 @@ def _list_bones(doc, includes, excludes, emitter=None):
         if emitter is not None:
             emitter.warning(code="selection_unresolved", message=str(e), section=None)
         else:
-            print("警告: " + str(e), file=sys.stderr)
+            print("warning: selection_unresolved: " + str(e), file=sys.stderr)
 
     # 構造化出力モード(機械/自己記述)は list_bones result で終端。人間向けは一覧テキスト。
     if emitter is not None:
