@@ -143,12 +143,13 @@ def test_default_output_path(tmp_path):
 
 
 def test_non_target_section_passthrough(tmp_path):
-    # bone を対象にし、camera セクションは透過(バイト保持)される。
+    # bone を対象にし、camera セクションと model_name ヘッダは透過(バイト保持)される。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     cam_keys = [cam(0), cam(30)]
     bone_keys = [bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(31)]
-    write_vmd(src, camera=cam_keys, bone=bone_keys)
+    model_name_raw = b"TestModel".ljust(20, b"\x00")
+    write_vmd(src, camera=cam_keys, bone=bone_keys, model_name_raw=model_name_raw)
     code = cli.main([str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear"])
     assert code == 0
     doc, _ = io.read(str(out))
@@ -156,6 +157,8 @@ def test_non_target_section_passthrough(tmp_path):
     assert doc.camera == cam_keys
     # bone は削減される。
     assert len(doc.bone) < 31
+    # VMDヘッダの model_name も透過(変更しない)。
+    assert doc.model_name_raw == model_name_raw
 
 
 # --- 入力正規化 ------------------------------------------------------
