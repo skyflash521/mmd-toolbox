@@ -71,7 +71,6 @@ def test_convert_single_vowel_writes_morph_vmd(monkeypatch, tmp_path):
     assert "あ" in _morph_names(out)
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd --model-name default", strict=True)
 def test_convert_default_model_name_is_tool_and_version(monkeypatch, tmp_path):
     # --model-name 未指定時、出力VMDの model_name はツール名+実行中のバージョン。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))

@@ -157,7 +157,8 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--track",
                    help="口パク対象の歌唱トラック。整数は 0-based の INDEX、非整数は Track 名"
                         "(既定: 先頭トラック)")
-    p.add_argument("--model-name", dest="model_name", type=_model_name, default="",
+    p.add_argument("--model-name", dest="model_name", type=_model_name,
+                   default=f"vpr2vmd {__version__}",
                    help="VMD に格納するモデル名(最大 20 バイト・Shift-JIS)")
     p.add_argument("--style", choices=STYLE_NAMES, default="pop",
                    help="口パクスタイルプリセット(開き量レンジ・タイミング・誇張を切り替える)")

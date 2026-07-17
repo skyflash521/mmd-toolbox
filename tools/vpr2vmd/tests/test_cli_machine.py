@@ -11,8 +11,6 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 
 import json
 
-import pytest
-
 from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
 
 from vpr2vmd import __version__, cli
@@ -137,7 +135,6 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
         }
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd --model-name default", strict=True)
 def test_describe_model_name_default_is_tool_and_version(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0
@@ -179,7 +176,6 @@ def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, m
     assert isinstance(res["non_event_symbols"], dict)
 
 
-@pytest.mark.xfail(reason="impl pending: vpr2vmd --model-name default", strict=True)
 def test_machine_dry_run_inspect_model_name_default_is_tool_and_version(
     tmp_path, capsysbinary, monkeypatch
 ):
