@@ -5,6 +5,8 @@ VMD書き。終了コード: 0 正常 / 1 入力不正(VMDでない・対象セ�
 2 引数エラー / 3 出力書き込み失敗 / 4 strict で許容誤差を満たせない。
 """
 
+import sys
+
 import numpy as np
 import pytest
 
@@ -597,3 +599,251 @@ def test_selection_unresolved_warning_line_uses_common_format(tmp_path, capsys):
         assert body.strip()
         assert body.lstrip() == body
     assert "警告:" not in err
+
+
+# --- 進捗ライブ表示の終端処理(全終了経路で close、正常終了時のみ完了行) -------------------
+
+
+class _SpyProgressReporter:
+    """ProgressReporter の差し替え。close/summary の呼び出しを、共有の calls リストへ記録する
+    (下記 spy_progress フィクスチャが標準エラーへの print 呼び出しも同じリストへ記録するため、
+    close とエラー行表示の相対順序を1本のタイムラインで検証できる)。"""
+
+    calls = None  # クラス変数: monkeypatch 先のコンストラクタから書けるよう、テストごとにリセットする
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def stage(self, *args, **kwargs):
+        pass
+
+    def update(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        _SpyProgressReporter.calls.append("close")
+
+    def summary(self, message):
+        _SpyProgressReporter.calls.append(("summary", message))
+
+
+@pytest.fixture
+def spy_progress(monkeypatch):
+    calls = []
+    _SpyProgressReporter.calls = calls
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _SpyProgressReporter)
+
+    real_print = print
+
+    def spy_print(*args, **kwargs):
+        if kwargs.get("file") is sys.stderr and args:
+            calls.append(("stderr_print", args[0]))
+        real_print(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "print", spy_print, raising=False)
+    return calls
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch, spy_progress):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
+    assert rc == 0
+    # close は冪等なので、正常終了の明示的な close/summary の後に、全終了経路を保証する
+    # 保険としての再呼び出しが続いてもよい(先頭2件の順序だけを固定する)。
+    assert spy_progress[:2] == ["close", ("summary", f"完了 {out}")]
+    assert all(call == "close" for call in spy_progress[2:])
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, spy_progress):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    rc = cli.main([str(src), "--target", "camera", "--curve-mode", "linear", "--dry-run"])
+    assert rc == 0
+    assert spy_progress[0] == "close"
+    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_strict_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
+    src = tmp_path / "in.vmd"
+    cam_keys = [cam(f, center=(0.0, 0.0 if f % 2 == 0 else 5.0, 0.0)) for f in range(9)]
+    write_vmd(src, camera=cam_keys)
+    out = tmp_path / "out.vmd"
+    rc = cli.main([
+        str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
+        "--strict", "--min-segment-frames", "8", "--max-segment-frames", "8",
+    ])
+    assert rc == 4
+    assert spy_progress[0] == "close"
+    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
+    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_write_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    out = tmp_path / "nodir" / "out.vmd"
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
+    assert rc == 3
+    assert spy_progress[0] == "close"
+    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
+    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+
+    def raise_interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "reduce_camera_track", raise_interrupt)
+    rc = cli.main([str(src), "--target", "camera", "--curve-mode", "linear", "--dry-run"])
+    assert rc == 130
+    assert spy_progress[0] == "close"
+    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
+    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
+
+
+# --- 進捗ライブ表示の工程名・対象補足 ----------------------------------------
+#
+# 実際の描画結果(stderr 上の文字列)はハートビートスレッドの再描画タイミング(既定 0.15 秒間隔)に
+# 依存し、小さい入力では描画前に処理が終わって非決定的になりうる。そのため stage/update の
+# 呼び出し引数そのものをスパイで記録し、描画待ちに依存せず工程名・対象補足を検証する。
+
+
+class _LabelSpyProgressReporter:
+    """ProgressReporter の差し替え。stage/update の呼び出し引数を記録する(描画タイミングに
+    依存しない検証のため)。close/summary は no-op。"""
+
+    calls = None
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def stage(self, label):
+        _LabelSpyProgressReporter.calls.append(("stage", label))
+
+    def update(self, done, total, note=""):
+        _LabelSpyProgressReporter.calls.append(("update", done, total, note))
+
+    def close(self):
+        pass
+
+    def summary(self, message):
+        pass
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_progress_label_is_keyframe_reduction_with_target_note(tmp_path, monkeypatch):
+    # 進捗ライブ表示の工程名は camera・bone とも同じ共有名称に統一し、対象(カメラ/ボーン名)は
+    # 行末の補足(note)として出す(工程を対象ごとに個別登録しない不変条件)。
+    calls = []
+    _LabelSpyProgressReporter.calls = calls
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _LabelSpyProgressReporter)
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc(), bone=[bone("センター", f, pos=(0.0, float(f), 0.0))
+                                                      for f in range(31)])
+    out = tmp_path / "out.vmd"
+    rc = cli.main([str(src), "-o", str(out), "--target", "all", "--curve-mode", "linear"])
+    assert rc == 0
+    stages = [c for c in calls if c[0] == "stage"]
+    updates = [c for c in calls if c[0] == "update"]
+    assert stages and all(label == "キーフレーム圧縮" for _, label in stages)
+    assert any(note == "カメラ" for _, _done, _total, note in updates)
+    assert any(note == "センター" for _, _done, _total, note in updates)
+
+
+# --- 進捗ライブ表示の有効化配線(TTY・quiet・機械モード) --------------------------
+
+
+class _EnabledCapturingReporter:
+    """ProgressReporter の差し替え。コンストラクタへ渡された enabled 値だけを記録する。"""
+
+    captured_enabled = None
+
+    def __init__(self, *args, **kwargs):
+        _EnabledCapturingReporter.captured_enabled = kwargs.get("enabled")
+
+    def stage(self, *args, **kwargs):
+        pass
+
+    def update(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        pass
+
+    def summary(self, message):
+        pass
+
+
+class _TTYWrapper:
+    """既存の stream をラップし、isatty() だけ True を返す(capsys 捕捉ストリームへの委譲)。"""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def isatty(self):
+        return True
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_progress_disabled_when_not_tty(tmp_path, monkeypatch):
+    # pytest の capsys 捕捉ストリームは非TTYなので、既定(--quiet 無し・非機械)でも無効。
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _EnabledCapturingReporter)
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    out = tmp_path / "out.vmd"
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
+    assert rc == 0
+    assert _EnabledCapturingReporter.captured_enabled is False
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_progress_enabled_when_tty_and_not_quiet_and_not_machine(tmp_path, monkeypatch):
+    # TTY かつ --quiet 無し・非機械なら有効(肯定ケース)。
+    monkeypatch.setattr(sys, "stderr", _TTYWrapper(sys.stderr))
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _EnabledCapturingReporter)
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    out = tmp_path / "out.vmd"
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
+    assert rc == 0
+    assert _EnabledCapturingReporter.captured_enabled is True
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_progress_disabled_with_quiet_flag_even_when_tty(tmp_path, monkeypatch):
+    # TTY であっても --quiet 指定時は無効(isatty だけを見る誤実装を弾くため TTY 化して検証する)。
+    monkeypatch.setattr(sys, "stderr", _TTYWrapper(sys.stderr))
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _EnabledCapturingReporter)
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    out = tmp_path / "out.vmd"
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear", "--quiet"])
+    assert rc == 0
+    assert _EnabledCapturingReporter.captured_enabled is False
+
+
+@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
+def test_progress_disabled_in_machine_mode_even_when_tty(tmp_path, monkeypatch):
+    # 機械モードは進捗を progress イベントで出すため、人間向けライブ表示は無効。TTY であっても
+    # 機械モードなら無効になることを、isatty だけを見る誤実装を弾く形で検証する。
+    monkeypatch.setattr(sys, "stderr", _TTYWrapper(sys.stderr))
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _EnabledCapturingReporter)
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    out = tmp_path / "out.vmd"
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear", "--machine"])
+    assert rc == 0
+    assert _EnabledCapturingReporter.captured_enabled is False
