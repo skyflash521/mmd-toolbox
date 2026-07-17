@@ -1653,3 +1653,107 @@ def test_n_mora_splits_when_long():
     amounts = [e.open_amount for e in n_events]
     assert amounts == sorted(amounts)
     assert len(set(amounts)) == 4
+
+
+# --- 長時間モーラのサブウィンドウ: 連続レンジ写像(既存のクランプによる強弱潰れを防ぐ) ------
+#
+# 分割された長時間モーラの各サブウィンドウの開き量は、_map_open_amount_continuous による連続
+# 写像を使う(分割されないモーラの開き量決定は既存のクランプ式のまま変更しない)。
+
+_XFAIL_CONTINUOUS_MAPPING = pytest.mark.xfail(
+    reason="impl pending: 長時間モーラサブウィンドウの連続レンジ写像", strict=True
+)
+
+
+@_XFAIL_CONTINUOUS_MAPPING
+@pytest.mark.parametrize("normalized", [0.0, 0.25, 0.5, 0.75, 1.0])
+@pytest.mark.parametrize("open_max,cap_side", [(0.60, "open_max"), (0.90, "open_hi")])
+def test_map_open_amount_continuous_follows_formula_without_clamping(normalized, open_max, cap_side):
+    open_lo, open_hi, intensity_curve = 0.30, 0.75, 0.6
+    cap = min(open_hi, open_max)
+    floor = min(open_lo, cap)
+    expected = floor + (cap - floor) * (normalized ** intensity_curve)
+    actual = events._map_open_amount_continuous(
+        normalized, open_lo=open_lo, open_hi=open_hi, open_max=open_max, intensity_curve=intensity_curve,
+    )
+    assert actual == pytest.approx(expected)
+    assert cap == pytest.approx(open_max if cap_side == "open_max" else open_hi)
+
+
+@_XFAIL_CONTINUOUS_MAPPING
+def test_map_open_amount_continuous_degenerates_to_constant_when_open_max_below_open_lo():
+    # 逆単調にならないことの回帰。
+    open_lo, open_hi, open_max, intensity_curve = 0.30, 0.75, 0.10, 0.6
+    amounts = [
+        events._map_open_amount_continuous(
+            v, open_lo=open_lo, open_hi=open_hi, open_max=open_max, intensity_curve=intensity_curve,
+        )
+        for v in (0.0, 0.3, 0.7, 1.0)
+    ]
+    assert amounts == pytest.approx([open_max] * 4)
+
+
+@_XFAIL_CONTINUOUS_MAPPING
+def test_map_open_amount_continuous_degenerates_to_constant_when_open_max_equals_open_lo():
+    open_lo, open_hi, open_max, intensity_curve = 0.30, 0.75, 0.30, 0.6
+    amounts = [
+        events._map_open_amount_continuous(
+            v, open_lo=open_lo, open_hi=open_hi, open_max=open_max, intensity_curve=intensity_curve,
+        )
+        for v in (0.0, 0.3, 0.7, 1.0)
+    ]
+    assert amounts == pytest.approx([open_lo] * 4)
+
+
+@_XFAIL_CONTINUOUS_MAPPING
+def test_split_subwindow_open_amounts_are_distinct_in_clamp_saturation_range():
+    anchor_dur = 0.20
+    mora_dur = 1.02  # 目標サブウィンドウ長0.3秒に対し _subwindow_count が3を返す区間長
+    lo_end = anchor_dur
+    target_end = lo_end + mora_dur
+    hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    sub_dur = mora_dur / 3
+    sub_values = [0.73, 0.856, 0.955]
+    values = []
+    for t in times:
+        if t < lo_end:
+            values.append(_ANCHOR_LO_RMS)
+        elif t < target_end:
+            offset = t - lo_end
+            idx = min(2, int(offset / sub_dur))
+            values.append(sub_values[idx])
+        else:
+            values.append(_ANCHOR_HI_RMS)
+    rms = rms_env(times, values)
+
+    mora_representative = events._mora_rms(rms, lo_end, target_end)
+    p_lo, p_hi = events._percentile_bounds([_ANCHOR_LO_RMS, mora_representative, _ANCHOR_HI_RMS])
+    normalized_values = [events._normalize_with_bounds(v, p_lo, p_hi) for v in sub_values]
+
+    cap = min(_DEFAULT_KW["open_hi"], _DEFAULT_KW["open_max"])
+    saturation_threshold = cap ** (1.0 / _DEFAULT_KW["intensity_curve"])
+    assert all(v >= saturation_threshold for v in normalized_values)
+
+    expected_amounts = [
+        events._map_open_amount_continuous(
+            v, open_lo=_DEFAULT_KW["open_lo"], open_hi=_DEFAULT_KW["open_hi"],
+            open_max=_DEFAULT_KW["open_max"], intensity_curve=_DEFAULT_KW["intensity_curve"],
+        )
+        for v in normalized_values
+    ]
+
+    mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
+    a_events = [e for e in mouth_events if e.shape == MouthShape.A]
+    assert len(a_events) == 3
+    actual_amounts = [e.open_amount for e in a_events]
+    assert actual_amounts == pytest.approx(expected_amounts)
+    assert actual_amounts == sorted(actual_amounts)
+    assert len(set(actual_amounts)) == 3
