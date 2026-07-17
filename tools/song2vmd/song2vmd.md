@@ -768,8 +768,9 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 各イベントは `type` を持つ。
 
 - **progress**: `{type:"progress", stage, done, total, note, elapsed}`。`stage` は処理段階の安定 id:
-  `"load"`(S0 読み込み)/ `"separate"`(S1 分離)/ `"recognize"`(S2 認識)/ `"rms"`(S3 RMS)/
-  `"events"`(入口の口形イベント確定)/ `"generate"`(S4 モーフ生成)/ `"write"`(VMD 書き出し)。
+  `"load"`(音声読み込み。S0)/ `"separate"`(ボーカル分離。S1)/ `"recognize"`(音素認識。S2)/
+  `"rms"`(音量解析。S3)/ `"events"`(口形イベント確定)/ `"generate"`(モーフ生成。S4)/
+  `"write"`(書き出し)。
   `done`/`total` は長尺分割(6.6)時の処理済み/総チャンク数(分割しない場合や内訳の無い段は
   `done=0, total=null`)、`note` は補足文字列(無ければ `""`)、`elapsed` は段開始からの経過秒。
   各段は開始時に最低1本の progress を出す。

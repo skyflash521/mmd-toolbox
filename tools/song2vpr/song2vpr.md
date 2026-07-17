@@ -280,8 +280,8 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 各イベントは `type` を持つ。
 
 - **progress**: `{type:"progress", stage, done, total, note, elapsed}`。`stage` は処理段階の安定 id:
-  `"load"`(入力読み込み)/ `"separate"`(ボーカル分離)/ `"recognize"`(音素認識)/ `"f0"`(F0ピッチ推定)/
-  `"notes"`(音符分割・歌詞/音素対応付け)/ `"write"`(vpr 書き出し)。`done`/`total` は段内の進捗内訳が
+  `"load"`(音声読み込み)/ `"separate"`(ボーカル分離)/ `"recognize"`(音素認識)/ `"f0"`(F0ピッチ推定)/
+  `"notes"`(音符分割・歌詞/音素対応付け)/ `"write"`(書き出し)。`done`/`total` は段内の進捗内訳が
   ある場合の処理済み/総数(内訳の無い段は `done=0, total=null`)、`note` は補足文字列(無ければ `""`)、
   `elapsed` は段開始からの経過秒。各段は開始時に最低1本の progress を出す。
 - **warning**: `{type:"warning", code, message}`。仕様が定める警告は `tempo_defaulted`(`--tempo` 未指定で
