@@ -827,7 +827,6 @@ def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "nan"]) == 2
 
 
-@pytest.mark.xfail(reason="impl pending: mocapvmd-warning-line", strict=True)
 def test_human_warning_line_uses_common_format(tmp_path, capsys):
     # 警告行は共通コードのラベルで1行にまとめて標準エラーへ出す(安定コードは機械モードの
     # warning イベントと同じ値)。旧来の日本語ラベルは出さず、標準出力には何も漏らさない。

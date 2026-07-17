@@ -196,7 +196,7 @@ def _surface_warnings(read_warnings, machine, emitter):
                             section=[w.section] if w.section else None)
         else:
             where = f"({w.section})" if w.section else ""
-            print(f"警告: {w.message}{where}", file=sys.stderr)
+            print(f"warning: {w.code}: {w.message}{where}", file=sys.stderr)
 
 
 def _bone_order(bone_keys):
