@@ -166,7 +166,7 @@ song2vmd INPUT [options]
 | `INPUT` | 必須 | 入力音声ファイル |
 | `-o, --output PATH` | `<入力名>.vmd` | 出力VMD |
 | `--overwrite` | off | 入力と同一パスへの出力を許可する(上書きガードの解除。5.3) |
-| `--model-name NAME` | 空 | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
+| `--model-name NAME` | `song2vmd <実行中のツールバージョン>`(例: `song2vmd 1.2.3`) | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
 | `--style NAME` | `pop` | 歌い方スタイルプリセット(8.1)。開き量レンジ・タイミングを切り替える |
 | `--separate-vocals MODE` | `auto` | ボーカル分離 `auto` / `always` / `never` |
 | `--separator NAME` | vocal_analysis の既定アダプタ | S1ボーカル分離バックエンドの選択(7章)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3) |
