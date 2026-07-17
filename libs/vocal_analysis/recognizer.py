@@ -1088,14 +1088,9 @@ def _transcribe_segment(
     return result["text"], _extract_word_timestamps(chunks, duration_sec)
 
 
-def _select_content_recognizer_device() -> str:
-    """内容認識モデル(Whisper系)の実行デバイスを環境から自動選択する。
-
-    GPU(CUDA)が利用可能ならGPUを使う。強制アライメント用の音素モデル(RECOGNIZER_CONFIG.device)は
-    決定論のためCPU固定のままで、この自動選択の対象外。内容認識の貪欲デコード
-    (ビーム幅1・サンプリング無し)はサンプリング由来の乱数的非決定性を排除するが、実行デバイス・
-    スレッド数の違いによる浮動小数点演算の丸め誤差までは排除しない。環境が異なれば僅差のトークン
-    選択が割れ、書き起こし結果がわずかに変わりうる。
+def _select_device() -> str:
+    """音素モデル(強制アライメント用)・内容認識モデル(Whisper系)の両方の実行デバイスを、
+    この関数で共通に環境から自動選択する。GPU(CUDA)が利用可能ならGPUを使う。
     """
     import torch
 
@@ -1108,7 +1103,7 @@ _content_recognizer_pipeline_cache: tuple[ContentRecognizerModel, object] | None
 def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognizerModel):
     """内容認識器を content_recognizer_model が指すモデル・revisionでロードする。
 
-    実行デバイスは環境から自動選択する(_select_content_recognizer_device)。1呼び出し中は
+    実行デバイスは環境から自動選択する(_select_device)。1呼び出し中は
     区間ごと・トリガ式リトライごとに同じ content_recognizer_model を使い回すため、直前に
     ロードした1件だけを保持する単一枠キャッシュで足りる(再ロードを避ける)。別の
     content_recognizer_model が指定されると、直前のキャッシュは破棄して差し替える(複数の
@@ -1129,7 +1124,7 @@ def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognize
     import torch
     from transformers import pipeline as transformers_pipeline
 
-    device = _select_content_recognizer_device()
+    device = _select_device()
     # GPU実行時はfp16でロードし、既定のfp32に対して重み・アクティベーションのメモリ使用量を
     # 半減させる(限られたVRAMでの他モデル(音素モデル・分離器)との競合・アロケータの逼迫による
     # 速度低下を避ける)。CPU実行時はfp16未対応のためfp32のまま。
@@ -1148,34 +1143,27 @@ def _load_content_recognizer_pipeline(content_recognizer_model: ContentRecognize
 def _compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:
     """音素モデルで推論し、フレームごとの対数確率行列を返す(手順7の入力)。
 
-    スレッド数の固定(RECOGNIZER_CONFIG.num_threads)はこの音素モデル推論だけへ局所的に
-    適用し、呼び出し前後の設定へ復元する(内容認識(Whisper系。手順3)のCPU実行はこの制約を
-    受けず、環境のデフォルトスレッド数で並列に動く)。
+    入力テンソルは _select_device() の戻り値のデバイスへ置く(ロード時
+    (_load_model_and_processor)にモデルを配置したデバイスと、同一プロセス内で自動選択結果は
+    変わらないため常に一致する)。
     """
     import torch
 
     inputs = processor(samples, sampling_rate=RECOGNIZER_CONFIG.sample_rate, return_tensors="pt")
-    prev_num_threads = torch.get_num_threads()
-    torch.set_num_threads(RECOGNIZER_CONFIG.num_threads)
-    try:
-        with torch.no_grad():
-            logits = model(inputs.input_values.to(RECOGNIZER_CONFIG.device)).logits
-        log_probs = torch.log_softmax(logits, dim=-1)
-        return log_probs[0].cpu().numpy()
-    finally:
-        torch.set_num_threads(prev_num_threads)
+    with torch.no_grad():
+        logits = model(inputs.input_values.to(_select_device())).logits
+    log_probs = torch.log_softmax(logits, dim=-1)
+    return log_probs[0].cpu().numpy()
 
 
 def _load_model_and_processor():
-    """音素モデル(強制アライメント用)をS-1測定の固定条件でロードする。
+    """音素モデル(強制アライメント用)をロードする。
 
-    スレッド数の固定(RECOGNIZER_CONFIG.num_threads)はロード時ではなく推論時(_compute_log_probs)
-    に局所適用する(内容認識(Whisper系)のCPU実行を道連れにしないため)。
+    モデル id・revision・dtype は S-1 測定の固定条件どおりに適用し、実行デバイスは
+    _select_device() の自動選択で決める(実行デバイスは固定条件に含まれない)。
     """
     import torch
     from transformers import AutoModelForCTC, AutoProcessor
-
-    torch.manual_seed(RECOGNIZER_CONFIG.random_seed)
 
     # wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
     # 要求する。音素IDのデコードのみが必要で音素へのエンコードは不要なため do_phonemize=False
@@ -1190,6 +1178,6 @@ def _load_model_and_processor():
         revision=RECOGNIZER_CONFIG.model_revision,
         torch_dtype=getattr(torch, RECOGNIZER_CONFIG.dtype),
     )
-    model.to(RECOGNIZER_CONFIG.device)
+    model.to(_select_device())
     model.eval()
     return processor, model

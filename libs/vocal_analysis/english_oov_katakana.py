@@ -94,7 +94,7 @@ def _select_katakana_model_device() -> str:
     """変換モデルの実行デバイスを環境から自動選択する(GPUが利用可能ならGPUを使う)。
 
     変換モデルは1.1Bパラメータの生成モデルで、CPU実行では1回の生成呼び出しに数秒かかる。
-    既存のS2内容認識モデル(recognizer._select_content_recognizer_device)と同じ考え方で
+    既存のS2内容認識モデル(recognizer._select_device)と同じ考え方で
     GPUを優先する。
     """
     import torch

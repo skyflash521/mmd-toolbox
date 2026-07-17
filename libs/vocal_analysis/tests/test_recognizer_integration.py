@@ -784,7 +784,6 @@ def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monk
     assert excinfo.value.__cause__ is original_error
 
 
-@pytest.mark.xfail(reason="impl pending: 決定論保証撤去に伴う _select_device 導入待ち", strict=True)
 def test_load_model_and_processor_passes_pinned_config(monkeypatch):
     # transformers・torch が実際に導入されている環境でのみ、_load_model_and_processor の実体を
     # 検証する(最小環境では skip)。from_pretrained 自体をモンキーパッチするためネットワーク・
@@ -901,7 +900,6 @@ def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
     assert captured["dtype"] == torch.float16
 
 
-@pytest.mark.xfail(reason="impl pending: 決定論保証撤去に伴う _select_device 導入待ち", strict=True)
 def test_load_content_recognizer_pipeline_evicts_previous_model_before_loading_next(monkeypatch):
     """異なるモデルへ切り替える際、新モデルのロードを始める時点で直前のパイプラインが実際に
     解放可能(参照を一切保持していない)になっている(グローバル変数がNoneというだけでなく、
