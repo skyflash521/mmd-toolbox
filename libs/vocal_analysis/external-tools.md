@@ -24,7 +24,7 @@ S0 入力読み込みは固定の内部処理(soundfile/ffmpeg)で、差し替�
   できること・Windows での導入容易性を重視する。
 
 評価軸: 日本語適性 / 品質 / 速度・GPU要否 / ライブラリ提供と導入容易性(Windows) / ライセンス /
-決定論 / 出力の解析しやすさ / 保守状況。
+出力の解析しやすさ / 保守状況。
 
 ---
 
@@ -36,15 +36,15 @@ S2の母音認識精度に直結する。ライブラリAPIで in-process 呼び
 | ツール | Python API | 品質 | 速度・要件 | 導入 | ライセンス | 備考 |
 |---|---|---|---|---|---|---|
 | **Demucs v4 (htdemucs)** 生API | `demucs.api.Separator` | 高(SDR≈9dB) | 中。CPU可/GPUで速い | pip。ただし依存 `torchaudio` が `<2.2` 固定で新しい Python(3.13等)向けビルドが無く導入不能 | MIT | 元repoは保守終了(archive)。限定bugfix fork: adefossez/demucs |
-| **audio-separator** (UVR系) | `Separator` クラス | モデル次第で最高峰(同梱 Demucs v4 htdemucs_ft はモデル一覧上のボーカルSDR≈10.8) | モデル次第。ONNX/torch | pip。容易。クロスプラットフォーム。`torchaudio` 上限に縛られない | MIT | UVRのMDX-Net/VR/Demucs/MDXCを切替。Demucs系モデルも `demucs_params.shifts` で非決定要素を制御可 |
+| **audio-separator** (UVR系) | `Separator` クラス | モデル次第で最高峰(同梱 Demucs v4 htdemucs_ft はモデル一覧上のボーカルSDR≈10.8) | モデル次第。ONNX/torch | pip。容易。クロスプラットフォーム。`torchaudio` 上限に縛られない | MIT | UVRのMDX-Net/VR/Demucs/MDXCを切替。Demucs系モデルも `demucs_params.shifts` でshift平均の回数を選べる(0で無効化) |
 | **Spleeter** | あり(TF) | 中(やや古い) | 高速・軽量 | pip(TensorFlow依存) | MIT | 速いが品質は上2者に劣る |
 
 **採用: audio-separator 経由の Demucs v4 htdemucs_ft**(`audio_separator.separator.Separator`)。理由:
 品質・MIT・Python APIでin-process呼び出し可・GPU不要でも動作という Demucs の採用理由をそのまま満たし、
 かつモデル実体(Demucs v4 の重み)も変えない。生 `demucs.api`(adefossez fork)は依存 `torchaudio` を
 `<2.2` に固定しており、この上限を満たす `torchaudio` ビルドが無い新しい Python では導入できないため
-採用しない。同じ Demucs v4 の重みを audio-separator 経由で実行する。再現性のため
-`demucs_params={"shifts": 0, ...}` で非決定要素を固定する。分離不要なボーカル単体入力は Separator 抽象の
+採用しない。同じ Demucs v4 の重みを audio-separator 経由で実行する。shift平均(複数回の追加フォワードパスを伴う)を
+無効化し既定の分離処理を軽くするため `demucs_params={"shifts": 0, ...}` を渡す。分離不要なボーカル単体入力は Separator 抽象の
 `mode=never` で扱う([vocal_analysis.md](vocal_analysis.md) §8.1)。
 
 ボーカル抽出ツールの切り替えは [vocal_analysis.md](vocal_analysis.md) §8.1 の **Separator 抽象**の背後で行う。
@@ -128,10 +128,10 @@ vocal_analysis.md §5.2・§8.3 が正本)。内容認識は既定値 `openai/wh
    かなであれば、漢字の読みに起因する曖昧性(同字異音の読み違い)は構造的に生じない。ただし助詞の
    読みや長音の解釈などかなでも文脈依存のケースはわずかに残る(vocal_analysis.md §5.2)。
 5. **すべて純Pythonでin-process**に呼べ、「利用者にコマンドを叩かせない/ライブラリ呼び出し」方針に合う。
-   torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる。内容認識モデルの
-   実行デバイスは環境依存で自動選択し(GPUが利用可能ならGPUを使う)、CPU実行時もスレッド数を制限しない
-   (アライメント用音素モデルはCPU・単一スレッド固定のまま。決定論を含む詳細は
-   [vocal_analysis.md](vocal_analysis.md) §5.1・§5.2 が正本)。この自動選択は実行時の分岐であり、
+   torch・transformers を既存の S1(Demucs)・アライメント用 CTC モデルと共有できる。内容認識モデル・
+   アライメント用音素モデルのいずれも実行デバイスは環境依存で自動選択し(GPUが利用可能ならGPUを使う)、
+   CPU実行時もスレッド数を制限しない(実行デバイス自動選択の正本は
+   [vocal_analysis.md](vocal_analysis.md) §5.1)。この自動選択は実行時の分岐であり、
    導入する torch 自体がCUDA対応ビルドかどうかは pip の既定インストールでは選べない
    (CPU専用ビルドがPyPI本体の既定で、CUDA対応ビルドは別indexでのみ配布されるため)。GPU利用は
    利用者が任意でCUDA対応ビルドを追加導入した場合の効果に留まり、既定インストール(CPU専用ビルド)
@@ -265,8 +265,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
 
 音素→母音への写像規則(IPA→5母音)は `vocal_analysis` が提供し、S-1認識測定の採点と利用先の口形イベント確定の
 双方が同一規則で使う(写像自体はRMS不要)。音響イベント(連続母音区間・閉鎖・無音)の判断と gap の無音/継続
-判定(S3のRMS併用)は利用先(口パク生成系の入口)で行う。外部ツールの非決定性(モデル・スレッド)に注意し、可能な
-範囲の決定論を目指す。
+判定(S3のRMS併用)は利用先(口パク生成系の入口)で行う。
 
 ---
 
