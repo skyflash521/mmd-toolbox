@@ -1660,12 +1660,6 @@ def test_n_mora_splits_when_long():
 # 分割された長時間モーラの各サブウィンドウの開き量は、_map_open_amount_continuous による連続
 # 写像を使う(分割されないモーラの開き量決定は既存のクランプ式のまま変更しない)。
 
-_XFAIL_CONTINUOUS_MAPPING = pytest.mark.xfail(
-    reason="impl pending: 長時間モーラサブウィンドウの連続レンジ写像", strict=True
-)
-
-
-@_XFAIL_CONTINUOUS_MAPPING
 @pytest.mark.parametrize("normalized", [0.0, 0.25, 0.5, 0.75, 1.0])
 @pytest.mark.parametrize("open_max,cap_side", [(0.60, "open_max"), (0.90, "open_hi")])
 def test_map_open_amount_continuous_follows_formula_without_clamping(normalized, open_max, cap_side):
@@ -1680,7 +1674,6 @@ def test_map_open_amount_continuous_follows_formula_without_clamping(normalized,
     assert cap == pytest.approx(open_max if cap_side == "open_max" else open_hi)
 
 
-@_XFAIL_CONTINUOUS_MAPPING
 def test_map_open_amount_continuous_degenerates_to_constant_when_open_max_below_open_lo():
     # 逆単調にならないことの回帰。
     open_lo, open_hi, open_max, intensity_curve = 0.30, 0.75, 0.10, 0.6
@@ -1693,7 +1686,6 @@ def test_map_open_amount_continuous_degenerates_to_constant_when_open_max_below_
     assert amounts == pytest.approx([open_max] * 4)
 
 
-@_XFAIL_CONTINUOUS_MAPPING
 def test_map_open_amount_continuous_degenerates_to_constant_when_open_max_equals_open_lo():
     open_lo, open_hi, open_max, intensity_curve = 0.30, 0.75, 0.30, 0.6
     amounts = [
@@ -1705,7 +1697,6 @@ def test_map_open_amount_continuous_degenerates_to_constant_when_open_max_equals
     assert amounts == pytest.approx([open_lo] * 4)
 
 
-@_XFAIL_CONTINUOUS_MAPPING
 def test_split_subwindow_open_amounts_are_distinct_in_clamp_saturation_range():
     anchor_dur = 0.20
     mora_dur = 1.02  # 目標サブウィンドウ長0.3秒に対し _subwindow_count が3を返す区間長

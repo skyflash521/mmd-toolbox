@@ -431,6 +431,13 @@ def _map_open_amount(rms_value, *, open_lo, open_hi, open_max, intensity_curve):
     return min(clamped, open_max)
 
 
+def _map_open_amount_continuous(normalized, *, open_lo, open_hi, open_max, intensity_curve):
+    """正規化値→開き量の連続写像(クランプを行わず、floor〜capへ連続的にスケールする)。"""
+    cap = min(open_hi, open_max)
+    floor = min(open_lo, cap)
+    return floor + (cap - floor) * (normalized ** intensity_curve)
+
+
 def _is_weak_vowel(confidence, rms_value):
     """段階(5): 低信頼・無声母音判定。"""
     if confidence is not None:
@@ -523,10 +530,17 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
 
             for i, (sub_start, sub_end) in enumerate(bounds):
                 sub_rms = mora_rms if len(bounds) == 1 else _mora_rms(rms, sub_start, sub_end)
-                open_amount = _map_open_amount(
-                    _normalize_with_bounds(sub_rms, p_lo, p_hi), open_lo=open_lo, open_hi=open_hi,
-                    open_max=open_max, intensity_curve=intensity_curve,
-                )
+                normalized = _normalize_with_bounds(sub_rms, p_lo, p_hi)
+                if len(bounds) > 1:
+                    open_amount = _map_open_amount_continuous(
+                        normalized, open_lo=open_lo, open_hi=open_hi,
+                        open_max=open_max, intensity_curve=intensity_curve,
+                    )
+                else:
+                    open_amount = _map_open_amount(
+                        normalized, open_lo=open_lo, open_hi=open_hi,
+                        open_max=open_max, intensity_curve=intensity_curve,
+                    )
                 if is_weak:
                     open_amount *= _WEAK_SCALE
                 if i == 0:
