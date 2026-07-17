@@ -503,54 +503,72 @@ def _run(args, emitter, fail) -> int:
     keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
 
     try:
-        result = _pipeline.run(
-            args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
-            content_recognizer_model=content_recognizer_model,
-            retry=args.recognizer_retry,
-            max_duration_sec=args.max_duration,
-            use_n_morph=args.n_morph, intensity_curve=args.intensity_curve,
-            silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
-            style_name=args.style, model_name=args.model_name,
-            forced_aligner=args.forced_aligner, sofa_aligner=_resolve_sofa_aligner_config(args),
-            english_oov_katakana_method=args.english_oov_katakana_method,
-            keep_intermediate_dir=keep_intermediate_dir, progress=progress_reporter)
-    except AudioLoadError as e:
-        return fail("decoder_missing", str(e), 4, field="input")
-    except SeparationError as e:
-        return fail("stage_failed", str(e), 4, stage="separate")
-    except RecognitionError as e:
-        return fail("stage_failed", str(e), 4, stage="recognize")
-    except _pipeline.IntermediateWriteError as e:
-        return fail("write_failed", str(e), 3, field="--keep-intermediate", path=keep_intermediate_dir)
+        try:
+            result = _pipeline.run(
+                args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
+                content_recognizer_model=content_recognizer_model,
+                retry=args.recognizer_retry,
+                max_duration_sec=args.max_duration,
+                use_n_morph=args.n_morph, intensity_curve=args.intensity_curve,
+                silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
+                style_name=args.style, model_name=args.model_name,
+                forced_aligner=args.forced_aligner, sofa_aligner=_resolve_sofa_aligner_config(args),
+                english_oov_katakana_method=args.english_oov_katakana_method,
+                keep_intermediate_dir=keep_intermediate_dir, progress=progress_reporter)
+        except AudioLoadError as e:
+            progress_reporter.close()
+            return fail("decoder_missing", str(e), 4, field="input")
+        except SeparationError as e:
+            progress_reporter.close()
+            return fail("stage_failed", str(e), 4, stage="separate")
+        except RecognitionError as e:
+            progress_reporter.close()
+            return fail("stage_failed", str(e), 4, stage="recognize")
+        except _pipeline.IntermediateWriteError as e:
+            progress_reporter.close()
+            return fail("write_failed", str(e), 3, field="--keep-intermediate", path=keep_intermediate_dir)
 
-    if result.diagnostics.low_dynamics:
-        # --quiet は進捗表示だけを抑制し、警告は抑制しない。機械モードは
-        # warning イベント、非機械モードは標準エラーへの1行を出す。
-        if emitter is not None:
-            emitter.warning(code="low_dynamics_suppressed",
-                            message="曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました")
-        else:
-            print("warning: low_dynamics_suppressed: "
-                  "曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました",
-                  file=sys.stderr)
+        if result.diagnostics.low_dynamics:
+            # --quiet は進捗表示だけを抑制し、警告は抑制しない。機械モードは
+            # warning イベント、非機械モードは標準エラーへの1行を出す。ライブ行と
+            # 警告行が同じ端末で連結・混線しないよう、書く前にライブ行を消す。
+            if emitter is not None:
+                emitter.warning(code="low_dynamics_suppressed",
+                                message="曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました")
+            else:
+                progress_reporter.close()
+                print("warning: low_dynamics_suppressed: "
+                      "曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました",
+                      file=sys.stderr)
 
-    # --dry-run は出力を書かずに終える(空実行)。診断は実データから得る。
-    if args.dry_run:
+        # --dry-run は出力を書かずに終える(空実行)。診断は実データから得る。
+        if args.dry_run:
+            if emitter is not None:
+                emitter.result(mode="inspect", **_report.result_inspect_fields(
+                    result.diagnostics, input_kind="audio",
+                    sample_rate=result.sample_rate, channels=result.channels))
+            else:
+                # 標準出力へのレポートも同じ端末でライブ行と連結しうるため、書く前に消す
+                # (low_dynamics 警告が無かった経路でも、ここで確実にライブ行を消す)。
+                progress_reporter.close()
+                params = _report_params(args, openness, style_gen)
+                sys.stdout.write(_report.render_report_text(result.diagnostics, params))
+            return 0
+
+        progress_reporter.stage("write")
+        try:
+            _vmd_write_file(result.document, output)
+        except OSError as e:
+            progress_reporter.close()
+            return fail("write_failed", str(e), 3, field="--output", path=output)
+
+        progress_reporter.close()
+        progress_reporter.summary(f"完了 {output}")
+
         if emitter is not None:
-            emitter.result(mode="inspect", **_report.result_inspect_fields(
-                result.diagnostics, input_kind="audio",
-                sample_rate=result.sample_rate, channels=result.channels))
-        else:
-            params = _report_params(args, openness, style_gen)
-            sys.stdout.write(_report.render_report_text(result.diagnostics, params))
+            emitter.result(mode="run", **_report.result_run_fields(result.diagnostics, output=output))
         return 0
-
-    progress_reporter.stage("write")
-    try:
-        _vmd_write_file(result.document, output)
-    except OSError as e:
-        return fail("write_failed", str(e), 3, field="--output", path=output)
-
-    if emitter is not None:
-        emitter.result(mode="run", **_report.result_run_fields(result.diagnostics, output=output))
-    return 0
+    finally:
+        # 全終了経路(正常終了・--dry-run・パイプライン失敗・書き込み失敗・中断)でライブ行を必ず消す。
+        # 正常終了は直前で明示的に close 済みだが、close は冪等なのでここでの再呼び出しも無害。
+        progress_reporter.close()

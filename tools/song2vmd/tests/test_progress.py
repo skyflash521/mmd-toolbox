@@ -104,7 +104,6 @@ def test_stage_defaults_done_zero_total_none_note_empty_elapsed_zero():
     assert emitter.calls == [{"stage": "load", "done": 0, "total": None, "note": "", "elapsed": 0.0}]
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_machine_mode_never_starts_heartbeat_thread_even_with_tty_stream():
     # 機械モードでは stream が TTY でも人間向けライブ表示機構(ハートビートスレッド)を
     # 一切起動しない。決定的な待機駆動で十分な時間が経過しても stream に何も書かれないことも
@@ -154,14 +153,12 @@ def test_machine_mode_never_constructs_heartbeat_thread(monkeypatch):
     (False, False, False),
     (False, True, False),
 ])
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_enabled_only_when_tty_and_not_quiet(isatty, quiet, expect_enabled):
     stream = _TTYStream() if isatty else _NonTTYStream()
     reporter = ProgressReporter(machine=False, quiet=quiet, emitter=_NoTouchEmitter(), stream=stream)
     assert reporter.enabled is expect_enabled
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_disabled_reporter_stage_is_noop_no_thread_no_output():
     # 非TTY/quiet 相当(enabled=False)は stage を呼んでもスレッドを起こさず何も書かない。
     stream = _NonTTYStream()
@@ -174,7 +171,6 @@ def test_disabled_reporter_stage_is_noop_no_thread_no_output():
     assert reporter._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_non_machine_mode_never_touches_emitter():
     # emitterに一切触れないことを、参照した瞬間に失敗するセンチネルで直接検証する。
     stream = _TTYStream()
@@ -185,7 +181,6 @@ def test_non_machine_mode_never_touches_emitter():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_non_machine_mode_works_with_emitter_none():
     # 非機械モードではemitterを参照しないため、Noneを渡しても例外にならない。
     stream = _TTYStream()
@@ -208,7 +203,6 @@ def test_non_machine_mode_works_with_emitter_none():
     ("generate", "モーフ生成"),
     ("write", "書き出し"),
 ])
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_stage_id_maps_to_japanese_label(stage_id, label):
     stream = _TTYStream()
     clock = [0.0]
@@ -220,7 +214,6 @@ def test_stage_id_maps_to_japanese_label(stage_id, label):
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_total_none_hides_count_shows_elapsed_only():
     stream = _TTYStream()
     clock = [0.0]
@@ -233,7 +226,6 @@ def test_total_none_hides_count_shows_elapsed_only():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_total_set_shows_done_over_total():
     stream = _TTYStream()
     clock = [0.0]
@@ -246,7 +238,6 @@ def test_total_set_shows_done_over_total():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_stages_share_one_line_without_newline():
     # 段を切り替えても改行せず、同じライブ行を上書きする(終わった段の行を残さない)。
     stream = _TTYStream()
@@ -264,7 +255,6 @@ def test_stages_share_one_line_without_newline():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_shorter_line_pads_over_previous_longer_line():
     # 長い行の後に短い行を描くとき、残像(前の行の余分な文字)を空白で埋めて消す。
     # 期待パディング数は本番の _display_width を使わず、表示幅を手計算した固定値で検証する
@@ -286,7 +276,6 @@ def test_shorter_line_pads_over_previous_longer_line():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_heartbeat_advances_elapsed_without_new_stage_call():
     # 停滞回避の核: stage が来なくてもハートビートが now() - 段開始 を再評価して再描画し、
     # 経過時間が進む(モデルの初回ダウンロード等、次の段報告までに長い待ちがあっても固まらない)。
@@ -305,7 +294,6 @@ def test_heartbeat_advances_elapsed_without_new_stage_call():
     assert "[ボーカル分離] 1/5 経過 1:00" in out
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_stage_change_resets_elapsed_and_stops_old_heartbeat():
     stream = _TTYStream()
     clock = [0.0]
@@ -323,7 +311,6 @@ def test_stage_change_resets_elapsed_and_stops_old_heartbeat():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_same_stage_repeat_call_does_not_reset_elapsed():
     # 同じ stage id での再呼び出し(長尺分割のチャンク進行など)は経過をリセットしない。
     stream = _TTYStream()
@@ -338,7 +325,6 @@ def test_same_stage_repeat_call_does_not_reset_elapsed():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_note_appears_in_drawn_line():
     # note(現在対象などの補足。測定可能な外部処理の進捗を含む)は行末へ併記する。
     stream = _TTYStream()
@@ -351,7 +337,6 @@ def test_note_appears_in_drawn_line():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_note_updates_on_same_stage_repeat_call():
     # 同一段の再呼び出しでnoteが更新される(ダウンロード進捗のバイト数更新等)。
     stream = _TTYStream()
@@ -365,7 +350,6 @@ def test_note_updates_on_same_stage_repeat_call():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_note_resets_on_stage_change():
     # 段を切り替えると note は据え置かれずリセットされる。
     stream = _TTYStream()
@@ -379,7 +363,6 @@ def test_note_resets_on_stage_change():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_empty_note_appends_no_extra_space():
     # note が空文字("")のときは行末に余分な空白を付けない。
     stream = _TTYStream()
@@ -392,7 +375,6 @@ def test_empty_note_appends_no_extra_space():
     reporter.close()
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_close_clears_line_leaves_nothing():
     stream = _TTYStream()
     clock = [0.0]
@@ -408,7 +390,6 @@ def test_close_clears_line_leaves_nothing():
     assert reporter._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_close_stops_live_heartbeat_thread():
     stream = _TTYStream()
     clock = [0.0]
@@ -424,7 +405,6 @@ def test_close_stops_live_heartbeat_thread():
     assert reporter._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_close_is_noop_when_nothing_active():
     stream = _TTYStream()
     reporter = ProgressReporter(
@@ -435,7 +415,6 @@ def test_close_is_noop_when_nothing_active():
     assert reporter._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_summary_writes_line_only_when_enabled():
     stream = _TTYStream()
     reporter = ProgressReporter(
@@ -455,7 +434,6 @@ def test_summary_writes_line_only_when_enabled():
 _WRITE_FAILURES = [OSError("io failed"), ValueError("bad stream"), UnicodeError("encode failed")]
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 @pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
 def test_draw_write_failure_disables_without_raising_and_close_stops_thread(exc):
     stream = _RaisingStream(exc)
@@ -476,7 +454,6 @@ def test_draw_write_failure_disables_without_raising_and_close_stops_thread(exc)
     reporter.summary("完了 out.vmd")
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 @pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
 def test_summary_write_failure_swallowed(exc):
     stream = _RaisingStream(exc)
@@ -486,7 +463,6 @@ def test_summary_write_failure_swallowed(exc):
     assert reporter.enabled is False
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 @pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
 def test_close_write_failure_swallowed(exc):
     stream = _TTYStream()

@@ -519,10 +519,19 @@ def spy_progress(monkeypatch):
         real_print(*args, **kwargs)
 
     monkeypatch.setattr(cli, "print", spy_print, raising=False)
+
+    # --dry-run の人間向けレポート生成呼び出しも同じタイムラインへ記録し、close との
+    # 相対順序(ライブ行を消してからレポートを書く)を検証できるようにする。
+    real_render = cli._report.render_report_text
+
+    def spy_render(*args, **kwargs):
+        calls.append("render_report")
+        return real_render(*args, **kwargs)
+
+    monkeypatch.setattr(cli._report, "render_report_text", spy_render)
     return calls
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch, spy_progress):
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
@@ -530,21 +539,41 @@ def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch,
 
     rc = cli.main([src, "-o", str(out)])
     assert rc == 0
-    assert spy_progress == ["close", ("summary", f"完了 {out}")]
+    # close は冪等なので、正常終了の明示的な close/summary の後に、全終了経路を保証する
+    # 保険としての再呼び出しが続いてもよい(先頭2件の順序だけを固定する)。
+    assert spy_progress[:2] == ["close", ("summary", f"完了 {out}")]
+    assert all(call == "close" for call in spy_progress[2:])
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, spy_progress):
     # --dry-run は VMD を書かないため完了行を出さない(close はライブ行の終端として必ず呼ぶ)。
+    # close はレポート生成(標準出力とライブ行が同じ端末で連結しうる)より前でなければならない。
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result())
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 0
-    assert spy_progress == ["close"]
+    assert spy_progress[0] == "close"
+    assert "render_report" in spy_progress
+    assert spy_progress.index("close") < spy_progress.index("render_report")
+    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
+def test_low_dynamics_warning_closes_progress_before_stderr_print(tmp_path, monkeypatch, spy_progress):
+    # low_dynamics 警告(非機械モード)は、標準エラーがライブ行と同じ端末につながるため、
+    # close でライブ行を消してから出す。
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 0
+    close_positions = [i for i, c in enumerate(spy_progress) if c == "close"]
+    print_positions = [i for i, c in enumerate(spy_progress)
+                       if isinstance(c, tuple) and c[0] == "stderr_print"]
+    assert close_positions and print_positions
+    assert close_positions[0] < print_positions[0]
+
+
 @pytest.mark.parametrize("make_exc", [
     lambda: AudioLoadError("no ffmpeg"),
     lambda: SeparationError("sep failed"),
@@ -561,7 +590,6 @@ def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatc
     assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_intermediate_write_error_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
@@ -574,7 +602,6 @@ def test_intermediate_write_error_closes_progress_before_error_line(tmp_path, mo
     assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_write_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "missing_parent" / "out.vmd"
@@ -586,7 +613,6 @@ def test_write_failure_closes_progress_before_error_line(tmp_path, monkeypatch, 
     assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-progress-live-display", strict=True)
 def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt()))
