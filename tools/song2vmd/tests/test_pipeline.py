@@ -260,7 +260,7 @@ def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeyp
     received = {}
 
     def fake_recognize(path, content_recognizer_model, retry, forced_aligner, sofa_aligner,
-                       english_oov_katakana_method):
+                       english_oov_katakana_method, on_progress=None):
         received["content_recognizer_model"] = content_recognizer_model
         received["forced_aligner"] = forced_aligner
         received["sofa_aligner"] = sofa_aligner
@@ -288,7 +288,7 @@ def test_recognizer_receives_selected_english_oov_katakana_method(tmp_path, monk
     received = {}
 
     def fake_recognize(path, content_recognizer_model, retry, forced_aligner, sofa_aligner,
-                       english_oov_katakana_method):
+                       english_oov_katakana_method, on_progress=None):
         received["english_oov_katakana_method"] = english_oov_katakana_method
         return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
@@ -631,6 +631,125 @@ def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_reco
     assert by_stage["separate"]["total"] is None
     assert by_stage["recognize"]["done"] == 0
     assert by_stage["recognize"]["total"] is None
+
+
+# --- 音素認識のモデルダウンロード進捗の中継 --------------------------------------
+#
+# vocal_analysis.recognizer.recognize() の on_progress 引数(モデル初回取得が実際にダウンロードを
+# 要した区間だけ進捗文言を渡すコールバック)へ、song2vmd 側の ProgressReporter を橋渡しする。
+# 橋渡しの要点: (1) recognize() へ on_progress を渡す、(2) on_progress が呼ばれたら
+# progress.stage("recognize", note=<文言>) へ反映する、(3) その際の done/total は呼び出し時点の
+# 進捗(分割時はチャンク進捗)をそのまま保つ(0/None へ巻き戻さない)。
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
+def test_non_chunked_recognize_on_progress_forwards_download_note(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    captured = {}
+
+    def fake_recognize(path, on_progress=None, **kwargs):
+        captured["on_progress"] = on_progress
+        if on_progress is not None:
+            on_progress("ダウンロード中: dummy-model 42%")
+        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
+
+    progress = _RecordingProgress()
+    pipeline.run(input_path, progress=progress, **_common_kwargs())
+
+    assert captured["on_progress"] is not None
+    recognize_calls = [c for c in progress.calls if c["stage"] == "recognize"]
+    assert any(c["note"] == "ダウンロード中: dummy-model 42%" for c in recognize_calls)
+    # 分割しない実行の既定(done=0, total=None)を、ダウンロード通知後も保ったままにする。
+    assert all(c["done"] == 0 and c["total"] is None for c in recognize_calls)
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
+def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [5.0])
+    monkeypatch.setattr(
+        pipeline.chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+
+    def fake_recognize(path, on_progress=None, **kwargs):
+        if on_progress is not None:
+            on_progress("ダウンロード中: dummy-model 10%")
+        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
+
+    progress = _RecordingProgress()
+    pipeline.run(input_path, progress=progress, **_common_kwargs(max_duration_sec=3.0))
+
+    recognize_calls = [c for c in progress.calls if c["stage"] == "recognize"]
+    download_notes = [c for c in recognize_calls if c["note"] == "ダウンロード中: dummy-model 10%"]
+    # 2チャンクとも、そのチャンクの done/total(チャンク進捗)を保ったままダウンロード通知が出る。
+    assert [(c["done"], c["total"]) for c in download_notes] == [(0, 2), (1, 2)]
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
+def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_path, monkeypatch):
+    # progress 省略時は recognize() へ on_progress=None を渡す(存在しない進捗表示へ橋渡しする
+    # 無意味なコールバックを作らない)。on_progress を必須キーワード引数にして、現行の
+    # (on_progress を渡さない)実装では TypeError で確実に落ちるようにする(既定値だと
+    # 未実装のままでも偶然 None のまま通ってしまい印の意味が無くなるため)。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    captured = {}
+
+    def fake_recognize(path, *, on_progress, **kwargs):
+        captured["on_progress"] = on_progress
+        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
+
+    pipeline.run(input_path, **_common_kwargs())
+
+    assert captured["on_progress"] is None
+
+
+@pytest.mark.xfail(reason="impl pending: song2vmd-download-progress-note", strict=True)
+def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_path, monkeypatch):
+    # 上と同じ契約(progress省略→on_progress=None)を、_run_chunked 側の recognize 呼び出し箇所
+    # (_run_single とは別のコード経路)でも独立に固定する。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [5.0])
+    monkeypatch.setattr(
+        pipeline.chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+
+    captured = []
+
+    def fake_recognize(path, *, on_progress, **kwargs):
+        captured.append(on_progress)
+        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
+
+    pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+
+    assert captured == [None, None]
 
 
 # --- 進捗レポータ省略時 --------------------------------------------------------
