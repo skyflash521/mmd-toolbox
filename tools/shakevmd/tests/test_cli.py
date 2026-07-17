@@ -683,11 +683,12 @@ class TestCli:
 
     # --- 非カメラセクション透過 -------------------------------------
     def test_non_camera_sections_passthrough_with_warning(self, tmp_path, capsys):
-        # ボーン等のセクションは無加工で透過し、警告を表示する。
+        # ボーン等のセクションは警告付きで無加工透過し、VMDヘッダのmodel_nameもそのまま引き継ぐ。
         bone = BoneKey(name_raw=b"bone".ljust(15, b"\x00"), frame=0,
                        position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0),
                        interpolation=bytes(64))
-        doc = VmdDocument(bone=[bone], camera=list(KEYS))
+        model_name_raw = b"TestModel".ljust(20, b"\x00")
+        doc = VmdDocument(bone=[bone], camera=list(KEYS), model_name_raw=model_name_raw)
         inp = tmp_path / "mixed.vmd"
         io.write_file(doc, str(inp))
         out = tmp_path / "out.vmd"
@@ -697,6 +698,7 @@ class TestCli:
         # ボーンキーが無傷で残る + カメラはベイクされている
         assert len(outdoc.bone) == 1 and outdoc.bone[0].name == "bone"
         assert sorted(k.frame for k in outdoc.camera) == list(range(0, 61))
+        assert outdoc.model_name_raw == model_name_raw
         text = capsys.readouterr()
         assert "warning:" in (text.out + text.err).lower()   # 非カメラ透過の警告(安定マーカー)
 
