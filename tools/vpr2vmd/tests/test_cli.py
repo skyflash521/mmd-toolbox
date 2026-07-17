@@ -500,3 +500,49 @@ def test_no_adopted_notes_warns_and_succeeds(tmp_path, capsys, monkeypatch):
     rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
     assert rc == 0
     assert "発音" in capsys.readouterr().err
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd-warning-line", strict=True)
+def test_read_warning_line_uses_common_format(tmp_path, capsys, monkeypatch):
+    # vpr 読み込みが返す構造化警告も同じ共通書式(warning: コード: 本文)で1行にまとめる。
+    src = _touch(tmp_path / "in.vpr")
+    project = _project_with_notes(
+        [Note(start_tick=0, duration_tick=480, pitch=60, lyric="x", velocity=64, phonemes=["a"])]
+    )
+    warning = VprWarning(
+        code="overlapping_notes", message="重なり音符", track_index=0, part_index=0,
+        note_index=1, related_note_index=0, tick=0,
+    )
+    monkeypatch.setattr(cli, "read", lambda _src: (project, [warning]))
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
+    assert rc == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    lines = err.splitlines()
+    assert len(lines) == 1
+    prefix = "warning: overlapping_notes: "
+    assert lines[0].startswith(prefix)
+    body = lines[0][len(prefix):]
+    assert body.strip()
+    assert not body.startswith(" ")
+    assert "警告:" not in err
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd-warning-line", strict=True)
+def test_no_adopted_notes_warning_line_uses_common_format(tmp_path, capsys, monkeypatch):
+    # 採用音符が空のときの警告も同じ共通書式(warning: コード: 本文)で1行にまとめる。
+    src = _touch(tmp_path / "in.vpr")
+    empty_track = _project_with_notes([])
+    monkeypatch.setattr(cli, "read", lambda _src: (empty_track, []))
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
+    assert rc == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    lines = err.splitlines()
+    assert len(lines) == 1
+    prefix = "warning: no_adopted_notes: "
+    assert lines[0].startswith(prefix)
+    body = lines[0][len(prefix):]
+    assert body.strip()
+    assert not body.startswith(" ")
+    assert "警告:" not in err
