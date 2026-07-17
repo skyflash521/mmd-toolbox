@@ -12,8 +12,6 @@ options に載せない。
 
 import json
 
-import pytest
-
 from song2vmd import __version__
 from song2vmd import cli
 
@@ -119,7 +117,6 @@ def test_describe_ignores_input_and_does_not_read_audio(capsysbinary):
     assert describe_result(capsysbinary)["mode"] == "describe"
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd --model-name default", strict=True)
 def test_describe_options_shape_and_values(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0

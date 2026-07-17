@@ -180,7 +180,8 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", help="出力VMD(既定: <入力名>.vmd)")
     p.add_argument("--overwrite", action="store_true",
                    help="出力先が入力と同一パスになる指定を許可する(別パスの既存ファイルは常に上書き)")
-    p.add_argument("--model-name", dest="model_name", type=_model_name, default="",
+    p.add_argument("--model-name", dest="model_name", type=_model_name,
+                   default=f"song2vmd {__version__}",
                    help="VMDに格納するモデル名(最大20バイト・Shift-JIS)")
     p.add_argument("--style", choices=STYLE_NAMES, default="pop",
                    help="歌い方スタイルプリセット(開き量レンジ・タイミングを切り替える)")

@@ -62,7 +62,6 @@ def _events_of(capsysbinary):
 # --- pipeline.run への引数の受け渡し -------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd --model-name default", strict=True)
 def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)
