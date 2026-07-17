@@ -68,32 +68,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-codex.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-readonly.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-watchdog.py\"",
             "shell": "bash"
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-cd-root.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git-write.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-pytest-env-prefix.py\"",
             "shell": "bash"
           },
           {

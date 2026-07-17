@@ -5,7 +5,7 @@ A bare `pytest ...` / `python -m pytest ...` is allowlisted, but piping (`| tail
 (`; echo $?`), or file-redirecting (`> out`) it breaks the match and triggers a needless prompt
 -- and those wrappers are pointless since `pytest -q` already prints a summary. Deny the wrapped
 form with an instruction to run pytest on its own; the harmless `2>&1` / `/dev/null` redirect is
-left alone. (Read-only tail/echo pipelines are already auto-approved by auto-approve-readonly.)
+left alone.
 
 Regex-level detection is intentional: a false positive only yields a recoverable deny+message,
 never a wrongful approval. Run with --selftest.
