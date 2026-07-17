@@ -1655,10 +1655,10 @@ def test_n_mora_splits_when_long():
     assert len(set(amounts)) == 4
 
 
-# --- 長時間モーラのサブウィンドウ: 連続レンジ写像(既存のクランプによる強弱潰れを防ぐ) ------
+# --- 長時間モーラのサブウィンドウ: 連続写像(既存のクランプによる強弱潰れを防ぐ) ----------
 #
 # 分割された長時間モーラの各サブウィンドウの開き量は、_map_open_amount_continuous による連続
-# 写像を使う(分割されないモーラの開き量決定は既存のクランプ式のまま変更しない)。
+# 写像を使う(分割されないモーラの開き量決定は _map_open_amount によるクランプ式を使う)。
 
 @pytest.mark.parametrize("normalized", [0.0, 0.25, 0.5, 0.75, 1.0])
 @pytest.mark.parametrize("open_max,cap_side", [(0.60, "open_max"), (0.90, "open_hi")])
