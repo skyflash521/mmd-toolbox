@@ -1,8 +1,8 @@
 """固定推論条件のテスト。
 
-外部モデル委譲ステージ(S1 分離・S2 認識)の非決定要素を固定し、S-1 測定と実装が同一条件で
-動くようにする。モデル id・revision の固定値、Demucs の shift 平均無効化は実装が独自に
-変えない値であり、値がずれていないことをテストで固定する。
+外部モデル委譲ステージ(S1 分離・S2 認識)のモデル指定(id・revision)の固定値、および
+dtype・Demucs の shift 平均無効化は実装が独自に変えない値であり、値がずれていないことを
+テストで固定する。
 """
 
 import dataclasses
@@ -29,16 +29,12 @@ def test_recognizer_target_sample_rate_is_16khz():
     assert RECOGNIZER_CONFIG.sample_rate == 16000
 
 
-def test_recognizer_inference_conditions_are_deterministic():
+def test_recognizer_dtype_is_pinned():
     from vocal_analysis import RECOGNIZER_CONFIG
 
-    # 音素モデル(強制アライメント用)の実行デバイス/dtype・スレッド・乱数シードを固定して決定論に
-    # する。内容認識モデル(Whisper系)の実行デバイスは環境依存で自動選択し、この固定値の
-    # 対象外(recognizer.py の _select_content_recognizer_device)。
-    assert RECOGNIZER_CONFIG.device == "cpu"
+    # 音素モデル(強制アライメント用)の dtype はモデル id・revision と同様に認識結果に影響する
+    # 推論条件で、S-1 測定で品質を検証済みの固定値。変更は revision 変更と同じ手順を要する。
     assert RECOGNIZER_CONFIG.dtype == "float32"
-    assert RECOGNIZER_CONFIG.num_threads == 1
-    assert RECOGNIZER_CONFIG.random_seed == 0
 
 
 def test_default_content_recognizer_model_id_and_revision_are_pinned():
@@ -72,10 +68,10 @@ def test_content_recognizer_model_revision_defaults_to_none():
     assert custom.model_revision is None
 
 
-def test_separator_shifts_disabled_for_determinism():
+def test_separator_shifts_disabled_for_speed():
     from vocal_analysis import SEPARATOR_CONFIG
 
-    # Demucs の shift 平均は非決定要素なので無効化する。
+    # Demucs の shift 平均は複数回の追加フォワードパスを伴い処理が遅くなるため無効化する。
     assert SEPARATOR_CONFIG.shifts == 0
 
 

@@ -784,6 +784,7 @@ def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monk
     assert excinfo.value.__cause__ is original_error
 
 
+@pytest.mark.xfail(reason="impl pending: 決定論保証撤去に伴う _select_device 導入待ち", strict=True)
 def test_load_model_and_processor_passes_pinned_config(monkeypatch):
     # transformers・torch が実際に導入されている環境でのみ、_load_model_and_processor の実体を
     # 検証する(最小環境では skip)。from_pretrained 自体をモンキーパッチするためネットワーク・
@@ -792,6 +793,7 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
     torch = pytest.importorskip("torch")
     transformers = pytest.importorskip("transformers")
     from vocal_analysis import RECOGNIZER_CONFIG
+    from vocal_analysis import recognizer as recognizer_module
     from vocal_analysis.recognizer import _load_model_and_processor
 
     captured = {}
@@ -816,12 +818,9 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
         captured["model_torch_dtype"] = torch_dtype
         return _FakeModel()
 
-    def fake_manual_seed(seed):
-        captured["manual_seed"] = seed
-
     monkeypatch.setattr(transformers.AutoProcessor, "from_pretrained", fake_processor_from_pretrained)
     monkeypatch.setattr(transformers.AutoModelForCTC, "from_pretrained", fake_model_from_pretrained)
-    monkeypatch.setattr(torch, "manual_seed", fake_manual_seed)
+    monkeypatch.setattr(recognizer_module, "_select_device", lambda: "fake-device")
 
     _load_model_and_processor()
 
@@ -834,48 +833,9 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
     assert captured["processor_revision"] == RECOGNIZER_CONFIG.model_revision
     assert captured["model_model_id"] == RECOGNIZER_CONFIG.model_id
     assert captured["model_revision"] == RECOGNIZER_CONFIG.model_revision
-    # 実行デバイス・dtype・乱数シードを固定条件どおりに適用する(スレッド数は推論時に
-    # _compute_log_probs が局所適用する。下記 test_compute_log_probs_scopes_num_threads_...)。
+    # dtype は固定条件どおりに適用し、実行デバイスは _select_device が返す値を使う。
     assert captured["model_torch_dtype"] == getattr(torch, RECOGNIZER_CONFIG.dtype)
-    assert captured["model_to_device"] == RECOGNIZER_CONFIG.device
-    assert captured["manual_seed"] == RECOGNIZER_CONFIG.random_seed
-
-
-def test_compute_log_probs_scopes_num_threads_to_phoneme_model_and_restores(monkeypatch):
-    """_compute_log_probs はスレッド数を推論の直前だけ RECOGNIZER_CONFIG.num_threads へ設定し、
-    呼び出し前の値へ復元する。内容認識(Whisper系)のCPU実行をこの制約に道連れにしない
-    ための局所化。"""
-    torch = pytest.importorskip("torch")
-    from vocal_analysis import RECOGNIZER_CONFIG
-    from vocal_analysis.recognizer import _compute_log_probs
-
-    calls = []
-    monkeypatch.setattr(torch, "get_num_threads", lambda: 8)
-    monkeypatch.setattr(torch, "set_num_threads", lambda n: calls.append(n))
-
-    class _FakeOutputs:
-        logits = torch.zeros(1, 2, 2)
-
-    class _FakeModel:
-        def __call__(self, input_values):
-            # 推論の時点では num_threads へ設定済みで、まだ復元されていない。
-            assert calls == [RECOGNIZER_CONFIG.num_threads]
-            return _FakeOutputs()
-
-    class _FakeInputValues:
-        def to(self, device):
-            return self
-
-    class _FakeInputs:
-        input_values = _FakeInputValues()
-
-    class _FakeProcessor:
-        def __call__(self, samples, sampling_rate, return_tensors):
-            return _FakeInputs()
-
-    _compute_log_probs(_FakeProcessor(), _FakeModel(), np.zeros(16000, dtype=np.float32))
-
-    assert calls == [RECOGNIZER_CONFIG.num_threads, 8]  # 設定→復元の順
+    assert captured["model_to_device"] == "fake-device"
 
 
 def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypatch):
@@ -909,7 +869,7 @@ def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypa
     # content_recognizer_model が指すモデル・revisionをそのままロードに渡す。
     assert captured["model"] == DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id
     assert captured["revision"] == DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision
-    # GPU不在時はCPUを使う(強制アライメント用音素モデルとは独立の自動選択)。
+    # GPU不在時はCPUを使う(音素モデルも同じ _select_device を使うため同じ挙動になる)。
     assert captured["device"] == "cpu"
     assert captured["dtype"] == torch.float32
 
@@ -935,12 +895,13 @@ def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
 
     _load_content_recognizer_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
 
-    # GPUが利用可能なら自動的にGPUを使う(強制アライメント用音素モデルはCPU固定のまま)。
+    # GPUが利用可能なら自動的にGPUを使う(音素モデルも同じ _select_device を使うため同じ挙動になる)。
     assert captured["device"] == "cuda"
     # GPU実行時はfp16でロードし、重み・アクティベーションのメモリ使用量を半減させる。
     assert captured["dtype"] == torch.float16
 
 
+@pytest.mark.xfail(reason="impl pending: 決定論保証撤去に伴う _select_device 導入待ち", strict=True)
 def test_load_content_recognizer_pipeline_evicts_previous_model_before_loading_next(monkeypatch):
     """異なるモデルへ切り替える際、新モデルのロードを始める時点で直前のパイプラインが実際に
     解放可能(参照を一切保持していない)になっている(グローバル変数がNoneというだけでなく、
@@ -967,7 +928,7 @@ def test_load_content_recognizer_pipeline_evicts_previous_model_before_loading_n
         return _Pipeline()
 
     monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
-    monkeypatch.setattr(recognizer_module, "_select_content_recognizer_device", lambda: "cpu")
+    monkeypatch.setattr(recognizer_module, "_select_device", lambda: "cpu")
     monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
 
     model_a_pipeline = _load_content_recognizer_pipeline(model_a)
