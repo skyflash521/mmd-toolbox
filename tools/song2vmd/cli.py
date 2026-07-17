@@ -530,7 +530,8 @@ def _run(args, emitter, fail) -> int:
             emitter.warning(code="low_dynamics_suppressed",
                             message="曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました")
         else:
-            print("warning: 曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました",
+            print("warning: low_dynamics_suppressed: "
+                  "曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました",
                   file=sys.stderr)
 
     # --dry-run は出力を書かずに終える(空実行)。診断は実データから得る。

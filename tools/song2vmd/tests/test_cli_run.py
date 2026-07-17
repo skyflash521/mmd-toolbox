@@ -313,7 +313,6 @@ def test_low_dynamics_suppressed_warning_survives_quiet(tmp_path, monkeypatch, c
     assert "low_dynamics_suppressed" in err or "ダイナミックレンジ" in err
 
 
-@pytest.mark.xfail(reason="impl pending: song2vmd-warning-line", strict=True)
 def test_human_warning_line_uses_common_format(tmp_path, monkeypatch, capsys):
     # 警告行は共通コードのラベルで1行にまとめて標準エラーへ出す(安定コードは機械モードの
     # warning イベントと同じ値)。通常実行(--dry-run なし)で標準出力には何も漏らさない。
