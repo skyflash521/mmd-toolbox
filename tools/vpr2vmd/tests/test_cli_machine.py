@@ -11,9 +11,11 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 
 import json
 
+import pytest
+
 from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
 
-from vpr2vmd import cli
+from vpr2vmd import __version__, cli
 
 
 def _touch(path):
@@ -67,8 +69,6 @@ def _machine_error(capsysbinary):
 
 
 def test_machine_version_stays_human(capsys):
-    from vpr2vmd import __version__
-
     rc = cli.main(["--machine", "--version"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -117,7 +117,7 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
     assert by["--style"]["constraint"] == {"choices": ["pop", "ballad", "powerful", "whisper", "rap"]}
     assert by["--style"]["default"] == "pop"
     assert by["--n-morph"]["type"] == "flag" and by["--n-morph"]["default"] is True
-    assert by["--overwrite"]["default"] is False and by["--model-name"]["default"] == ""
+    assert by["--overwrite"]["default"] is False
     assert by["--output"]["default"] is None
     # 固定既定は呼び出し先由来で報告される。
     assert by["--legato-max"]["default"] == 8.0
@@ -135,6 +135,15 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
             "open_max", "default_open", "valley_shallow", "valley_deep",
             "valley_slope", "coartic_overlap", "anticipation",
         }
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd --model-name default", strict=True)
+def test_describe_model_name_default_is_tool_and_version(capsysbinary):
+    rc = cli.main(["--describe"])
+    assert rc == 0
+    res = _terminal_events(capsysbinary)[-1]
+    by = {o["name"]: o for o in res["options"]}
+    assert by["--model-name"]["default"] == f"vpr2vmd {__version__}"
 
 
 def test_describe_with_unknown_option_is_bad_argument(capsysbinary):
@@ -158,7 +167,7 @@ def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, m
     res = _terminal_events(capsysbinary)[-1]
     assert res["mode"] == "inspect" and res["output"] is None and res["input_kind"] == "vpr"
     assert res["track_index"] == 0 and res["track_name"] == "Vocal"
-    assert res["style"] == "pop" and res["n_morph"] is True and res["model_name"] == ""
+    assert res["style"] == "pop" and res["n_morph"] is True
     assert set(res["params"]) == {
         "open_max", "default_open", "legato_max", "valley_shallow", "valley_deep",
         "valley_slope", "coartic_overlap", "anticipation", "ref_bpm", "tempo_scale_min",
@@ -168,6 +177,19 @@ def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, m
     assert isinstance(res["mouth_events"], int) and isinstance(res["morph_keys"], int)
     assert set(res["open_amounts"]) == {"min", "max", "mean"}
     assert isinstance(res["non_event_symbols"], dict)
+
+
+@pytest.mark.xfail(reason="impl pending: vpr2vmd --model-name default", strict=True)
+def test_machine_dry_run_inspect_model_name_default_is_tool_and_version(
+    tmp_path, capsysbinary, monkeypatch
+):
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"])]))
+    out = tmp_path / "out.vmd"
+    rc = cli.main([src, "-o", str(out), "--machine", "--dry-run"])
+    assert rc == 0
+    res = _terminal_events(capsysbinary)[-1]
+    assert res["model_name"] == f"vpr2vmd {__version__}"
 
 
 def test_machine_dry_run_no_adopted_warns_then_inspect(tmp_path, capsysbinary, monkeypatch):
