@@ -101,32 +101,6 @@ def test_non_machine_cancelled_on_interrupt(tmp_path, capsys, monkeypatch):
     assert not out.exists()
 
 
-def test_progress_line_closed_on_interrupt(tmp_path, capsys, monkeypatch):
-    # ライブ表示が有効(TTY・非機械)なとき、中断でも進捗行を閉じてから終える。
-    # 進捗ラベルの行に error 行が連結されない(finish の \n で閉じられている)ことで確認する。
-    monkeypatch.setattr("sys.stderr.isatty", lambda: True, raising=False)
-    monkeypatch.setattr(cli, "reduce_camera_track", _raise_keyboard_interrupt)
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera"])
-    assert rc == 130
-    err = capsys.readouterr().err
-    progress_lines = [ln for ln in err.split("\n") if "カメラ削減" in ln]
-    assert progress_lines and all("error" not in ln.lower() for ln in progress_lines)
-
-
-def test_progress_line_closed_on_strict_error(tmp_path, capsys, monkeypatch):
-    # strict で許容を満たせず終了(exit 4)する例外経路でも、error 行を出す前に進捗行を閉じる。
-    monkeypatch.setattr("sys.stderr.isatty", lambda: True, raising=False)
-    src = tmp_path / "in.vmd"
-    # ジグザグは線形表現不能。min-segment を大きくし strict にすると分割下限まで割っても許容を満たせない。
-    cam_keys = [cam(f, center=(0.0, 0.0 if f % 2 == 0 else 5.0, 0.0)) for f in range(9)]
-    write_vmd(src, camera=cam_keys)
-    rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera",
-                   "--curve-mode", "linear", "--strict",
-                   "--min-segment-frames", "8", "--max-segment-frames", "180"])
-    assert rc == 4
-    err = capsys.readouterr().err
-    assert "error:" in err.lower()  # 理由が 1 行出る
-    progress_lines = [ln for ln in err.split("\n") if "カメラ削減" in ln]
-    assert progress_lines and all("error" not in ln.lower() for ln in progress_lines)
+# 進捗のライブ行が中断・strict失敗の各経路でエラー表示より前に閉じられることは、進捗表示の
+# close/summary 呼び出しを直接記録する CLI 統合テストがタイミング非依存で厳密に検証する
+# (実際の描画結果はハートビートの再描画間隔に依存し非決定的になるため、ここでは検証しない)。

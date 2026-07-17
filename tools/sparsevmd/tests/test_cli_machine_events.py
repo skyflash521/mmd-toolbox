@@ -140,6 +140,25 @@ def test_machine_no_human_text_on_stdout_with_verbose(tmp_path, capsysbinary):
         json.loads(ln)
 
 
+def test_machine_verbose_diagnostics_go_to_stderr(tmp_path, capsysbinary):
+    # --machine --verbose の詳細診断(不連続検出位置など)は stdout でなく stderr へ出ることを、
+    # cli.main を通した実際の呼び出し経路(_log_diagnostics への file 引数の配線)で検証する
+    # (_log_diagnostics 単体呼び出しだけの検証は呼び出し側の配線漏れを検出できないため)。
+    src = tmp_path / "in.vmd"
+    keys = [cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0)) for f in range(31)]
+    write_vmd(src, camera=keys)
+    cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera",
+              "--curve-mode", "linear", "--machine", "--verbose"])
+    cap = capsysbinary.readouterr()
+    out_text = cap.out.decode("utf-8")
+    err_text = cap.err.decode("utf-8")
+    lines = [ln for ln in out_text.split("\n") if ln]
+    assert lines
+    for ln in lines:
+        json.loads(ln)  # stdout は全行イベントのまま(診断が混入していない)
+    assert "不連続検出位置" in err_text
+
+
 # --- progress(camera/bone 2 段)------------------------------------
 
 

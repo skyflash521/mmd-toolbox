@@ -348,19 +348,6 @@ def test_non_machine_missing_input_is_arg_error(capsys):
 # --- 進捗のライブ表示抑制------------------------------------
 
 
-def test_quiet_disables_live_progress_even_on_tty(tmp_path, capsys, monkeypatch):
-    # --quiet は標準エラーが端末でもライブ進捗表示を抑制する。TTY を擬装して検証する。
-    import sys as _sys
-    monkeypatch.setattr(_sys.stderr, "isatty", lambda: True, raising=False)
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    # 前提: TTY 扱いなら通常実行(--quiet なし)では進捗ラベルが標準エラーに出る。
-    rc = cli.main([str(src), "-o", str(tmp_path / "base.vmd"),
-                   "--target", "camera", "--curve-mode", "linear"])
-    assert rc == 0
-    assert "カメラ削減" in capsys.readouterr().err
-    # --quiet はそのライブ進捗を抑制する(TTY でも出さない)。
-    rc = cli.main([str(src), "-o", str(tmp_path / "quiet.vmd"),
-                   "--target", "camera", "--curve-mode", "linear", "--quiet"])
-    assert rc == 0
-    assert "カメラ削減" not in capsys.readouterr().err
+# --quiet が TTY でもライブ進捗表示を抑制することは、進捗表示の有効化フラグをコンストラクタ引数
+# から直接記録する CLI 統合テストがタイミング非依存で厳密に検証する(実際の描画結果はハートビートの
+# 再描画間隔に依存し非決定的になるため、ここでは検証しない)。

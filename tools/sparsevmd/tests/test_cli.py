@@ -217,7 +217,8 @@ def test_dry_run_records_no_reduction_target(tmp_path, capsys):
 
 
 def test_verbose_logs_diagnostics(tmp_path, capsys):
-    # -v 指定で不連続検出位置などの診断を stderr に出す。レポート系フラグ無しでも。
+    # -v 指定で不連続検出位置などの診断を標準出力に出す(利用者が要求した詳細診断は標準出力へ、の
+    # 規約に従う)。レポート系フラグ無しでも。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     keys = [cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0))
@@ -225,7 +226,9 @@ def test_verbose_logs_diagnostics(tmp_path, capsys):
     write_vmd(src, camera=keys)
     code = cli.main([str(src), "-o", str(out), "--target", "camera", "-v"])
     assert code == 0
-    assert "15" in capsys.readouterr().err  # 不連続検出位置 frame15 が verbose ログに出る
+    cap = capsys.readouterr()
+    assert "15" in cap.out  # 不連続検出位置 frame15 が verbose ログに出る
+    assert "15" not in cap.err
 
 
 # --- CLI 堅牢化 -----------------------------------------
@@ -644,7 +647,6 @@ def spy_progress(monkeypatch):
     return calls
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch, spy_progress):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -657,7 +659,6 @@ def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch,
     assert all(call == "close" for call in spy_progress[2:])
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, spy_progress):
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
@@ -667,7 +668,6 @@ def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, 
     assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_strict_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
     src = tmp_path / "in.vmd"
     cam_keys = [cam(f, center=(0.0, 0.0 if f % 2 == 0 else 5.0, 0.0)) for f in range(9)]
@@ -683,7 +683,6 @@ def test_strict_failure_closes_progress_before_error_line(tmp_path, monkeypatch,
     assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_write_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
@@ -695,7 +694,6 @@ def test_write_failure_closes_progress_before_error_line(tmp_path, monkeypatch, 
     assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
@@ -709,6 +707,20 @@ def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypa
     assert spy_progress[0] == "close"
     assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
     assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
+
+
+def test_verbose_closes_progress_before_diagnostics(tmp_path, monkeypatch, spy_progress):
+    # --verbose の詳細診断は標準出力へ出るが、同じ端末画面上でライブ行と重ならないよう、
+    # 診断を出す前に close していることをタイミング非依存に検証する
+    # (_log_diagnostics 呼び出し自体を記録し、close との相対順序を見る)。
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    monkeypatch.setattr(cli, "_log_diagnostics", lambda *a, **k: spy_progress.append("log_diagnostics"))
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear", "-v"])
+    assert rc == 0
+    assert "close" in spy_progress and "log_diagnostics" in spy_progress
+    assert spy_progress.index("close") < spy_progress.index("log_diagnostics")
 
 
 # --- 進捗ライブ表示の工程名・対象補足 ----------------------------------------
@@ -740,7 +752,6 @@ class _LabelSpyProgressReporter:
         pass
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_progress_label_is_keyframe_reduction_with_target_note(tmp_path, monkeypatch):
     # 進捗ライブ表示の工程名は camera・bone とも同じ共有名称に統一し、対象(カメラ/ボーン名)は
     # 行末の補足(note)として出す(工程を対象ごとに個別登録しない不変条件)。
@@ -758,6 +769,56 @@ def test_progress_label_is_keyframe_reduction_with_target_note(tmp_path, monkeyp
     assert stages and all(label == "キーフレーム圧縮" for _, label in stages)
     assert any(note == "カメラ" for _, _done, _total, note in updates)
     assert any(note == "センター" for _, _done, _total, note in updates)
+
+
+def test_progress_camera_note_preserves_reducer_note(tmp_path, monkeypatch):
+    # reduce_camera_track が渡す非空 note(出力後検証区間の補足等)を対象名の後ろへ残すことを、
+    # 実際のリデューサ挙動に依存せずコールバック引数だけで検証する。
+    calls = []
+    _LabelSpyProgressReporter.calls = calls
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _LabelSpyProgressReporter)
+
+    def fake_reduce_camera_track(cam, cam_ranges, tols, cut_thresholds=None, diagnostics=None,
+                                  progress=None, **kw):
+        if progress is not None:
+            progress(1, 2, "出力後検証")
+        return cam
+
+    monkeypatch.setattr(cli, "reduce_camera_track", fake_reduce_camera_track)
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
+    assert rc == 0
+    updates = [c for c in calls if c[0] == "update"]
+    assert any(note == "カメラ 出力後検証" for _, _done, _total, note in updates)
+
+
+def test_progress_bone_note_shows_target_before_processing(tmp_path, monkeypatch):
+    # bone 段の note は「今から処理するボーン名」を示す(§6.1 の「現在対象」)。処理完了後の
+    # 名前ではないことを、reduce_bone_track 呼び出し時点で直前の update が既に自分の名前で
+    # あることを確認して検証する(呼び出し順序に直接依存し描画タイミングに依存しない)。
+    calls = []
+    _LabelSpyProgressReporter.calls = calls
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _LabelSpyProgressReporter)
+
+    seen_notes_at_call = []
+
+    def fake_reduce_bone_track(keys, track_ranges, tols, cut_thresholds=None, diagnostics=None, **kw):
+        updates = [c for c in calls if c[0] == "update"]
+        seen_notes_at_call.append(updates[-1][3] if updates else None)
+        return keys
+
+    monkeypatch.setattr(cli, "reduce_bone_track", fake_reduce_bone_track)
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=(
+        [bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(31)]
+        + [bone("上半身", f, pos=(0.0, float(f), 0.0)) for f in range(31)]
+    ))
+    rc = cli.main([str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear"])
+    assert rc == 0
+    assert seen_notes_at_call == ["センター", "上半身"]
 
 
 # --- 進捗ライブ表示の有効化配線(TTY・quiet・機械モード) --------------------------
@@ -797,7 +858,6 @@ class _TTYWrapper:
         return getattr(self._stream, name)
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_progress_disabled_when_not_tty(tmp_path, monkeypatch):
     # pytest の capsys 捕捉ストリームは非TTYなので、既定(--quiet 無し・非機械)でも無効。
     monkeypatch.setattr(cli.progress, "ProgressReporter", _EnabledCapturingReporter)
@@ -809,7 +869,6 @@ def test_progress_disabled_when_not_tty(tmp_path, monkeypatch):
     assert _EnabledCapturingReporter.captured_enabled is False
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_progress_enabled_when_tty_and_not_quiet_and_not_machine(tmp_path, monkeypatch):
     # TTY かつ --quiet 無し・非機械なら有効(肯定ケース)。
     monkeypatch.setattr(sys, "stderr", _TTYWrapper(sys.stderr))
@@ -822,7 +881,6 @@ def test_progress_enabled_when_tty_and_not_quiet_and_not_machine(tmp_path, monke
     assert _EnabledCapturingReporter.captured_enabled is True
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_progress_disabled_with_quiet_flag_even_when_tty(tmp_path, monkeypatch):
     # TTY であっても --quiet 指定時は無効(isatty だけを見る誤実装を弾くため TTY 化して検証する)。
     monkeypatch.setattr(sys, "stderr", _TTYWrapper(sys.stderr))
@@ -835,7 +893,6 @@ def test_progress_disabled_with_quiet_flag_even_when_tty(tmp_path, monkeypatch):
     assert _EnabledCapturingReporter.captured_enabled is False
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_progress_disabled_in_machine_mode_even_when_tty(tmp_path, monkeypatch):
     # 機械モードは進捗を progress イベントで出すため、人間向けライブ表示は無効。TTY であっても
     # 機械モードなら無効になることを、isatty だけを見る誤実装を弾く形で検証する。

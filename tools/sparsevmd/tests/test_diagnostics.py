@@ -307,17 +307,29 @@ def test_format_dry_run_shows_verify():
 
 
 def test_log_diagnostics_shows_verify(capsys):
-    # verbose の stderr ログにも出力後検証の反復・追加が出る。
+    # verbose の詳細ログ(既定は標準出力)にも出力後検証の反復・追加が出る。
     from sparsevmd import cli
 
     diag = dict(_diag())
     diag["verify"] = [{"range": [0, 30], "iterations": 3,
                        "bad_counts": [5, 2, 0], "added_counts": [5, 2, 0], "added_total": 7}]
     cli._log_diagnostics(diag, None)
-    err = capsys.readouterr().err
-    assert "出力後検証" in err
-    assert "反復3" in err
-    assert "追加7" in err
+    out = capsys.readouterr().out
+    assert "出力後検証" in out
+    assert "反復3" in out
+    assert "追加7" in out
     # 反復ごとの推移(bad_counts/added_counts)も出し、総数が同じで推移が違うループを区別できる。
-    assert "bad=[5, 2, 0]" in err
-    assert "added=[5, 2, 0]" in err
+    assert "bad=[5, 2, 0]" in out
+    assert "added=[5, 2, 0]" in out
+
+
+def test_log_diagnostics_uses_given_file(capsys):
+    # 機械モードは file=sys.stderr を渡して stdout をイベント専用に保つ(呼び出し側の契約)。
+    import sys
+    from sparsevmd import cli
+
+    diag = dict(_diag())
+    cli._log_diagnostics(diag, None, file=sys.stderr)
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert "不連続検出位置" in cap.err

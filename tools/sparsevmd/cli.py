@@ -25,7 +25,7 @@ from cli_events import (
 )
 from vmd import io
 
-from . import __version__, presets, ranges, report, selection
+from . import __version__, presets, progress, ranges, report, selection
 from .cuts import parse_cut_threshold_bone, parse_cut_threshold_camera
 from .reduce import (
     StrictError,
@@ -106,53 +106,6 @@ _D_TYPE = {
     "verbose": ("flag", None),
     "quiet": ("flag", None),
 }
-
-
-class _Progress:
-    """削減処理の経過を stderr の1行に上書き表示する。
-
-    フェーズ単位で start→update→finish と使う。stderr が端末でない場合
-    (リダイレクト・パイプ・テスト捕捉)は無効化し、通常の出力・警告を汚さない。
-    表示は付帯的なものなので、書き込み失敗(エンコード不能等)では削減処理を止めない。
-    """
-
-    def __init__(self, enabled):
-        self.enabled = enabled
-        self._label = ""
-        self._total = 0
-        self._width = 0
-
-    def start(self, label, total):
-        self._label = label
-        self._total = total
-        self._width = 0
-        self.update(0)
-
-    def update(self, done, note=""):
-        if not self.enabled:
-            return
-        pct = 100.0 * done / self._total if self._total else 100.0
-        line = f"{self._label} {pct:3.0f}% ({done}/{self._total})"
-        if note:
-            line += f" {note}"
-        pad = max(0, self._width - len(line))
-        try:
-            sys.stderr.write("\r" + line + " " * pad)
-            sys.stderr.flush()
-        except (OSError, ValueError, UnicodeError):
-            self.enabled = False
-            return
-        self._width = len(line)
-
-    def finish(self):
-        if not self.enabled or not self._width:
-            return
-        try:
-            sys.stderr.write("\n")
-            sys.stderr.flush()
-        except (OSError, ValueError):
-            pass
-        self._width = 0
 
 
 def _nonneg_int(text):
@@ -236,7 +189,7 @@ def _build_parser(machine=False):
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="出力VMDを書かずに統計を表示する(引数検証は実施する)")
     p.add_argument("-v", "--verbose", action="store_true",
-                   help="詳細ログを標準エラーへ出す")
+                   help="詳細ログを出す(通常時は標準出力、--machine併用時は標準エラー)")
     p.add_argument("--quiet", dest="quiet", action="store_true",
                    help="進捗のライブ表示を抑制する(警告・統計・終了コードは抑制しない)")
     p.add_argument("--machine", action="store_true",
@@ -337,23 +290,27 @@ def _bone_reduced(bone_keys, selected, global_ranges):
     return False
 
 
-def _log_diagnostics(camera_diag, bone_diag):
-    """verbose 時に不連続検出位置・継ぎ目書き換え・分割理由・出力後検証を stderr に出す。"""
+def _log_diagnostics(camera_diag, bone_diag, file=None):
+    """verbose 時に不連続検出位置・継ぎ目書き換え・分割理由・出力後検証を出す。
+
+    file 省略時(既定の人間向け表示)は標準出力。機械モードは stdout をイベント専用に固定するため、
+    呼び出し側が file=sys.stderr を渡して人間向け診断を標準エラーへ回す。
+    """
     def emit(label, d):
         if not d:
             return
         if d.get("cuts"):
-            print(f"詳細[{label}]: 不連続検出位置 {d['cuts']}", file=sys.stderr)
+            print(f"詳細[{label}]: 不連続検出位置 {d['cuts']}", file=file)
         if d.get("seam_rewrites"):
-            print(f"詳細[{label}]: 継ぎ目書き換え {d['seam_rewrites']}", file=sys.stderr)
+            print(f"詳細[{label}]: 継ぎ目書き換え {d['seam_rewrites']}", file=file)
         if d.get("splits"):
-            print(f"詳細[{label}]: 分割 {len(d['splits'])} 件", file=sys.stderr)
+            print(f"詳細[{label}]: 分割 {len(d['splits'])} 件", file=file)
         for v in d.get("verify") or ():
             print(
                 f"詳細[{label}]: 出力後検証 範囲[{v['range'][0]},{v['range'][1]}] "
                 f"反復{v['iterations']} 追加{v['added_total']} "
                 f"bad={v['bad_counts']} added={v['added_counts']}",
-                file=sys.stderr,
+                file=file,
             )
 
     emit("camera", camera_diag)
@@ -706,7 +663,7 @@ def _run(args, emitter, fail):
                 print(f"warning: keep_frame_ignored: {msg}", file=sys.stderr)
 
     want_report = args.dry_run
-    want_diag = want_report or args.verbose  # verbose は診断を stderr ログに出す
+    want_diag = want_report or args.verbose  # verbose は詳細ログとして診断を出す
     new_camera = doc.camera
     new_bone = doc.bone
     camera_errors = None
@@ -716,100 +673,114 @@ def _run(args, emitter, fail):
     # 削減中の処理経過を stderr に上書き表示する。対話端末時のみ、かつ人間向け経路
     # (構造化出力モードでない)で --quiet 未指定のときだけ有効。機械モードはライブ表示せず
     # 同じ進捗を progress イベントで出す。emitter が非 None なら構造化出力(機械/自己記述)。
-    reporter = _Progress(enabled=sys.stderr.isatty() and not args.quiet and emitter is None)
+    reporter = progress.ProgressReporter(
+        sys.stderr, enabled=(sys.stderr.isatty() and not args.quiet and emitter is None))
     did_reduce = False
     try:
-        if do_camera:
-            cam = _sorted_camera(doc.camera)
-            cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
-            # 機械モードは camera 段の開始イベントを、処理対象なら len に依らず必ず 1 本出す
-            # (bone 段と同様)。人間モードのライブ表示は削減が走る len>=2 のときのみ。
-            cam_cb = _machine_progress(emitter, "camera") if emitter is not None else None
-            if len(cam) >= 2:
-                if cam_ranges:  # 有効範囲が空なら実際には削減されない
-                    did_reduce = True
-                camera_diag = {} if want_diag else None
-                cam_total = sum(f1 - f0 for f0, f1 in cam_ranges)
-                if emitter is None:
-                    reporter.start("カメラ削減", cam_total)
-                    cam_cb = lambda done, total, note="": reporter.update(done, note)  # noqa: E731
-                new_camera = reduce_camera_track(
-                    cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
-                    diagnostics=camera_diag, progress=cam_cb, **cut_kw
+        try:
+            if do_camera:
+                cam = _sorted_camera(doc.camera)
+                cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
+                # 機械モードは camera 段の開始イベントを、処理対象なら len に依らず必ず 1 本出す
+                # (bone 段と同様)。人間モードのライブ表示は削減が走る len>=2 のときのみ。
+                cam_cb = _machine_progress(emitter, "camera") if emitter is not None else None
+                if len(cam) >= 2:
+                    if cam_ranges:  # 有効範囲が空なら実際には削減されない
+                        did_reduce = True
+                    camera_diag = {} if want_diag else None
+                    cam_total = sum(f1 - f0 for f0, f1 in cam_ranges)
+                    if emitter is None:
+                        reporter.stage("キーフレーム圧縮")
+                        # reduce_camera_track が渡す note(出力後検証など重い段階の注記)を、
+                        # 対象名の後ろへ残す(停滞誤認防止のため、対象名で上書きして消さない)。
+                        cam_cb = lambda done, total, note="": reporter.update(  # noqa: E731
+                            done, total, note=f"カメラ {note}" if note else "カメラ")
+                    new_camera = reduce_camera_track(
+                        cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
+                        diagnostics=camera_diag, progress=cam_cb, **cut_kw
+                    )
+                else:
+                    new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持
+                if want_report:
+                    camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
+            if do_bone:
+                bone_diag = {} if want_diag else None
+                # 機械モードは bone 段の開始イベントを出し、完了ごとの progress を on_progress で写す。
+                bone_cb = _machine_progress(emitter, "bone") if emitter is not None else None
+                new_bone = _reduce_bones(
+                    doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
+                    diagnostics_out=bone_diag,
+                    reporter=(reporter if emitter is None else None), on_progress=bone_cb,
                 )
-                if emitter is None:
-                    reporter.finish()
-            else:
-                new_camera = doc.camera  # 1 キー以下は削減不能として逐語保持
-            if want_report:
-                camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
-        if do_bone:
-            bone_diag = {} if want_diag else None
-            # 機械モードは bone 段の開始イベントを出し、完了ごとの progress を on_progress で写す。
-            bone_cb = _machine_progress(emitter, "bone") if emitter is not None else None
-            new_bone = _reduce_bones(
-                doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
-                diagnostics_out=bone_diag, reporter=reporter, on_progress=bone_cb,
+                if _bone_reduced(doc.bone, selected, global_ranges):
+                    did_reduce = True
+                if want_report:
+                    bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
+        except StrictError:
+            # エラー理由を出す前にライブ表示の行を閉じる(fail の error 行が進捗行へ連結されないように)。
+            reporter.close()
+            return fail("strict_tolerance_unmet", "--strict 指定で許容誤差を満たせない", 4)
+
+        # verbose: 不連続検出位置・分割理由・継ぎ目書き換えを出す。機械モードは stdout がイベント
+        # 専用なので stderr へ、それ以外は標準出力へ出す。標準エラーのライブ行と同じ端末画面に
+        # 重なるため、書く前に閉じる(複数行の出力にハートビートの上書きが混ざらないように)。
+        if args.verbose:
+            reporter.close()
+            _log_diagnostics(camera_diag, bone_diag, file=(sys.stderr if emitter is not None else None))
+
+        # dry-run 統計。誤差・診断を含む report dict を作り、テキスト要約を標準出力へ出す。
+        # 機械モードの標準出力はイベント専用なので人間向けテキストは出さない。
+        if want_report:
+            rep = report.build_report(
+                target=args.target,
+                camera=(len(doc.camera), len(new_camera)) if do_camera else None,
+                bones=_bone_io_counts(doc.bone, new_bone) if do_bone else None,
+                selected_bones=selected,
+                ranges=global_ranges,
+                keep_frames=args.keep_frames,
+                camera_errors=camera_errors,
+                bone_errors=bone_errors,
+                camera_diag=camera_diag,
+                bone_diag=bone_diag,
+                reduced=did_reduce,
             )
-            if _bone_reduced(doc.bone, selected, global_ranges):
-                did_reduce = True
-            if want_report:
-                bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
-    except StrictError:
-        # エラー理由を出す前にライブ表示の行を閉じる(fail の error 行が進捗行へ連結されないように)。
-        reporter.finish()
-        return fail("strict_tolerance_unmet", "--strict 指定で許容誤差を満たせない", 4)
+            if args.dry_run and emitter is None:
+                # レポート(標準出力)もライブ行と同じ端末で連結しうるため、書く前に消す。
+                reporter.close()
+                print(report.format_dry_run(rep))
+
+        # dry-run は出力を書かずに終える。機械モードは入力検査(inspect)の result でストリームを終端する。
+        if args.dry_run:
+            if emitter is not None:
+                emitter.result(mode="inspect", **_build_inspect(
+                    args, doc, do_camera, do_bone, selected, global_ranges, new_camera, new_bone,
+                    camera_errors, bone_errors, camera_diag, bone_diag, did_reduce))
+            return 0
+
+        out_doc = dataclasses.replace(doc, camera=new_camera, bone=new_bone)
+        try:
+            io.write_file(out_doc, output)
+        except Exception as e:
+            reporter.close()
+            return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}", 3,
+                        field="--output", path=output)
+
+        # 書き込み成功後、非機械モードはライブ行を閉じて完了行を残し、機械モードは
+        # reduce result でストリームを終端する。
+        if emitter is None:
+            reporter.close()
+            reporter.summary(f"完了 {output}")
+        else:
+            emitter.result(
+                mode="reduce", output=output, target=args.target,
+                camera={"input_keys": len(doc.camera), "output_keys": len(new_camera)} if do_camera else None,
+                bone={"input_keys": len(doc.bone), "output_keys": len(new_bone)} if do_bone else None,
+                reduced=did_reduce)
+        return 0
     finally:
         # 中断(KeyboardInterrupt)・その他の例外が _run 外へ伝播する経路でもライブ表示の行を閉じてから
-        # 抜ける。finish は冪等(既に閉じていれば何もしない)で、機械モードでは reporter 自体が無効。
-        reporter.finish()
-
-    # verbose: 不連続検出位置・分割理由・継ぎ目書き換えを stderr に出す。
-    if args.verbose:
-        _log_diagnostics(camera_diag, bone_diag)
-
-    # dry-run 統計。誤差・診断を含む report dict を作り、テキスト要約を標準出力へ出す。
-    # 機械モードの標準出力はイベント専用なので人間向けテキストは出さない。
-    if want_report:
-        rep = report.build_report(
-            target=args.target,
-            camera=(len(doc.camera), len(new_camera)) if do_camera else None,
-            bones=_bone_io_counts(doc.bone, new_bone) if do_bone else None,
-            selected_bones=selected,
-            ranges=global_ranges,
-            keep_frames=args.keep_frames,
-            camera_errors=camera_errors,
-            bone_errors=bone_errors,
-            camera_diag=camera_diag,
-            bone_diag=bone_diag,
-            reduced=did_reduce,
-        )
-        if args.dry_run and emitter is None:
-            print(report.format_dry_run(rep))
-
-    # dry-run は出力を書かずに終える。機械モードは入力検査(inspect)の result でストリームを終端する。
-    if args.dry_run:
-        if emitter is not None:
-            emitter.result(mode="inspect", **_build_inspect(
-                args, doc, do_camera, do_bone, selected, global_ranges, new_camera, new_bone,
-                camera_errors, bone_errors, camera_diag, bone_diag, did_reduce))
-        return 0
-
-    out_doc = dataclasses.replace(doc, camera=new_camera, bone=new_bone)
-    try:
-        io.write_file(out_doc, output)
-    except Exception as e:
-        return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}", 3,
-                    field="--output", path=output)
-
-    # 書き込み成功後に reduce result でストリームを終端する。
-    if emitter is not None:
-        emitter.result(
-            mode="reduce", output=output, target=args.target,
-            camera={"input_keys": len(doc.camera), "output_keys": len(new_camera)} if do_camera else None,
-            bone={"input_keys": len(doc.bone), "output_keys": len(new_bone)} if do_bone else None,
-            reduced=did_reduce)
-    return 0
+        # 抜ける。close は冪等(既に閉じていれば何もしない)で、機械モードでは reporter 自体が無効。
+        reporter.close()
 
 
 def _bone_io_counts(in_keys, out_keys):
@@ -848,12 +819,17 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
     groups = _bone_keys_by_name(bone_keys)
     total = sum(1 for name, keys in groups.items() if name in selected and len(keys) >= 2)
     if reporter is not None and total:
-        reporter.start("ボーン削減", total)
+        reporter.stage("キーフレーム圧縮")
     done = 0
     out = []
     for name, keys in groups.items():
         ks = sorted(keys, key=lambda k: k.frame)
         if name in selected and len(ks) >= 2:
+            # reporter(人間向けライブ表示)は処理に着手する前に現在対象を出す(§6.1「現在対象などの
+            # 補足は行末へ併記する」)。on_progress(機械モードイベント)は仕様書の契約どおり完了後に
+            # 呼ぶ(sparsevmd.md 12.2: bone 段は 1 件の完了ごとに done/total/note を出す)。
+            if reporter is not None:
+                reporter.update(done, total, note=name)
             track_ranges = ranges.intersect(global_ranges, ks[0].frame, ks[-1].frame)
             diag = {} if diagnostics_out is not None else None
             out.extend(
@@ -865,15 +841,11 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
             if diagnostics_out is not None:
                 diagnostics_out[name] = diag
             done += 1
-            if reporter is not None:
-                reporter.update(done, name)
             if on_progress is not None:
                 on_progress(done, total, name)
         else:
             # 非選択トラック、および選択でもキー1件以下(削減不能)は逐語保持。
             out.extend(ks)
-    if reporter is not None and total:
-        reporter.finish()
     # ボーン名(生バイト)・フレーム順に安定ソート。
     out.sort(key=lambda k: (k.name_raw, k.frame))
     return out

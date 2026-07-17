@@ -53,18 +53,15 @@ def _wait_until(pred, timeout=2.0):
     raise AssertionError("condition not met within timeout")
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_format_line_shows_label_count_elapsed():
     assert progress._format_line("キーフレーム圧縮", 5, 88, 73.0) == "[キーフレーム圧縮] 5/88 経過 1:13"
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_format_line_hides_count_when_total_unset():
     # total 未確定(stage 直後・最初の update 前)はカウントを出さず経過のみ。
     assert progress._format_line("キーフレーム圧縮", 0, None, 2.0) == "[キーフレーム圧縮] 経過 0:02"
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_format_line_appends_note_when_present():
     # note があれば行末へ併記する(現在処理中の対象の注記)。note 既定("")では併記しない。
     assert (progress._format_line("キーフレーム圧縮", 60, 60, 5.0, "ボーン: センター")
@@ -72,13 +69,11 @@ def test_format_line_appends_note_when_present():
     assert progress._format_line("キーフレーム圧縮", 60, 60, 5.0, "") == "[キーフレーム圧縮] 60/60 経過 0:05"
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_display_width_counts_fullwidth_as_two():
     assert progress._display_width("キーフレーム圧縮") == 16  # 全角8文字=16
     assert progress._display_width("[X] 0/5") == 7  # 半角はそのまま
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_disabled_is_noop_no_thread_no_output():
     # 非TTY/quiet 相当(enabled=False)は全メソッド no-op。stream へ何も書かず、スレッドも起こさない。
     stream = io.StringIO()
@@ -92,14 +87,12 @@ def test_disabled_is_noop_no_thread_no_output():
     assert r._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_auto_enabled_follows_isatty():
     # enabled 省略時は stream.isatty() で自動判定し、enabled は解決済みの真偽値。
     assert ProgressReporter(_TTYStream(), now=lambda: 0.0).enabled is True
     assert ProgressReporter(io.StringIO(), now=lambda: 0.0).enabled is False  # StringIO.isatty()==False
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_update_does_not_write_heartbeat_is_sole_writer():
     # 進捗行を書くのはハートビートだけ。interval を十分大きくしてハートビートを発火させなければ、
     # update を呼んでも何も書かれない(update が直接 stream へ書く実装を弾く)。
@@ -113,7 +106,6 @@ def test_update_does_not_write_heartbeat_is_sole_writer():
     r.close()
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_stages_share_one_line_without_newline():
     # 段を切り替えても改行せず、同じライブ行を上書きする(終わった段の行を残さない)。ハートビート未発火
     # (interval 大)で _draw を手動で呼び、改行が入らないこと・行が後段へ切り替わることを決定的に固定する。
@@ -133,7 +125,6 @@ def test_stages_share_one_line_without_newline():
     r.close()
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_update_note_appears_in_drawn_line():
     # update の note が描画行に併記される(対象の表示確認)。stage() は note をリセットする。
     stream = io.StringIO()
@@ -150,7 +141,6 @@ def test_update_note_appears_in_drawn_line():
     r.close()
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_heartbeat_advances_elapsed_without_update():
     # 停滞回避の核: update は最初の1回だけ。以後 update が来なくてもハートビートが now() - 段開始 を
     # 再評価して再描画し、経過時間が進む。重い処理で表示が固まらないことの担保。
@@ -169,7 +159,6 @@ def test_heartbeat_advances_elapsed_without_update():
     assert "[キーフレーム圧縮] 2/10 経過 1:00" in out
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_stage_uses_begin_time_and_resets_per_stage():
     # 経過は段開始(stage)時刻基準。構築時刻と stage 時刻を変え、構築時刻でなく stage 時刻からの差分が
     # 出ることを固定する。さらに段ごとに開始時刻がリセットされる。
@@ -190,7 +179,6 @@ def test_stage_uses_begin_time_and_resets_per_stage():
     r.close()
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_close_clears_line_leaves_nothing():
     # close は行を空白で上書きし行頭へ戻して消す(改行しないので画面に残らない)。ハートビート未発火で
     # 出力を厳密に固定する。
@@ -208,7 +196,6 @@ def test_close_clears_line_leaves_nothing():
     assert r._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_close_stops_live_heartbeat_thread():
     # close は活動中のハートビートを停止イベントで止め join する(止め損ねた残存スレッドが後段の表示を
     # 乱す穴を弾く)。捕捉した実スレッド参照が close 後に is_alive()==False になることで固定する。
@@ -226,7 +213,6 @@ def test_close_stops_live_heartbeat_thread():
     assert r._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_close_is_noop_when_nothing_active():
     # 段を開始していないときの close は no-op(無出力・スレッドなし)。多重 close でも害がない。
     stream = io.StringIO()
@@ -237,7 +223,6 @@ def test_close_is_noop_when_nothing_active():
     assert r._thread is None
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_stage_while_active_stops_old_heartbeat():
     # 段を切り替えると旧ハートビートを止めてから新段を起こす。旧スレッドが残って後から描画し混線する
     # 漏れを弾く(単一描画所有者)。
@@ -253,7 +238,6 @@ def test_stage_while_active_stops_old_heartbeat():
     r.close()
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 def test_summary_writes_line_only_when_enabled():
     # summary は完了行を1行(改行付き)残す。有効時のみ書き、無効時は no-op。
     stream = io.StringIO()
@@ -271,7 +255,6 @@ def test_summary_writes_line_only_when_enabled():
 _WRITE_FAILURES = [OSError("io failed"), ValueError("bad stream"), UnicodeError("encode failed")]
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 @pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
 def test_draw_write_failure_disables_without_raising_and_close_stops_thread(exc):
     # stderr 書き込みが失敗しても例外を外へ漏らさず enabled=False に落ち、以後は描画 no-op。
@@ -294,7 +277,6 @@ def test_draw_write_failure_disables_without_raising_and_close_stops_thread(exc)
     r.summary("完了 out.vmd")
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 @pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
 def test_summary_write_failure_swallowed(exc):
     # summary の書き込み失敗も握りつぶし、例外を外へ漏らさず enabled=False に落ちる。
@@ -304,7 +286,6 @@ def test_summary_write_failure_swallowed(exc):
     assert r.enabled is False
 
 
-@pytest.mark.xfail(reason="impl pending: sparsevmd-progress-live-display", strict=True)
 @pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
 def test_close_write_failure_swallowed(exc):
     # close の行消去書き込みが失敗しても例外を外へ漏らさず、スレッドは停止・join される。
