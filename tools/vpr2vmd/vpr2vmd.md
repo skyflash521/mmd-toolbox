@@ -179,7 +179,7 @@ vpr2vmd INPUT [options]
 | `-o, --output PATH` | `<入力名>.vmd` | 出力VMD |
 | `--overwrite` | off | 出力先が入力と同一パスになる指定を許可する。別パスの既存ファイルへの上書きは常に許すため、この指定は不要 |
 | `--track NAME\|INDEX` | 先頭トラック(`tracks[0]`) | 口パク対象の歌唱トラック。整数は 0-based の INDEX、非整数は `Track.name`。名前が複数一致・不一致・INDEX 範囲外はエラー |
-| `--model-name NAME` | 空 | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
+| `--model-name NAME` | `vpr2vmd <実行中のツールバージョン>`(例: `vpr2vmd 1.2.3`) | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
 | `--style NAME` | `pop` | 口パクスタイルプリセット。`lipsync` の生成パラメータ(開き量レンジ・タイミング・誇張)を切り替える |
 | `--n-morph` | on | 撥音「ん」に「ん」モーフ(`MouthShape.N`)を使う(既定 on)。`--no-n-morph` の対の明示形 |
 | `--no-n-morph` | off(既定で「ん」モーフを使う) | 撥音「ん」に「ん」モーフを使わず、無音(閉口)に倒す。`--n-morph` の対 |
@@ -357,7 +357,7 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 | `--output` | str | null | null(既定は入力名由来 `<入力名>.vmd` の算出値。規則は help に記す) |
 | `--overwrite` | flag | null | false |
 | `--track` | str | null | null(既定は先頭トラック) |
-| `--model-name` | str | null | `""` |
+| `--model-name` | str | null | `"vpr2vmd <実行中のツールバージョン>"`(例: `"vpr2vmd 1.2.3"`) |
 | `--style` | enum | `{choices:["pop","ballad","powerful","whisper","rap"]}` | `"pop"` |
 | `--n-morph` | flag | null | true |
 | `--open-max` | float | `{min:0, max:1, exclusive_min:false}` | null(プリセット値) |
