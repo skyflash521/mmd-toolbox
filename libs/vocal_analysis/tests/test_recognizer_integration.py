@@ -137,6 +137,68 @@ def test_recognize_builds_segments_from_mocked_pipeline(tmp_path, monkeypatch):
     assert segments[2].end_sec == pytest.approx(0.12)
 
 
+def test_recognize_releases_content_pipeline_before_phoneme_model_load(tmp_path, monkeypatch):
+    """アライメントフェーズでは、内容認識パイプラインの解放が音素モデルのロードより先に行われる
+    (両モデルの同時GPU常駐によるVRAMピークを避ける二相化の順序保証)。"""
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+    decoder = {0: "<pad>", 1: "a"}
+    log_probs = np.array([[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]])
+
+    calls = []
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model, on_progress=None: object(),
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
+    monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
+    monkeypatch.setattr(
+        recognizer_module, "_release_content_recognizer_pipeline", lambda: calls.append("release"))
+
+    def fake_load_model(on_progress=None):
+        calls.append("load_phoneme")
+        return _FakeProcessor(decoder), object()
+
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fake_load_model)
+    monkeypatch.setattr(
+        recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
+    )
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert calls == ["release", "load_phoneme"]
+    assert any(seg.type == "vowel" for seg in segments)
+
+
+def test_recognize_releases_content_pipeline_without_alignment_targets(tmp_path, monkeypatch):
+    """発声区間があっても全区間がgap確定(書き起こし空文字列)でアライメント対象が0件の場合、
+    内容認識パイプラインの解放は行い、音素モデルはロードしない。"""
+    from vocal_analysis import recognizer as recognizer_module
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
+
+    calls = []
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model, on_progress=None: object(),
+    )
+    monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("", None))
+    monkeypatch.setattr(
+        recognizer_module, "_release_content_recognizer_pipeline", lambda: calls.append("release"))
+
+    def fake_load_model(on_progress=None):
+        calls.append("load_phoneme")
+        raise AssertionError("アライメント対象0件では音素モデルをロードしない")
+
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor", fake_load_model)
+
+    segments = recognizer_module.recognize(wav_path)
+
+    assert calls == ["release"]
+    assert all(seg.type == "gap" for seg in segments)
+
+
 def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 

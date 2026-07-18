@@ -672,6 +672,108 @@ def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
     return merged
 
 
+def _ensure_phoneme_model(on_progress: Callable[[str], None] | None):
+    """音素モデル(強制アライメント用)をロードし (processor, model, vocab, blank_token_id) を返す。
+
+    ロード失敗の例外は recognize() の既存契約どおり RecognitionError へ写像する。
+    """
+    try:
+        processor, model = _load_model_and_processor(on_progress=on_progress)
+    except ImportError as e:
+        raise RecognitionError(
+            "transformers または torch が見つかりません。導入してください"
+            "(vocal-analysis extra で両方導入されます)。"
+        ) from e
+    except OSError as e:
+        raise RecognitionError(
+            f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
+            "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
+        ) from e
+    vocab = processor.tokenizer.get_vocab()
+    blank_token_id = processor.tokenizer.pad_token_id
+    return processor, model, vocab, blank_token_id
+
+
+def _align_wav2vec2_job(
+    processor, model, vocab, blank_token_id, threshold: float, job: dict
+) -> list[Segment]:
+    """1区間ぶんの wav2vec2 CTC 強制アライメント(手順6〜9)を実行し、絶対時刻の Segment 列を返す。
+
+    job は区間ループ(手順1〜5)が積んだ辞書(chunk_samples・seq・windows_sec・words_phonemes・
+    trim_lo_sec・trim_hi_sec)。
+    """
+    chunk_samples = job["chunk_samples"]
+    seq = job["seq"]
+    windows_sec = job["windows_sec"]
+    words_phonemes = job["words_phonemes"]
+    trim_lo_sec = job["trim_lo_sec"]
+    trim_hi_sec = job["trim_hi_sec"]
+
+    token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
+    log_probs = _compute_log_probs(processor, model, chunk_samples)
+    # 手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
+    # 非blankトークンをサブ状態へ展開してアライメントし、経路を元トークンindexへ戻してから
+    # Segment化する。
+    log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
+
+    # 手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
+    # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。単語窓がある場合、
+    # 最小滞在は単語ごとの局所適応(_expand_min_stay_local)を使う。局所適応でも窓制約が
+    # 到達不能ならチャンク全体の最小滞在(_expand_min_stay)へ計算し直し、位置バンド制限を使う。
+    if windows_sec is not None:
+        sub_token_ids, sub_to_token = _expand_min_stay_local(token_ids, words_phonemes, blank_token_id)
+        sub_windows = [windows_sec[i] for i in sub_to_token]
+        try:
+            sub_path = _forced_align_windowed(log_probs, sub_token_ids, sub_windows)
+        except RecognitionError:
+            sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
+            sub_path = _forced_align(log_probs, sub_token_ids)
+    else:
+        sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
+        sub_path = _forced_align(log_probs, sub_token_ids)
+
+    path = [sub_to_token[s] for s in sub_path]
+    local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
+    # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
+    # 使わず、トリム後区間の真の終端(trim_hi_sec - trim_lo_sec)へ強制的に揃える(フレーム数
+    # 計算の丸め等で区間境界とわずかにずれ、隣接区間との欠落・重複を生むことを防ぐ)。
+    if local_segments:
+        last = local_segments[-1]
+        local_segments[-1] = Segment(
+            type=last.type, start_sec=last.start_sec, end_sec=trim_hi_sec - trim_lo_sec,
+            phoneme=last.phoneme, confidence=None,
+        )
+    return [
+        Segment(
+            type=seg.type,
+            start_sec=seg.start_sec + trim_lo_sec,
+            end_sec=seg.end_sec + trim_lo_sec,
+            phoneme=seg.phoneme,
+            confidence=None,
+        )
+        for seg in local_segments
+    ]
+
+
+def _release_content_recognizer_pipeline() -> None:
+    """内容認識パイプラインのプロセス内キャッシュを解放し、GPUのキャッシュ済みメモリを返す。
+
+    書き起こしフェーズ完了後、音素モデル(またはSOFAサブプロセス)の実行前に呼ぶことで、
+    内容認識モデルと音素モデルの同時GPU常駐によるVRAMピークを避ける。
+    """
+    global _content_recognizer_pipeline_cache
+    if _content_recognizer_pipeline_cache is None:
+        return
+    _content_recognizer_pipeline_cache = None
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+
 def recognize(
     vocal_wav_path: Path,
     content_recognizer_model: ContentRecognizerModel = DEFAULT_CONTENT_RECOGNIZER_MODEL,
@@ -713,18 +815,23 @@ def recognize(
     split_points = _detect_silence_split_points(resampled, RECOGNIZER_CONFIG.sample_rate)
     segment_bounds = _build_segment_bounds(duration_sec, split_points)
 
-    # 音素モデルは実際に強制アライメントへ進む区間が現れるまでロードしない(手順2: 全区間が
-    # 無音ならモデルを一切必要としない。非無音区間でも内容認識・G2P・手順4の音素密度チェックより
-    # 先にロードするのではなく、それらを経てなお進む区間だけで遅延ロードする。幻覚検出でgap確定
-    # した区間はロードせずスキップする。ロード自体の失敗は握りつぶさず例外にして失敗境界を隠さない)。
-    # 内容認識パイプライン(Whisper系)も同様に無音でない最初の区間で遅延ロードし、以降の区間では
+    # 実行は二相に分ける: まず全区間の書き起こし(内容認識・G2P・音素密度チェック)を済ませ、
+    # 内容認識パイプラインを解放してから、強制アライメント(音素モデルまたはSOFA)をまとめて行う。
+    # 内容認識モデルと音素モデル(いずれもGPU実行時は数GB)を同時にGPUへ常駐させると、VRAMの
+    # 逼迫(ページング)で処理時間が大きく悪化し、他プロセスの描画も阻害するため。
+    # 内容認識パイプライン(Whisper系)は無音でない最初の区間で遅延ロードし、以降の区間では
     # 使い回す(区間ごとの再ロードによるモデル転送コスト(特にGPU使用時)の浪費を避ける)。
-    processor = model = vocab = blank_token_id = None
+    # 音素モデルは強制アライメント対象が1件以上あるときだけアライメントフェーズでロードする
+    # (全区間が無音・gap確定ならモデルを一切必要としない。ロード自体の失敗は握りつぶさず
+    # 例外にして失敗境界を隠さない)。
     content_pipeline = None
     # SOFA経路専用: 対象区間・対象単語をここへ積み、recognize()呼び出し全体で1回だけ
     # SOFAへまとめて渡す(ループの外、全区間処理後)。各要素は
     # (音声サンプル, サンプルレート, G2P音素記号列, 絶対オフセット秒, 相対長さ秒)。
     pending_sofa_targets: list[tuple[np.ndarray, int, list[str], float, float]] = []
+    # wav2vec2 CTC経路の二相化用: 書き起こしフェーズで積んだ強制アライメント対象。
+    # 各要素は _align_wav2vec2_job が受け取る辞書+挿入位置(insert_at)。
+    pending_align_jobs: list[dict] = []
 
     all_segments: list[Segment] = []
     for start_sec, end_sec in segment_bounds:
@@ -827,22 +934,6 @@ def recognize(
             continue
 
         if forced_aligner == "wav2vec2-ctc-forcedalign":
-            if processor is None:
-                try:
-                    processor, model = _load_model_and_processor(on_progress=on_progress)
-                except ImportError as e:
-                    raise RecognitionError(
-                        "transformers または torch が見つかりません。導入してください"
-                        "(vocal-analysis extra で両方導入されます)。"
-                    ) from e
-                except OSError as e:
-                    raise RecognitionError(
-                        f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
-                        "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
-                    ) from e
-                vocab = processor.tokenizer.get_vocab()
-                blank_token_id = processor.tokenizer.pad_token_id
-
             # 手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ
             # (単語分割していない一括の)音素記号列の前後にpauを補うだけにする。
             if words_phonemes is not None:
@@ -853,50 +944,18 @@ def recognize(
                 seq = _assemble_phoneme_sequence([phonemes])
                 windows_sec = None
 
-            token_ids = _g2p_symbols_to_token_ids(seq, vocab, blank_token_id)
-            log_probs = _compute_log_probs(processor, model, chunk_samples)
-            # 手順7の有声フレームのblank抑制と最小滞在制約: 有声フレームでblankを不利にし、
-            # 非blankトークンをサブ状態へ展開してアライメントし、経路を元トークンindexへ戻してから
-            # Segment化する。
-            log_probs = _apply_voiced_blank_penalty(log_probs, chunk_samples, threshold, blank_token_id)
-
-            # 手順7: 単語窓制約を主経路とし、窓が無い(単語タイムスタンプ非取得)、または窓制約下で
-            # 末尾トークンへ到達できない場合は位置バンド制限へフォールバックする。単語窓がある場合、
-            # 最小滞在は単語ごとの局所適応(_expand_min_stay_local)を使う。局所適応でも窓制約が
-            # 到達不能ならチャンク全体の最小滞在(_expand_min_stay)へ計算し直し、位置バンド制限を使う。
-            if windows_sec is not None:
-                sub_token_ids, sub_to_token = _expand_min_stay_local(token_ids, words_phonemes, blank_token_id)
-                sub_windows = [windows_sec[i] for i in sub_to_token]
-                try:
-                    sub_path = _forced_align_windowed(log_probs, sub_token_ids, sub_windows)
-                except RecognitionError:
-                    sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
-                    sub_path = _forced_align(log_probs, sub_token_ids)
-            else:
-                sub_token_ids, sub_to_token = _expand_min_stay(token_ids, blank_token_id, log_probs.shape[0])
-                sub_path = _forced_align(log_probs, sub_token_ids)
-
-            path = [sub_to_token[s] for s in sub_path]
-            local_segments = _path_to_segments(path, seq, FRAME_DURATION_SEC)
-            # 最後の区切りは対数確率行列のフレーム数に由来する終端(local_segments[-1].end_sec)を
-            # 使わず、トリム後区間の真の終端(trim_hi_sec - trim_lo_sec)へ強制的に揃える(フレーム数
-            # 計算の丸め等で区間境界とわずかにずれ、隣接区間との欠落・重複を生むことを防ぐ)。
-            if local_segments:
-                last = local_segments[-1]
-                local_segments[-1] = Segment(
-                    type=last.type, start_sec=last.start_sec, end_sec=trim_hi_sec - trim_lo_sec,
-                    phoneme=last.phoneme, confidence=None,
-                )
-            for seg in local_segments:
-                all_segments.append(
-                    Segment(
-                        type=seg.type,
-                        start_sec=seg.start_sec + trim_lo_sec,
-                        end_sec=seg.end_sec + trim_lo_sec,
-                        phoneme=seg.phoneme,
-                        confidence=None,
-                    )
-                )
+            # 二相化: 書き起こしフェーズでは音素モデルの推論を行わず対象を積むだけにし、
+            # 全区間の書き起こし完了後に内容認識モデルを解放してからまとめて実行する
+            # (両モデルの同時GPU常駐によるVRAMピークを避ける)。
+            pending_align_jobs.append({
+                "chunk_samples": chunk_samples,
+                "seq": seq,
+                "windows_sec": windows_sec,
+                "words_phonemes": words_phonemes,
+                "trim_lo_sec": trim_lo_sec,
+                "trim_hi_sec": trim_hi_sec,
+                "insert_at": len(all_segments),
+            })
         else:
             # forced_aligner == "sofa-forcedalign"(関数入口でこの2値のいずれかであることを
             # 検証済み): 単語単位分割してSOFA対象を積み、gapはここで直接確定する。実際のSOFA呼び出しは
@@ -935,9 +994,37 @@ def recognize(
                 Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
             )
 
+    if forced_aligner == "wav2vec2-ctc-forcedalign":
+        # 二相化のアライメントフェーズ: まず内容認識パイプラインを解放してから音素モデルを
+        # ロードし、積んだ対象を順に実行して確定済み gap 区間の間の記録位置へ挿入する。
+        # 挿入位置はフェーズ実行前の all_segments 上の位置(insert_at)なので、先行する挿入で
+        # 増えた要素数を累積オフセットとして加算する。解放は対象0件(全区間が無音・gap確定)でも
+        # 行う(内容認識だけ行われた場合もこの時点で以降の工程に内容認識モデルは不要なため)。
+        content_pipeline = None
+        _release_content_recognizer_pipeline()
+        if pending_align_jobs:
+            processor, model, vocab, blank_token_id = _ensure_phoneme_model(on_progress)
+            inserted = 0
+            for job in pending_align_jobs:
+                aligned = _align_wav2vec2_job(processor, model, vocab, blank_token_id, threshold, job)
+                position = job["insert_at"] + inserted
+                all_segments[position:position] = aligned
+                inserted += len(aligned)
+            # 音素モデルの参照を落としてGPUのキャッシュ済みメモリを返す(以降のS3・モーフ生成、
+            # および長尺分割時の次チャンクの書き起こしフェーズにVRAMを明け渡す)。
+            del processor, model
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
     if forced_aligner == "sofa-forcedalign":
         # バッチ単位の確定: 積んだ対象をrecognize()呼び出し1回につき1回だけSOFAへまとめて渡す
         # (対象が0件ならsofa_align._align_batchがサブプロセスの起動自体を省略する)。
+        # SOFAサブプロセスもGPUを使うため、実行前に内容認識パイプラインを解放して
+        # VRAMを明け渡す(二相化と同じ理由)。
+        content_pipeline = None
+        _release_content_recognizer_pipeline()
         raw_by_basename = sofa_align._align_batch(
             [(samples, sr, ph) for samples, sr, ph, _, _ in pending_sofa_targets], sofa_aligner
         )
