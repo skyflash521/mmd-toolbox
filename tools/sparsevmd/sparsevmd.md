@@ -54,7 +54,7 @@ MMD互換の疎なキーフレームと補間曲線へ変換する。
 |---|---|---|---|
 | `<入力ファイル名>` | パス | (必須) | 入力VMD |
 | `-o, --output` | パス | `<入力ファイル名>_sparse.vmd` | 出力先 |
-| `--overwrite` | flag | off | 入力と同一パスへの出力を許可。未指定で同一パスならエラー |
+| `--overwrite` | flag | off | 出力先の既存ファイルへの上書きを許可。未指定で出力先に既存ファイルがあるとエラー |
 | `--target` | `camera` / `bone` / `all` | `all` | 削減対象セクション。`all` は camera + bone |
 | `--bone NAME` | NAME(反復可) | なし | 指定ボーンのみ処理。未指定なら全ボーン |
 | `--bone-glob PATTERN` | GLOB(反復可) | なし | globに一致するボーンを処理対象に追加 |
@@ -139,8 +139,8 @@ CLI値の共通書式:
   出力VMDの親ディレクトリが存在しない場合や、
   その他の書き込み失敗(`io.write_file` 等が送出する例外)は出力書き込み失敗
   (終了コード3、§9)。
-  入力と異なる既存ファイルは上書きする。`--overwrite` は入力パスそのものへの
-  書き込み許可だけを制御する。
+  `--overwrite` は出力先に既存ファイルがあるときの上書き許可を制御する
+  (入力パスと同一かどうかは問わない)。
 
 `--range` 指定時、対象トラックの**範囲外キーは値・補間曲線ともに変更不可**で逐語保持する
 (§6.3)。範囲端は必須キーとして範囲内に保持する。範囲外への境界キー追加や範囲外キーの
@@ -632,7 +632,7 @@ camera_distance_tol, camera_fov_tol}`(§2.4 の表の値)。
 | `--bone-file` パスが不在・通常ファイルでない | `bone_file_not_file` | `"--bone-file"` | 2 |
 | `--bone-file` の読み込み・解析失敗(UTF-8 デコード不能等) | `bad_bone_file` | `"--bone-file"` | 2 |
 | `--target camera` とボーン選択の同時指定 | `target_selection_conflict` | `null` | 2 |
-| 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
+| 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | ボーン選択のハードエラー(空文字名・include/exclude 重複名・明示 `--bone` 名の不在・選択結果 0 件) | `bone_selection_invalid` | `null`(対象名は `message` に載る) | 2 |
 | `--range` の展開・正規化失敗(重複・省略端解決後の逆順) | `range_invalid` | `"--range"` | 2 |
 | 入力が VMD でない・破損 | `not_vmd` | `"input"` | 1 |

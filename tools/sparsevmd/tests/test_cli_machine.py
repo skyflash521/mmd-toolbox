@@ -216,13 +216,25 @@ def test_machine_error_target_selection_conflict(tmp_path, capsysbinary):
     assert e["code"] == "target_selection_conflict" and e["field"] is None and e["exit_code"] == 2
 
 
-def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
+def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     ramp_camera(src)
     rc = cli.main([str(src), "-o", str(src), "--machine"])
     assert rc == 2
     e = machine_error(capsysbinary)
-    assert e["code"] == "output_overwrites_input" and e["field"] == "--output" and e["exit_code"] == 2
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
+
+
+def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
+    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
+    src = tmp_path / "in.vmd"
+    ramp_camera(src)
+    out = tmp_path / "out.vmd"
+    out.write_bytes(b"old content")
+    rc = cli.main([str(src), "-o", str(out), "--machine"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
 
 
 def test_machine_error_bone_selection_invalid(tmp_path, capsysbinary):

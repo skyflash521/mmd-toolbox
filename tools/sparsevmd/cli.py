@@ -126,7 +126,7 @@ def _build_parser(machine=False):
     p.add_argument("input", nargs="?", help="入力VMDファイル")
     p.add_argument("-o", "--output", help="出力先(既定: <入力名>_sparse.vmd)")
     p.add_argument("--overwrite", action="store_true",
-                   help="入力と同一パスへの出力を許可する(未指定で同一パスならエラー)")
+                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
     p.add_argument("--target", choices=("camera", "bone", "all"), default="all",
                    help="削減対象セクション: camera / bone / all(既定 all=camera+bone)")
     # ボーン選択。
@@ -206,13 +206,6 @@ def _build_parser(machine=False):
 def _default_output(input_path):
     base, _ = os.path.splitext(input_path)
     return base + "_sparse.vmd"
-
-
-def _same_path(a, b):
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return os.path.realpath(a) == os.path.realpath(b)
 
 
 def _build_selectors(args):
@@ -553,11 +546,11 @@ def _run(args, emitter, fail):
         return fail("target_selection_conflict",
                     "--target camera とボーン選択オプションは同時指定できない", 2)
 
-    # 出力先・上書きガード。list-bones は出力しないので不要。
+    # 出力先・上書きガード。list-bones は出力しないので不要。出力先に既存ファイルがあれば --overwrite 必須。
     output = args.output if args.output is not None else _default_output(args.input)
-    if not args.list_bones and not args.overwrite and _same_path(output, args.input):
-        return fail("output_overwrites_input",
-                    f"出力先が入力と同一パス。上書きには --overwrite が必要: {output}", 2, field="--output")
+    if not args.list_bones and not args.overwrite and os.path.exists(output):
+        return fail("output_exists",
+                    f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}", 2, field="--output")
 
     # 入力読み込み(VMDでない等 → 入力不正 コード1)。
     try:
