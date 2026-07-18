@@ -273,13 +273,24 @@ def test_machine_error_no_camera_keys(tmp_path, capsysbinary):
     assert e["code"] == "no_camera_keys" and e["field"] == "input" and e["exit_code"] == 1
 
 
-def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
-    # 出力が入力と同一パス・--overwrite 未指定 → output_overwrites_input(exit 2)、field は --output。
+def test_machine_error_output_exists(tmp_path, capsysbinary):
+    # 出力が入力と同一パス・--overwrite 未指定 → output_exists(exit 2)、field は --output。
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", inp, "--machine"])
     assert rc == 2
     e = machine_error(capsysbinary)
-    assert e["code"] == "output_overwrites_input" and e["field"] == "--output"
+    assert e["code"] == "output_exists" and e["field"] == "--output"
+
+
+def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
+    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
+    inp = write_input(tmp_path / "in.vmd")
+    out = tmp_path / "out.vmd"
+    out.write_bytes(b"old content")
+    rc = cli.main([inp, "-o", str(out), "--machine"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "output_exists" and e["field"] == "--output"
 
 
 def test_machine_error_range_reversed(tmp_path, capsysbinary):

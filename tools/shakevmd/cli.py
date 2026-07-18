@@ -169,7 +169,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("input", nargs="?", help="入力カメラ VMD ファイル")
     p.add_argument("-o", "--output", help="出力先(既定: <入力名>_shake.vmd)")
     p.add_argument("--overwrite", action="store_true",
-                   help="入力と同一パスへの出力を許可する(未指定で同一パスならエラー)")
+                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
     p.add_argument("--range", dest="ranges", action="append", type=_parse_range,
                    metavar="START:END",
                    help="揺れ適用範囲。START/END は各々省略可。複数指定可(既定は全範囲)")
@@ -320,15 +320,6 @@ def _all_finite(keys) -> bool:
     return True
 
 
-def _same_path(a: str, b: str) -> bool:
-    # 実ファイルが同一かを優先(symlink・大小無視 FS でも inode で一致判定)。
-    # 出力先が未存在なら samefile が立たないので、symlink 解決した realpath で比較する。
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return os.path.realpath(a) == os.path.realpath(b)
-
-
 def _working_view(camera):
     """正規化作業ビュー: フレームでソートし重複は後勝ち。bake の正規化と同じ規則。"""
     by_frame = {}
@@ -469,11 +460,11 @@ def _run(args, machine, emitter, fail) -> int:
     """引数解析済みの本体処理(ベイク→スムージング→書き込み)。失敗は fail() 経由で終了コードを返す。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
-    # 上書きガード: 入力と同一パスへの出力は --overwrite 必須。未許可なら書かずにエラー。
-    if not args.overwrite and _same_path(output, args.input):
+    # 上書きガード: 出力先に既存ファイルがあれば --overwrite 必須。未許可なら書かずにエラー。
+    if not args.overwrite and os.path.exists(output):
         return fail(
-            "output_overwrites_input",
-            f"出力先が入力と同一パス。上書きには --overwrite が必要: {output}",
+            "output_exists",
+            f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}",
             2, field="--output",
         )
 

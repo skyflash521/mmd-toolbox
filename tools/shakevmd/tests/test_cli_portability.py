@@ -109,9 +109,9 @@ def test_stderr_safe_argparse_usage_error(monkeypatch):
 def test_stderr_safe_fail_path(tmp_path, monkeypatch):
     # (b) fail() 経路: 表せない文字を含むパス。上書きガードの fail() メッセージが符号化に失敗せず、
     # 引数エラー(2)で終える(符号化失敗を internal_error(1)へ落とさない)。
+    p = write_input(tmp_path / (UNREP + ".vmd"))  # 出力先に既存ファイルがある状態を作る
     _cp932_stderr(monkeypatch)
-    p = str(tmp_path / (UNREP + ".vmd"))
-    rc = cli.main([p, "-o", p])   # 入力=出力・--overwrite 未指定 → output_overwrites_input(2)
+    rc = cli.main([p, "-o", p])   # 入力=出力・既存・--overwrite 未指定 → output_exists(2)
     assert rc == 2
 
 

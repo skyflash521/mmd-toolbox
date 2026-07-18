@@ -176,18 +176,23 @@ class TestCli:
         assert rc == 0
         assert sorted(k.frame for k in read_camera(inp)) == list(range(0, 61))
 
-    def test_existing_distinct_output_allowed(self, tmp_path):
-        # 上書きガードは「入力と同一パス」限定。入力と別の既存ファイルへの出力は
-        # --overwrite なしでも許可され、既存内容を上書きする。全既存出力を拒否する実装を排除。
+    def test_existing_distinct_output_blocked_without_overwrite(self, tmp_path):
+        # 別パスの既存出力も --overwrite 無しでは上書きガードで拒否する。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        out.write_bytes(b"old content")          # 既存だが入力とは別パス
-        assert cli.main([inp, "-o", str(out), "--no-smooth"]) == 0
+        out.write_bytes(b"old content")
+        assert cli.main([inp, "-o", str(out), "--no-smooth"]) == 2
+        assert out.read_bytes() == b"old content"  # 拒否時は書き換えない
+
+    def test_existing_distinct_output_allowed_with_overwrite(self, tmp_path):
+        inp = write_input(tmp_path / "in.vmd")
+        out = tmp_path / "out.vmd"
+        out.write_bytes(b"old content")
+        assert cli.main([inp, "-o", str(out), "--overwrite", "--no-smooth"]) == 0
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_overwrite_guard_via_symlink_exit2(self, tmp_path):
-        # 入力へのシンボリックリンク経由の出力も「同一ファイル」として上書きガードが効く。
-        # abspath 文字列比較だと取りこぼすので samefile/realpath で判定する。
+        # シンボリックリンク経由の出力先も、実体が存在するファイルとしてガードが効く。
         p = tmp_path / "in.vmd"
         inp = write_input(p)
         before = p.read_bytes()
@@ -605,7 +610,7 @@ class TestCli:
         for args in (["--amp-rot", "0"], ["--amp-pos", "0"], ["--motion-damp", "0"],
                      ["--settle", "0"], ["--fade", "0"], ["--cut-threshold", "0,0"],
                      ["--impulse", "20:0:0.5"]):
-            assert cli.main([inp, "-o", o, *args, "--no-smooth"]) == 0, args
+            assert cli.main([inp, "-o", o, "--overwrite", *args, "--no-smooth"]) == 0, args
 
     def test_negative_impulse_frame_exit2(self, tmp_path):
         # --impulse の F はフレーム=非負。負フレームは引数エラー(exit 2)。
@@ -1025,11 +1030,11 @@ class TestCliOps:
         # -v は --verbose と同義。出力パスを同一にして(ログがパスを含んでも差が出ない)
         # 両者の詳細ログが一致することを確認する。
         inp = write_input(tmp_path / "in.vmd")
-        out = str(tmp_path / "out.vmd")            # 同一パス(入力とは別なので上書きガード対象外)
+        out = str(tmp_path / "out.vmd")
         assert cli.main([inp, "-o", out, "-v", "--no-smooth"]) == 0
         short = capsys.readouterr()
         short_text = short.out + short.err
-        assert cli.main([inp, "-o", out, "--verbose", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", out, "--verbose", "--no-smooth", "--overwrite"]) == 0
         long = capsys.readouterr()
         assert short_text == (long.out + long.err)
 

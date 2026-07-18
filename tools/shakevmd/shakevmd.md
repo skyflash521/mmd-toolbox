@@ -47,7 +47,7 @@ click または argparse
 |---|---|---|---|
 | `<入力ファイル名>` | パス | (必須) | 入力カメラVMD |
 | `-o, --output` | パス | `<入力ファイル名>_shake.vmd` | 出力先 |
-| `--overwrite` | flag | off | 入力と同一パスへの出力を許可。未指定で同一パスならエラー |
+| `--overwrite` | flag | off | 出力先の既存ファイルへの上書きを許可。未指定で出力先に既存ファイルがあるとエラー |
 | `--range START:END` | フレーム番号(整数) | 全範囲 | 揺れ適用範囲。START/ENDは各々省略可(省略側は先頭/末尾まで)。両方省略(`:`)は全範囲と同義。`START>END`(逆順)は引数エラー。複数指定可(カット単位の運用を想定)。範囲端は常に既存キーへスナップされる(§5.2)。重複はスナップ適用後に判定しエラー |
 
 入出力はファイルパスで受け渡す(入力=positional パス、出力=`--output`)。対象データ本体を標準入出力で
@@ -579,7 +579,7 @@ CLI 非公開なので `values` に出さない(§8 の非公開方針と一致)
 | カメラキー0件 | `no_camera_keys` | `"input"` | 1 |
 | 範囲書式・逆順 `START>END`・未知オプション・型エラー・positional 欠落等(argparse 検出) | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`) | 2 |
 | 省略端を解決した結果が逆順(例 `999:` で末尾<999) | `range_reversed` | `"--range"` | 2 |
-| 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
+| 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | 範囲の重複・接触(ベイクの ValueError) | `range_overlap` | `"--range"` | 2 |
 | 有限だが過大な値が float32 で溢れた(ベイク中・書き込み時の OverflowError) | `value_overflow` | `null` | 2 |
 | 焼き結果が inf/nan(非有限出力) | `non_finite_output` | `null` | 2 |
