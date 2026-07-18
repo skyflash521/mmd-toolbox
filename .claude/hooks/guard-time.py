@@ -72,6 +72,8 @@ def main():
     if decision == "deny":
         out["permissionDecisionReason"] = (
             "date による時計変更は不可。現在時刻は読み取り専用の date を使う。"
+            "PowerShellのSet-Date・w32tm・pythonのos/time経由での時刻変更等、"
+            "別の手段で同じ変更を回避して実行しないこと。"
         )
     print(json.dumps({"hookSpecificOutput": out}))
 

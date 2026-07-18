@@ -49,11 +49,6 @@
       "Bash(./.venv/Scripts/python -m pytest *)",
       "Bash(.venv/Scripts/python.exe -m pytest *)",
       "Bash(./.venv/Scripts/python.exe -m pytest *)"
-    ],
-    "deny": [
-      "Bash(git -C *)",
-      "Bash(git --git-dir*)",
-      "Bash(git --work-tree*)"
     ]
   },
   "sandbox": {
@@ -74,11 +69,6 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git-write.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-pytest-pipe.py\"",
             "shell": "bash"
           },
           {

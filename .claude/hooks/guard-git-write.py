@@ -50,13 +50,46 @@ TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
 WRAPPERS = {
     "command", "builtin", "env", "exec", "time", "timeout", "nice", "ionice",
     "nohup", "setsid", "stdbuf", "xargs", "sudo", "doas", "taskset", "chrt",
+    "!", "coproc",
 }
+# Tokens that make a following `git` a genuine new command start rather than plain text: shell
+# control operators (including bare `&`, background), `cd` (a preceding directory change), and a
+# subshell open paren.
+CONTROL_OR_WRAPPER = {"cd", "&&", "||", ";", "|", "&", "("}
 GIT_VALUE_OPTIONS = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace",
     "--super-prefix", "--exec-path", "--config-env",
 }
-# Global options that move git off the current repo/worktree (never needed: cwd is the repo root).
+# Global options that move git off the current repo/worktree.
 REPOSITION_OPTIONS = {"-C", "--git-dir", "--work-tree"}
+# Subcommands with no write/state-change mode under any flag or repo-local config: a repositioned
+# git running one of these is a harmless read (e.g. inspecting a sibling clone) and is allowed.
+# diff/log/show are deliberately excluded even though mostly read-only: they run the diff engine,
+# which can invoke an externally configured textconv/ext-diff/gpg program from the TARGET repo's
+# own .gitattributes/config with no special flag required, so their safety isn't provable from the
+# command line alone. Everything not listed is denied -- an unknown or write-capable subcommand
+# outside the guarded cwd would bypass this guard's assumptions.
+REPOSITION_READONLY = {
+    "status", "blame", "grep", "cat-file", "ls-files", "ls-tree",
+    "rev-parse", "rev-list", "merge-base", "describe", "shortlog",
+}
+# Long-option flags on an otherwise-readonly subcommand that still run an external helper
+# (grep/cat-file --textconv; cat-file --filters run a configured external driver). Matched via
+# _is_unsafe_reposition_arg, which also catches git's unambiguous-abbreviation form (e.g.
+# `--textcon`), not just the exact spelling.
+REPOSITION_UNSAFE_LONG = ("--open-files-in-pager", "--filters", "--textconv")
+
+
+def _is_unsafe_reposition_arg(arg):
+    """True for -O (grep's short --open-files-in-pager, incl. glued forms like -Ovim) or any
+    (possibly abbreviated, per git's unambiguous long-option prefix matching) form of a
+    REPOSITION_UNSAFE_LONG flag."""
+    if arg.startswith("-O"):
+        return True
+    name = arg.split("=", 1)[0]
+    return name.startswith("--") and len(name) >= 3 and any(
+        long_opt.startswith(name) for long_opt in REPOSITION_UNSAFE_LONG
+    )
 
 
 def _has_shell_syntax(text):
@@ -121,7 +154,7 @@ def _mentions_target(tokens):
         if (
             index == 0
             or not _is_plain_git(token)
-            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
+            or any(item in WRAPPERS or item in CONTROL_OR_WRAPPER for item in prefix)
             or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
         ):
             return True
@@ -153,21 +186,35 @@ def _mentions_reset(tokens):
         if (
             index == 0
             or not _is_plain_git(token)
-            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
+            or any(item in WRAPPERS or item in CONTROL_OR_WRAPPER for item in prefix)
             or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
         ):
             return True
     return False
 
 
-def _mentions_repositioned_git(tokens):
-    """True when a git invocation uses a global -C/--git-dir/--work-tree reposition.
+def _mentions_repositioned_git(command, tokens):
+    """True when a repositioned git invocation is not a provably read-only subcommand.
 
-    Mirrors _mentions_target's prefix analysis. The settings `git -C *` deny only matches the
-    command start, so this closes the chained/prefixed form (`cd /f && git -C <abs> status`). A
-    subcommand-level -C (`git log -C`) sits after the subcommand, not in the global run, so it is
-    not matched.
+    The readonly carve-out only applies when the WHOLE command has no shell syntax
+    (_has_shell_syntax: no `;`/`&`/`|`/`<`/`>`/newline/`$`/backtick outside quotes) and no
+    parens -- this rules out a second, differently-reachable git invocation hiding after a
+    separator this scan wouldn't recognize, rather than trying to enumerate every separator
+    spelling. Under that gate, tokens after the subcommand cannot belong to another command, so
+    they are scanned to the end via _is_unsafe_reposition_arg with no separate boundary needed.
+
+    Unlike _mentions_target/_mentions_reset, a repositioned invocation that fails the carve-out is
+    denied UNCONDITIONALLY, without the prefix/wrapper reachability analysis those two use: that
+    analysis exists to avoid denying a git mention inside unrelated text (e.g. an echo argument),
+    but it means any prefix word it doesn't recognize (a shell keyword such as `!`/`coproc`, or one
+    not yet added to WRAPPERS/CONTROL_OR_WRAPPER) silently escapes deny. A repositioned git is
+    already a deliberate, argument-bearing invocation (not incidental text), so erring toward
+    denying it outright is safe-side and closes this class of bypass without enumerating every
+    possible shell keyword. A missing or substituted subcommand is not provably read-only and is
+    denied. A subcommand-level -C (`git log -C`) sits after the subcommand, not in the global run,
+    so it is not matched.
     """
+    single_invocation = not _has_shell_syntax(command) and "(" not in tokens and ")" not in tokens
     for index, token in enumerate(tokens):
         if not _is_git(token):
             continue
@@ -182,14 +229,11 @@ def _mentions_repositioned_git(tokens):
                 pos += 1
         if not repositioned:
             continue
-        prefix = tokens[:index]
-        if (
-            index == 0
-            or not _is_plain_git(token)
-            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
-            or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
-        ):
-            return True
+        if single_invocation and pos < len(tokens) and tokens[pos] in REPOSITION_READONLY:
+            rest = tokens[pos + 1:]
+            if not any(_is_unsafe_reposition_arg(arg) for arg in rest):
+                continue
+        return True
     return False
 
 
@@ -247,16 +291,29 @@ def classify(command, root=None):
         tokens = _tokens(command)
     except ValueError:
         if re.search(r"\bgit\b", command) and re.search(r"\breset\b", command):
-            return "deny", "git reset is denied; ask the user to add an allow rule if truly needed"
+            return "deny", (
+                "git reset is denied; ask the user to add an allow rule if truly needed. Do not "
+                "work around this by using a plumbing equivalent (update-ref, symbolic-ref, "
+                "checkout-index, or editing .git/ directly) or any other command."
+            )
         if re.search(r"\bgit\b", command) and TARGET_WORD.search(command):
             return "deny", "Unparseable git add/commit; retry with the regular form"
         return "pass", None
 
     if _mentions_reset(tokens):
-        return "deny", "git reset is denied; ask the user to add an allow rule if truly needed"
+        return "deny", (
+            "git reset is denied; ask the user to add an allow rule if truly needed. Do not work "
+            "around this by using a plumbing equivalent (update-ref, symbolic-ref, checkout-index, "
+            "or editing .git/ directly) or any other command."
+        )
 
-    if _mentions_repositioned_git(tokens):
-        return "deny", "Run git from the repository cwd; drop -C/--git-dir/--work-tree"
+    if _mentions_repositioned_git(command, tokens):
+        return "deny", (
+            "Repositioned git (-C/--git-dir/--work-tree) is allowed only for read-only "
+            "subcommands. Do not work around this by cd-ing into that other repository (or any "
+            "other method) to run the write command there instead -- run write commands only in "
+            "THIS repository's cwd."
+        )
 
     plain_target = (
         len(tokens) >= 2
@@ -358,11 +415,35 @@ def selftest():
         ("echo git reset", "pass"),
         ("echo 'git reset --hard'", "pass"),
         ("cd /f && git -C /f/Repositories/Skyflash/mmd-toolbox status --short", "deny"),
-        ("git -C repo status", "deny"),
-        ("git -C. status", "deny"),
-        ("git --git-dir=.git --work-tree=. status", "deny"),
-        ("git --work-tree /x status", "deny"),
-        ("VAR=x git -C repo status", "deny"),
+        ("git -C repo status", "pass"),
+        ("git -C. status", "pass"),
+        ("git -C ../other-clone log --oneline -5", "deny"),
+        ("git -C ../other-clone diff", "deny"),
+        ("git -C ../other-clone show HEAD", "deny"),
+        ("git --git-dir=.git --work-tree=. status", "pass"),
+        ("git --work-tree /x status", "pass"),
+        ("VAR=x git -C repo status", "pass"),
+        ("git -C repo push", "deny"),
+        ("git -C repo checkout main", "deny"),
+        ("git -C repo stash", "deny"),
+        ("git -C repo", "deny"),
+        ("git -C ../other grep --open-files-in-pager foo", "deny"),
+        ("git -C ../other grep -Ovim foo", "deny"),
+        ("git -C ../other grep --textconv foo", "deny"),
+        ("git -C ../other cat-file --filters HEAD:a.py", "deny"),
+        ("git -C ../other cat-file --textconv HEAD:a.py", "deny"),
+        ("git -C ../other cat-file --textcon HEAD:a.py", "deny"),
+        ("git -C ../other grep --filter=x foo", "deny"),
+        ("! git add a.py", "deny"),
+        ("coproc git commit -m 'x'", "deny"),
+        ("! git reset --hard", "deny"),
+        ("git -C ../other status & git -C ../other checkout main", "deny"),
+        ("git -C ../other status\ngit -C ../other checkout main", "deny"),
+        ("( git -C ../other checkout main )", "deny"),
+        ("! git -C ../other push", "deny"),
+        ("coproc git -C ../other checkout main", "deny"),
+        ("( git add a.py )", "deny"),
+        ("git status & git commit -m 'x'", "deny"),
         ("git log -C", "pass"),
         ("git -c user.name=x status", "pass"),
         ("echo git -C repo status", "pass"),

@@ -46,6 +46,8 @@ def main():
         reason = (
             "rm は常に deny します。同じ引数で python3 .claude/hooks/trash.py <path>... を"
             "使ってください(削除でなくOS標準のごみ箱へ送る可逆な代替です)。"
+            "os.remove/os.unlink/pathlib.Path.unlink・PowerShellのRemove-Item・find -delete等、"
+            "別の手段で同じ削除を回避して実行しないこと。"
         )
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",

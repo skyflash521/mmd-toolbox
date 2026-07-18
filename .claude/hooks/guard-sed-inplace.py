@@ -54,7 +54,11 @@ def main():
         return
     command = (data.get("tool_input") or {}).get("command") or ""
     if has_sed_inplace(command):
-        reason = "ファイルのインプレース書き換え(sed -i)は Edit ツールで行ってください。"
+        reason = (
+            "ファイルのインプレース書き換え(sed -i)は Edit ツールで行ってください。"
+            "awk -i inplace・perl -i・python -c での読み書き等、別の手段で同じ書き換えを"
+            "回避して実行しないこと。"
+        )
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
