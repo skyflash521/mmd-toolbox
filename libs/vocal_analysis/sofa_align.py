@@ -102,17 +102,44 @@ def _check_ascii_paths(work_dir: Path, config: SofaAlignerConfig) -> None:
             raise RecognitionError(f"{label}のパスに非ASCII文字が含まれています: {path}")
 
 
+def _check_paths_exist(config: SofaAlignerConfig) -> None:
+    """SOFA実行環境の各パスの実在と種別をSOFA起動前に検証する。
+
+    不正な場合は、どのパスが・なぜ不正か(存在しない/期待する種別でない)を明示した
+    `RecognitionError` にする(音声前段の外部依存の実行失敗として利用先が分類・提示できる
+    形にするため。未検証のまま subprocess を起動すると、パス情報を持たない FileNotFoundError が
+    想定外エラー扱いで漏れる)。
+    """
+    for label, path, check, kind in (
+        ("sofa_python", config.sofa_python, Path.is_file, "ファイル"),
+        ("sofa_root", config.sofa_root, Path.is_dir, "ディレクトリ"),
+        ("sofa_root配下のinfer.py", config.sofa_root / "infer.py", Path.is_file, "ファイル"),
+        ("checkpoint_path", config.checkpoint_path, Path.is_file, "ファイル"),
+    ):
+        if not check(path):
+            reason = "存在しません" if not path.exists() else f"{kind}ではありません"
+            raise RecognitionError(f"SOFAの実行環境パスが不正です: {label}={path}({reason})")
+
+
 def _run_sofa_subprocess(basenames: list[str], config: SofaAlignerConfig, work_dir: Path) -> None:
     """infer.pyを1回呼ぶ。タイムアウト・異常終了・出力欠落/空はいずれも RecognitionError にする。"""
     cmd = _build_sofa_command(config, work_dir)
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(config.sofa_root),
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        **_popen_kwargs(),
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(config.sofa_root),
+            encoding="utf-8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **_popen_kwargs(),
+        )
+    except FileNotFoundError as e:
+        # 事前検証(_check_paths_exist)後にパスが消える競合等の受け皿。起動失敗も外部依存の
+        # 実行失敗として扱い、候補パスを明示する。
+        raise RecognitionError(
+            "SOFAサブプロセスを起動できませんでした(実行ファイルまたは作業ディレクトリが"
+            f"見つかりません): sofa_python={config.sofa_python}, sofa_root={config.sofa_root}"
+        ) from e
     try:
         _, stderr = proc.communicate(timeout=config.timeout_sec)
     except subprocess.TimeoutExpired as e:
@@ -221,8 +248,9 @@ def _align_batch(
     """targetsをまとめて1回のSOFA呼び出しで処理し、basenameごとの生セグメント列を返す。
 
     Segment契約の検証・IPA写像は含まない(呼び出し元が別途`_validate_and_normalize_segments`等で
-    行う)。非ASCIIパスの拒否(`_check_ascii_paths`)は本関数がSOFA起動前に行う。targetsが空なら
-    サブプロセスを起動せず空の結果を返す。
+    行う)。非ASCIIパスの拒否(`_check_ascii_paths`)と実行環境パスの実在検証
+    (`_check_paths_exist`)は本関数がSOFA起動前に行う。targetsが空ならサブプロセスを起動せず
+    空の結果を返す。
     """
     if not targets:
         return {}
@@ -230,6 +258,7 @@ def _align_batch(
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
         _check_ascii_paths(work_dir, config)
+        _check_paths_exist(config)
         basenames = _write_sofa_inputs(work_dir, targets)
         _run_sofa_subprocess(basenames, config, work_dir)
         return {

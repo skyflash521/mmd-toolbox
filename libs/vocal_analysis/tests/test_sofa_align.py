@@ -15,12 +15,21 @@ import pytest
 
 
 def _make_config(tmp_path):
+    """SOFA起動前の実在検証(_check_paths_exist)を通る実在パスの構成を作る。"""
     from vocal_analysis import SofaAlignerConfig
 
+    sofa_python = tmp_path / "sofa-venv" / "python"
+    sofa_root = tmp_path / "SOFA"
+    checkpoint_path = tmp_path / "checkpoint.ckpt"
+    sofa_python.parent.mkdir(parents=True, exist_ok=True)
+    sofa_python.write_text("", encoding="utf-8")
+    sofa_root.mkdir(exist_ok=True)
+    (sofa_root / "infer.py").write_text("", encoding="utf-8")
+    checkpoint_path.write_text("", encoding="utf-8")
     return SofaAlignerConfig(
-        sofa_python=tmp_path / "sofa-venv" / "python",
-        sofa_root=tmp_path / "SOFA",
-        checkpoint_path=tmp_path / "checkpoint.ckpt",
+        sofa_python=sofa_python,
+        sofa_root=sofa_root,
+        checkpoint_path=checkpoint_path,
     )
 
 
@@ -188,6 +197,102 @@ def test_align_batch_empty_targets_does_not_start_subprocess(tmp_path, monkeypat
     monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
 
     assert sofa_align._align_batch([], config) == {}
+
+
+@pytest.mark.parametrize(
+    "remove, expected_label",
+    [
+        ("sofa_python", "sofa_python"),
+        ("sofa_root", "sofa_root"),
+        ("infer_py", "sofa_root配下のinfer.py"),
+        ("checkpoint", "checkpoint_path"),
+    ],
+)
+def test_align_batch_missing_environment_path_raises_recognition_error_with_path(
+    tmp_path, monkeypatch, remove, expected_label
+):
+    """SOFA実行環境のパスが存在しない場合、サブプロセスを起動せず、どのパスが無いかを明示した
+    RecognitionErrorにする(利用先が外部依存の実行失敗として分類・提示できる形)。"""
+    import shutil
+
+    from vocal_analysis import sofa_align
+    from vocal_analysis.recognizer import RecognitionError
+
+    config = _make_config(tmp_path)
+    if remove == "sofa_python":
+        config.sofa_python.unlink()
+    elif remove == "sofa_root":
+        shutil.rmtree(config.sofa_root)
+    elif remove == "infer_py":
+        (config.sofa_root / "infer.py").unlink()
+    else:
+        config.checkpoint_path.unlink()
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("実在検証で弾かれるべき構成でサブプロセスを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError, match="SOFAの実行環境パスが不正です") as exc_info:
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+    assert expected_label in str(exc_info.value)
+    assert "存在しません" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "target, expected_reason",
+    [
+        ("sofa_python_is_dir", "ファイルではありません"),
+        ("sofa_root_is_file", "ディレクトリではありません"),
+    ],
+)
+def test_align_batch_wrong_kind_environment_path_raises_recognition_error_with_reason(
+    tmp_path, monkeypatch, target, expected_reason
+):
+    """パスは存在するが期待する種別でない場合(sofa_pythonにディレクトリ等)、
+    「存在しません」ではなく種別の不一致を理由として明示する。"""
+    import shutil
+
+    from vocal_analysis import sofa_align
+    from vocal_analysis.recognizer import RecognitionError
+
+    config = _make_config(tmp_path)
+    if target == "sofa_python_is_dir":
+        config.sofa_python.unlink()
+        config.sofa_python.mkdir()
+    else:
+        shutil.rmtree(config.sofa_root)
+        config.sofa_root.write_text("", encoding="utf-8")
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("種別検証で弾かれるべき構成でサブプロセスを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError, match="SOFAの実行環境パスが不正です") as exc_info:
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+    assert expected_reason in str(exc_info.value)
+
+
+def test_align_batch_popen_file_not_found_raises_recognition_error(tmp_path, monkeypatch):
+    """事前検証の後にパスが消える競合等でPopen自体がFileNotFoundErrorを送出した場合も、
+    未捕捉例外にせず候補パスを明示したRecognitionErrorへ包む。"""
+    from vocal_analysis import sofa_align
+    from vocal_analysis.recognizer import RecognitionError
+
+    config = _make_config(tmp_path)
+
+    def raising_popen(cmd, **kwargs):
+        raise FileNotFoundError(2, "指定されたファイルが見つかりません")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", raising_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError, match="SOFAサブプロセスを起動できませんでした") as exc_info:
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+    assert str(config.sofa_python) in str(exc_info.value)
 
 
 def test_align_batch_nonzero_exit_code_raises_recognition_error(tmp_path, monkeypatch):
