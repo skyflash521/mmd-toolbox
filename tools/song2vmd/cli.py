@@ -179,7 +179,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("input", nargs="?", help="入力音声ファイル(wav/mp3等)")
     p.add_argument("-o", "--output", help="出力VMD(既定: <入力名>.vmd)")
     p.add_argument("--overwrite", action="store_true",
-                   help="出力先が入力と同一パスになる指定を許可する(別パスの既存ファイルは常に上書き)")
+                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
     p.add_argument("--model-name", dest="model_name", type=_model_name,
                    default=f"song2vmd {__version__}",
                    help="VMDに格納するモデル名(最大20バイト・Shift-JIS)")
@@ -359,16 +359,6 @@ def _default_output(input_path: str) -> str:
     return base + ".vmd"
 
 
-def _same_path(a: str, b: str) -> bool:
-    """2 パスが同一ファイルを指すか。未存在でも realpath 比較で判定する。"""
-    # 実ファイルが同一かを優先(symlink・大小無視 FS でも inode で一致判定)。出力先が
-    # 未存在だと samefile が立たないので、symlink 解決した realpath で比較する。
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return os.path.realpath(a) == os.path.realpath(b)
-
-
 def main(argv=None) -> int:
     """CLI エントリポイント。終了コードを返す(0/1/2/3/4/130)。"""
     # 人間向け標準エラーはロケール符号化で表せない文字でも UnicodeEncodeError で落とさない。
@@ -482,11 +472,10 @@ def _run(args, emitter, fail) -> int:
     """引数解析済みの本体(検証 → パイプライン実行 → 空実行/書き出し)。失敗は fail() で終端する。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
-    # 上書きガード: 出力先が入力と同一パスになる指定だけを --overwrite 無しで拒否する。
-    # 別パスの既存出力ファイルは対象にしない。同一パス判定を存在確認より先に置く(未存在でも入力上書きは弾く)。
-    if not args.overwrite and _same_path(output, args.input):
-        return fail("output_overwrites_input",
-                    f"出力先が入力と同一パスです(--overwrite が必要): {output}", 2, field="--output")
+    # 上書きガード: 出力先に既存ファイルがある場合は --overwrite 無しで拒否する。
+    if not args.overwrite and os.path.exists(output):
+        return fail("output_exists",
+                    f"出力先に既存ファイルがあります(--overwrite が必要): {output}", 2, field="--output")
 
     # --recognizer-model-id 未指定なのに --recognizer-model-revision だけを指定するのは対象が無く無意味。
     if args.recognizer_model_id is None and args.recognizer_model_revision is not None:

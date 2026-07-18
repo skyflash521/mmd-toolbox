@@ -358,10 +358,11 @@ def test_overwrite_guard_blocks_input_overwrite(tmp_path):
     assert cli.main([src, "-o", src, "--dry-run"]) == 2
 
 
-def test_overwrite_guard_blocks_same_path_even_when_missing(tmp_path):
-    """入力同一パス指定は、そのパスが未存在でも上書きガード(引数エラー)で弾く。"""
+def test_overwrite_guard_allows_missing_same_path(tmp_path):
+    """入力・出力が同一の未存在パスなら、出力先に既存ファイルが無いためガードは発火しない
+    (後続の入力検証が別途コード1/4等で弾く)。"""
     missing = str(tmp_path / "missing.wav")
-    assert cli.main([missing, "-o", missing, "--dry-run"]) == 2
+    assert cli.main([missing, "-o", missing, "--dry-run"]) != 2
 
 
 def test_overwrite_flag_allows_input_overwrite(tmp_path):
@@ -369,11 +370,17 @@ def test_overwrite_flag_allows_input_overwrite(tmp_path):
     assert cli.main([src, "-o", src, "--overwrite", "--dry-run"]) == 0
 
 
-def test_existing_separate_output_does_not_require_overwrite(tmp_path):
-    """保護対象は入力ファイルに限る。別パスの既存出力ファイルはガード対象外。"""
+def test_existing_separate_output_requires_overwrite(tmp_path):
+    """保護対象は出力先の既存ファイル全般。入力と別パスの既存出力もガード対象。"""
     src = _touch(tmp_path / "in.wav")
     out = _touch(tmp_path / "out.vmd")  # 既存だが入力とは別パス
-    assert cli.main([src, "-o", out, "--dry-run"]) == 0
+    assert cli.main([src, "-o", out, "--dry-run"]) == 2
+
+
+def test_existing_separate_output_allowed_with_overwrite(tmp_path):
+    src = _touch(tmp_path / "in.wav")
+    out = _touch(tmp_path / "out.vmd")  # 既存だが入力とは別パス
+    assert cli.main([src, "-o", out, "--overwrite", "--dry-run"]) == 0
 
 
 # --- メタ操作(--version・--help)--------------------------------------------

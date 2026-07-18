@@ -6,7 +6,7 @@
 
 本モジュールは骨格(--version/--machine/--describe/--quiet フラグ・MachineArgumentParser 切替・
 emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と、CLI 引数解析段の構造化エラー
-経路(bad_argument・output_overwrites_input)を対象にする。音声読み込み以降の成功経路のイベント
+経路(bad_argument・output_exists)を対象にする。音声読み込み以降の成功経路のイベント
 (progress/warning/result mode:"run"/"inspect")・中断は音声処理パイプラインの実装後に検証する。
 
 機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。
@@ -101,12 +101,22 @@ def test_machine_error_bad_argument_unknown_style(tmp_path, capsysbinary):
 # --- 上書きガード ------------------------------------------------------------
 
 
-def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
+def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     rc = cli.main([str(src), "-o", str(src), "--machine"])
     assert rc == 2
     e = machine_error(capsysbinary)
-    assert e["code"] == "output_overwrites_input" and e["field"] == "--output" and e["exit_code"] == 2
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
+
+
+def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
+    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
+    src = _touch(tmp_path / "in.wav")
+    out = _touch(tmp_path / "out.vmd")
+    rc = cli.main([str(src), "-o", str(out), "--machine"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
 
 
 # --- チャネル固定(JSON Lines・LF・UTF-8)------------------------------------
