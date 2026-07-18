@@ -98,7 +98,7 @@ song2vpr INPUT [options]
 |---|---:|---|
 | `INPUT` | 必須 | 入力音声ファイル |
 | `-o, --output PATH` | `<入力名>.vpr` | 出力 vpr |
-| `--overwrite` | off | 入力と同一パスへの出力を許可する(上書きガードの解除。5章) |
+| `--overwrite` | off | 出力先の既存ファイルへの上書きを許可する(上書きガードの解除。5章) |
 | `--separate-vocals MODE` | `auto` | ボーカル分離 `auto` / `always` / `never`(vocal_analysis へ渡す) |
 | `--recognizer NAME` | vocal_analysis の既定アダプタ | 音素認識バックエンドの選択(vocal_analysis へ渡す)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3。採用構成の確定も同節が正本) |
 | `--tempo BPM` | `120` | テンポ(BPM)。未指定時は既定 120 で仮置きし警告を出す(自動推定は将来。7.3) |
@@ -148,9 +148,9 @@ song2vpr INPUT [options]
 - 出力 vpr の書き出しは `vpr` に委譲する。`song2vpr` は vpr のバイナリ/直列化構造を直接扱わない。
 - 音声前段(分離・認識)は `vocal_analysis` の共有出力を使う。利用者は `song2vpr INPUT` の1コマンドだけを実行し、
   外部ツールは内部で呼ばれる。
-- **上書きガード**: 出力先が入力と同一パスになる指定だけを、`--overwrite` が無い限り拒否し、書かずに
-  引数エラー(終了コード2。8章)で終える。保護対象は入力ファイルに限り、別パスの既存ファイルへの出力は
-  ガードしない([CLI インターフェース規約](../../docs/conventions/cli-interface.md) §6 の全ツール共通の意味)。
+- **上書きガード**: 出力先パスに既存ファイルがある場合、`--overwrite` が無い限り拒否し、書かずに
+  引数エラー(終了コード2。8章)で終える。保護対象は出力先の既存ファイル全般で、入力ファイルと同一パスか
+  どうかは問わない([CLI インターフェース規約](../../docs/conventions/cli-interface.md) §6 の全ツール共通の意味)。
 - **出力の原子性**: vpr は一時ファイルへ書き切ってから最終パスへ置換する(書き出し自体は `vpr` へ委譲し、
   一時パスへの書き出しと最終パスへの置換は `song2vpr` が行う)。途中終了で中途半端な出力ファイルを残さない
   (中断は9章)。
@@ -331,7 +331,7 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 |---|---|---|---|
 | 入力を音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
 | 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出) | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`) | 2 |
-| 出力先が入力と同一パス・`--overwrite` 未指定(5章) | `output_overwrites_input` | `"--output"` | 2 |
+| 出力先に既存ファイルがある・`--overwrite` 未指定(5章) | `output_exists` | `"--output"` | 2 |
 | `--lyrics` のファイルを読めない | `lyrics_unreadable` | `"--lyrics"`(+ `path`) | 2 |
 | 出力書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"`(+ `path`) | 3 |
 | 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない(vocal_analysis.md §3) | `decoder_missing` | `"input"` | 4 |
