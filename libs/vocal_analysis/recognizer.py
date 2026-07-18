@@ -1151,11 +1151,21 @@ def _prefetch_with_progress(repo_id: str, revision: str | None, on_progress: Cal
     state = {"shown": False}
 
     class _RelayTqdm(hf_tqdm):
+        # 表示が無効化されたバー(非TTY等)では tqdm の __init__ が早期 return し self.unit が
+        # 未設定・self.n も update() で進まないため、tqdm 内部状態に依存せず、生成時引数の unit と
+        # 自前の累積カウンタで中継する。self.total は無効化時も設定され、snapshot_download が
+        # バー生成後に加算更新するため、都度読む。
+        def __init__(self, *args, **kwargs):
+            self._relay_unit = kwargs.get("unit")
+            self._relay_n = kwargs.get("initial") or 0
+            super().__init__(*args, **kwargs)
+
         def update(self, n=1):
             result = super().update(n)
-            if self.unit == "B" and self.total:
+            if self._relay_unit == "B" and self.total:
+                self._relay_n += n or 0
                 state["shown"] = True
-                percent = min(100, int(self.n * 100 / self.total))
+                percent = min(100, int(self._relay_n * 100 / self.total))
                 on_progress(f"ダウンロード中: {repo_id} {percent}%")
             return result
 
