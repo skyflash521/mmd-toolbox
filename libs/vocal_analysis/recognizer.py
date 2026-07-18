@@ -1193,11 +1193,22 @@ def _select_device() -> str:
 _content_recognizer_pipeline_cache: tuple[ContentRecognizerModel, object] | None = None
 
 
+# 事前フェッチの取得対象から除くファイルのパターン。本パイプラインのロード(PyTorchバックエンドの
+# transformers)が参照しない別フレームワーク・別ランタイム向けの重みファイルで、サイズが大きい
+# (例: openai/whisper-medium では TensorFlow(h5)・Flax(msgpack)の重みだけで約6GB)ため、
+# 初回ダウンロードの所要時間・ディスク消費を抑える。PyTorch向けの重み(safetensors・bin)や
+# 設定・トークナイザのファイルは除外しない。
+_PREFETCH_IGNORE_PATTERNS = ["*.h5", "*.msgpack", "*.tflite", "*.onnx", "*.ot", "*.mlmodel"]
+
+
 def _hf_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
     """huggingface_hub.snapshot_download への薄いラッパー(モンキーパッチの受け口)。"""
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(repo_id, revision=revision, tqdm_class=tqdm_class)
+    return snapshot_download(
+        repo_id, revision=revision, tqdm_class=tqdm_class,
+        ignore_patterns=_PREFETCH_IGNORE_PATTERNS,
+    )
 
 
 def _transformers_pipeline(*args, **kwargs):
