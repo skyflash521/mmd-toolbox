@@ -82,7 +82,7 @@ mocapvmd <入力ファイル名>.vmd [オプション]
 |---|---:|---|
 | `<入力ファイル名>` | 必須 | 入力VMD |
 | `-o, --output PATH` | `<入力ファイル名>_mocap.vmd` | 出力VMD |
-| `--overwrite` | off | 入力と同一パスへの出力を許可 |
+| `--overwrite` | off | 出力先の既存ファイルへの上書きを許可 |
 | `--preset NAME` | `medium` | キーフレーム圧縮の許容誤差プリセット(速度観点)`slower` / `slow` / `medium` / `fast` / `faster`。種別スケールの基準値(5.3)。本ツール唯一の名前付きプリセット |
 | `--clean-strength X` | `1.0` | ノイズ軽減の効き量の倍率(ブレンド率に掛ける。0で無加工相当、上げるほど強く平準化する。窓幅は据え置き)。5.2 |
 | `--denoise` | on | ノイズ軽減を有効化 |
@@ -483,7 +483,7 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 | argparse 検出(未知オプション・型エラー・choices 外・positional 欠落)、および解析後の値検証(`--clean-strength` の非有限/負・`--foot-slide-suppression` の範囲外/非有限・`--reduce-error-bone-pos`/`--reduce-error-bone-rot` の非有限/負) | `bad_argument` | argparse が示す引数名、値検証は該当オプション名 | 2 |
 | 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 2 |
 | `--pmx` パスが不在・通常ファイルでない(pose 方式時) | `pmx_not_file` | `"--pmx"` | 2 |
-| 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
+| 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | 入力が VMD でない・破損 | `not_vmd` | `"input"` | 1 |
 | ボーン値の非有限・ゼロノルム quaternion | `invalid_bone_values` | `"input"` | 1 |
 | PMX 形式不正(`PmxFormatError`) | `not_pmx` | `"--pmx"` | 1 |

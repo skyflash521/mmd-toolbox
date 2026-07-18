@@ -243,13 +243,25 @@ def test_machine_error_pmx_not_file(tmp_path, capsysbinary):
     assert e["code"] == "pmx_not_file" and e["field"] == "--pmx" and e["exit_code"] == 2
 
 
-def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
+def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     _ramp_doc(src)
     rc = cli.main([str(src), "-o", str(src), "--machine"])
     assert rc == 2
     e = machine_error(capsysbinary)
-    assert e["code"] == "output_overwrites_input" and e["field"] == "--output"
+    assert e["code"] == "output_exists" and e["field"] == "--output"
+
+
+def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
+    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
+    src = tmp_path / "in.vmd"
+    _ramp_doc(src)
+    out = tmp_path / "out.vmd"
+    out.write_bytes(b"old content")
+    rc = cli.main([str(src), "-o", str(out), "--machine"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "output_exists" and e["field"] == "--output"
 
 
 def test_machine_error_not_vmd(tmp_path, capsysbinary):

@@ -135,8 +135,7 @@ def test_overwrite_guard_blocks_same_path(tmp_path):
 
 
 def test_overwrite_guard_via_symlink(tmp_path):
-    # 入力へのシンボリックリンク経由の出力も「同一ファイル」としてガードが効く。
-    # 文字列比較でなく samefile/realpath で判定することの検証。
+    # シンボリックリンク経由の出力先も、実体が存在するファイルとしてガードが効く。
     src = tmp_path / "in.vmd"
     _full_doc(src)
     before = src.read_bytes()
@@ -167,14 +166,23 @@ def test_overwrite_allows_same_path(tmp_path):
     assert len(out_doc.bone) >= 1
 
 
-def test_existing_distinct_output_allowed(tmp_path):
-    # 上書きガードは「入力と同一パス」限定。入力と別の既存ファイルへの出力は --overwrite なしでも許可
-    # (全既存出力を拒否する実装を排除)。
+def test_existing_distinct_output_blocked_without_overwrite(tmp_path):
+    # 別パスの既存出力も --overwrite 無しでは上書きガードで拒否する。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
     out.write_bytes(b"old content")
     code = cli.main([str(src), "-o", str(out)])
+    assert code == 2
+    assert out.read_bytes() == b"old content"
+
+
+def test_existing_distinct_output_allowed_with_overwrite(tmp_path):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _full_doc(src)
+    out.write_bytes(b"old content")
+    code = cli.main([str(src), "-o", str(out), "--overwrite"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -633,7 +641,7 @@ def test_reduce_error_override_validation(tmp_path):
     out = tmp_path / "out.vmd"
     _ramp_doc(src)
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "0.05"]) == 0
-    assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-rot", "0.5"]) == 0  # 有効な回転許容値は受理
+    assert cli.main([str(src), "-o", str(out), "--overwrite", "--reduce-error-bone-rot", "0.5"]) == 0  # 有効な回転許容値は受理
     assert cli.main([str(src), "--reduce-error-bone-pos", "-1"]) == 2  # 負の許容値は引数エラー
     assert cli.main([str(src), "--reduce-error-bone-rot", "nan"]) == 2  # 非有限は引数エラー
 

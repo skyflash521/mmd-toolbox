@@ -55,7 +55,7 @@ def _build_parser(machine=False):
     p.add_argument("input", nargs="?", help="入力VMDファイル")
     p.add_argument("-o", "--output", help="出力先(既定: <入力名>_mocap.vmd)")
     p.add_argument("--overwrite", action="store_true",
-                   help="入力と同一パスへの出力を許可する(未指定で同一パスならエラー)")
+                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="medium",
                    help="キーフレーム圧縮の許容誤差プリセット(速度観点): slower/slow/medium/fast/faster。種別スケールの基準値")
     p.add_argument("--clean-strength", dest="clean_strength", type=float, default=1.0,
@@ -170,13 +170,6 @@ def _describe_presets():
 def _default_output(input_path):
     base, _ = os.path.splitext(input_path)
     return base + "_mocap.vmd"
-
-
-def _same_path(a, b):
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return os.path.realpath(a) == os.path.realpath(b)
 
 
 def _surface_warnings(read_warnings, machine, emitter):
@@ -465,11 +458,11 @@ def _run(args, machine, emitter, fail):
             print(_list_bones_text(doc.bone))
         return 0
 
-    # 出力先・上書きガード。入力と同一パスへの出力は --overwrite が必要。
+    # 出力先・上書きガード。出力先に既存ファイルがあれば --overwrite が必要。
     output = args.output if args.output is not None else _default_output(args.input)
-    if not args.overwrite and _same_path(output, args.input):
-        return fail("output_overwrites_input",
-                    f"出力先が入力と同一パス。上書きには --overwrite が必要: {output}",
+    if not args.overwrite and os.path.exists(output):
+        return fail("output_exists",
+                    f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}",
                     2, field="--output")
 
     # 疎化の許容誤差 override は非有限・負を引数エラー(bad_argument)とする。
