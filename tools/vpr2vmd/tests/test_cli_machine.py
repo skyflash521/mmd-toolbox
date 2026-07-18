@@ -269,12 +269,22 @@ def test_machine_error_value_out_of_range(tmp_path, capsysbinary):
     assert e["code"] == "bad_argument" and e["field"] == "--open-max"
 
 
-def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
+def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = _touch(tmp_path / "in.vpr")
     rc = cli.main([src, "-o", src, "--machine"])
     assert rc == 2
     e = _machine_error(capsysbinary)
-    assert e["code"] == "output_overwrites_input" and e["field"] == "--output" and e["exit_code"] == 2
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
+
+
+def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
+    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
+    src = _touch(tmp_path / "in.vpr")
+    out = _touch(tmp_path / "out.vmd")
+    rc = cli.main([src, "-o", out, "--machine"])
+    assert rc == 2
+    e = _machine_error(capsysbinary)
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
 
 
 def test_machine_error_valley_bounds_inverted(tmp_path, capsysbinary):

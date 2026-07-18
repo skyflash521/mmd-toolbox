@@ -138,21 +138,21 @@ def test_missing_input_file_is_input_error(tmp_path):
     assert cli.main([missing]) == 1
 
 
-def test_existing_other_path_output_allowed_without_overwrite(tmp_path):
-    """別パスの既存出力は --overwrite 無しでも上書きを許す(上書きガードを入力同一パスのみへ統一)。"""
+def test_existing_other_path_output_blocked_without_overwrite(tmp_path):
+    """別パスの既存出力も --overwrite 無しでは上書きガードで拒否する。"""
     src = _touch(tmp_path / "in.vpr")
     out = _touch(tmp_path / "out.vmd")  # 既存出力(入力とは別パス)
-    assert cli.main([src, "-o", out, "--dry-run"]) == 0
+    assert cli.main([src, "-o", out, "--dry-run"]) == 2
 
 
-def test_existing_other_path_output_overwritten_on_normal_run(tmp_path):
-    """別パスの既存出力を通常実行(--overwrite 無し)で実際に上書きし、終了コード 0 で書き込むこと。"""
+def test_existing_other_path_output_not_overwritten_without_overwrite(tmp_path):
+    """別パスの既存出力を通常実行(--overwrite 無し)で書き換えないこと。"""
     src = _touch(tmp_path / "in.vpr")
     out = tmp_path / "out.vmd"
     out.write_bytes(b"stale")  # 既存の別パス出力(入力とは別パス)
     rc = cli.main([src, "-o", str(out)])
-    assert rc == 0
-    assert out.read_bytes() != b"stale"  # ガードに阻まれず上書きされた
+    assert rc == 2
+    assert out.read_bytes() == b"stale"  # ガードに阻まれ上書きされていない
 
 
 def test_overwrite_allows_existing_output(tmp_path):
@@ -168,13 +168,12 @@ def test_overwrite_guard_blocks_input_overwrite(tmp_path):
     assert cli.main([src, "-o", src, "--dry-run"]) == 2
 
 
-def test_overwrite_guard_blocks_same_path_even_when_missing(tmp_path):
-    """入力同一パス指定は、そのパスが未存在でも上書きガード(引数エラー)で弾く。
-
-    存在確認(入力不正=1)より同一パス判定を先に行うため、未存在でも 1 でなく 2 になる。
+def test_missing_same_path_output_is_input_error_not_overwrite_guard(tmp_path):
+    """入力・出力が同一の未存在パスなら、出力先に既存ファイルが無いため上書きガードは発火せず、
+    後続の入力存在確認で入力不正(コード1)になる。
     """
     missing = str(tmp_path / "missing.vpr")
-    assert cli.main([missing, "-o", missing, "--dry-run"]) == 2
+    assert cli.main([missing, "-o", missing, "--dry-run"]) == 1
 
 
 def test_model_name_over_20_bytes_is_arg_error(tmp_path):
@@ -227,11 +226,17 @@ def test_model_name_at_20_byte_limit_is_accepted(tmp_path):
     assert cli.main([src, "--model-name", "x" * 20, "--dry-run"]) == 0
 
 
-def test_existing_default_output_allowed_without_overwrite(tmp_path):
-    """既定出力 <入力名>.vmd が既存でも、別パス扱いで -o 無し・--overwrite 無しで上書きを許す。"""
+def test_existing_default_output_blocked_without_overwrite(tmp_path):
+    """既定出力 <入力名>.vmd が既存なら、-o 無し・--overwrite 無しは上書きガードで拒否する。"""
     src = _touch(tmp_path / "song.vpr")
-    _touch(tmp_path / "song.vmd")  # 既定出力が既に存在(入力とは別パス)
-    assert cli.main([src, "--dry-run"]) == 0
+    _touch(tmp_path / "song.vmd")  # 既定出力が既に存在
+    assert cli.main([src, "--dry-run"]) == 2
+
+
+def test_existing_default_output_allowed_with_overwrite(tmp_path):
+    src = _touch(tmp_path / "song.vpr")
+    _touch(tmp_path / "song.vmd")
+    assert cli.main([src, "--overwrite", "--dry-run"]) == 0
 
 
 def test_default_output_is_vmd_alongside_input(tmp_path):
@@ -440,8 +445,8 @@ def test_valley_inverted_reports_reason(tmp_path, capsys):
     _assert_error_line(capsys.readouterr().err)
 
 
-def test_output_overwrites_input_reports_reason(tmp_path, capsys):
-    """出力先が入力と同一パスは理由 1 行 + 終了コード 2(output_overwrites_input)。"""
+def test_output_exists_reports_reason(tmp_path, capsys):
+    """出力先に既存ファイルがあれば理由 1 行 + 終了コード 2(output_exists)。"""
     src = _touch(tmp_path / "in.vpr")
     rc = cli.main([src, "-o", src, "--dry-run"])
     assert rc == 2
