@@ -18,7 +18,7 @@ class PhonemeCategory(Enum):
 
     VOWEL = "vowel"  # 母音。対応する MouthShape は vowel_shape() で得る
     BILABIAL = "bilabial"  # 両唇閉鎖(ま・ば・ぱ行の語頭)。MouthShape.BILABIAL へ
-    MORAIC_NASAL = "moraic_nasal"  # 撥音「ん」。MouthShape.N(--no-n-morph 時は無音)へ
+    MORAIC_NASAL = "moraic_nasal"  # 撥音。既定は無音、--n-morph 指定時は MouthShape.N(「ん」)へ
     GEMINATE_STOP = "geminate_stop"  # 促音「っ」(Q)。無音(閉口)へ
     CONTINUATION = "continuation"  # 継続/メリスマ(直前音の伸ばし)
     OTHER = "other"  # その他子音・未知。自前イベントを作らず協調調音/直前口形継続へ委ねる
@@ -38,7 +38,7 @@ _VOWEL_LETTER_SHAPES = {
 # p\(=φ、ふ の無声両唇摩擦音)は完全閉鎖でないため含めず、その他子音として後続母音「う」の口で見せる。
 _BILABIALS = {"m", "m'", "b", "b'", "p", "p'"}
 
-# 撥音「ん」(後続母音を持たない単独の鼻音)。X-SAMPA では N\(uvular nasal)。
+# 撥音(後続母音を持たない単独の鼻音)。X-SAMPA では N\(uvular nasal)。
 _MORAIC_NASALS = {"N\\"}
 
 # 促音「っ」。X-SAMPA では Q(日本語の特殊モーラ。閉鎖・詰まり)。

@@ -33,7 +33,7 @@ def _classify_gap(
 ) -> MouthShape:
     """母音間の短い間隙をレガート間隙(LEGATO_GAP)/休符(SILENCE)へ分類する。
 
-    前後の実効口形がともに母音的(母音・撥音「ん」)で、間隙が `legato_max_frames` 以下のときだけ
+    前後の実効口形がともに母音的(母音・「ん」)で、間隙が `legato_max_frames` 以下のときだけ
     `LEGATO_GAP`(谷で繋ぐ)。非母音的な隣接(両唇閉鎖・促音閉口・直前が閉口の継続など)・長い間隙・
     曲頭(直前口形なし `left_shape is None`)は `SILENCE`(完全閉口)。判定は確定済みの口形だけに依り、
     `lipsync` 側はこの分類結果を入力として受ける。
@@ -118,7 +118,7 @@ def build_mouth_events(
     `legato_max_frames` はレガート間隙と判定する間隙長の上限(視覚で詰める)。
 
     `open_by_note`(採用音符に整列した開き量列。`adopted_notes` と同長)を渡すと、その音符が生む
-    母音的口形イベント(母音・撥音「ん」)へ該当音符の開き量を刻印する。両唇閉鎖・無音(休符・促音・
+    母音的口形イベント(母音・「ん」)へ該当音符の開き量を刻印する。両唇閉鎖・無音(休符・促音・
     閉口継続)は閉口なので開き量を持たない(0)。継続(母音なし)の保持イベントも、保持口形が母音的なら
     その継続音符自身の開き量を刻印する。`open_by_note` が None なら全イベントの開き量は 0。
 
@@ -127,7 +127,7 @@ def build_mouth_events(
     (`non_event_symbols`)を併せて返す。
     """
     result: list[MouthEvent] = []
-    prev_held: MouthShape | None = None  # 直前の確定口形(母音/撥音「ん」/閉口)。継続が引き継ぐ。
+    prev_held: MouthShape | None = None  # 直前の確定口形(母音/「ん」/閉口)。継続が引き継ぐ。
     cursor = 0.0
     vowel_undetermined = 0
     non_event_symbols: Counter[str] = Counter()

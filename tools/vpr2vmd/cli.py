@@ -162,7 +162,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    help="VMD に格納するモデル名(最大 20 バイト・Shift-JIS)")
     p.add_argument("--style", choices=STYLE_NAMES, default="pop",
                    help="リップモーションスタイルプリセット(開き量レンジ・タイミング・誇張を切り替える)")
-    # --n-morph / --no-n-morph は既定 on の対。dest=n_morph を共有する。
+    # --n-morph / --no-n-morph は既定 off の対。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=False,
                    help="撥音に「ん」モーフを使う(既定 off)。--no-n-morph の対の明示形")
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
@@ -311,7 +311,7 @@ def _print_plan(args, output: str) -> None:
     print(f"output: {output}")
     print(f"track: {args.track if args.track is not None else '(先頭トラック)'}")
     print(f"style: {args.style}")
-    # 既定は撥音「ん」に「ん」モーフを使う(on)。--no-n-morph 指定時は無音へ倒す(off)。
+    # 既定は撥音を閉口へ倒す(off)。--n-morph 指定時のみ「ん」モーフを使う(on)。
     print(f"n-morph: {'on (撥音→ん)' if args.n_morph else 'off (撥音→無音)'}")
     print(f"model-name: {args.model_name!r}")
     print(f"open-max: {args.open_max if args.open_max is not None else '(プリセット値)'}")

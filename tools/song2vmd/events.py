@@ -2,11 +2,11 @@
 
 vocal_analysis の音素セグメント列(母音/子音/gap)と相対正規化RMSから、`lipsync` へ渡す口形イベント列
 (`MouthEvent`)と各モーラの開き量を確定する。適用順は次の6段階に従う:
-(1) IPA写像・両唇閉鎖判定・撥音「ん」判定、(2) gap解決・母音区間の無音補正、(3) 同母音連結、
+(1) IPA写像・両唇閉鎖判定・撥音判定、(2) gap解決・母音区間の無音補正、(3) 同母音連結、
 (4) 母音境界のRMSオンセット補正、(5) 低信頼・無声判定、(6) 先頭子音種別の付与。
 
 音素記号は採用構成(G2P強制アライメント)が実際に出力する記号に基づく:
-撥音「ん」は専用記号 ɴ、ま行/ば行/ぱ行頭子音は m/mʲ・b/bʲ・p/pʲ。
+撥音は専用記号 ɴ、ま行/ば行/ぱ行頭子音は m/mʲ・b/bʲ・p/pʲ。
 """
 
 import math
@@ -23,7 +23,7 @@ FRAME_RATE = 30.0  # 30fps基準。
 # 閉鎖しないため含めない。
 _BILABIAL_PHONEMES = frozenset({"m", "mʲ", "b", "bʲ", "p", "pʲ"})
 
-# 撥音「ん」専用の音素記号(採用構成ではG2Pの N に対応する ɴ)。頭子音の鼻音(n・ɲ・m・mʲ等)とは
+# 撥音専用の音素記号(採用構成ではG2Pの N に対応する ɴ)。頭子音の鼻音(n・ɲ・m・mʲ等)とは
 # 記号が分かれるため、後続母音の有無を観測しなくても記号だけで一意に判定できる。
 _MORAIC_NASAL_PHONEME = "ɴ"
 
@@ -107,7 +107,7 @@ class _Unit:
     letter: str | None = None  # "vowel" のみ意味を持つ(a/i/u/e/o)
     confidence: float | None = None  # "vowel" のみ意味を持つ
     consonant_ipa: str | None = None  # "vowel" のみ意味を持つ(先頭子音種別判定用)
-    # "vowel" のみ意味を持つ(開口減衰種別判定用)。直前の区切り(母音・gap・撥音「ん」・両唇閉鎖・
+    # "vowel" のみ意味を持つ(開口減衰種別判定用)。直前の区切り(母音・gap・「ん」・両唇閉鎖・
     # 列先頭)からこの母音までに連続して現れた子音(両唇・撥音を除く)の音素列。
     aperture_ipas: tuple[str, ...] = ()
     content_start_sec: float | None = None
@@ -186,9 +186,9 @@ def _split_into_subwindows(start_sec, end_sec):
 
 
 def _classify_phonetic(segments, use_n_morph):
-    """段階(1): IPA→5母音写像・両唇閉鎖判定・撥音「ん」判定(音素由来、RMS非依存)。
+    """段階(1): IPA→5母音写像・両唇閉鎖判定・撥音判定(音素由来、RMS非依存)。
 
-    独立イベントを作らない子音(両唇閉鎖・撥音「ん」以外)は、次に現れる母音的口形イベントの開始時刻を
+    独立イベントを作らない子音(両唇閉鎖・撥音以外)は、次に現れる母音的口形イベントの開始時刻を
     その子音の開始まで前へ寄せることで吸収する(前後母音の協調調音は lipsync が扱う)。
     """
     units = []
@@ -228,7 +228,7 @@ def _classify_phonetic(segments, use_n_morph):
                     content_start_sec=seg.start_sec, content_end_sec=seg.end_sec,
                 ))
                 pending_start = None
-                # 撥音「ん」自身は独立イベントとして表示済みなので、次の母音の先頭子音種別には
+                # 撥音自身は独立イベントとして表示済みなので、次の母音の先頭子音種別には
                 # 使わない(先行隣接子音なし=NONE)。撥音自身も区切り。
                 last_consonant_ipa = None
                 aperture_run = []
@@ -280,7 +280,7 @@ def _gap_close_time(rms, start_sec, end_sec, silence_on):
 def _resolve_silence(units, rms, silence_on, low_dynamics):
     """段階(2): gap解決・母音区間の無音補正。
 
-    gapの無音/継続は、直前に確定した口形が母音的(母音・撥音「ん」)かどうかと開始(下降側)しきい値
+    gapの無音/継続は、直前に確定した口形が母音的(母音・「ん」)かどうかと開始(下降側)しきい値
     だけで決める。gap全体をひとまとめに判定せず、RMSを先頭から走査して発声が終わった時点でgapを
     分割し、前半は直前の母音的口形の継続・残りは無音にする(一度閉じたgap内では
     再度開かない)。先頭・末尾のgapはRMSに依らず常に無音。
@@ -332,7 +332,7 @@ def _merge_adjacent(units):
     content_start_sec/content_end_sec(代表RMS算出用の区間)は、先頭ユニットの開始から
     末尾ユニットの終了までへ広げる(同一口形が続く区間はすべて母音的内容とみなす)。
 
-    戻り値は (統合後のユニット列, 統合回数)。統合回数は母音/撥音「ん」区間の統合
+    戻り値は (統合後のユニット列, 統合回数)。統合回数は母音/「ん」区間の統合
     (merged_morae)だけを数え、閉口・無音区間の統合は含めない。
     """
     merged = []

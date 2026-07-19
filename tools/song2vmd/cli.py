@@ -132,7 +132,7 @@ def _vowel_gain(text: str) -> tuple:
     """--vowel-gain の `a:i:u:e:o` を5要素 float タプルへ解析する。
 
     各要素はプリセットの母音別倍率へ乗算する微調整倍率なので非負の有限値を要求する。
-    撥音「ん」はプリセット値のままで本引数の対象外。
+    撥音はプリセット値のままで本引数の対象外。
     """
     parts = text.split(":")
     if len(parts) != 5:
@@ -229,7 +229,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    help="実行デバイスの選択。auto=環境から自動選択(GPU(CUDA)が利用可能ならGPU)、"
                         "cpu=GPUを使わずCPUで実行する(音声前段の全モデル・SOFAサブプロセスを含む。"
                         "VRAM不足環境の回避手段)")
-    # --n-morph / --no-n-morph は既定 on の対。dest=n_morph を共有する。
+    # --n-morph / --no-n-morph は既定 off の対。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=False,
                    help="撥音に「ん」モーフを使う(既定off)。--no-n-morphの対の明示形")
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
