@@ -66,12 +66,19 @@ _cmudict_cache = None
 def _get_cmudict_entries():
     """CMUdict辞書全体をプロセス内キャッシュする(nltkのdict()は呼び出すたびに辞書全体を
     再構築するため、_g2p経由で頻繁に呼ばれるこの関数の呼び出しごとに再構築させない)。
+    未取得の場合はnltkの標準キャッシュへ自動取得する(他の学習済みモデルの初回取得と同様、
+    利用者に手動コマンドを要求しない)。
     """
     global _cmudict_cache
     if _cmudict_cache is None:
+        import nltk
         from nltk.corpus import cmudict
 
-        _cmudict_cache = cmudict.dict()
+        try:
+            _cmudict_cache = cmudict.dict()
+        except LookupError:
+            nltk.download("cmudict", quiet=True)
+            _cmudict_cache = cmudict.dict()
     return _cmudict_cache
 
 

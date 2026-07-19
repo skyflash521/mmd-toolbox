@@ -98,6 +98,35 @@ def test_lookup_cmudict_phonemes_unknown_word_returns_none():
     assert _lookup_cmudict_phonemes("tiktok") is None
 
 
+def test_get_cmudict_entries_auto_downloads_when_not_cached(monkeypatch):
+    import nltk.corpus
+
+    import vocal_analysis.english_oov_katakana as module
+
+    monkeypatch.setattr(module, "_cmudict_cache", None)
+    download_calls = []
+    attempts = {"n": 0}
+
+    class _FakeCmudict:
+        # 実物のnltk.corpus.cmudict(LazyCorpusLoader)は初回ロードで自身をコーパスへ
+        # 変身させる特殊な実装のため、そのオブジェクト自体をこの偽物へ丸ごと差し替えて
+        # 検証する(dict属性だけをモックすると、他テストの実行順で実物が既にロード済みかに
+        # 挙動が左右され、環境・順序依存になる)。
+        def dict(self):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise LookupError("missing")
+            return {"sky": [["S", "K", "AY1"]]}
+
+    monkeypatch.setattr(nltk.corpus, "cmudict", _FakeCmudict())
+    monkeypatch.setattr(nltk, "download", lambda name, quiet=False: download_calls.append((name, quiet)))
+
+    entries = module._get_cmudict_entries()
+
+    assert download_calls == [("cmudict", True)]
+    assert entries == {"sky": [["S", "K", "AY1"]]}
+
+
 @pytest.mark.parametrize(
     "text,expected",
     [
