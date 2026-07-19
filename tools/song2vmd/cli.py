@@ -63,6 +63,10 @@ FORCED_ALIGNER_NAMES = ("wav2vec2-ctc-forcedalign", "sofa-forcedalign")
 # 英語未知語カタカナ化フォールバックの変換方式。既定は DEFAULT_ENGLISH_OOV_KATAKANA_METHOD(arpakana)。
 ENGLISH_OOV_KATAKANA_METHOD_NAMES = ("arpakana", "tinyllama-katakana-converter")
 
+# 実行デバイスの選択。cpu はプロセスからGPU(CUDA)を隠して音声前段の全モデルと
+# SOFAサブプロセスをCPUへ倒す(VRAM不足環境の回避手段)。既定 auto は環境から自動選択。
+DEVICE_MODES = ("auto", "cpu")
+
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS。
 _MODEL_NAME_MAX_BYTES = 20
 
@@ -220,6 +224,10 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    default=DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
                    help="英語未知語カタカナ化フォールバックの変換方式選択(既定arpakana。"
                         "tinyllama-katakana-converterは生成モデルを使う選択式オプション)")
+    p.add_argument("--device", choices=DEVICE_MODES, default="auto",
+                   help="実行デバイスの選択。auto=環境から自動選択(GPU(CUDA)が利用可能ならGPU)、"
+                        "cpu=GPUを使わずCPUで実行する(音声前段の全モデル・SOFAサブプロセスを含む。"
+                        "VRAM不足環境の回避手段)")
     # --n-morph / --no-n-morph は既定 on の対。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
                    help="撥音「ん」に「ん」モーフを使う(既定on)。--no-n-morphの対の明示形")
@@ -293,6 +301,7 @@ _D_TYPE = {
     "recognizer_retry": ("flag", None),
     "forced_aligner": ("enum", {"choices": list(FORCED_ALIGNER_NAMES)}),
     "english_oov_katakana_method": ("enum", {"choices": list(ENGLISH_OOV_KATAKANA_METHOD_NAMES)}),
+    "device": ("enum", {"choices": list(DEVICE_MODES)}),
     "sofa_python": ("str", None),
     "sofa_root": ("str", None),
     "checkpoint_path": ("str", None),
@@ -424,6 +433,12 @@ def main(argv=None) -> int:
             if getattr(args, dest) is None:
                 return fail("bad_argument", f"{field} は --forced-aligner sofa-forcedalign 時に必須です",
                             2, field=field)
+
+    # --device cpu はプロセスからGPU(CUDA)を隠して全段をCPUへ倒す。CUDAのデバイス集合は
+    # プロセス内の最初の照会以降固定されるため、パイプライン起動前のここで設定しなければ効かない。
+    # 環境は子プロセスへ継承されるため、SOFAサブプロセスにも同じ選択が効く。
+    if args.device == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
     # 引数解析後の本体。KeyboardInterrupt(Ctrl-C 等)は協調的な中断(cancelled/130)として畳み、それ以外の
     # 想定外例外はトレースバックを漏らさず internal_error(理由1行 + 終了コード1)へ畳む。

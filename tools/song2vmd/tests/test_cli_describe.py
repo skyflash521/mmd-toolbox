@@ -24,7 +24,7 @@ def _ffield(name, mn, mx, ex):
     return {"name": name, "type": "float", "min": mn, "max": mx, "exclusive_min": ex}
 
 
-# --describe が返す options 全28要素。name → (type, constraint, default)。
+# --describe が返す options 全29要素。name → (type, constraint, default)。
 EXPECTED = {
     "input": ("str", None, None),
     "--output": ("str", None, None),
@@ -40,6 +40,7 @@ EXPECTED = {
                          "wav2vec2-ctc-forcedalign"),
     "--english-oov-katakana-method": ("enum", {"choices": ["arpakana", "tinyllama-katakana-converter"]},
                                       "arpakana"),
+    "--device": ("enum", {"choices": ["auto", "cpu"]}, "auto"),
     "--sofa-python": ("str", None, None),
     "--sofa-root": ("str", None, None),
     "--sofa-checkpoint": ("str", None, None),

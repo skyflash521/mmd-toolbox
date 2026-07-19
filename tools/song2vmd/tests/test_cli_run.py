@@ -7,6 +7,7 @@ cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(
 """
 
 import json
+import os
 import sys
 
 import pytest
@@ -156,6 +157,52 @@ def test_english_oov_katakana_method_option_selects_tinyllama(tmp_path, monkeypa
     ])
     assert rc == 0
     assert captured["kwargs"]["english_oov_katakana_method"] == "tinyllama-katakana-converter"
+
+
+def _capture_cvd_at_run(monkeypatch):
+    """pipeline.run 呼び出し時点の CUDA_VISIBLE_DEVICES を捕捉する。
+
+    --device の設定はパイプライン起動前(最初のCUDA照会前)に済んでいなければ効かないため、
+    設定の有無だけでなく「pipeline.run より前」というタイミングを呼び出し時点の観測で検証する。
+    """
+    seen = {}
+
+    def fake_run(input_path, **kwargs):
+        seen["cvd"] = os.environ.get("CUDA_VISIBLE_DEVICES")
+        return _make_result()
+
+    monkeypatch.setattr(cli._pipeline, "run", fake_run)
+    return seen
+
+
+def test_device_cpu_hides_cuda_before_pipeline_runs(tmp_path, monkeypatch):
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    seen = _capture_cvd_at_run(monkeypatch)
+
+    rc = cli.main([src, "--device", "cpu", "--dry-run"])
+    assert rc == 0
+    assert seen["cvd"] == "-1"
+
+
+def test_device_auto_default_leaves_environment_untouched(tmp_path, monkeypatch):
+    """既定(auto)は環境に触れない。利用者が自分で設定した CUDA_VISIBLE_DEVICES も壊さない。"""
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    seen = _capture_cvd_at_run(monkeypatch)
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 0
+    assert seen["cvd"] == "0"
+
+
+def test_device_rejects_unknown_value(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    seen = _capture_cvd_at_run(monkeypatch)
+
+    rc = cli.main([src, "--device", "gpu", "--dry-run"])
+    assert rc == 2
+    assert "cvd" not in seen  # 引数エラーで pipeline は起動しない
 
 
 def test_run_passes_default_retry_enabled(tmp_path, monkeypatch):

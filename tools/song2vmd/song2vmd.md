@@ -179,6 +179,7 @@ song2vmd INPUT [options]
 | `--sofa-checkpoint PATH` | 無し(必須) | SOFAチェックポイント(`.ckpt`)ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
 | `--sofa-timeout SEC` | `300` | SOFAサブプロセス1回あたりのタイムアウト秒数(正の数値のみ) |
 | `--english-oov-katakana-method NAME` | `arpakana` | S2 G2Pの英語未知語カタカナ化フォールバック(vocal_analysis.md §5.2手順4)の変換方式選択。`arpakana`(ルールベース。生成モデル・GPU不要)または `tinyllama-katakana-converter`(生成モデル) |
+| `--device MODE` | `auto` | 実行デバイスの選択(`auto` / `cpu`)。`auto` は環境から自動選択(GPU(CUDA)が利用可能ならGPU)。`cpu` はGPUを使わずCPUで実行する(音声前段の全モデルと、環境を継承するSOFAサブプロセスを含む)。GPUはあるがVRAMが不足する環境の回避手段 |
 | `--no-n-morph` | off(既定で「ん」モーフを使う) | 撥音「ん」(音節末の鼻音)に「ん」モーフ(`MouthShape.N`)を使わず、無音(閉口)に倒す。既定では「ん」モーフを使う(6.3) |
 | `--vowel-gain a:i:u:e:o` | `1:1:1:1:1` | 母音別(あ/い/う/え/お)の開き量微調整倍率。プリセットの母音別倍率(8.1)へ要素ごとに乗算する(既定はプリセット値そのまま。プリセット非依存の共通既定)。撥音「ん」はプリセット値のままで本引数の対象外(8.2) |
 | `--open-max V` | プリセット値(8.1) | 口の開き量の上限(開けすぎ防止) |
@@ -197,7 +198,8 @@ song2vmd INPUT [options]
 | `--describe` | — | オプション定義とプリセット一覧を構造化して出力し終了する(5.5・12章) |
 
 音声前段の外部ツールは vocal_analysis が内部で呼ぶ(7章)。モデル等の細かな呼び出し設定は vocal_analysis が
-保持し(vocal_analysis.md §5.1・§8)、CLIにはバックエンドの「選択」と、口パクの「効かせ方」のみを置く。
+保持し(vocal_analysis.md §5.1・§8)、CLIにはバックエンドの「選択」・実行デバイスの指定(`--device`)と、
+口パクの「効かせ方」のみを置く。
 挙動パラメータはコマンドライン引数だけで与え、環境変数・設定ファイルから挙動を暗黙に変える経路は持たない
 ([CLI インターフェース規約](../../docs/conventions/cli-interface.md) §9)。
 
