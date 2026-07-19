@@ -1,8 +1,8 @@
 """S1 ボーカル抽出。
 
 S0 の出力(入力レベル正規化済み。ステレオ・元サンプルレート)からボーカルを分離し、ボーカルWAVを得る。
-分離は audio-separator 経由で Demucs v4 htdemucs_ft を in-process 実行する。mode(auto/always/never)は
-この抽象が解釈する。auto は BGM 有無の自動判定を持たず always と同義(常に分離する)。
+分離は audio-separator 経由で Demucs v4 htdemucs_ft を in-process 実行する。mode(always/never)は
+この抽象が解釈する。
 """
 
 import atexit
@@ -21,15 +21,15 @@ class SeparationError(Exception):
     """S1 の分離失敗(audio-separator 未導入など、原因が分かるエラー)。"""
 
 
-def separate(pcm: AudioPcm, mode: Literal["auto", "always", "never"]) -> Path:
+def separate(pcm: AudioPcm, mode: Literal["always", "never"]) -> Path:
     """S0出力からボーカルWAVのパスを得る。
 
     戻り値のWAVを格納する作業ディレクトリは呼び出し元に公開せず、プロセスの正常終了時に
     削除を試みる(強制終了時や削除失敗時は残置を許容する)。呼び出し元が削除
     タイミングを制御する手段は無い。
     """
-    if mode not in ("auto", "always", "never"):
-        raise ValueError(f"未知の mode です: {mode!r}(auto/always/never のいずれかを指定してください)")
+    if mode not in ("always", "never"):
+        raise ValueError(f"未知の mode です: {mode!r}(always/never のいずれかを指定してください)")
 
     work_dir = Path(tempfile.mkdtemp(prefix="vocal_analysis_s1_"))
     atexit.register(shutil.rmtree, work_dir, ignore_errors=True)

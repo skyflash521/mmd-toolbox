@@ -168,7 +168,7 @@ song2vmd INPUT [options]
 | `--overwrite` | off | 出力先の既存ファイルへの上書きを許可する(上書きガードの解除。5.3) |
 | `--model-name NAME` | `song2vmd <実行中のツールバージョン>`(例: `song2vmd 1.2.3`) | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
 | `--style NAME` | `pop` | 歌い方スタイルプリセット(8.1)。開き量レンジ・タイミングを切り替える |
-| `--separate-vocals MODE` | `auto` | ボーカル分離 `auto` / `always` / `never` |
+| `--separate-vocals MODE` | `always` | ボーカル分離 `always` / `never` |
 | `--separator NAME` | vocal_analysis の既定アダプタ | S1ボーカル分離バックエンドの選択(7章)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3) |
 | `--recognizer-model-id ID` | vocal_analysis の既定内容認識モデル(`ContentRecognizerModel.model_id`) | S2内容認識モデルの指定(vocal_analysis.md §5.2・§8.3)。未指定時は vocal_analysis の既定モデルを使う |
 | `--recognizer-model-revision REV` | 既定モデルのリビジョン(`--recognizer-model-id` 未指定時)。`--recognizer-model-id` 指定時は未指定なら最新リビジョン | S2内容認識モデルのリビジョン指定(`ContentRecognizerModel.model_revision`)。`--recognizer-model-id` と組で使う。`--recognizer-model-id` を指定せず本引数だけを指定するのは対象が無く無意味なため引数エラー(11章・12.3) |
@@ -279,7 +279,7 @@ song2vmd INPUT [options]
 [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する(vocal_analysis.md §4〜§6)。`song2vmd` は共有
 出力(ボーカルWAV・音素セグメント列・RMS)を消費する。
 
-- **ボーカル抽出(S1)**: vocal_analysis.md §4。分離の挙動 `auto`/`always`/`never` の選択は `song2vmd` の CLI
+- **ボーカル抽出(S1)**: vocal_analysis.md §4。分離の挙動 `always`/`never` の選択は `song2vmd` の CLI
   (`--separate-vocals`、5.2)で公開する。
 - **音素/母音認識(S2)**: vocal_analysis.md §5。母音/子音/gap の全被覆セグメント列＋IPAラベル(任意の信頼度)を
   得る。内容認識モデルの選択は CLI(`--recognizer-model-id`・`--recognizer-model-revision`、5.2)で公開する。
@@ -847,7 +847,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 - `type`: 固定語彙 `"float"` / `"int"` / `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)/ `"compound"`
   (複合トークン)。
 - `constraint`: 数値(`float`/`int`)は `{min, max, exclusive_min}`、`enum` は `{choices:[...]}`
-  (`--style` は 8.1 のプリセット名、`--separate-vocals` は `auto`/`always`/`never`、`--separator` は
+  (`--style` は 8.1 のプリセット名、`--separate-vocals` は `always`/`never`、`--separator` は
   vocal_analysis の登録アダプタの安定 id)、`compound`
   (`--vowel-gain`=`"a:i:u:e:o"`・`--silence-threshold`=`"ON:OFF"`)は `{format, fields}`(`format` は
   トークン文法の文字列、`fields` は各トークンの数値制約の配列)、`flag` と制約なしは `null`。制約値は CLI

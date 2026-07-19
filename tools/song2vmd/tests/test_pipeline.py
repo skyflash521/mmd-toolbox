@@ -46,7 +46,7 @@ class _RecordingProgress:
 def _common_kwargs(**overrides):
     openness, style_gen = presets.resolve("pop")
     kw = dict(
-        separate_vocals="auto", separator_name="audio-separator-htdemucs-ft",
+        separate_vocals="always", separator_name="audio-separator-htdemucs-ft",
         content_recognizer_model=_TEST_MODEL, retry=True,
         max_duration_sec=300.0, use_n_morph=True,
         intensity_curve=0.6, silence_on=0.06,
@@ -235,7 +235,7 @@ def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, m
     assert result.diagnostics.duration_sec == pytest.approx(1.0, abs=0.05)
 
 
-@pytest.mark.parametrize("mode,expected", [("auto", True), ("always", True), ("never", False)])
+@pytest.mark.parametrize("mode,expected", [("always", True), ("never", False)])
 def test_separated_flag_matches_separate_vocals_mode(tmp_path, monkeypatch, mode, expected):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)

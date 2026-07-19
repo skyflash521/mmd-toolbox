@@ -77,7 +77,7 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["openness"] == openness
     assert kwargs["style_gen"] == style_gen
     assert kwargs["style_name"] == "pop"
-    assert kwargs["separate_vocals"] == "auto"
+    assert kwargs["separate_vocals"] == "always"
     assert kwargs["separator_name"] == "audio-separator-htdemucs-ft"
     assert kwargs["max_duration_sec"] == 300.0
     assert kwargs["use_n_morph"] is True

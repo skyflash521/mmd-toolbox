@@ -112,13 +112,13 @@
 ## 4. ボーカル抽出(S1)
 
 - S0 の出力(入力レベル正規化済み。ステレオ・元サンプルレート)からボーカルを分離し、ボーカルWAVを得る
-  (出力形式は分離器に従う)。分離の挙動(`auto`/`always`/`never`)は利用先がCLI等で選ぶ。
-  - `always`: 常に分離する。
+  (出力形式は分離器に従う)。分離の挙動(`always`/`never`)は利用先がCLI等で選ぶ。
+  - `always`: 常に分離する(既定)。
   - `never`: 分離せず入力をそのままボーカルとして扱う(既にボーカル単体の入力向け)。
-  - `auto`: 常に分離する(BGM有無の自動判定は持たず `always` と同義。自動判定を追加する場合は本書を先に
-    更新してから実装する)。
+  - BGM有無の自動判定は持たない。判定コストが実運用の主要ケース(BGM込み入力)では常に純オーバーヘッド
+    になり、判定を追加する価値が無いと判断したため。
 - 分離は外部ライブラリで内部実行し(必要時のみサブプロセス)、Separator 抽象の背後で差し替え可能とする(8章)。
-  公開関数は `separate(pcm: AudioPcm, mode: Literal["auto","always","never"]) -> Path`
+  公開関数は `separate(pcm: AudioPcm, mode: Literal["always","never"]) -> Path`
   (`vocal_analysis.separator`)。ライブラリ未導入時は `SeparationError` で失敗する。
 - `separate()` は分離前後の一時WAVを格納する作業ディレクトリをOSの一時領域に作る。このディレクトリは
   呼び出し元に公開せず、プロセスの正常終了時に削除を試みる(強制終了時や削除失敗時は残置を許容する)。
@@ -789,7 +789,7 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
 
 - **Separator**: `separate(vocal_source, mode) -> vocal_wav_path`(内部でライブラリ/サブプロセスを呼ぶ)。
   出力は「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・分離トラック構成・一時ファイルは各実装に
-  閉じる。`mode`(`auto`/`always`/`never`)もこの抽象が解釈する。
+  閉じる。`mode`(`always`/`never`)もこの抽象が解釈する。
 - **Recognizer**: `recognize(vocal_wav_path, content_recognizer_model, *, retry, forced_aligner, sofa_aligner,
   english_oov_katakana_method, on_progress) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
   (文字列なしの音素認識)。
@@ -819,7 +819,7 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
   `content_recognizer_model` 引数(`ContentRecognizerModel`。5.2)で選ぶ。
 - 同一ステージに複数のアダプタがあるときは、引数で適用ツールを選択可能にする(選択肢の公開は利用先
   CLIが行う)。アダプタと id の追加・変更は本書(8.3)を先に更新する。**S2は複数アダプタを持つステージで
-  あり(`forced_aligner`引数。8.1)、S1の分離モード(`auto`/`always`/`never`。4章)とは異なり、同一ステージ
+  あり(`forced_aligner`引数。8.1)、S1の分離モード(`always`/`never`。4章)とは異なり、同一ステージ
   内で複数の実装(強制アライメント手法)から選ぶパターンにあたる。**
 
 ### 8.3 採用ツールと代替候補

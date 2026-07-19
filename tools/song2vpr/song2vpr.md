@@ -99,7 +99,7 @@ song2vpr INPUT [options]
 | `INPUT` | 必須 | 入力音声ファイル |
 | `-o, --output PATH` | `<入力名>.vpr` | 出力 vpr |
 | `--overwrite` | off | 出力先の既存ファイルへの上書きを許可する(上書きガードの解除。5章) |
-| `--separate-vocals MODE` | `auto` | ボーカル分離 `auto` / `always` / `never`(vocal_analysis へ渡す) |
+| `--separate-vocals MODE` | `always` | ボーカル分離 `always` / `never`(vocal_analysis へ渡す) |
 | `--recognizer NAME` | vocal_analysis の既定アダプタ | 音素認識バックエンドの選択(vocal_analysis へ渡す)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3。採用構成の確定も同節が正本) |
 | `--tempo BPM` | `120` | テンポ(BPM)。未指定時は既定 120 で仮置きし警告を出す(自動推定は将来。7.3) |
 | `--lyrics PATH` | なし | 任意の歌詞テキスト(かな表記前提。モーラ単位で音符へ対応。漢字の読み変換は将来。7.2) |
@@ -313,7 +313,7 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 - `name`: 長形式フラグ文字列(例 `"--tempo"`)。positional は `"input"`。
 - `type`: 固定語彙 `"float"` / `"int"` / `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)。
 - `constraint`: 数値(`float`/`int`)は `{min, max, exclusive_min}`、`enum` は `{choices:[...]}`
-  (`--separate-vocals` は `auto`/`always`/`never`、`--recognizer` は vocal_analysis の登録アダプタの
+  (`--separate-vocals` は `always`/`never`、`--recognizer` は vocal_analysis の登録アダプタの
   安定 id)、`flag` と制約なしは `null`。制約値は CLI 実装の引数検証から機械導出し、手書きで複製しない。
 - `default`: 解決後の既定値(例 `--tempo` は `120`)。入力名由来の `--output` は単一リテラルで表せないため
   `null`(算出規則は `help` に記す)。未指定が既定の `--lyrics` も `null`。

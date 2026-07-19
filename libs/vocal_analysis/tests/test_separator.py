@@ -74,8 +74,7 @@ class _FakeSeparator:
         return [out.name]
 
 
-@pytest.mark.parametrize("mode", ["always", "auto"])
-def test_separate_always_and_auto_modes_call_separator_factory(monkeypatch, mode):
+def test_separate_always_mode_calls_separator_factory(monkeypatch):
     from vocal_analysis import separator as separator_module
 
     calls = {}
@@ -86,9 +85,8 @@ def test_separate_always_and_auto_modes_call_separator_factory(monkeypatch, mode
 
     monkeypatch.setattr(separator_module, "_build_separator", fake_build_separator)
 
-    result = separator_module.separate(_make_pcm(), mode=mode)
+    result = separator_module.separate(_make_pcm(), mode="always")
 
-    # auto は BGM 有無の自動判定を持たず always と同義(常に分離する)。
     # 出力は「ボーカルWAVのパス」を約束するため、返るパスが実在することも検証する。
     assert result == Path(calls["audio_file_path"]).parent / "vocals_output.wav"
     assert result.exists()

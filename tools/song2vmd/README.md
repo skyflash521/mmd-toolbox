@@ -123,7 +123,7 @@ song2vmd <入力ファイル名>.wav -o <出力ファイル名>.vmd --style powe
 
 | オプション | 既定値 | 値と効き方 |
 |---|---|---|
-| `--separate-vocals MODE` | `auto` | ボーカル分離の実施方針。`auto` / `always` / `never` から選ぶ。`auto` は BGM の有無を自動判定せず、現状は `always`(常に分離する)と同じ動作。分離自体を行わない場合は `never` を指定する。 |
+| `--separate-vocals MODE` | `always` | ボーカル分離の実施方針。`always`(常に分離する) / `never`(分離しない) から選ぶ。分離自体を行わない場合は `never` を指定する。 |
 | `--separator NAME` | `audio-separator-htdemucs-ft` | ボーカル分離バックエンドの選択。 |
 | `--recognizer-model-id ID` | (未指定) | 内容認識モデルの指定。未指定時は既定モデル(`openai/whisper-medium`)を使う。 |
 | `--recognizer-model-revision REV` | (未指定) | `--recognizer-model-id` と組で使うリビジョン指定。`--recognizer-model-id` を指定してこちらを省略すると、そのモデルの最新リビジョンを使う。 |

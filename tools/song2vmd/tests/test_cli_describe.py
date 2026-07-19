@@ -31,7 +31,7 @@ EXPECTED = {
     "--overwrite": ("flag", None, False),
     "--model-name": ("str", None, f"song2vmd {__version__}"),
     "--style": ("enum", {"choices": ["pop", "ballad", "powerful", "whisper", "rap"]}, "pop"),
-    "--separate-vocals": ("enum", {"choices": ["auto", "always", "never"]}, "auto"),
+    "--separate-vocals": ("enum", {"choices": ["always", "never"]}, "always"),
     "--separator": ("enum", {"choices": ["audio-separator-htdemucs-ft"]}, "audio-separator-htdemucs-ft"),
     "--recognizer-model-id": ("str", None, None),
     "--recognizer-model-revision": ("str", None, None),

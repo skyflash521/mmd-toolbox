@@ -49,7 +49,7 @@ from . import resource_watch as _resource_watch
 STYLE_NAMES = _presets.STYLE_NAMES
 
 # --separate-vocals の実施方針。
-SEPARATE_VOCALS_MODES = ("auto", "always", "never")
+SEPARATE_VOCALS_MODES = ("always", "never")
 
 # S1 の登録アダプタの安定 id。選択肢の公開は利用先 CLI の責務なので、現行の採用アダプタ id を
 # ここで公開する(vocal_analysis 側の採用アダプタの追加・変更にこの一覧を追随させる)。
@@ -191,7 +191,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--style", choices=STYLE_NAMES, default="pop",
                    help="歌い方スタイルプリセット(開き量レンジ・タイミングを切り替える)")
     p.add_argument("--separate-vocals", dest="separate_vocals", choices=SEPARATE_VOCALS_MODES,
-                   default="auto", help="ボーカル分離の実施方針(auto/always/never)")
+                   default="always", help="ボーカル分離の実施方針(always/never)")
     p.add_argument("--separator", choices=SEPARATOR_NAMES, default=SEPARATOR_NAMES[0],
                    help="S1ボーカル分離バックエンドの選択(vocal_analysisの登録アダプタ安定id)")
     p.add_argument("--recognizer-model-id", dest="recognizer_model_id", default=None,
