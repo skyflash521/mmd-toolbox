@@ -30,7 +30,7 @@ from .config import (
     ForcedAlignerId,
     SofaAlignerConfig,
 )
-from .english_oov_katakana import convert_oov_words
+from .english_oov_katakana import convert_oov_words, convert_words, uncached_target_words
 from .phonemes import (
     _BLANK_G2P_SYMBOLS,
     _MIN_WORD_DURATION_SEC,
@@ -820,11 +820,11 @@ def recognize(
     # 内容認識モデルと音素モデル(いずれもGPU実行時は数GB)を同時にGPUへ常駐させると、VRAMの
     # 逼迫(ページング)で処理時間が大きく悪化し、他プロセスの描画も阻害するため。
     # 内容認識パイプライン(Whisper系)は無音でない最初の区間で遅延ロードし、以降の区間では
-    # 使い回す(区間ごとの再ロードによるモデル転送コスト(特にGPU使用時)の浪費を避ける)。
+    # プロセス内キャッシュで使い回す(区間ごとの再ロードによるモデル転送コスト(特にGPU使用時)の
+    # 浪費を避ける)。
     # 音素モデルは強制アライメント対象が1件以上あるときだけアライメントフェーズでロードする
     # (全区間が無音・gap確定ならモデルを一切必要としない。ロード自体の失敗は握りつぶさず
     # 例外にして失敗境界を隠さない)。
-    content_pipeline = None
     # SOFA経路専用: 対象区間・対象単語をここへ積み、recognize()呼び出し全体で1回だけ
     # SOFAへまとめて渡す(ループの外、全区間処理後)。各要素は
     # (音声サンプル, サンプルレート, G2P音素記号列, 絶対オフセット秒, 相対長さ秒)。
@@ -861,10 +861,14 @@ def recognize(
         trim_duration_sec = trim_hi_sec - trim_lo_sec
 
         try:
-            if content_pipeline is None:
-                content_pipeline = _load_content_recognizer_pipeline(
-                    content_recognizer_model, on_progress=on_progress)
-            text, words = _transcribe_segment(content_pipeline, chunk_samples)
+            # パイプラインへの参照はこの呼び出しの間だけ持つ(プロセス内キャッシュが実体を保持
+            # するため、ここでローカル変数に持ち続けなくても再ロードは起きない)。参照を持ち
+            # 続けると、変換モデルとのGPU入れ替え(_prepare_english_oov_conversion)や二相化の
+            # 解放でキャッシュを手放しても実体がGPUに残ってしまう。
+            text, words = _transcribe_segment(
+                _load_content_recognizer_pipeline(content_recognizer_model, on_progress=on_progress),
+                chunk_samples,
+            )
         except ImportError as e:
             raise RecognitionError(
                 "transformers または torch が見つかりません。導入してください"
@@ -1000,7 +1004,6 @@ def recognize(
         # 挿入位置はフェーズ実行前の all_segments 上の位置(insert_at)なので、先行する挿入で
         # 増えた要素数を累積オフセットとして加算する。解放は対象0件(全区間が無音・gap確定)でも
         # 行う(内容認識だけ行われた場合もこの時点で以降の工程に内容認識モデルは不要なため)。
-        content_pipeline = None
         _release_content_recognizer_pipeline()
         if pending_align_jobs:
             processor, model, vocab, blank_token_id = _ensure_phoneme_model(on_progress)
@@ -1023,7 +1026,6 @@ def recognize(
         # (対象が0件ならsofa_align._align_batchがサブプロセスの起動自体を省略する)。
         # SOFAサブプロセスもGPUを使うため、実行前に内容認識パイプラインを解放して
         # VRAMを明け渡す(二相化と同じ理由)。
-        content_pipeline = None
         _release_content_recognizer_pipeline()
         raw_by_basename = sofa_align._align_batch(
             [(samples, sr, ph) for samples, sr, ph, _, _ in pending_sofa_targets], sofa_aligner
@@ -1061,6 +1063,25 @@ def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: 
     return resample_poly(mono, up, down).astype(np.float32)
 
 
+def _prepare_english_oov_conversion(text: str, method: EnglishOovKatakanaMethod) -> None:
+    """tinyllama-katakana-converter 方式のG2P前処理: 未変換の対象語があるときだけ、内容認識
+    パイプラインを解放してからまとめて変換する(変換モデル(GPU実行時はfp16で重み約2.2GB)と内容認識モデルの
+    同時GPU常駐によるVRAM逼迫を避ける。変換モデル自体は convert_words が変換後に解放する)。
+
+    変換結果は語キャッシュに入るため、後続のG2P内の変換(convert_oov_words)はキャッシュに
+    当たり、変換モデルのロードは起きない。内容認識パイプラインは次の書き起こしでプロセス内
+    キャッシュにより再ロードされる。arpakana 方式(既定)では何も行わない(モデルを使わないため
+    入れ替えが不要で、対象語の検出も走らせない)。
+    """
+    if method != "tinyllama-katakana-converter":
+        return
+    words = uncached_target_words(text, method)
+    if not words:
+        return
+    _release_content_recognizer_pipeline()
+    convert_words(words, method)
+
+
 def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD) -> list[str]:
     """テキストをG2Pで音素記号列へ変換する(手順4。pyopenjtalk-plus、ルールベース)。
 
@@ -1070,6 +1091,7 @@ def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAK
     import pyopenjtalk
 
     try:
+        _prepare_english_oov_conversion(text, method)
         text = convert_oov_words(text, method=method)
     except ImportError as e:
         raise RecognitionError(

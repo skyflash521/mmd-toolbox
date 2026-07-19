@@ -259,16 +259,20 @@ def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(
     log_probs = np.array(
         [[5.0, -5.0], [5.0, -5.0], [-5.0, 5.0], [-5.0, 5.0], [5.0, -5.0], [5.0, -5.0]]
     )
-    load_calls = {"count": 0}
+    build_calls = {"count": 0}
 
-    def fake_load_pipeline(content_recognizer_model, on_progress=None):
-        load_calls["count"] += 1
+    def fake_transformers_pipeline(*args, **kwargs):
+        build_calls["count"] += 1
         return object()
 
     def fake_transcribe(pipeline, samples):
         return "あ", None
 
-    monkeypatch.setattr(recognizer_module, "_load_content_recognizer_pipeline", fake_load_pipeline)
+    # ローダー関数自体はモックせず実物を通し、パイプラインの構築(_transformers_pipeline)の
+    # 回数で「区間ごとに再ロードしない」契約を検証する(実物のプロセス内キャッシュが効くため、
+    # ローダーが区間ごとに呼ばれても構築は1回に留まる)。
+    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
+    monkeypatch.setattr(recognizer_module, "_transformers_pipeline", fake_transformers_pipeline)
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None: {"あ": ["a"]}[text])
     monkeypatch.setattr(
@@ -281,7 +285,7 @@ def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(
 
     recognizer_module.recognize(wav_path)
 
-    assert load_calls["count"] == 1  # 2区間とも内容認識を呼ぶが、パイプラインは使い回す
+    assert build_calls["count"] == 1  # 2区間とも内容認識を呼ぶが、パイプラインの構築は1回だけ
 
 
 def test_recognize_forwards_on_progress_to_model_loaders(tmp_path, monkeypatch):

@@ -387,3 +387,121 @@ def test_convert_oov_words_caches_separately_per_method(monkeypatch):
     assert arpakana_result == "空を見上げてスカイ"
     assert tinyllama_result == "空を見上げてスカイー"
     assert tinyllama_calls == ["sky"]
+
+
+def test_uncached_target_words_filters_already_cached_words(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    # skyはキャッシュ済み・glimmerは未変換 → 未変換のglimmerだけが返る。
+    module._conversion_cache[("tinyllama-katakana-converter", "sky")] = "スカイ"
+
+    words = module.uncached_target_words(
+        "空を見上げてsky そしてglimmer", method="tinyllama-katakana-converter"
+    )
+
+    assert words == ["glimmer"]
+
+
+def test_uncached_target_words_returns_empty_when_no_targets():
+    import vocal_analysis.english_oov_katakana as module
+
+    assert module.uncached_target_words("空を見上げて", method="tinyllama-katakana-converter") == []
+
+
+def test_convert_words_caches_results_and_releases_tinyllama_model(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    monkeypatch.setattr(
+        module, "_generate_katakana_tinyllama", lambda word, phonemes: "スカイ"
+    )
+    release_calls = []
+    monkeypatch.setattr(
+        module, "release_katakana_model", lambda: release_calls.append("release")
+    )
+
+    module.convert_words(["sky"], method="tinyllama-katakana-converter")
+
+    assert module._conversion_cache[("tinyllama-katakana-converter", "sky")] == "スカイ"
+    assert release_calls == ["release"]
+
+
+def test_convert_words_releases_tinyllama_model_even_when_conversion_fails(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    def raising_generate(word, phonemes):
+        raise OSError("モデル取得失敗")
+
+    monkeypatch.setattr(module, "_generate_katakana_tinyllama", raising_generate)
+    release_calls = []
+    monkeypatch.setattr(
+        module, "release_katakana_model", lambda: release_calls.append("release")
+    )
+
+    with pytest.raises(OSError):
+        module.convert_words(["sky"], method="tinyllama-katakana-converter")
+    assert release_calls == ["release"]
+
+
+def test_convert_words_arpakana_does_not_release_model(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    release_calls = []
+    monkeypatch.setattr(
+        module, "release_katakana_model", lambda: release_calls.append("release")
+    )
+
+    module.convert_words(["sky"], method="arpakana")
+
+    assert ("arpakana", "sky") in module._conversion_cache
+    assert release_calls == []
+
+
+def test_release_katakana_model_clears_process_cache(monkeypatch):
+    import vocal_analysis.english_oov_katakana as module
+
+    module._katakana_model_cache = (object(), object())
+    module.release_katakana_model()
+    assert module._katakana_model_cache is None
+
+
+@pytest.mark.parametrize(
+    "device, expected_dtype_name",
+    [("cuda", "float16"), ("cpu", "float32")],
+)
+def test_load_katakana_model_selects_dtype_by_device(monkeypatch, device, expected_dtype_name):
+    """変換モデルのdtypeは実行デバイスに連動する(GPU実行時はfp16で重みのVRAM使用量を半減、
+    CPU実行時はfp16未対応のためfp32)。"""
+    import torch
+    import transformers
+
+    import vocal_analysis.english_oov_katakana as module
+
+    captured = {}
+
+    class _FakeModel:
+        def to(self, target):
+            captured["to_device"] = target
+            return self
+
+        def eval(self):
+            return self
+
+    def fake_model_from_pretrained(model_id, revision=None, dtype=None):
+        captured["dtype"] = dtype
+        return _FakeModel()
+
+    monkeypatch.setattr(module, "_katakana_model_cache", None)
+    monkeypatch.setattr(module, "_select_katakana_model_device", lambda: device)
+    monkeypatch.setattr(
+        transformers, "AutoTokenizer",
+        type("_FakeTokenizerLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: object())}),
+    )
+    monkeypatch.setattr(
+        transformers, "AutoModelForCausalLM",
+        type("_FakeModelLoader", (), {"from_pretrained": staticmethod(fake_model_from_pretrained)}),
+    )
+
+    module._load_katakana_model()
+
+    assert captured["dtype"] == getattr(torch, expected_dtype_name)
+    assert captured["to_device"] == device

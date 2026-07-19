@@ -119,10 +119,14 @@ def _load_katakana_model():
     tokenizer = AutoTokenizer.from_pretrained(
         ENGLISH_OOV_KATAKANA_MODEL.model_id, revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision
     )
+    # GPU実行時はfp16でロードし、fp32(約4.4GB)に対して重みのVRAM使用量を半減させる
+    # (実曲の対象語でfp32と変換結果が一致することを確認して採用)。CPU実行時はfp16未対応の
+    # ためfp32のまま。
+    dtype = torch.float16 if device == "cuda" else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         ENGLISH_OOV_KATAKANA_MODEL.model_id,
         revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision,
-        dtype=torch.float32,
+        dtype=dtype,
     )
     model.to(device)
     model.eval()
@@ -246,6 +250,58 @@ def _locate_and_replace(text: str, target_words: list[str], converted: dict[str,
         prev_end = end
     result.append(text[prev_end:])
     return "".join(result)
+
+
+def release_katakana_model() -> None:
+    """変換モデルのプロセス内キャッシュを解放し、GPUのキャッシュ済みメモリを返す。
+
+    変換モデル(1.1Bパラメータ。GPU実行時はfp16で重み約2.2GB)を使い終えた時点で常駐をやめるための解放口。
+    次の変換が必要になれば _load_katakana_model が改めてロードする。
+    """
+    global _katakana_model_cache
+    if _katakana_model_cache is None:
+        return
+    _katakana_model_cache = None
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+
+def uncached_target_words(
+    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+) -> list[str]:
+    """テキスト中の対象語のうち、変換結果がまだ語キャッシュに無いものを出現順(重複なし)で返す。
+
+    呼び出し元が「これから convert_oov_words を呼ぶと新たな変換(変換モデルのロードを伴いうる)が
+    走るか」を変換前に判定するための照会口。語が返らなければ、後続の変換はすべて語キャッシュに
+    当たり、モデルのロードは起きない。
+    """
+    return [
+        word
+        for word in dict.fromkeys(_find_target_words(text))
+        if (method, word) not in _conversion_cache
+    ]
+
+
+def convert_words(
+    words: list[str], method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+) -> None:
+    """語のリストをまとめて変換し、結果を語キャッシュへ入れる。
+
+    tinyllama-katakana-converter 方式では、変換後に変換モデルを解放する(まとめて変換する
+    呼び出し元は変換モデルの常駐を変換中だけに限定でき、他のGPU常駐モデルとの同時常駐による
+    VRAM逼迫を避けられる)。arpakana 方式はモデルを使わないため解放は行わない。
+    """
+    try:
+        for word in words:
+            _convert_word(word, method)
+    finally:
+        if method == "tinyllama-katakana-converter":
+            release_katakana_model()
 
 
 def convert_oov_words(

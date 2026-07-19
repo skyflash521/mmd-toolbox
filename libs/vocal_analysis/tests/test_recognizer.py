@@ -1505,3 +1505,57 @@ def test_load_content_recognizer_pipeline_no_on_progress_when_already_cached(mon
     )
 
     assert calls == []
+
+
+# --- _prepare_english_oov_conversion(tinyllama方式のG2P前処理: 内容認識モデルとのGPU入れ替え) ---
+
+
+def test_prepare_english_oov_conversion_arpakana_does_nothing(monkeypatch):
+    import vocal_analysis.recognizer as R
+
+    monkeypatch.setattr(
+        R, "uncached_target_words",
+        lambda text, method: (_ for _ in ()).throw(AssertionError("arpakanaでは対象語検出を行わない")),
+    )
+    monkeypatch.setattr(
+        R, "_release_content_recognizer_pipeline",
+        lambda: (_ for _ in ()).throw(AssertionError("arpakanaでは内容認識モデルを解放しない")),
+    )
+
+    R._prepare_english_oov_conversion("hello を見上げて", "arpakana")
+
+
+def test_prepare_english_oov_conversion_tinyllama_releases_pipeline_before_converting(monkeypatch):
+    import vocal_analysis.recognizer as R
+
+    calls = []
+    monkeypatch.setattr(R, "uncached_target_words", lambda text, method: ["hello"])
+    monkeypatch.setattr(
+        R, "_release_content_recognizer_pipeline", lambda: calls.append("release_pipeline")
+    )
+    monkeypatch.setattr(
+        R, "convert_words", lambda words, method: calls.append(("convert", tuple(words), method))
+    )
+
+    R._prepare_english_oov_conversion("hello を見上げて", "tinyllama-katakana-converter")
+
+    assert calls == [
+        "release_pipeline",
+        ("convert", ("hello",), "tinyllama-katakana-converter"),
+    ]
+
+
+def test_prepare_english_oov_conversion_tinyllama_skips_release_when_no_uncached_words(monkeypatch):
+    import vocal_analysis.recognizer as R
+
+    monkeypatch.setattr(R, "uncached_target_words", lambda text, method: [])
+    monkeypatch.setattr(
+        R, "_release_content_recognizer_pipeline",
+        lambda: (_ for _ in ()).throw(AssertionError("未変換対象語が無ければ解放しない")),
+    )
+    monkeypatch.setattr(
+        R, "convert_words",
+        lambda words, method: (_ for _ in ()).throw(AssertionError("未変換対象語が無ければ変換しない")),
+    )
+
+    R._prepare_english_oov_conversion("hello を見上げて", "tinyllama-katakana-converter")
