@@ -8,6 +8,7 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 |---|---|---|---|
 | `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.1 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
 | `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.2 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
+| `song2vmd` | 日本語の歌の音声ファイルから、リップモーション VMD を自動生成する | 0.0.1 | [tools/song2vmd/README.md](tools/song2vmd/README.md) |
 
 ## 使い方
 
@@ -155,6 +156,43 @@ shakevmd <入力ファイル名>.vmd
 
 詳しい使い方とオプションは [tools/shakevmd/README.md](tools/shakevmd/README.md)
 
+## song2vmd: 歌声からリップモーション VMD を自動生成する
+
+`song2vmd` は、日本語の歌の音声ファイル(BGM込み可)から、ボーカル分離・音素認識・声の強弱解析を経て、あ・い・う・え・お・んによるリップモーション VMD を1コマンドで自動生成するツール。
+
+使い方:
+
+1. 歌の音声ファイル(wav・mp3 等)を用意する。
+2. 上の「4. 初回準備コマンドを実行する」の `pip install .` の代わりに次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを含める)。
+
+```sh
+pip install ".[vocal-analysis]"
+```
+
+3. 次のコマンドを実行する。
+
+```sh
+song2vmd <入力ファイル名>.wav
+```
+
+生成したリップモーション VMD が、入力した音声ファイルと同じフォルダに `<入力ファイル名>.vmd` という名前で作られる。
+
+処理の特徴:
+
+- ボーカル分離・音素認識・声の強弱解析は内部で行い、外部ツールを利用者が個別に実行する必要はない。
+- 声の強弱を各モーラの口の開き量に反映し、モーラごとに口形を保持する、アニメ的にはっきり開閉するリップモーションを作る。
+
+注意事項:
+
+- 対象は日本語の歌のみ。母音認識の誤り(歌唱の崩れ・ロングトーンなど)はそのまま口形に出る。
+- 感情・表情モーフ(まばたき・眉など)の生成、日本語以外の言語、歌詞テキスト指定による高精度化には対応しない。
+- 対応する音声ファイル形式は WAV・FLAC・OGG・mp3。ffmpeg がインストール済みの環境であれば、mp4/aac など追加の形式にも対応する。
+- 初回実行時だけ、内容認識・音素アライメント・ボーカル分離の学習済みモデルをインターネットから自動取得する(既定構成の合計は約7.7GB)。取得後はキャッシュされるため2回目以降のダウンロードは発生しない。
+- GPU(CUDA)があれば自動的に使う。VRAM が不足すると大幅に遅くなり、警告が表示される。その場合は `--device cpu` を指定すると改善することがある。
+- PC の性能(GPU の有無・CPU 性能など)によっては、処理に時間がかかることがある。
+
+詳しい使い方とオプションは [tools/song2vmd/README.md](tools/song2vmd/README.md)
+
 ## 開発者向け
 
 ### リポジトリ構成
@@ -167,7 +205,7 @@ shakevmd <入力ファイル名>.vmd
 | `libs/vmd/` | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
 | `libs/pmx/` | PMX 読み取り・ボーン階層・FK 評価のライブラリ |
 | `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
-| `libs/lipsync/` | 口パク生成の共有ドメインライブラリ |
+| `libs/lipsync/` | リップモーション生成の共有ドメインライブラリ |
 | `libs/vocal_analysis/` | 音声解析の共有ドメインライブラリ |
 | `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は `pyproject.toml`、おもなツールの使い方は冒頭「ツール」一覧 |
 
@@ -182,7 +220,7 @@ shakevmd <入力ファイル名>.vmd
 | GitHub CLI(`gh`) | リリース作業(PR 作成・マージ・Release 確認)の実行 | 任意。ツールをリリースするときだけ必要。初回に `gh auth login` で認証する |
 
 `numpy`・`scipy`(実行時依存)と `pytest`(開発依存)は `pip install -e ".[dev,vocal-analysis]"` で導入される。
-`song2vmd`(音声認識・音声分離を使う)のテスト実行には、追加で `vocal-analysis` extra
+`song2vmd`(音声認識・ボーカル分離を使う)のテスト実行には、追加で `vocal-analysis` extra
 (`torch`・`transformers`・`pyopenjtalk-plus`等)が要る。開発環境構築では両方合わせて
 `pip install -e ".[dev,vocal-analysis]"` を使う。
 
