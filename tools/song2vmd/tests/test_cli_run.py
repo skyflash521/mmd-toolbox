@@ -205,6 +205,94 @@ def test_device_rejects_unknown_value(tmp_path, monkeypatch, capsys):
     assert "cvd" not in seen  # 引数エラーで pipeline は起動しない
 
 
+def _force_gpu_oversubscription(monkeypatch):
+    """資源逼迫のGPU probe を、2回目の判定で超過が成立する系列(バイト値)に差し替える。"""
+    mib = 2**20
+    seq = iter([(4000 * mib, 8192 * mib, 0), (4000 * mib, 8192 * mib, 5600 * mib)])
+    monkeypatch.setattr(cli._resource_watch, "_default_gpu_probe",
+                        lambda: next(seq, (4000 * mib, 8192 * mib, 5600 * mib)))
+    monkeypatch.setattr(cli._resource_watch, "_default_ram_probe", lambda: (0, 0, 0))
+
+
+def _fake_run_with_stages(monkeypatch):
+    """pipeline.run を、progress へ2段(load→separate)を報告するフェイクへ差し替える。"""
+
+    def fake_run(input_path, **kwargs):
+        kwargs["progress"].stage("load")
+        kwargs["progress"].stage("separate")
+        return _make_result()
+
+    monkeypatch.setattr(cli._pipeline, "run", fake_run)
+
+
+def test_resource_warning_emitted_as_machine_event(tmp_path, monkeypatch, capsysbinary):
+    src = _touch(tmp_path / "in.wav")
+    _force_gpu_oversubscription(monkeypatch)
+    _fake_run_with_stages(monkeypatch)
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 0
+    events = _events_of(capsysbinary)
+    warnings = [e for e in events if e["type"] == "warning" and e["code"] == "gpu_memory_oversubscribed"]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning["message"] == "GPUメモリの要求量が空き容量を超過しました"
+    assert warning["stage"] == "separate"
+    assert warning["reserved_mib"] == 5600 and warning["free_at_start_mib"] == 4000
+    assert warning["total_mib"] == 8192
+    # 警告は診断・終了を変えない: result で正常終端する。
+    assert events[-1]["type"] == "result"
+
+
+def test_resource_warning_printed_to_stderr_in_human_mode(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    _force_gpu_oversubscription(monkeypatch)
+    _fake_run_with_stages(monkeypatch)
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "warning: gpu_memory_oversubscribed:" in err
+    assert "5600MiB" in err and "--device cpu" in err
+
+
+def test_resource_warning_closes_live_line_before_stderr_write(tmp_path, monkeypatch):
+    """人間向け警告は、ライブ進捗行の消去(close)→標準エラーへの書き込みの順で出る
+    (ライブ行と警告行の混線防止の順序保証)。"""
+    src = _touch(tmp_path / "in.wav")
+    _force_gpu_oversubscription(monkeypatch)
+    _fake_run_with_stages(monkeypatch)
+    order = []
+
+    class _OrderReporter:
+        def __init__(self, **kwargs):
+            self.enabled = False
+
+        def stage(self, stage_id, **kwargs):
+            pass
+
+        def close(self):
+            order.append("close")
+
+        def summary(self, message):
+            pass
+
+    class _OrderStderr:
+        def write(self, text):
+            if text.startswith("warning:"):
+                order.append("warning")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(cli._progress, "ProgressReporter", _OrderReporter)
+    monkeypatch.setattr(cli.sys, "stderr", _OrderStderr())
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 0
+    assert order[:2] == ["close", "warning"]
+
+
 def test_run_passes_default_retry_enabled(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)

@@ -43,6 +43,7 @@ from . import pipeline as _pipeline
 from . import presets as _presets
 from . import progress as _progress
 from . import report as _report
+from . import resource_watch as _resource_watch
 
 # 歌い方スタイルプリセット名。具体値の解決は presets モジュールが持つ。
 STYLE_NAMES = _presets.STYLE_NAMES
@@ -504,6 +505,18 @@ def _run(args, emitter, fail) -> int:
         anticipation=args.anticipation, min_hold=args.min_hold, vowel_gain=args.vowel_gain)
     progress_reporter = _progress.ProgressReporter(
         machine=emitter is not None, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
+
+    def _emit_resource_warning(code, message, human_text, fields):
+        # 人間向けの警告はライブ進捗行と混線しないよう、書く前に close でライブ行を消す
+        # (改行付きの1行として確定し、次の stage() でライブ行が下の行に再開する)。
+        if emitter is not None:
+            emitter.warning(code=code, message=message, **fields)
+        else:
+            progress_reporter.close()
+            print(f"warning: {code}: {human_text}", file=sys.stderr)
+
+    progress = _resource_watch.ProgressWithResourceCheck(
+        progress_reporter, _resource_watch.ResourceWatch(_emit_resource_warning))
     # 中間生成物は出力先の隣に <出力ファイル名>.intermediate/ を作って保存する。
     keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
 
@@ -519,7 +532,7 @@ def _run(args, emitter, fail) -> int:
                 style_name=args.style, model_name=args.model_name,
                 forced_aligner=args.forced_aligner, sofa_aligner=_resolve_sofa_aligner_config(args),
                 english_oov_katakana_method=args.english_oov_katakana_method,
-                keep_intermediate_dir=keep_intermediate_dir, progress=progress_reporter)
+                keep_intermediate_dir=keep_intermediate_dir, progress=progress)
         except AudioLoadError as e:
             progress_reporter.close()
             return fail("decoder_missing", str(e), 4, field="input")
@@ -560,7 +573,7 @@ def _run(args, emitter, fail) -> int:
                 sys.stdout.write(_report.render_report_text(result.diagnostics, params))
             return 0
 
-        progress_reporter.stage("write")
+        progress.stage("write")
         try:
             _vmd_write_file(result.document, output)
         except OSError as e:

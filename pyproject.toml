@@ -26,6 +26,7 @@ vocal-analysis = [
     "pyopenjtalk-plus",
     "nltk",
     "arpakana",
+    "psutil",
 ]
 
 [project.scripts]
