@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -249,11 +250,22 @@ def _align_batch(
 
     Segment契約の検証・IPA写像は含まない(呼び出し元が別途`_validate_and_normalize_segments`等で
     行う)。非ASCIIパスの拒否(`_check_ascii_paths`)と実行環境パスの実在検証
-    (`_check_paths_exist`)は本関数がSOFA起動前に行う。targetsが空ならサブプロセスを起動せず
-    空の結果を返す。
+    (`_check_paths_exist`)は本関数がSOFA起動前に行う。configの相対パスはプロセスの
+    作業ディレクトリ基準で絶対化してから検証・起動に使う。targetsが空ならサブプロセスを
+    起動せず空の結果を返す。
     """
     if not targets:
         return {}
+
+    # SOFAサブプロセスは作業ディレクトリをsofa_rootにして動くため、相対パスのままでは
+    # 起動前検証(このプロセスの作業ディレクトリ基準)と実行時の解決先が食い違い、検証を
+    # 通過したパスが実行時に見つからなくなる。検証・起動の前に絶対化して食い違いを断つ。
+    config = replace(
+        config,
+        sofa_python=config.sofa_python.absolute(),
+        sofa_root=config.sofa_root.absolute(),
+        checkpoint_path=config.checkpoint_path.absolute(),
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)

@@ -101,6 +101,45 @@ def test_align_batch_happy_path_parses_htk_output_as_seconds(tmp_path, monkeypat
     assert result == {"segment_0000": [(0.0, 0.5, "pau"), (0.5, 1.0, "a")]}
 
 
+def test_align_batch_absolutizes_relative_config_paths(tmp_path, monkeypatch):
+    """相対パスのSofaAlignerConfigは、プロセスの作業ディレクトリ基準で絶対化してから
+    サブプロセス起動に使われる(サブプロセスは作業ディレクトリ=sofa_rootで動くため、
+    相対のままではチェックポイント等がsofa_root基準へ誤解決される)。"""
+    from vocal_analysis import SofaAlignerConfig, sofa_align
+
+    _make_config(tmp_path)  # 実在検証を通すためのファイル群を tmp_path 配下に作る
+    monkeypatch.chdir(tmp_path)
+    config = SofaAlignerConfig(
+        sofa_python=Path("sofa-venv") / "python",
+        sofa_root=Path("SOFA"),
+        checkpoint_path=Path("checkpoint.ckpt"),
+    )
+
+    captured = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        folder = _folder_arg(cmd)
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "a")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    python_arg = Path(captured["cmd"][0])
+    ckpt_arg = Path(captured["cmd"][captured["cmd"].index("--ckpt") + 1])
+    cwd_arg = Path(captured["cwd"])
+    assert python_arg.is_absolute() and python_arg == tmp_path / "sofa-venv" / "python"
+    assert ckpt_arg.is_absolute() and ckpt_arg == tmp_path / "checkpoint.ckpt"
+    assert cwd_arg.is_absolute() and cwd_arg == tmp_path / "SOFA"
+
+
 def test_align_batch_writes_ascii_fixed_width_basenames_for_multiple_targets(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
