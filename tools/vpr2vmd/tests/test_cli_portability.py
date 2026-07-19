@@ -46,7 +46,7 @@ def test_non_ascii_path_roundtrip_non_machine(tmp_path, monkeypatch):
     # 日本語ファイル名の入力を受理し、日本語ファイル名の出力 VMD を生成できる(非機械)。
     src = tmp_path / "ボーカル入力.vpr"
     src.write_bytes(b"")
-    out = tmp_path / "口パク出力.vmd"
+    out = tmp_path / "リップモーション出力.vmd"
     _stub_read(monkeypatch)
     rc = cli.main([str(src), "-o", str(out)])
     assert rc == 0
@@ -59,7 +59,7 @@ def test_non_ascii_path_machine(tmp_path, monkeypatch, capsysbinary):
     # 日本語パスでも機械モードで convert result を出し、出力を生成する。
     src = tmp_path / "ボーカル入力.vpr"
     src.write_bytes(b"")
-    out = tmp_path / "口パク出力.vmd"
+    out = tmp_path / "リップモーション出力.vmd"
     _stub_read(monkeypatch)
     rc = cli.main([str(src), "-o", str(out), "--machine"])
     assert rc == 0

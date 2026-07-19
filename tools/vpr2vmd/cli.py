@@ -1,7 +1,7 @@
 """vpr2vmd CLI。
 
-vpr を入力に、口形イベント列と開き量を作って lipsync に渡し、口パク VMD を 1 コマンドで
-出力する薄いラッパー。引数解析・検証・出力先解決を担い、vpr 読み込みから口パク VMD
+vpr を入力に、口形イベント列と開き量を作って lipsync に渡し、リップモーション VMD を 1 コマンドで
+出力する薄いラッパー。引数解析・検証・出力先解決を担い、vpr 読み込みからリップモーション VMD
 ドキュメント生成までの変換パイプライン(vpr 読み込み → 口形イベント確定 → 開き量 → lipsync)は
 _build() が束ねる。--dry-run は出力VMDを書かず、処理計画と診断を表示する。
 
@@ -40,7 +40,7 @@ from .events import (
 from .io import TrackSelectionError, collect_notes, select_track
 from .tempo_correction import apply_tempo_correction
 
-# 口パクスタイルプリセット名。具体値の解決は presets.resolve が担う。
+# リップモーションスタイルプリセット名。具体値の解決は presets.resolve が担う。
 STYLE_NAMES = ("pop", "ballad", "powerful", "whisper", "rap")
 
 # VMD ヘッダのモデル名は固定 20 バイト・Shift-JIS。
@@ -155,13 +155,13 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     # --track は整数なら 0-based INDEX、非整数なら Track.name。解釈・解決は
     # io.select_track が行うため、ここでは生文字列のまま保持する(type=str)。
     p.add_argument("--track",
-                   help="口パク対象の歌唱トラック。整数は 0-based の INDEX、非整数は Track 名"
+                   help="リップモーション対象の歌唱トラック。整数は 0-based の INDEX、非整数は Track 名"
                         "(既定: 先頭トラック)")
     p.add_argument("--model-name", dest="model_name", type=_model_name,
                    default=f"vpr2vmd {__version__}",
                    help="VMD に格納するモデル名(最大 20 バイト・Shift-JIS)")
     p.add_argument("--style", choices=STYLE_NAMES, default="pop",
-                   help="口パクスタイルプリセット(開き量レンジ・タイミング・誇張を切り替える)")
+                   help="リップモーションスタイルプリセット(開き量レンジ・タイミング・誇張を切り替える)")
     # --n-morph / --no-n-morph は既定 on の対。dest=n_morph を共有する。
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
                    help="撥音「ん」に「ん」モーフを使う(既定 on)。--no-n-morph の対の明示形")
@@ -357,7 +357,7 @@ class _Built:
 
 
 def _build(args, emitter, fail):
-    """vpr を読み口パク VMD ドキュメントと診断・解決値を組み立てる(書き込みはしない)。
+    """vpr を読みリップモーション VMD ドキュメントと診断・解決値を組み立てる(書き込みはしない)。
 
     vpr 解析 → 対象トラック選択 → 重なり解決 → 口形イベント確定 → 開き量 → lipsync → モーフキーまでを
     束ね、`_Built` を返す。読み込み警告は surface し、失敗は fail() で終端して終了コードを返す
