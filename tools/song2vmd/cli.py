@@ -230,10 +230,10 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                         "cpu=GPUを使わずCPUで実行する(音声前段の全モデル・SOFAサブプロセスを含む。"
                         "VRAM不足環境の回避手段)")
     # --n-morph / --no-n-morph は既定 on の対。dest=n_morph を共有する。
-    p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
-                   help="撥音「ん」に「ん」モーフを使う(既定on)。--no-n-morphの対の明示形")
+    p.add_argument("--n-morph", dest="n_morph", action="store_true", default=False,
+                   help="撥音に「ん」モーフを使う(既定off)。--no-n-morphの対の明示形")
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
-                   help="撥音「ん」に「ん」モーフを使わず無音(閉口)に倒す。--n-morphの対")
+                   help="撥音に「ん」モーフを使わず無音(閉口)に倒す(既定)。--n-morphの対")
     p.add_argument("--vowel-gain", dest="vowel_gain", type=_vowel_gain, default=(1.0, 1.0, 1.0, 1.0, 1.0),
                    help="母音別(あ/い/う/え/お)の開き量微調整倍率(a:i:u:e:o)。"
                         "プリセットの母音別倍率へ要素ごとに乗算する")

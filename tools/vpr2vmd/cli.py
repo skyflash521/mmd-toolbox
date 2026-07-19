@@ -163,10 +163,10 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--style", choices=STYLE_NAMES, default="pop",
                    help="リップモーションスタイルプリセット(開き量レンジ・タイミング・誇張を切り替える)")
     # --n-morph / --no-n-morph は既定 on の対。dest=n_morph を共有する。
-    p.add_argument("--n-morph", dest="n_morph", action="store_true", default=True,
-                   help="撥音「ん」に「ん」モーフを使う(既定 on)。--no-n-morph の対の明示形")
+    p.add_argument("--n-morph", dest="n_morph", action="store_true", default=False,
+                   help="撥音に「ん」モーフを使う(既定 off)。--no-n-morph の対の明示形")
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
-                   help="撥音「ん」に「ん」モーフを使わず無音(閉口)に倒す。--n-morph の対")
+                   help="撥音に「ん」モーフを使わず無音(閉口)に倒す(既定)。--n-morph の対")
     # 既定はプリセット値。未指定センチネル(None)は presets.resolve がプリセットから解決する。
     p.add_argument("--open-max", dest="open_max", type=_open_amount,
                    help="口の開き量の上限(0.0〜1.0。既定: プリセット値)")

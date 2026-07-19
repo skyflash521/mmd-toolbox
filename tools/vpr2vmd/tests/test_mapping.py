@@ -2,7 +2,8 @@
 
 1つの採用音符(フレーム区間 [s, e))の音素列を、文脈なしで定まる口形イベントへ写像する。
 時間配分: 語頭両唇閉鎖は音符先頭に取り分 d_b = min(公称長, (e-s)×取り分上限)、残り区間の母音 k 個を等分。
-撥音「ん」(単独の鼻音)は ON で「ん」(N)、OFF(use_n_morph=False)で無音(閉口)。促音「っ」(Q)は無音(閉口)。
+撥音(単独の鼻音)は既定(use_n_morph 未指定)・OFF(use_n_morph=False)で無音(閉口)、
+ON(use_n_morph=True)で「ん」(N)。促音「っ」(Q)は無音(閉口)。
 母音を持たず撥音/促音でもない音符(継続「-」・その他子音のみ等)は直前口形に依存するため None を返し、
 組み立て段で直前口形を継続する(既定母音「あ」フォールバックは行わない)。
 """
@@ -95,15 +96,22 @@ def test_no_vowel_returns_none_for_hold():
     assert mapping.note_mouth_events([], 0.0, 30.0) is None
 
 
-def test_moraic_nasal_fills_note_with_n_when_on():
-    # 撥音(単独の鼻音 N\)は既定(ん ON)で音符全体を「ん」(N)にする。
+def test_moraic_nasal_is_silence_by_default():
+    # 撥音(単独の鼻音 N\)は use_n_morph 未指定(既定)では音符全体を無音(閉口)にする。
     assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0)) == [
+        (MouthShape.SILENCE, 0.0, 30.0),
+    ]
+
+
+def test_moraic_nasal_fills_note_with_n_when_on():
+    # ん ON(use_n_morph=True)では撥音(単独の鼻音 N\)を音符全体で「ん」(N)にする。
+    assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0, use_n_morph=True)) == [
         (MouthShape.N, 0.0, 30.0),
     ]
 
 
 def test_moraic_nasal_is_silence_when_off():
-    # ん OFF(use_n_morph=False)では撥音を無音(閉口)にする。口を開けた母音「あ」へ倒さない。
+    # ん OFF(use_n_morph=False)を明示しても無音(閉口)は変わらない。口を開けた母音「あ」へ倒さない。
     assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0, use_n_morph=False)) == [
         (MouthShape.SILENCE, 0.0, 30.0),
     ]

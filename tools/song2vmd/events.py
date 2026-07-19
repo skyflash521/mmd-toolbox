@@ -480,7 +480,7 @@ def _renormalize_open_rms(values):
 
 
 def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity_curve, silence_on,
-                          use_n_morph=True):
+                          use_n_morph=False):
     """音素セグメント列とRMSから口形イベント列(MouthEvent)と開き量を確定する。
 
     段階(6)の先頭子音種別付与とフレーム変換(30fps)は本関数内で行い、`lipsync` へ渡す最終形を返す。

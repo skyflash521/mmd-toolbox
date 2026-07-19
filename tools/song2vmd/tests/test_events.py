@@ -185,6 +185,19 @@ def test_no_n_morph_flag_forces_silence_instead_of_n():
     assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.SILENCE]
 
 
+def test_moraic_nasal_is_silence_when_use_n_morph_omitted():
+    # confirm_mouth_events 自身の use_n_morph 既定値(off)を直接検証する(confirm() ヘルパーは
+    # _DEFAULT_KW で常に True を明示するため、この既定値の回帰は検出できない)。
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("consonant", 0.2, 0.35, phoneme="ɴ"),
+    ]
+    rms = flat_rms(0.35, 0.8)
+    kw = {k: v for k, v in _DEFAULT_KW.items() if k != "use_n_morph"}
+    mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **kw)
+    assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.SILENCE]
+
+
 def test_head_nasal_consonant_before_vowel_is_not_n_mora():
     # な行等の頭子音(n)は撥音「ん」の専用記号ɴと異なるため独立イベントを作らず母音へ吸収される。
     segments = [

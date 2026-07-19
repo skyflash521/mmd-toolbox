@@ -114,7 +114,7 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
     assert by["--style"]["type"] == "enum"
     assert by["--style"]["constraint"] == {"choices": ["pop", "ballad", "powerful", "whisper", "rap"]}
     assert by["--style"]["default"] == "pop"
-    assert by["--n-morph"]["type"] == "flag" and by["--n-morph"]["default"] is True
+    assert by["--n-morph"]["type"] == "flag" and by["--n-morph"]["default"] is False
     assert by["--overwrite"]["default"] is False
     assert by["--output"]["default"] is None
     # 固定既定は呼び出し先由来で報告される。
@@ -164,7 +164,7 @@ def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, m
     res = _terminal_events(capsysbinary)[-1]
     assert res["mode"] == "inspect" and res["output"] is None and res["input_kind"] == "vpr"
     assert res["track_index"] == 0 and res["track_name"] == "Vocal"
-    assert res["style"] == "pop" and res["n_morph"] is True
+    assert res["style"] == "pop" and res["n_morph"] is False
     assert set(res["params"]) == {
         "open_max", "default_open", "legato_max", "valley_shallow", "valley_deep",
         "valley_slope", "coartic_overlap", "anticipation", "ref_bpm", "tempo_scale_min",

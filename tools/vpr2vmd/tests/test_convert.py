@@ -260,21 +260,30 @@ def test_convert_vpr_format_error_is_input_error(monkeypatch, tmp_path):
     assert cli.main([str(src), "-o", str(out)]) == 1
 
 
-def test_convert_moraic_nasal_uses_n_morph_by_default(monkeypatch, tmp_path):
-    # 既定は「ん」モーフを使う。撥音「ん」音符 → ん モーフキーを含む。
+def test_convert_moraic_nasal_is_silence_by_default(monkeypatch, tmp_path):
+    # 既定は無音(閉口)に倒す。撥音音符単独ではモーフキーを一切出さない(「ん」不在に加え、
+    # 誤って「あ」等へ倒さないことも固定)。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]))
     assert rc == 0
-    assert "ん" in _morph_names(out)
+    assert _morph_names(out) == []
 
 
 def test_convert_no_n_morph_drops_n_morph(monkeypatch, tmp_path):
-    # --no-n-morph 指定時、単独撥音は無音(閉口)へ倒れモーフキーを一切出さない
-    # (「ん」不在に加え、誤って「あ」等へ倒さないことも固定)。
+    # --no-n-morph を明示しても既定(無音)と変わらない。単独撥音はモーフキーを一切出さない。
     rc, out = _run(
         monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]), "--no-n-morph"
     )
     assert rc == 0
     assert _morph_names(out) == []
+
+
+def test_convert_n_morph_flag_enables_n_morph(monkeypatch, tmp_path):
+    # --n-morph 指定時、単独撥音は「ん」モーフキーを含む。
+    rc, out = _run(
+        monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]), "--n-morph"
+    )
+    assert rc == 0
+    assert "ん" in _morph_names(out)
 
 
 def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):

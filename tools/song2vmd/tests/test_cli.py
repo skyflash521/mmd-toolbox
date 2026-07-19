@@ -88,11 +88,18 @@ def test_default_output_is_vmd_alongside_input(tmp_path):
     assert not (tmp_path / "song.vmd").exists()
 
 
-def test_n_morph_defaults_to_on(tmp_path):
-    """--n-morph/--no-n-morph 無指定の既定は on(撥音「ん」にんモーフを使う)。"""
+def test_n_morph_defaults_to_off(tmp_path):
+    """--n-morph/--no-n-morph 無指定の既定は off(撥音を無音に倒す)。"""
     src = _touch(tmp_path / "in.wav")
     parser = cli._build_parser()
     args = parser.parse_args([src, "--dry-run"])
+    assert args.n_morph is False
+
+
+def test_n_morph_flag_enables(tmp_path):
+    src = _touch(tmp_path / "in.wav")
+    parser = cli._build_parser()
+    args = parser.parse_args([src, "--n-morph", "--dry-run"])
     assert args.n_morph is True
 
 

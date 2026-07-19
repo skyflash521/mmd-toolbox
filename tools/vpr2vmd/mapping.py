@@ -16,7 +16,7 @@ _BILABIAL_SHARE_CAP = 0.5  # 音符長に対する取り分上限
 
 
 def note_mouth_events(
-    phonemes: list[str], start: float, end: float, use_n_morph: bool = True
+    phonemes: list[str], start: float, end: float, use_n_morph: bool = False
 ) -> list[MouthEvent] | None:
     """1採用音符 [start, end)(フレーム)の音素列を口形イベント列へ写像する。
 

@@ -45,7 +45,7 @@ EXPECTED = {
     "--sofa-root": ("str", None, None),
     "--sofa-checkpoint": ("str", None, None),
     "--sofa-timeout": ("float", _POS, 300.0),
-    "--n-morph": ("flag", None, True),
+    "--n-morph": ("flag", None, False),
     "--vowel-gain": ("compound",
                      {"format": "a:i:u:e:o",
                       "fields": [_ffield(n, 0, None, False) for n in ("a", "i", "u", "e", "o")]},

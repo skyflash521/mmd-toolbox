@@ -188,18 +188,25 @@ def test_no_n_morph_accepted_in_dry_run(tmp_path):
     assert cli.main([src, "--no-n-morph", "--dry-run"]) == 0
 
 
-def test_dry_run_plan_reflects_n_morph_on_by_default(tmp_path, capsys):
-    """既定では「ん」モーフを使う。--dry-run の計画表示に n-morph on を出す。"""
+def test_dry_run_plan_reflects_n_morph_off_by_default(tmp_path, capsys):
+    """既定では撥音を無音へ倒す。--dry-run の計画表示に n-morph off を出す。"""
     src = _touch(tmp_path / "in.vpr")
     cli.main([src, "--dry-run"])
-    assert "n-morph: on" in capsys.readouterr().out
+    assert "n-morph: off" in capsys.readouterr().out
 
 
 def test_dry_run_plan_reflects_no_n_morph(tmp_path, capsys):
-    """--no-n-morph 指定時は撥音を無音へ倒す旨(n-morph off)を計画表示に出す。"""
+    """--no-n-morph 明示指定時も既定と同じく撥音を無音へ倒す旨(n-morph off)を計画表示に出す。"""
     src = _touch(tmp_path / "in.vpr")
     cli.main([src, "--no-n-morph", "--dry-run"])
     assert "n-morph: off" in capsys.readouterr().out
+
+
+def test_dry_run_plan_reflects_n_morph_on(tmp_path, capsys):
+    """--n-morph 指定時は「ん」モーフを使う旨(n-morph on)を計画表示に出す。"""
+    src = _touch(tmp_path / "in.vpr")
+    cli.main([src, "--n-morph", "--dry-run"])
+    assert "n-morph: on" in capsys.readouterr().out
 
 
 def test_model_name_multibyte_over_20_bytes_is_arg_error(tmp_path):

@@ -103,7 +103,7 @@ def build_mouth_events(
     adopted_notes: list[Note],
     tempos: list[TempoEvent],
     resolution: int,
-    use_n_morph: bool = True,
+    use_n_morph: bool = False,
     open_by_note: list[float] | None = None,
     legato_max_frames: float = _LEGATO_MAX_FRAMES,
 ) -> tuple[list[MouthEvent], EventDiagnostics]:
