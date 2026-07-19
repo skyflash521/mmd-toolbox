@@ -1020,6 +1020,31 @@ def test_load_content_recognizer_pipeline_uses_cpu_when_gpu_unavailable(monkeypa
     assert captured["dtype"] == torch.float32
 
 
+def test_load_content_recognizer_pipeline_passes_through_omitted_revision(monkeypatch):
+    # 任意指定でmodel_revisionを省略(None)したモデルは、そのままtransformersへrevision=Noneとして
+    # 渡り、最新リビジョンを使う。既定値以外の実際のロード経路でこの挙動を固定する回帰テスト。
+    transformers = pytest.importorskip("transformers")
+    torch = pytest.importorskip("torch")
+    from vocal_analysis import ContentRecognizerModel
+    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis.recognizer import _load_content_recognizer_pipeline
+
+    custom_model = ContentRecognizerModel(model_id="openai/whisper-large-v3")
+    captured = {}
+
+    def fake_pipeline(task, model=None, revision=None, device=None, dtype=None, **kwargs):
+        captured["revision"] = revision
+        return object()
+
+    monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
+
+    _load_content_recognizer_pipeline(custom_model)
+
+    assert captured["revision"] is None
+
+
 def test_load_content_recognizer_pipeline_uses_gpu_when_available(monkeypatch):
     transformers = pytest.importorskip("transformers")
     torch = pytest.importorskip("torch")
@@ -1255,10 +1280,12 @@ def test_recognize_default_content_recognizer_model_loads_pinned_pipeline(tmp_pa
 
 
 def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, monkeypatch):
-    """content_recognizer_model に既定値以外(例: 候補値 KANA_WHISPER_MODEL)を渡すと、
+    """content_recognizer_model に既定値以外を任意指定すると、
     そのモデルでパイプラインをロードする(モデルによる分岐は無い)。"""
-    from vocal_analysis import KANA_WHISPER_MODEL
+    from vocal_analysis import ContentRecognizerModel
     from vocal_analysis import recognizer as recognizer_module
+
+    custom_model = ContentRecognizerModel(model_id="sbintuitions/kana-whisper")
 
     wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
 
@@ -1297,9 +1324,9 @@ def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, m
         recognizer_module, "_compute_log_probs", lambda processor, model, samples: log_probs
     )
 
-    recognizer_module.recognize(wav_path, content_recognizer_model=KANA_WHISPER_MODEL)
+    recognizer_module.recognize(wav_path, content_recognizer_model=custom_model)
 
-    assert calls["loaded_model"] == KANA_WHISPER_MODEL
+    assert calls["loaded_model"] == custom_model
 
 
 def test_recognize_english_oov_katakana_method_is_passed_through_to_g2p(tmp_path, monkeypatch):

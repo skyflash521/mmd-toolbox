@@ -4,8 +4,8 @@
 `forced_aligner`引数で選択できる: 既定のwav2vec2 CTC強制アライメントと、SOFA経路
 (`sofa_align`モジュールへ委譲)。公開関数 recognize() が唯一の公開面(Recognizerアダプタ契約。
 契約は`forced_aligner`の選択に関わらず不変)。内容認識モデルは `content_recognizer_model`
-(`ContentRecognizerModel`)で指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・候補値
-`KANA_WHISPER_MODEL`・任意指定も可)。`retry` はエコー幻覚・反復幻覚へのトリガ式リトライの
+(`ContentRecognizerModel`)で指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・任意指定も可)。
+`retry` はエコー幻覚・反復幻覚へのトリガ式リトライの
 有効/無効を切り替える(既定True。主モデル自身をプロンプト無しで再認識する。別モデルは使わない)。
 """
 
@@ -786,7 +786,7 @@ def recognize(
 ) -> list[Segment]:
     """ボーカルWAVから母音/子音/gapのセグメント列を認識する(Recognizerアダプタ契約)。
 
-    content_recognizer_model で内容認識モデルを指定する(既定値・候補値・任意指定)。
+    content_recognizer_model で内容認識モデルを指定する(既定値・任意指定)。
     retry はエコー幻覚・反復幻覚へのトリガ式リトライの有効/無効を切り替える
     (既定True。主モデル自身をプロンプト無しで再認識する。別モデルは使わない)。内容認識・
     G2Pはどのモデル・どの強制アライメント経路でも共通。forced_aligner で強制アライメント段を選択する
@@ -1304,7 +1304,7 @@ def _load_content_recognizer_pipeline(
     ロードした1件だけを保持する単一枠キャッシュで足りる(再ロードを避ける)。別の
     content_recognizer_model が指定されると、直前のキャッシュは破棄して差し替える(複数の
     モデルを同時にプロセス内保持しない)。on_progress はモデルの初回取得が実際にネットワーク
-    ダウンロードを要した区間だけ、進捗文言を渡して呼ぶ(vocal_analysis.md §5)。
+    ダウンロードを要した区間だけ、進捗文言を渡して呼ぶ。
     """
     global _content_recognizer_pipeline_cache
     if _content_recognizer_pipeline_cache is not None:
@@ -1339,8 +1339,8 @@ def _load_content_recognizer_pipeline(
             dtype=dtype,
         )
     finally:
-        # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ。
-        # vocal_analysis.md §5)。例外時もライブ表示側の後始末に合わせクリアする。
+        # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ)。
+        # 例外時もライブ表示側の後始末に合わせクリアする。
         if downloaded:
             on_progress("")
     _content_recognizer_pipeline_cache = (content_recognizer_model, pipeline)
@@ -1368,8 +1368,7 @@ def _load_model_and_processor(on_progress: Callable[[str], None] | None = None):
 
     モデル id・revision・dtype は S-1 測定の固定条件どおりに適用し、実行デバイスは
     _select_device() の自動選択で決める(実行デバイスは固定条件に含まれない)。on_progress は
-    モデルの初回取得が実際にネットワークダウンロードを要した区間だけ、進捗文言を渡して呼ぶ
-    (vocal_analysis.md §5)。
+    モデルの初回取得が実際にネットワークダウンロードを要した区間だけ、進捗文言を渡して呼ぶ。
     """
     import torch
 
@@ -1393,8 +1392,8 @@ def _load_model_and_processor(on_progress: Callable[[str], None] | None = None):
             torch_dtype=getattr(torch, RECOGNIZER_CONFIG.dtype),
         )
     finally:
-        # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ。
-        # vocal_analysis.md §5)。例外時もライブ表示側の後始末に合わせクリアする。
+        # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ)。
+        # 例外時もライブ表示側の後始末に合わせクリアする。
         if downloaded:
             on_progress("")
     model.to(_select_device())

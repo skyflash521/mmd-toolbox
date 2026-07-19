@@ -572,7 +572,7 @@ interface(Separator / Recognizer)、正規化中間形式、アダプタの登�
   `--no-recognizer-retry` /
   `--separate-vocals` / `--forced-aligner` / `--sofa-python` / `--sofa-root` / `--sofa-checkpoint` /
   `--sofa-timeout` / `--english-oov-katakana-method`)は `song2vmd` の CLI で公開する(5.2)。アダプタの追加・切り替えや内容認識
-  モデルの既定値・候補値・リトライ既定の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
+  モデルの既定値・リトライ既定の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
 - 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、本リポジトリ本体の
   必須依存は `numpy/scipy` のまま保つ。
 

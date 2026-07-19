@@ -1,6 +1,6 @@
 """外部モデル委譲ステージの固定推論条件。
 
-S2 の音素モデル(強制アライメント用)・内容認識モデル(既定値・候補値)と S1 分離器のモデル指定
+S2 の音素モデル(強制アライメント用)・内容認識モデル(既定値)と S1 分離器のモデル指定
 (id・revision、Demucs の shift 平均無効化)を固定する。音素モデル・内容認識モデルの
 実行デバイス・スレッド数は環境依存で自動選択する(制限しない)。音素モデルの dtype のみ
 固定値として残る。これらの固定値は実装が独自に変えない。
@@ -44,13 +44,7 @@ DEFAULT_CONTENT_RECOGNIZER_MODEL = ContentRecognizerModel(
     model_revision="abdf7c39ab9d0397620ccaea8974cc764cd0953e",
 )
 
-# 候補値: 常にかなを返す。歌唱データでの学習・評価実績は無い。
-KANA_WHISPER_MODEL = ContentRecognizerModel(
-    model_id="sbintuitions/kana-whisper",
-    model_revision="88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82",
-)
-
-# かな限定プロンプト。既定値・候補値のどちらにも同じ手順で渡す(モデルによる分岐なし)。
+# かな限定プロンプト。既定値・任意指定のどちらにも同じ手順で渡す(モデルによる分岐なし)。
 # 内容認識のトリガ式リトライの再認識には渡さない。
 KANA_PROMPT = "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
 

@@ -45,25 +45,17 @@ def test_default_content_recognizer_model_id_and_revision_are_pinned():
     assert DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision == "abdf7c39ab9d0397620ccaea8974cc764cd0953e"
 
 
-def test_kana_whisper_model_id_and_revision_are_pinned():
-    from vocal_analysis import KANA_WHISPER_MODEL
-
-    # 候補値(kana-whisper)として固定したモデルとrevision。
-    assert KANA_WHISPER_MODEL.model_id == "sbintuitions/kana-whisper"
-    assert KANA_WHISPER_MODEL.model_revision == "88ecb3d79c5846cb4fcf76f4107b84c8fa2acd82"
-
-
 def test_kana_prompt_is_pinned():
     from vocal_analysis import KANA_PROMPT
 
-    # かな限定プロンプトとして固定した文字列。既定値・候補値どちらに渡す場合も共通。
+    # かな限定プロンプトとして固定した文字列。既定値・任意指定どちらに渡す場合も共通。
     assert KANA_PROMPT == "すべて ひらがなだけで こたえてください。かんじは つかわないでください。"
 
 
 def test_content_recognizer_model_revision_defaults_to_none():
     from vocal_analysis import ContentRecognizerModel
 
-    # revision省略時は最新リビジョンを使う。既定値・候補値以外を任意指定するときの挙動。
+    # revision省略時は最新リビジョンを使う。既定値以外を任意指定するときの挙動。
     custom = ContentRecognizerModel(model_id="openai/whisper-large-v3")
     assert custom.model_revision is None
 
@@ -149,7 +141,6 @@ def test_sofa_aligner_config_is_frozen():
 def test_configs_are_frozen():
     from vocal_analysis import (
         DEFAULT_CONTENT_RECOGNIZER_MODEL,
-        KANA_WHISPER_MODEL,
         RECOGNIZER_CONFIG,
         SEPARATOR_CONFIG,
     )
@@ -161,5 +152,3 @@ def test_configs_are_frozen():
         SEPARATOR_CONFIG.shifts = 1
     with pytest.raises(dataclasses.FrozenInstanceError):
         DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id = "other"
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        KANA_WHISPER_MODEL.model_id = "other"
