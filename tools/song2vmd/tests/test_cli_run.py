@@ -392,6 +392,44 @@ def test_normal_run_machine_emits_run_result(tmp_path, monkeypatch, capsysbinary
     assert r["keys"] == 4
 
 
+# --- --verbose: 通常実行での診断レポート追加表示 --------------------------------
+
+
+def test_verbose_normal_run_writes_vmd_and_prints_report(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "out.vmd"
+    _capture_run_kwargs(monkeypatch, result=_make_result(keys=6))
+
+    rc = cli.main([src, "-o", str(out), "--verbose"])
+    assert rc == 0
+    assert out.exists()
+    out_text = capsys.readouterr().out
+    assert "keys: 6" in out_text
+
+
+def test_normal_run_without_verbose_prints_no_report(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "out.vmd"
+    _capture_run_kwargs(monkeypatch, result=_make_result(keys=6))
+
+    rc = cli.main([src, "-o", str(out)])
+    assert rc == 0
+    out_text = capsys.readouterr().out
+    assert out_text == ""
+
+
+def test_verbose_machine_run_does_not_print_report_text(tmp_path, monkeypatch, capsysbinary):
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "out.vmd"
+    _capture_run_kwargs(monkeypatch, result=_make_result(keys=6))
+
+    rc = cli.main([src, "-o", str(out), "--machine", "--verbose"])
+    assert rc == 0
+    results = [e for e in _events_of(capsysbinary) if e["type"] == "result"]
+    assert len(results) == 1
+    assert results[0]["mode"] == "run"
+
+
 def test_normal_run_emits_write_progress_stage_before_writing(tmp_path, monkeypatch, capsysbinary):
     # VMD書き出し(段id "write")はcli.py自身の責務なので、pipeline.run()の
     # 内部でなくcli.py側でprogress.stage("write")を発行する必要がある。

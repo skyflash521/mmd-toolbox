@@ -257,7 +257,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     p.add_argument("--keep-intermediate", dest="keep_intermediate", action="store_true",
                    help="中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)を残す(診断用)")
     p.add_argument("-v", "--verbose", dest="verbose", action="store_true",
-                   help="詳細ログを標準エラーへ出す")
+                   help="通常実行でも --dry-run と同じ診断レポートを標準出力へ表示する(出力VMDは書く)")
     p.add_argument("--quiet", dest="quiet", action="store_true",
                    help="進捗表示を抑制する(警告・診断・終了コードは抑制しない)")
     p.add_argument("--machine", action="store_true",
@@ -582,6 +582,10 @@ def _run(args, emitter, fail) -> int:
 
         progress_reporter.close()
         progress_reporter.summary(f"完了 {output}")
+
+        if emitter is None and args.verbose:
+            params = _report_params(args, openness, style_gen)
+            sys.stdout.write(_report.render_report_text(result.diagnostics, params))
 
         if emitter is not None:
             emitter.result(mode="run", **_report.result_run_fields(result.diagnostics, output=output))
