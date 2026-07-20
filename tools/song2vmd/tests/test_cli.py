@@ -28,7 +28,7 @@ def _stub_pipeline_result():
         segments=[], mouth_events=[], mora_event_group_sizes=[],
         event_diagnostics=_events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
         backends={"separator": "audio-separator-htdemucs-ft", "recognizer": "openai/whisper-medium"},
-        style="pop", separated=True, duration_sec=1.0, keys=0,
+        style="pop", separated=True, duration_sec=1.0, keys=0, forced_split=False,
     )
     return _pipeline.PipelineResult(document=document, diagnostics=diagnostics, sample_rate=44100, channels=2)
 

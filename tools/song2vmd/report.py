@@ -33,8 +33,8 @@ class MoraReport:
 class Diagnostics:
     """人間向けレポートと機械モードの result に使う統計をまとめた診断データ。
 
-    low_dynamics は機械モードのresultペイロードには含まれない。呼び出し側が
-    warningイベント(code="low_dynamics_suppressed")を出すかどうかの判定に使う。
+    low_dynamics・forced_split は機械モードのresultペイロードには含まれない。呼び出し側が
+    warningイベント(code="low_dynamics_suppressed"/"forced_split")を出すかどうかの判定に使う。
     """
 
     backends: dict
@@ -50,6 +50,7 @@ class Diagnostics:
     keys: int
     mora_details: tuple
     low_dynamics: bool
+    forced_split: bool
 
 
 def _group_mora_events(mouth_events, mora_event_group_sizes):
@@ -70,7 +71,7 @@ def _group_mora_events(mouth_events, mora_event_group_sizes):
 
 
 def build_diagnostics(*, segments, mouth_events, event_diagnostics, mora_event_group_sizes, backends,
-                       style, separated, duration_sec, keys) -> Diagnostics:
+                       style, separated, duration_sec, keys, forced_split) -> Diagnostics:
     """音素セグメント列・口形イベント列・EventDiagnosticsからDiagnosticsを組み立てる。"""
     phonemes = sum(1 for s in segments if s.type in ("vowel", "consonant"))
     gap_duration = sum(s.end_sec - s.start_sec for s in segments if s.type == "gap")
@@ -91,7 +92,7 @@ def build_diagnostics(*, segments, mouth_events, event_diagnostics, mora_event_g
         backends=dict(backends), style=style, separated=separated, phonemes=phonemes, morae=morae,
         merged_morae=event_diagnostics.merged_morae, coverage=coverage, closed_ranges=closed_ranges,
         max_opening=max_opening, duration_sec=duration_sec, keys=keys, mora_details=mora_details,
-        low_dynamics=event_diagnostics.low_dynamics,
+        low_dynamics=event_diagnostics.low_dynamics, forced_split=forced_split,
     )
 
 

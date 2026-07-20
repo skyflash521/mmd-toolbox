@@ -173,8 +173,9 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         segments, rms_envelope, vocal_pcm = _run_single(
             pcm, separate_vocals, content_recognizer_model, retry,
             forced_aligner, sofa_aligner, english_oov_katakana_method, progress)
+        forced_split = False
     else:
-        segments, rms_envelope, vocal_pcm = _run_chunked(
+        segments, rms_envelope, vocal_pcm, forced_split = _run_chunked(
             pcm, duration_sec, separate_vocals, content_recognizer_model,
             retry, max_duration_sec, forced_aligner, sofa_aligner,
             english_oov_katakana_method, progress)
@@ -199,7 +200,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
                   "forced_aligner": forced_aligner,
                   "english_oov_katakana_method": english_oov_katakana_method},
         style=style_name, separated=(separate_vocals != "never"), duration_sec=duration_sec,
-        keys=len(document.morph))
+        keys=len(document.morph), forced_split=forced_split)
 
     return PipelineResult(
         document=document, diagnostics=diagnostics, sample_rate=pcm.sample_rate,
@@ -228,8 +229,10 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
                  english_oov_katakana_method, progress):
     """長尺分割ありの実行。境界決定は分離前の生音声RMSを使う。"""
     raw_rms = _va_rms.compute_rms(pcm)
-    boundaries = chunking.find_chunk_boundaries(
+    boundary_pairs = chunking.find_chunk_boundaries(
         duration_sec, raw_rms.times_sec, raw_rms.values, max_duration_sec=max_duration_sec)
+    boundaries = [b for b, _ in boundary_pairs]
+    forced_split = any(f for _, f in boundary_pairs)
     edges = [0.0] + boundaries + [duration_sec]
     n = len(edges) - 1
 
@@ -262,4 +265,4 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
     whole_vocal_pcm = _concat_pcm(vocal_core_chunks)
     _report_stage(progress, "rms")
     rms_envelope = _va_rms.compute_rms(whole_vocal_pcm)
-    return merged_segments, rms_envelope, whole_vocal_pcm
+    return merged_segments, rms_envelope, whole_vocal_pcm, forced_split

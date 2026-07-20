@@ -12,13 +12,9 @@
 RMS算出を1回だけ行うことで満たされ、本モジュールが担うセグメント結合とは別の関心事)。
 """
 
-import pytest
-
 from vocal_analysis import Segment
 
 from song2vmd import chunking
-
-_XFAIL_ITEM1 = pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
 
 
 def seg(type_, start, end, phoneme=None, confidence=None):
@@ -37,7 +33,6 @@ def test_short_audio_has_no_boundaries():
     assert boundaries == []
 
 
-@_XFAIL_ITEM1
 def test_boundary_picks_quietest_point_among_multiple_silence_candidates():
     # 探索窓内にしきい値以下の候補が複数(296s=0.05・298s=0.02・303s=0.04)あるとき、
     # 単に最初に見つかった無音点ではなく、最も静かな点(298s)を選ぶ。無音採用点なのでforced=False。
@@ -50,7 +45,6 @@ def test_boundary_picks_quietest_point_among_multiple_silence_candidates():
     assert boundaries == [(298.0, False)]
 
 
-@_XFAIL_ITEM1
 def test_forced_split_when_no_silence_in_window():
     # 探索窓内に無音(しきい値以下)が無ければ、目標境界そのもので強制分割する
     # (ロングトーン・ライブ音源等)。強制分割点なのでforced=True。
@@ -63,7 +57,6 @@ def test_forced_split_when_no_silence_in_window():
     assert boundaries == [(300.0, True)]
 
 
-@_XFAIL_ITEM1
 def test_second_target_is_computed_from_actual_cut_point_not_fixed_grid():
     # 次の目標境界は固定グリッド(2×max_duration=600s)ではなく、実際に切った点(298s)から
     # max_duration秒後(598s)を起点にする。無音点を594sに置くと、
@@ -80,7 +73,6 @@ def test_second_target_is_computed_from_actual_cut_point_not_fixed_grid():
     assert boundaries == [(298.0, False), (594.0, False)]
 
 
-@_XFAIL_ITEM1
 def test_forced_split_target_within_duration_is_still_applied():
     times = [float(t) for t in range(0, 320)]
     values = [0.5] * len(times)
@@ -91,7 +83,6 @@ def test_forced_split_target_within_duration_is_still_applied():
     assert boundaries == [(300.0, True)]
 
 
-@_XFAIL_ITEM1
 def test_boundaries_keep_advancing_when_max_duration_is_small_relative_to_search_window():
     # max_duration_secがsearch_window_sec以下(--max-durationに小さい値を与えた場合)でも、
     # 終始無音(=常に候補になりうる)なデータで境界検出が前進し続け、有限回で終わることを確認する。
@@ -108,7 +99,6 @@ def test_boundaries_keep_advancing_when_max_duration_is_small_relative_to_search
     assert all(forced is False for _, forced in boundaries)  # 終始無音なので全て無音採用
 
 
-@_XFAIL_ITEM1
 def test_forced_split_flag_distinguishes_silence_and_forced_boundaries_in_same_call():
     # 1回の呼び出し内で、1つ目の境界は無音採用(forced=False)・2つ目は強制分割(forced=True)になる
     # 混在ケース(単一の代表値で一括判定せず境界ごとに判定することを確認する)。

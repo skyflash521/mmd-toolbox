@@ -20,6 +20,9 @@ def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_durati
 
     候補は前の実境界より後ろ(t > previous_boundary)に限ることで、無音点が繰り返し見つかっても
     境界が前進し続けることを保証する(max_duration_sec が search_window_sec 以下でも停止しない)。
+
+    戻り値は (boundary_sec, forced) のタプル列。forced は探索窓内に無音が無く目標境界そのもので
+    強制分割したかどうかを境界ごとに示す(song2vmd.md 12.1 の forced_split 警告の送出判定に使う)。
     """
     if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
         return []
@@ -34,10 +37,12 @@ def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_durati
         ]
         if candidates:
             quietest_time, quietest_value = min(candidates, key=lambda tv: tv[1])
-            boundary = quietest_time if quietest_value <= silence_threshold else target
+            forced = quietest_value > silence_threshold
+            boundary = target if forced else quietest_time
         else:
+            forced = True
             boundary = target
-        boundaries.append(boundary)
+        boundaries.append((boundary, forced))
         previous_boundary = boundary
         target = boundary + max_duration_sec
     return boundaries

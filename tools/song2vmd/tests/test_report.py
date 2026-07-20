@@ -26,7 +26,7 @@ def diag_of(**overrides):
     kw = dict(
         segments=[], mouth_events=[],
         event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
-        backends={}, style="pop", separated=False, duration_sec=1.0, keys=0,
+        backends={}, style="pop", separated=False, duration_sec=1.0, keys=0, forced_split=False,
     )
     kw.update(overrides)
     if "mora_event_group_sizes" not in overrides:
@@ -106,7 +106,6 @@ def test_low_dynamics_comes_from_event_diagnostics():
     ).low_dynamics is False
 
 
-@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
 def test_forced_split_is_a_diagnostics_field_not_in_result_payload():
     # forced_splitはlow_dynamicsと同じ位置づけ(機械モードのresultペイロードには含めない、
     # 呼び出し側のwarningイベント判定専用のDiagnosticsフィールド)。build_diagnosticsは

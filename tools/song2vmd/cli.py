@@ -559,6 +559,17 @@ def _run(args, emitter, fail) -> int:
                       "曲のダイナミックレンジが小さいため、音量に基づく無音化を抑制しました",
                       file=sys.stderr)
 
+        if result.diagnostics.forced_split:
+            # 長尺分割で無音点が見つからず、最大チャンク長で強制分割した境界があったことを知らせる。
+            # low_dynamics_suppressedと同じ扱い(--quietでも抑制しない、ライブ行を消してから出す)。
+            if emitter is not None:
+                emitter.warning(code="forced_split",
+                                message="無音が見つからず最大チャンク長で強制分割しました")
+            else:
+                progress_reporter.close()
+                print("warning: forced_split: 無音が見つからず最大チャンク長で強制分割しました",
+                      file=sys.stderr)
+
         # --dry-run は出力を書かずに終える(空実行)。診断は実データから得る。
         if args.dry_run:
             if emitter is not None:
