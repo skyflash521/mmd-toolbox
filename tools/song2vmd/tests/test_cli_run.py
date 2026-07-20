@@ -578,7 +578,7 @@ def test_forced_split_human_warning_line_uses_common_format_and_appears_once(tmp
 
 def test_audio_load_error_maps_to_decoder_missing(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
-    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg")))
+    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")))
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 4
@@ -586,7 +586,7 @@ def test_audio_load_error_maps_to_decoder_missing(tmp_path, monkeypatch):
 
 def test_audio_load_error_machine_mode_emits_decoder_missing_error(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
-    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg")))
+    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")))
 
     rc = cli.main([src, "--machine", "--dry-run"])
     assert rc == 4
@@ -595,6 +595,24 @@ def test_audio_load_error_machine_mode_emits_decoder_missing_error(tmp_path, mon
     assert events[-1]["code"] == "decoder_missing"
     assert events[-1]["field"] == "input"
     assert events[-1]["exit_code"] == 4
+
+
+@pytest.mark.xfail(reason="impl pending: AudioLoadErrorのreason属性", strict=True)
+def test_audio_load_error_maps_to_not_audio(tmp_path, monkeypatch, capsysbinary):
+    # ffmpeg変換失敗・変換後ファイルの再読み込み失敗など、復号器不在でなく入力そのものが壊れている
+    # ケースはdecoder_missingでなくnot_audio(終了コード1)にする。
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(
+        cli._pipeline, "run",
+        lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("broken input", reason="not_audio")))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 1
+    events = _events_of(capsysbinary)
+    assert events[-1]["type"] == "error"
+    assert events[-1]["code"] == "not_audio"
+    assert events[-1]["field"] == "input"
+    assert events[-1]["exit_code"] == 1
 
 
 def test_separation_error_maps_to_stage_failed_separate(tmp_path, monkeypatch, capsysbinary):
@@ -814,7 +832,7 @@ def test_low_dynamics_warning_closes_progress_before_stderr_print(tmp_path, monk
 
 
 @pytest.mark.parametrize("make_exc", [
-    lambda: AudioLoadError("no ffmpeg"),
+    lambda: AudioLoadError("no ffmpeg", reason="decoder_missing"),
     lambda: SeparationError("sep failed"),
     lambda: RecognitionError("rec failed"),
 ])

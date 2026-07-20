@@ -7,6 +7,7 @@ soundfile 経由で読める形式(WAV/FLAC/OGG/mp3)は、短い合成音の形�
 """
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,7 @@ import pytest
 import soundfile as sf
 
 FIXTURES = Path(__file__).parent / "fixtures"
+_XFAIL_REASON_ATTR = pytest.mark.xfail(reason="impl pending: AudioLoadErrorのreason属性", strict=True)
 
 
 def test_reads_wav_without_ffmpeg(monkeypatch):
@@ -90,6 +92,49 @@ def test_missing_ffmpeg_raises_clear_error(monkeypatch):
 
     with pytest.raises(AudioLoadError, match="ffmpeg"):
         load_audio(FIXTURES / "beep.m4a")
+
+
+@_XFAIL_REASON_ATTR
+def test_missing_ffmpeg_error_has_decoder_missing_reason(monkeypatch):
+    from vocal_analysis.io import AudioLoadError, load_audio
+
+    monkeypatch.setattr("vocal_analysis.io._find_ffmpeg", lambda: None)
+
+    with pytest.raises(AudioLoadError) as exc_info:
+        load_audio(FIXTURES / "beep.m4a")
+    assert exc_info.value.reason == "decoder_missing"
+
+
+@_XFAIL_REASON_ATTR
+def test_ffmpeg_conversion_failure_raises_audio_load_error_with_not_audio_reason(monkeypatch):
+    from vocal_analysis.io import AudioLoadError, load_audio
+
+    # soundfile で読めない形式で ffmpeg は見つかるが、変換自体が失敗する場合(壊れた入力ファイル等)。
+    # 復号器が無いのではなく入力が壊れているケースなので、decoder_missingでなくnot_audioになる。
+    monkeypatch.setattr("vocal_analysis.io._find_ffmpeg", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "vocal_analysis.io.subprocess.run",
+        lambda *a, **k: (_ for _ in ()).throw(subprocess.CalledProcessError(1, "ffmpeg")))
+
+    with pytest.raises(AudioLoadError) as exc_info:
+        load_audio(FIXTURES / "beep.m4a")
+    assert exc_info.value.reason == "not_audio"
+
+
+@_XFAIL_REASON_ATTR
+def test_ffmpeg_reread_failure_raises_audio_load_error_with_not_audio_reason(monkeypatch, tmp_path):
+    from vocal_analysis.io import AudioLoadError, load_audio
+
+    # ffmpeg変換自体は成功するが、変換後ファイルの再読み込みが失敗する場合(壊れた入力ファイル等)。
+    monkeypatch.setattr("vocal_analysis.io._find_ffmpeg", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("vocal_analysis.io.subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "vocal_analysis.io.sf.read",
+        lambda *a, **k: (_ for _ in ()).throw(sf.LibsndfileError(1, "decode error")))
+
+    with pytest.raises(AudioLoadError) as exc_info:
+        load_audio(tmp_path / "broken.m4a")
+    assert exc_info.value.reason == "not_audio"
 
 
 def test_channels_and_sample_rate_preserved_for_stereo(tmp_path):
