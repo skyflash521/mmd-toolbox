@@ -83,6 +83,23 @@ def test_single_run_calls_stages_in_order(tmp_path, monkeypatch):
     assert result.channels == 2
 
 
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+def test_single_run_diagnostics_forced_split_is_always_false(tmp_path, monkeypatch):
+    # 非分割経路(_run_single)は forced_split=False で固定(強制分割は長尺分割時のみ起こりうる)。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    result = pipeline.run(input_path, **_common_kwargs())
+    assert result.diagnostics.forced_split is False
+
+
 def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(tmp_path, monkeypatch):
     # progress.stage()の順序だけでなく、実際の下位関数の呼び出し順序とデータの受け渡し
     # (separateへ渡すpcm・recognizeへ渡すvocal_path・events.confirm_mouth_eventsへ渡す
@@ -346,6 +363,38 @@ def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monke
 
 
 # --- 長尺分割(--max-duration 超過) ---------------------------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+@pytest.mark.parametrize("boundary_pairs, expected_forced_split", [
+    ([(3.0, False), (6.0, False)], False),  # 全境界が無音採用
+    ([(3.0, True), (6.0, False)], True),  # 一部が強制分割
+    ([(3.0, False), (6.0, True)], True),  # 一部が強制分割(順序が逆でも同じ判定)
+])
+def test_chunked_run_diagnostics_forced_split_reflects_any_boundary(
+        tmp_path, monkeypatch, boundary_pairs, expected_forced_split):
+    # find_chunk_boundariesが返すタプル列のうち、いずれか1つでもforced=Trueならforced_split=True
+    # (単純な一括判定ではなく境界ごとの論理和)。_run_chunkedはboundaries_secへ座標だけを渡す
+    # ので、merge_chunk_segmentsが受け取るboundaries_secは従来どおりlist[float]のまま。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: boundary_pairs)
+
+    def fake_merge(chunk_segments_list, chunk_offsets_sec, boundaries_sec):
+        assert boundaries_sec == [3.0, 6.0]  # 座標だけのlist[float]で従来どおり
+        return [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline.chunking, "merge_chunk_segments", fake_merge)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    result = pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+    assert result.diagnostics.forced_split is expected_forced_split
 
 
 def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monkeypatch):

@@ -508,6 +508,87 @@ def test_human_warning_line_uses_common_format(tmp_path, monkeypatch, capsys):
     assert body.lstrip() == body  # 接頭辞直後に空白文字(タブ・全角空白等)が無い
 
 
+# --- forced_split 警告 ----------------------------------------------------------
+
+
+def _make_forced_split_result(*, forced_split):
+    # _make_resultはforced_splitに未対応のため、build_diagnosticsを直接呼ぶ専用ヘルパー。
+    document = VmdDocument(model_name_raw=b"\x00" * 20, morph=[])
+    diagnostics = _report.build_diagnostics(
+        segments=[], mouth_events=[], mora_event_group_sizes=[],
+        event_diagnostics=_events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
+        backends={"separator": "audio-separator-htdemucs-ft", "recognizer": "openai/whisper-medium"},
+        style="pop", separated=True, duration_sec=2.5, keys=3, forced_split=forced_split)
+    return _pipeline.PipelineResult(document=document, diagnostics=diagnostics, sample_rate=44100, channels=2)
+
+
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+def test_forced_split_warning_emitted_in_machine_mode(tmp_path, monkeypatch, capsysbinary):
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch, result=_make_forced_split_result(forced_split=True))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 0
+    warnings = [e for e in _events_of(capsysbinary) if e["type"] == "warning"]
+    assert len(warnings) == 1
+    assert warnings[0]["code"] == "forced_split"
+    assert "stage" not in warnings[0]  # low_dynamics_suppressedと同じ形でstageキーは持たない
+
+
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+def test_no_forced_split_warning_when_not_forced(tmp_path, monkeypatch, capsysbinary):
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch, result=_make_forced_split_result(forced_split=False))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 0
+    assert not [e for e in _events_of(capsysbinary) if e["type"] == "warning"]
+
+
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+def test_forced_split_warning_printed_to_stderr_non_machine(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch, result=_make_forced_split_result(forced_split=True))
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "forced_split" in err
+
+
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+def test_forced_split_warning_survives_quiet(tmp_path, monkeypatch, capsys):
+    # --quiet は進捗表示だけを抑制し、警告は抑制しない(low_dynamics_suppressedと同じ扱い)。
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch, result=_make_forced_split_result(forced_split=True))
+
+    rc = cli.main([src, "--dry-run", "--quiet"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "forced_split" in err
+
+
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+def test_forced_split_human_warning_line_uses_common_format_and_appears_once(tmp_path, monkeypatch, capsys):
+    # low_dynamics_suppressedのtest_human_warning_line_uses_common_formatと対になる検証:
+    # 警告行は共通コードのラベルで実行につき1行だけ標準エラーへ出す。
+    src = _touch(tmp_path / "in.wav")
+    out = tmp_path / "out.vmd"
+    _capture_run_kwargs(monkeypatch, result=_make_forced_split_result(forced_split=True))
+
+    rc = cli.main([src, "-o", str(out)])
+    assert rc == 0
+    stdout, err = capsys.readouterr()
+    assert stdout == ""
+    lines = err.splitlines()
+    assert len(lines) == 1
+    prefix = "warning: forced_split: "
+    assert lines[0].startswith(prefix)
+    body = lines[0][len(prefix):]
+    assert body.strip()
+    assert body.lstrip() == body  # 接頭辞直後に空白文字(タブ・全角空白等)が無い
+
+
 # --- エラー変換(音声前段の失敗。12.3) -----------------------------------------
 
 

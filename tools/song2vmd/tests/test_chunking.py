@@ -12,9 +12,13 @@
 RMS算出を1回だけ行うことで満たされ、本モジュールが担うセグメント結合とは別の関心事)。
 """
 
+import pytest
+
 from vocal_analysis import Segment
 
 from song2vmd import chunking
+
+_XFAIL_ITEM1 = pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
 
 
 def seg(type_, start, end, phoneme=None, confidence=None):
@@ -33,35 +37,38 @@ def test_short_audio_has_no_boundaries():
     assert boundaries == []
 
 
+@_XFAIL_ITEM1
 def test_boundary_picks_quietest_point_among_multiple_silence_candidates():
     # 探索窓内にしきい値以下の候補が複数(296s=0.05・298s=0.02・303s=0.04)あるとき、
-    # 単に最初に見つかった無音点ではなく、最も静かな点(298s)を選ぶ。
+    # 単に最初に見つかった無音点ではなく、最も静かな点(298s)を選ぶ。無音採用点なのでforced=False。
     times = [290.0, 295.0, 296.0, 297.0, 298.0, 299.0, 300.0, 303.0, 305.0, 310.0]
     values = [0.8, 0.7, 0.05, 0.5, 0.02, 0.5, 0.6, 0.04, 0.8, 0.9]
     boundaries = chunking.find_chunk_boundaries(
         duration_sec=400.0, rms_times_sec=times, rms_values=values,
         max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
     )
-    assert boundaries == [298.0]
+    assert boundaries == [(298.0, False)]
 
 
+@_XFAIL_ITEM1
 def test_forced_split_when_no_silence_in_window():
     # 探索窓内に無音(しきい値以下)が無ければ、目標境界そのもので強制分割する
-    # (ロングトーン・ライブ音源等)。
+    # (ロングトーン・ライブ音源等)。強制分割点なのでforced=True。
     times = [295.0, 297.0, 299.0, 300.0, 301.0, 303.0, 305.0]
     values = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]  # 終始しきい値(0.06)を上回る
     boundaries = chunking.find_chunk_boundaries(
         duration_sec=400.0, rms_times_sec=times, rms_values=values,
         max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
     )
-    assert boundaries == [300.0]
+    assert boundaries == [(300.0, True)]
 
 
+@_XFAIL_ITEM1
 def test_second_target_is_computed_from_actual_cut_point_not_fixed_grid():
     # 次の目標境界は固定グリッド(2×max_duration=600s)ではなく、実際に切った点(298s)から
     # max_duration秒後(598s)を起点にする。無音点を594sに置くと、
     # 起点598sの探索窓[593,603]には入るが、固定グリッド起点600sの探索窓[595,605]には
-    # 入らない(594<595)ため、両設計を区別できる。
+    # 入らない(594<595)ため、両設計を区別できる。両方とも無音採用点なのでforced=False。
     times = [float(t) for t in range(0, 651)]
     values = [0.5] * len(times)
     values[298] = 0.01  # 最初の目標境界(300s)付近の無音点
@@ -70,9 +77,10 @@ def test_second_target_is_computed_from_actual_cut_point_not_fixed_grid():
         duration_sec=650.0, rms_times_sec=times, rms_values=values,
         max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
     )
-    assert boundaries == [298.0, 594.0]
+    assert boundaries == [(298.0, False), (594.0, False)]
 
 
+@_XFAIL_ITEM1
 def test_forced_split_target_within_duration_is_still_applied():
     times = [float(t) for t in range(0, 320)]
     values = [0.5] * len(times)
@@ -80,9 +88,10 @@ def test_forced_split_target_within_duration_is_still_applied():
         duration_sec=320.0, rms_times_sec=times, rms_values=values,
         max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
     )
-    assert boundaries == [300.0]
+    assert boundaries == [(300.0, True)]
 
 
+@_XFAIL_ITEM1
 def test_boundaries_keep_advancing_when_max_duration_is_small_relative_to_search_window():
     # max_duration_secがsearch_window_sec以下(--max-durationに小さい値を与えた場合)でも、
     # 終始無音(=常に候補になりうる)なデータで境界検出が前進し続け、有限回で終わることを確認する。
@@ -93,8 +102,25 @@ def test_boundaries_keep_advancing_when_max_duration_is_small_relative_to_search
         max_duration_sec=1.0, search_window_sec=5.0, silence_threshold=0.06,
     )
     assert boundaries
-    assert boundaries == sorted(boundaries)
-    assert len(boundaries) == len(set(boundaries))  # 重複無く単調に前進している
+    times_only = [t for t, _ in boundaries]
+    assert times_only == sorted(times_only)
+    assert len(times_only) == len(set(times_only))  # 重複無く単調に前進している
+    assert all(forced is False for _, forced in boundaries)  # 終始無音なので全て無音採用
+
+
+@_XFAIL_ITEM1
+def test_forced_split_flag_distinguishes_silence_and_forced_boundaries_in_same_call():
+    # 1回の呼び出し内で、1つ目の境界は無音採用(forced=False)・2つ目は強制分割(forced=True)になる
+    # 混在ケース(単一の代表値で一括判定せず境界ごとに判定することを確認する)。
+    times = [float(t) for t in range(0, 620)]
+    values = [0.5] * len(times)
+    values[298] = 0.01  # 最初の目標境界(300s)付近だけ無音
+    # 2つ目の目標(298+300=598s)付近は終始しきい値超のまま(強制分割になる)
+    boundaries = chunking.find_chunk_boundaries(
+        duration_sec=620.0, rms_times_sec=times, rms_values=values,
+        max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
+    )
+    assert boundaries == [(298.0, False), (598.0, True)]
 
 
 # --- merge_chunk_segments -----------------------------------------------------

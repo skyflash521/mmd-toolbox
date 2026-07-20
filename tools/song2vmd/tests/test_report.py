@@ -106,6 +106,22 @@ def test_low_dynamics_comes_from_event_diagnostics():
     ).low_dynamics is False
 
 
+@pytest.mark.xfail(reason="impl pending: 項目1 forced_split警告", strict=True)
+def test_forced_split_is_a_diagnostics_field_not_in_result_payload():
+    # forced_splitはlow_dynamicsと同じ位置づけ(機械モードのresultペイロードには含めない、
+    # 呼び出し側のwarningイベント判定専用のDiagnosticsフィールド)。build_diagnosticsは
+    # forced_splitを必須キーワード引数として受け取る。
+    kw = dict(
+        segments=[], mouth_events=[], mora_event_group_sizes=[],
+        event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
+        backends={}, style="pop", separated=False, duration_sec=1.0, keys=0,
+    )
+    assert report.build_diagnostics(**kw, forced_split=True).forced_split is True
+    assert report.build_diagnostics(**kw, forced_split=False).forced_split is False
+    fields = report.result_run_fields(report.build_diagnostics(**kw, forced_split=True), output="x.vmd")
+    assert "forced_split" not in fields
+
+
 def test_mora_details_lists_only_vowel_like_events_with_shape_and_hold():
     mouth_events = [mev(MouthShape.A, 0, 10, 0.4), mev(MouthShape.BILABIAL, 10, 12), mev(MouthShape.N, 12, 18, 0.3)]
     diag = diag_of(mouth_events=mouth_events, keys=3)
