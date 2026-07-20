@@ -108,7 +108,6 @@ def test_coartic_full_envelopes():
     _approx_envelope(env["う"], [(8, 0.0), (10, 0.25), (12, 0.5), (18, 0.5), (20, 0.0)])
 
 
-@pytest.mark.xfail(reason="impl pending: 両唇閉鎖隣接時の先行/後行残し", strict=True)
 def test_bilabial_between_no_coartic():
     # あ[0,10]・両唇閉鎖[10,14]・う[14,24]: 両唇閉鎖を挟むので終端10≠次始端14 → 協調調音を作らない
     # (各々 単一区間エンベロープ)。両唇閉鎖区間は専用の閉口キーを持たず、キーは出力されない

@@ -82,7 +82,6 @@ def test_no_anticipation_at_timeline_start():
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
 
 
-@pytest.mark.xfail(reason="impl pending: 両唇閉鎖隣接時の先行/後行残し", strict=True)
 def test_anticipation_after_bilabial():
     # 両唇閉鎖の直後の母音も無音直後と同様に先行準備の対象になる。無音[0,8]・両唇閉鎖[8,10]・
     # あ[10,20]op0.5、anticipation_frames=1(既定)。開き量比 0.5/0.8=0.625、
@@ -97,7 +96,6 @@ def test_anticipation_after_bilabial():
     _approx_envelope(env["あ"], [(9, 0.0), (10, 0.5), (18, 0.5), (20, 0.0)])
 
 
-@pytest.mark.xfail(reason="impl pending: 両唇閉鎖隣接時の先行/後行残し", strict=True)
 def test_release_lag_before_bilabial():
     # 直後が両唇閉鎖の母音も直後が無音の場合と同様に後行残しの対象になる(先行準備と対称)。あ[0,10]op0.5・
     # 両唇閉鎖[10,20]、anticipation_frames=3。R_eff=half_up(3×0.625)=2、floor(10/2)=5 で頭打ちなし。

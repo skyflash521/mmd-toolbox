@@ -481,11 +481,11 @@ def _following_event(events: Sequence[MouthEvent], end: float) -> MouthEvent | N
 def _lead_lag_eff(neighbor: MouthEvent | None, opening: float, params: GenerationParams) -> int:
     """先行準備(立ち上がり前倒し)/後行残し(閉じ後ろずらし)の実効量。
 
-    隣接が無音区間のときのみ働く(直前/直後が無い・母音・両唇閉鎖は 0)。基準フレーム `anticipation_frames`
+    隣接が無音区間・両唇閉鎖のときのみ働く(直前/直後が無い・母音・レガート間隙は 0)。基準フレーム `anticipation_frames`
     を開き量比 `opening/open_cap` でスケールするため、機械的な固定値にならず開きの大小で量が変動する
-    (大きく開くほど長い余韻)。隣接無音長の 1/2 上限で前/後区間を侵食しすぎない。先行準備と後行残しで対称。
+    (大きく開くほど長い余韻)。隣接区間長の 1/2 上限で前/後区間を侵食しすぎない。先行準備と後行残しで対称。
     """
-    if neighbor is None or neighbor.shape is not MouthShape.SILENCE:
+    if neighbor is None or neighbor.shape not in (MouthShape.SILENCE, MouthShape.BILABIAL):
         return 0
     ratio = opening / params.open_cap if params.open_cap > 0.0 else 0.0
     want = params.anticipation_frames * min(max(ratio, 0.0), 1.0)
@@ -636,8 +636,8 @@ def generate_morph_keys(
     先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量の強弱節点を
     置いて節点間を線形に変え、三角形グループは中央に保持値ピーク1点を置く。直接隣接する異母音グループの境界では閉口を挟まず、協調調音(境界 b を中心とした幅 T の
     窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、境界に中間口形を置く)へ置き換える。
-    無音に隣接する母音は、先行準備で立ち上がりを無音側へ伸ばして緩やかに開き(音符開始で保持値へ達する)、
-    後行残しで閉じを無音側へ伸ばして緩やかに閉じる(開き量比例)。長く伸ばす母音の保持プラトーには伸び表現で
+    無音・両唇閉鎖に隣接する母音は、先行準備で立ち上がりを隣接側へ伸ばして緩やかに開き(音符開始で保持値へ
+    達する)、後行残しで閉じを隣接側へ伸ばして緩やかに閉じる(開き量比例)。長く伸ばす母音の保持プラトーには伸び表現で
     揺らぎ節点を任意に加える。両唇閉鎖・無音は隣接母音の 0.0 キーとキー不在(MMD 上 0.0)で閉口を表し、専用の
     閉口キーは置かない。整数フレームへの量子化は最後に一括して行う。返すキーは時間順。
     """
@@ -720,8 +720,8 @@ def generate_morph_keys(
             # 谷が onset を担うため先頭アタックの 0.0/到達キーは置かない。
             plateau_start = g.start
         else:
-            # 先行準備: 直前が無音なら口形を A_eff フレーム手前から緩やかに立ち上げ、音符開始で保持値へ達する
-            # (開き量比例)。先行が無ければ通常アタック。
+            # 先行準備: 直前が無音・両唇閉鎖なら口形を A_eff フレーム手前から緩やかに立ち上げ、音符開始で
+            # 保持値へ達する(開き量比例)。先行が無ければ通常アタック。
             antic = _lead_lag_eff(_preceding_event(events, g.start), max(gw[0].values()), params)
             if antic > 0:
                 f_start, f_attack = g.start - antic, g.start
@@ -737,8 +737,8 @@ def generate_morph_keys(
             # 谷が offset を担うため末尾リリースの保持/0.0 キーは置かない。
             plateau_end = g.end
         else:
-            # 後行残し: 直後が無音なら音符終了まで保持し、その後 R_eff フレームかけて緩やかに閉じる
-            # (先行準備と対称・開き量比例)。直後が無音でなければ通常リリース。
+            # 後行残し: 直後が無音・両唇閉鎖なら音符終了まで保持し、その後 R_eff フレームかけて緩やかに閉じる
+            # (先行準備と対称・開き量比例)。該当しなければ通常リリース。
             lag = _lead_lag_eff(_following_event(events, g.end), max(gw[-1].values()), params)
             if lag > 0:
                 f_hold_end, f_end = g.end, g.end + lag
