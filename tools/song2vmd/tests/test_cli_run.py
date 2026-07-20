@@ -597,7 +597,6 @@ def test_audio_load_error_machine_mode_emits_decoder_missing_error(tmp_path, mon
     assert events[-1]["exit_code"] == 4
 
 
-@pytest.mark.xfail(reason="impl pending: AudioLoadErrorのreason属性", strict=True)
 def test_audio_load_error_maps_to_not_audio(tmp_path, monkeypatch, capsysbinary):
     # ffmpeg変換失敗・変換後ファイルの再読み込み失敗など、復号器不在でなく入力そのものが壊れている
     # ケースはdecoder_missingでなくnot_audio(終了コード1)にする。

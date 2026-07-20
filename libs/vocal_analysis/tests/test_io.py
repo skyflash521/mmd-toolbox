@@ -15,7 +15,6 @@ import pytest
 import soundfile as sf
 
 FIXTURES = Path(__file__).parent / "fixtures"
-_XFAIL_REASON_ATTR = pytest.mark.xfail(reason="impl pending: AudioLoadErrorのreason属性", strict=True)
 
 
 def test_reads_wav_without_ffmpeg(monkeypatch):
@@ -94,7 +93,6 @@ def test_missing_ffmpeg_raises_clear_error(monkeypatch):
         load_audio(FIXTURES / "beep.m4a")
 
 
-@_XFAIL_REASON_ATTR
 def test_missing_ffmpeg_error_has_decoder_missing_reason(monkeypatch):
     from vocal_analysis.io import AudioLoadError, load_audio
 
@@ -105,7 +103,6 @@ def test_missing_ffmpeg_error_has_decoder_missing_reason(monkeypatch):
     assert exc_info.value.reason == "decoder_missing"
 
 
-@_XFAIL_REASON_ATTR
 def test_ffmpeg_conversion_failure_raises_audio_load_error_with_not_audio_reason(monkeypatch):
     from vocal_analysis.io import AudioLoadError, load_audio
 
@@ -121,7 +118,6 @@ def test_ffmpeg_conversion_failure_raises_audio_load_error_with_not_audio_reason
     assert exc_info.value.reason == "not_audio"
 
 
-@_XFAIL_REASON_ATTR
 def test_ffmpeg_reread_failure_raises_audio_load_error_with_not_audio_reason(monkeypatch, tmp_path):
     from vocal_analysis.io import AudioLoadError, load_audio
 

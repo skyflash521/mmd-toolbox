@@ -19,7 +19,15 @@ TARGET_PEAK = 0.95
 
 
 class AudioLoadError(Exception):
-    """S0 の読み込み失敗(soundfile 非対応かつ ffmpeg 未検出など、原因が分かるエラー)。"""
+    """S0 の読み込み失敗(soundfile 非対応かつ ffmpeg 未検出など、原因が分かるエラー)。
+
+    reason は失敗原因の分類("decoder_missing": フォールバック復号器(ffmpeg)が未検出のため復号を
+    試みられない。"not_audio": 利用可能な復号経路で試みて失敗した)。呼び出し側が原因の切り分けに使う。
+    """
+
+    def __init__(self, message, *, reason):
+        super().__init__(message)
+        self.reason = reason
 
 
 def load_audio(path: Path) -> AudioPcm:
@@ -44,16 +52,24 @@ def _read_via_ffmpeg(path: Path) -> tuple[np.ndarray, int]:
     if ffmpeg is None:
         raise AudioLoadError(
             f"{path} は soundfile で読み込めない形式です。ffmpeg が見つからないため読み込めません。"
-            " ffmpeg を導入してください。"
+            " ffmpeg を導入してください。",
+            reason="decoder_missing",
         )
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir) / "decoded.wav"
-        subprocess.run(
-            [ffmpeg, "-y", "-loglevel", "error", "-i", str(path), str(tmp_path)],
-            check=True,
-            capture_output=True,
-        )
-        return sf.read(tmp_path, dtype="float32", always_2d=True)
+        try:
+            subprocess.run(
+                [ffmpeg, "-y", "-loglevel", "error", "-i", str(path), str(tmp_path)],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise AudioLoadError(f"{path} の ffmpeg 変換に失敗しました。", reason="not_audio") from e
+        try:
+            return sf.read(tmp_path, dtype="float32", always_2d=True)
+        except sf.LibsndfileError as e:
+            raise AudioLoadError(
+                f"{path} は ffmpeg 変換後も読み込めませんでした。", reason="not_audio") from e
 
 
 def _normalize_peak(samples: np.ndarray) -> np.ndarray:

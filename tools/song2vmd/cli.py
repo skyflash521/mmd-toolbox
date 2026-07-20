@@ -535,7 +535,8 @@ def _run(args, emitter, fail) -> int:
                 keep_intermediate_dir=keep_intermediate_dir, progress=progress)
         except AudioLoadError as e:
             progress_reporter.close()
-            return fail("decoder_missing", str(e), 4, field="input")
+            exit_code = 4 if e.reason == "decoder_missing" else 1
+            return fail(e.reason, str(e), exit_code, field="input")
         except SeparationError as e:
             progress_reporter.close()
             return fail("stage_failed", str(e), 4, stage="separate")
