@@ -22,7 +22,8 @@ class AudioLoadError(Exception):
     """S0 の読み込み失敗(soundfile 非対応かつ ffmpeg 未検出など、原因が分かるエラー)。
 
     reason は失敗原因の分類("decoder_missing": フォールバック復号器(ffmpeg)が未検出のため復号を
-    試みられない。"not_audio": 利用可能な復号経路で試みて失敗した)。呼び出し側が原因の切り分けに使う。
+    試みられない。"not_audio": 入力ファイルが存在しない、または利用可能な復号経路をいずれも
+    実際に試みたが失敗した)。呼び出し側が原因の切り分けに使う。
     """
 
     def __init__(self, message, *, reason):
@@ -41,6 +42,11 @@ def _find_ffmpeg() -> str | None:
 
 
 def _read_raw(path: Path) -> tuple[np.ndarray, int]:
+    if not path.is_file():
+        # soundfile はファイル不在・ディレクトリ指定も非対応フォーマットも同じ LibsndfileError で
+        # 報告し、そのまま ffmpeg フォールバックへ進むと ffmpeg も失敗して原因不明の
+        # 「ffmpeg 変換に失敗しました」という誤解を招くメッセージになる。ここで先に区別する。
+        raise AudioLoadError(f"{path} が見つかりません。", reason="not_audio")
     try:
         return sf.read(path, dtype="float32", always_2d=True)
     except sf.LibsndfileError:

@@ -82,6 +82,46 @@ def test_reads_m4a_via_ffmpeg_fallback():
     assert np.max(np.abs(pcm.samples)) == pytest.approx(TARGET_PEAK, abs=1e-4)
 
 
+def test_missing_input_file_raises_clear_error_without_attempting_ffmpeg(monkeypatch, tmp_path):
+    from vocal_analysis.io import AudioLoadError, load_audio
+
+    # 存在しない入力ファイルは soundfile・ffmpeg のどちらでも「非対応フォーマット」と区別が付かず、
+    # 何もしないと ffmpeg フォールバックへ進んで「ffmpeg 変換に失敗しました」という誤解を招く
+    # メッセージになる(実際の原因はファイルが無いことで、ffmpeg 自体は無関係)。ffmpeg 呼び出し
+    # (subprocess.run)が一切行われないことも合わせて検証する。
+    called = {"ffmpeg": False}
+    monkeypatch.setattr(
+        "vocal_analysis.io.subprocess.run",
+        lambda *a, **k: called.__setitem__("ffmpeg", True))
+
+    missing_path = tmp_path / "does_not_exist.wav"
+    with pytest.raises(AudioLoadError) as exc_info:
+        load_audio(missing_path)
+
+    assert "見つかりません" in str(exc_info.value)
+    assert "ffmpeg" not in str(exc_info.value)
+    assert exc_info.value.reason == "not_audio"
+    assert called["ffmpeg"] is False
+
+
+def test_directory_input_raises_clear_error_without_attempting_ffmpeg(monkeypatch, tmp_path):
+    from vocal_analysis.io import AudioLoadError, load_audio
+
+    # ディレクトリを入力に指定した場合も、存在しないファイルと同様に soundfile・ffmpeg のどちらでも
+    # 区別が付かない失敗になるため、同じ入口チェック(is_file)で弾く。
+    called = {"ffmpeg": False}
+    monkeypatch.setattr(
+        "vocal_analysis.io.subprocess.run",
+        lambda *a, **k: called.__setitem__("ffmpeg", True))
+
+    with pytest.raises(AudioLoadError) as exc_info:
+        load_audio(tmp_path)
+
+    assert "見つかりません" in str(exc_info.value)
+    assert exc_info.value.reason == "not_audio"
+    assert called["ffmpeg"] is False
+
+
 def test_missing_ffmpeg_raises_clear_error(monkeypatch):
     from vocal_analysis.io import AudioLoadError, load_audio
 
