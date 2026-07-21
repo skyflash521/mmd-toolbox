@@ -477,3 +477,84 @@ def test_close_write_failure_swallowed(exc):
     assert reporter.enabled is False
     assert not live.is_alive()
     assert reporter._thread is None
+
+
+# vocal_analysis.quiet.suppress_native_stderr と同じ STDERR_WRITE_LOCK を取ってから書くことを
+# 固定する(取らずに書くと、fd 差し替え中の別スレッド書き込みが実コンソール環境で失敗しうる)。
+# 検証は書き込み中に別スレッド(テスト本体)から非ブロッキングでロック取得を試み、取れない
+# (=書き込み側が保持している)ことで行う。
+
+
+class _BlockingStream:
+    """write 呼び出し中、release イベントが立つまで保持し続ける疑似ストリーム。"""
+
+    def __init__(self):
+        self.write_started = threading.Event()
+        self.release = threading.Event()
+
+    def write(self, s):
+        self.write_started.set()
+        self.release.wait(2.0)
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return True
+
+
+def test_draw_holds_stderr_write_lock_during_write():
+    from vocal_analysis.quiet import STDERR_WRITE_LOCK
+
+    stream = _BlockingStream()
+    reporter = ProgressReporter(
+        machine=False, quiet=False, emitter=None, stream=stream, now=lambda: 0.0, interval=3600.0)
+    reporter.stage("load")
+
+    t = threading.Thread(target=reporter._draw)
+    t.start()
+    try:
+        assert stream.write_started.wait(2.0)
+        assert STDERR_WRITE_LOCK.acquire(blocking=False) is False
+    finally:
+        stream.release.set()
+        t.join(2.0)
+        reporter._stop_heartbeat()  # stage() が起こしたハートビートスレッドを回収する
+
+
+def test_close_holds_stderr_write_lock_during_write():
+    from vocal_analysis.quiet import STDERR_WRITE_LOCK
+
+    stream = _BlockingStream()
+    reporter = ProgressReporter(
+        machine=False, quiet=False, emitter=None, stream=_TTYStream(), now=lambda: 0.0, interval=3600.0)
+    reporter.stage("load")
+    reporter._draw()  # _last_width を立てて close の行消去 write を発生させる
+    reporter._stop_heartbeat()
+    reporter._stream = stream
+
+    t = threading.Thread(target=reporter.close)
+    t.start()
+    try:
+        assert stream.write_started.wait(2.0)
+        assert STDERR_WRITE_LOCK.acquire(blocking=False) is False
+    finally:
+        stream.release.set()
+        t.join(2.0)
+
+
+def test_summary_holds_stderr_write_lock_during_write():
+    from vocal_analysis.quiet import STDERR_WRITE_LOCK
+
+    stream = _BlockingStream()
+    reporter = ProgressReporter(
+        machine=False, quiet=False, emitter=None, stream=stream, now=lambda: 0.0, interval=3600.0)
+
+    t = threading.Thread(target=reporter.summary, args=("完了 out.vmd",))
+    t.start()
+    try:
+        assert stream.write_started.wait(2.0)
+        assert STDERR_WRITE_LOCK.acquire(blocking=False) is False
+    finally:
+        stream.release.set()
+        t.join(2.0)

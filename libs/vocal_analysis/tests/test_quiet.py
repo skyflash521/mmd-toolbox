@@ -4,6 +4,8 @@
 (vocal-analysis extra が無い最小環境では該当箇所を skip する)。
 """
 
+import threading
+
 import pytest
 
 from vocal_analysis import quiet
@@ -96,3 +98,41 @@ def test_suppress_native_stderr_restores_fd_even_if_flush_fails(monkeypatch, cap
 
     captured = capfd.readouterr()
     assert "after-flush-failure" in captured.err
+
+
+def _try_acquire_stderr_write_lock_from_other_thread():
+    """別スレッドから STDERR_WRITE_LOCK の非ブロッキング取得を試み、成否を返す。
+
+    取得できれば解放してから返す(呼び出し元スレッドに残さない)。RLock は保有スレッド自身の
+    再取得は常に成功するため、この関数は必ずテスト本体と別のスレッドで呼ぶこと。
+    """
+    result = {}
+
+    def _try_acquire():
+        result["acquired"] = quiet.STDERR_WRITE_LOCK.acquire(blocking=False)
+        if result["acquired"]:
+            quiet.STDERR_WRITE_LOCK.release()
+
+    t = threading.Thread(target=_try_acquire)
+    t.start()
+    t.join(2.0)
+    return result.get("acquired", False)
+
+
+def test_suppress_native_stderr_holds_stderr_write_lock_for_other_threads():
+    # fd 差し替え中、別スレッドは STDERR_WRITE_LOCK を取れない(取れると呼び出し側 CLI の
+    # 進捗表示等がこの区間に同時書き込みしてしまい、Windowsの実コンソールハンドルで書き込み
+    # 失敗が起こりうる)。この排他が実際に効いていることを固定する。
+    with quiet.suppress_native_stderr():
+        acquired = _try_acquire_stderr_write_lock_from_other_thread()
+
+    assert acquired is False
+
+
+def test_suppress_native_stderr_releases_stderr_write_lock_after_exit():
+    # ロックが恒久的に保持されたままにならないことも確認する(抜けた後は別スレッドが取得できる)。
+    # RLock は保有スレッド自身の再取得が常に成功するため、テスト本体と別のスレッドから確認する。
+    with quiet.suppress_native_stderr():
+        pass
+
+    assert _try_acquire_stderr_write_lock_from_other_thread() is True

@@ -13,6 +13,13 @@ ProgressReporter は machine/quiet/stream から表示先を1箇所で出し分�
 停止イベントで止めて join し(描画所有権を回収)てから書くため、同時に stderr へ書くスレッドが常に1つに
 なり、行の混線を防ぐ。
 
+fd 2 の排他: vocal_analysis.quiet.suppress_native_stderr は G2P 変換中、標準エラー(fd 2)を
+os.dup2 で一時的に devnull へ差し替える(pyopenjtalk のネイティブ拡張が fd へ直接書く警告を
+抑えるため)。この差し替え中に別スレッドが fd 2 へ書き込むと、Windows の実コンソールハンドルでは
+OSError([WinError 1])が発生しうるため、stream への書き込みは同じ
+vocal_analysis.quiet.STDERR_WRITE_LOCK を取ってから行い、suppress_native_stderr の fd 差し替えと
+重ならないようにする。
+
 副作用専用の保証: 表示の stream 書き込みが失敗(端末のエンコード不能・閉じたストリームへの書き込み等)
 しても例外を外へ漏らさず、以後の表示を無効化(enabled=False)するだけで処理は止めない(終了コード不変)。
 書き込み失敗で無効化された後でも、残存スレッドを防ぐため close はハートビートの停止・join を必ず行う。
@@ -22,6 +29,8 @@ import sys
 import threading
 import time
 import unicodedata
+
+from vocal_analysis.quiet import STDERR_WRITE_LOCK
 
 # 表示書き込みで握りつぶす例外。端末のエンコード不能(全角ラベルが端末コーデックで表せない等)・
 # 閉じたストリームへの書き込みなどを捕捉し、表示を無効化するだけで処理は止めない(副作用専用)。
@@ -110,8 +119,9 @@ class ProgressReporter:
         self._stop_heartbeat()
         if self.enabled and self._last_width:
             try:
-                self._stream.write("\r" + " " * self._last_width + "\r")
-                self._stream.flush()
+                with STDERR_WRITE_LOCK:
+                    self._stream.write("\r" + " " * self._last_width + "\r")
+                    self._stream.flush()
             except _WRITE_ERRORS:
                 self.enabled = False
         self._snap = None
@@ -123,8 +133,9 @@ class ProgressReporter:
         if not self.enabled:
             return
         try:
-            self._stream.write(message + "\n")
-            self._stream.flush()
+            with STDERR_WRITE_LOCK:
+                self._stream.write(message + "\n")
+                self._stream.flush()
         except _WRITE_ERRORS:
             self.enabled = False
 
@@ -149,8 +160,9 @@ class ProgressReporter:
         width = _display_width(line)
         pad = " " * max(0, self._last_width - width)
         try:
-            self._stream.write("\r" + line + pad)
-            self._stream.flush()
+            with STDERR_WRITE_LOCK:
+                self._stream.write("\r" + line + pad)
+                self._stream.flush()
         except _WRITE_ERRORS:
             self.enabled = False
             return
