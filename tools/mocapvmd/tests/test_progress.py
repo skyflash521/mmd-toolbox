@@ -13,10 +13,15 @@ ProgressReporter は重い処理の進行を stderr へ1本のライブ行で表
     interval を大きくして決定的な出力で固定する。
   - 「update なしでも経過が進む」停滞回避の核は、小さい interval でハートビートを発火させ、クロックを
     進めて複数の経過表記が現れることで固定する(結末は join 同期で確定)。
+  - 「stderr 書き込みが失敗(エンコード不能等)しても例外を外へ漏らさず enabled=False に落ち、以後 no-op」
+    は書き込みを常に失敗させる注入ストリームで固定する。書き込み失敗で表示が無効化された後も、
+    close はハートビートスレッドを必ず停止・join する。
 """
 
 import io
 import time
+
+import pytest
 
 from mocapvmd import progress
 
@@ -26,6 +31,20 @@ ProgressReporter = progress.ProgressReporter
 class _TTYStream(io.StringIO):
     def isatty(self):
         return True
+
+
+class _RaisingStream(io.StringIO):
+    """write が常に例外を送出する端末ストリーム(cp932 端末で全角がエンコード不能なケースの代理)。"""
+
+    def __init__(self, exc=None):
+        super().__init__()
+        self._exc = exc if exc is not None else OSError("write failed")
+
+    def isatty(self):
+        return True
+
+    def write(self, _s):
+        raise self._exc
 
 
 def _wait_until(pred, timeout=2.0):
@@ -178,6 +197,7 @@ def test_close_is_noop_when_nothing_active():
     stream = io.StringIO()
     r = ProgressReporter(stream, enabled=True, now=lambda: 0.0, interval=3600.0)
     r.close()
+    r.close()
     assert stream.getvalue() == ""
     assert r._thread is None
 
@@ -207,3 +227,57 @@ def test_summary_writes_line_only_when_enabled():
     r2 = ProgressReporter(stream2, enabled=False, now=lambda: 0.0)
     r2.summary("完了 out.vmd")
     assert stream2.getvalue() == ""
+
+
+# 書き込み失敗保護が捕捉すべき例外種別。端末のエンコード不能(全角ラベルが端末コーデックで表せない等)は UnicodeError 系。
+# OSError だけ捕捉する実装を弾くため、3種すべてで保護が効くことを固定する。
+_WRITE_FAILURES = [OSError("io failed"), ValueError("bad stream"), UnicodeError("encode failed")]
+
+
+@pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
+def test_draw_write_failure_disables_without_raising_and_close_stops_thread(exc):
+    # stderr 書き込みが失敗しても例外を外へ漏らさず enabled=False に落ち、以後は描画 no-op。
+    # 表示が無効化された後も、close はハートビートスレッドを必ず停止・join する(残存スレッド防止)。
+    stream = _RaisingStream(exc)
+    clock = [0.0]
+    r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
+    r.stage("疎化")
+    live = r._thread
+    assert live is not None and live.is_alive()
+    r.update(1, 2)
+    r._draw()  # 内部 write が例外送出 → 捕捉して enabled=False(例外は外へ出ない)
+    assert r.enabled is False
+    r.close()  # enabled が False でもハートビートを停止・join する
+    assert not live.is_alive()
+    assert r._thread is None
+    # 以後の呼び出しも no-op で例外を出さない。
+    r.update(3, 4)
+    r._draw()
+    r.summary("完了 out.vmd")
+
+
+@pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
+def test_summary_write_failure_swallowed(exc):
+    # summary の書き込み失敗も握りつぶし、例外を外へ漏らさず enabled=False に落ちる。
+    stream = _RaisingStream(exc)
+    r = ProgressReporter(stream, enabled=True, now=lambda: 0.0, interval=3600.0)
+    r.summary("完了 out.vmd")  # write が例外 → 捕捉、例外は外へ出ない
+    assert r.enabled is False
+
+
+@pytest.mark.parametrize("exc", _WRITE_FAILURES, ids=lambda e: type(e).__name__)
+def test_close_write_failure_swallowed(exc):
+    # close の行消去書き込みが失敗しても例外を外へ漏らさず、スレッドは停止・join される。
+    # 成功描画で _last_width を立ててからストリームを失敗版へ差し替え、close の消去 write を失敗させる。
+    stream = _TTYStream()
+    clock = [0.0]
+    r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
+    r.stage("疎化")
+    r.update(2, 4)
+    r._draw()  # 成功描画で _last_width を立てる
+    live = r._thread
+    r._stream = _RaisingStream(exc)  # close の行消去 write を失敗させる
+    r.close()  # 例外を外へ漏らさず enabled=False、スレッドは停止・join
+    assert r.enabled is False
+    assert not live.is_alive()
+    assert r._thread is None

@@ -14,6 +14,10 @@
 終了 close)は、書く前にハートビートを停止イベントで止めて join し(描画所有権を回収)てから書く。これにより
 同時に stderr へ書くスレッドが常に1つになり、行の混線を防ぐ。
 
+副作用専用の保証: 表示の stream 書き込みが失敗(端末のエンコード不能・閉じたストリームへの書き込み等)
+しても例外を外へ漏らさず、以後の表示を無効化(enabled=False)するだけで処理は止めない(終了コード不変)。
+書き込み失敗で無効化された後でも、残存スレッドを防ぐため close はハートビートの停止・join を必ず行う。
+
 経過時間は now() - 段階開始時刻で測る。表示器は表示の判断だけを持ち、何を1段とするか・各段の総数の
 決め方・完了行の文言は呼び出し側に委ねる(このモジュールは他モジュールを参照しない)。
 """
@@ -22,6 +26,10 @@ import sys
 import threading
 import time
 import unicodedata
+
+# 表示書き込みで握りつぶす例外。端末のエンコード不能(全角ラベルが端末コーデックで表せない等)・
+# 閉じたストリームへの書き込みなどを捕捉し、表示を無効化するだけで処理は止めない(副作用専用)。
+_WRITE_ERRORS = (OSError, ValueError, UnicodeError)
 
 
 def _format_line(label, done, total, elapsed):
@@ -39,7 +47,11 @@ def _display_width(text):
 class ProgressReporter:
     """段単位の進捗を1本のライブ行で表示する。stage(label) で段を開始/切り替え、update(done, total) で
     進行を通知、close() で行を消して終える。summary(message) は完了行を1行残す。enabled 省略時は
-    stream.isatty() で自動判定し、無効時は全メソッド no-op。詳細はモジュール docstring を参照。
+    stream.isatty() で自動判定し、無効時は全メソッド no-op。
+
+    stream 書き込みが失敗しても例外を外へ漏らさず、以後の表示を無効化(enabled=False)するだけで
+    処理は止めない。無効化された後でも close はハートビートスレッドを必ず停止・join する。
+    詳細はモジュール docstring を参照。
     """
 
     def __init__(self, stream=None, *, enabled=None, now=None, interval=0.15):
@@ -76,14 +88,18 @@ class ProgressReporter:
         self._snap = (snap[0], done, total, snap[3])
 
     def close(self):
-        """進捗を終える。ハートビートを止め join してから、ライブ行を消して何も残さない。"""
-        if not self.enabled:
-            return
+        """進捗を終える。ハートビートを止め join してから、ライブ行を消して何も残さない。
+
+        書き込み失敗で表示が無効化された後でも、残存スレッドを防ぐためハートビートの停止・join は必ず行う。
+        """
         self._stop_heartbeat()
-        if self._last_width:
-            # 行を空白で上書きし、行頭へ戻して消す(改行しないので画面に残らない)。
-            self._stream.write("\r" + " " * self._last_width + "\r")
-            self._stream.flush()
+        if self.enabled and self._last_width:
+            try:
+                # 行を空白で上書きし、行頭へ戻して消す(改行しないので画面に残らない)。
+                self._stream.write("\r" + " " * self._last_width + "\r")
+                self._stream.flush()
+            except _WRITE_ERRORS:
+                self.enabled = False
         self._snap = None
         self._last_width = 0
 
@@ -91,8 +107,11 @@ class ProgressReporter:
         """完了行を1行残す(有効時のみ)。close で行を消した後に呼び、結果を1行で示すのに使う。"""
         if not self.enabled:
             return
-        self._stream.write(message + "\n")
-        self._stream.flush()
+        try:
+            self._stream.write(message + "\n")
+            self._stream.flush()
+        except _WRITE_ERRORS:
+            self.enabled = False
 
     def _heartbeat(self):
         # 停止イベントが立つまで一定間隔で再描画する。wait は間隔経過で False、停止で True を返す。
@@ -107,6 +126,8 @@ class ProgressReporter:
             self._thread = None
 
     def _draw(self):
+        if not self.enabled:
+            return
         snap = self._snap
         if snap is None:
             return
@@ -115,6 +136,10 @@ class ProgressReporter:
         width = _display_width(line)
         # 直前の行が今より長ければ、その差ぶん空白で埋めて残像を消す(次の \r で行頭へ戻る)。
         pad = " " * max(0, self._last_width - width)
-        self._stream.write("\r" + line + pad)
-        self._stream.flush()
+        try:
+            self._stream.write("\r" + line + pad)
+            self._stream.flush()
+        except _WRITE_ERRORS:
+            self.enabled = False
+            return
         self._last_width = width
