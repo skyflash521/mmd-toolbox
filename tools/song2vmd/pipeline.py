@@ -110,12 +110,14 @@ def _report_stage(progress, stage, *, done=0, total=None, note=""):
 
 
 def _model_download_progress(progress, stage, *, done, total):
-    """vocal_analysis.recognizer.recognize() の on_progress へ渡すコールバックを組み立てる。
+    """vocal_analysis.separator.separate()・recognizer.recognize() の on_progress へ渡す
+    コールバックを組み立てる。
 
-    モデル初回取得のダウンロード進捗文言を、呼び出し時点の完了数/総数(長尺分割時はチャンク進捗)を
+    モデル初回取得のダウンロード進捗文言、および分離・書き起こし・アライメントの各実処理が
+    進行中であることを示す文言を、呼び出し時点の完了数/総数(長尺分割時はチャンク進捗)を
     保ったまま progress.stage() の note へ反映する(通知のたびに 0/None へ巻き戻さない)。elapsed は
-    このコールバックを組み立てた時点(直前の _report_stage 呼び出しと同時)からの実経過秒で、
-    段開始からの経過秒という機械モードイベントの契約(song2vmd.md §12.1)を満たす。progress が
+    このコールバックを組み立てた時点(直前の _report_stage 呼び出しと同時)からの実経過秒とする
+    (段開始からの経過秒として扱う)。progress が
     None(進捗レポータ省略時)なら None を返し、存在しない進捗表示への橋渡しコールバックを作らない。
     """
     if progress is None:

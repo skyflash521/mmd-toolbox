@@ -33,8 +33,10 @@ def separate(
     戻り値のWAVを格納する作業ディレクトリは呼び出し元に公開せず、プロセスの正常終了時に
     削除を試みる(強制終了時や削除失敗時は残置を許容する)。呼び出し元が削除
     タイミングを制御する手段は無い。on_progress はモデルの初回取得が実際にネットワーク
-    ダウンロードを要した区間だけ、進捗文言を渡して呼ぶ(vocal_analysis.recognizer.recognize の
-    同名引数と同じ契約)。
+    ダウンロードを要した区間(vocal_analysis.recognizer.recognize の同名引数と同じ契約)に加え、
+    モデルのロード開始時(ダウンロードの有無に関わらず、キャッシュ済みでディスクから読み込むだけの
+    場合を含む。進捗文言`f"モデル読み込み中: {ファイル名}"`)、および分離処理(Demucs推論)が
+    実際に進行している区間(進捗文言`f"分離中: {percent}%"`)にも、都度渡して呼ぶ。
     """
     if mode not in ("always", "never"):
         raise ValueError(f"未知の mode です: {mode!r}(always/never のいずれかを指定してください)")
@@ -60,7 +62,7 @@ def separate(
         # (分離処理の完了まで「ダウンロード中」の補足を残すと、分離が進んでいるだけなのに
         # まだダウンロード中であるかのように誤認させる)。
         on_progress("")
-    output_files = separator.separate(str(input_wav))
+    output_files = _separate_with_progress(separator, input_wav, on_progress)
     output_path = Path(output_files[0])
     # S1のGPUメモリをS2(内容認識・音素モデル)のロード前に返す。保持したままだと、後続の
     # 内容認識パイプラインのロード・推論時にVRAMが逼迫し、処理時間が大きく悪化する。
@@ -78,9 +80,12 @@ def separate(
 
 
 def _load_model_with_progress(separator_obj, on_progress) -> bool:
-    """separator_obj.load_model() を実行し、実際にモデルダウンロードが発生した区間だけ
-    on_progress(f"ダウンロード中: {ファイル名} {percent}%") を呼ぶ。戻り値は実際にダウンロードが
-    発生したか(呼び出し元がロード完了後の空文字列クリア通知を出すべきか)。
+    """separator_obj.load_model() を実行する。実行直前に on_progress(f"モデル読み込み中: {ファイル名}")
+    を1回呼び(キャッシュ済みでディスクからの読み込み・GPU転送だけでも数秒かかり、それ自体は
+    ダウンロードでないため下記の中継では捕捉できない空白区間を埋める)、実際にモデルダウンロードが
+    発生した区間はさらに on_progress(f"ダウンロード中: {ファイル名} {percent}%") を呼ぶ(この間は
+    「モデル読み込み中」の文言を上書きする)。戻り値は実際にダウンロードが発生したか(呼び出し元が
+    ロード完了後の空文字列クリア通知を出すべきか)。
 
     audio-separator は huggingface_hub の snapshot_download と異なり tqdm_class 差し込み口を
     持たず、audio_separator.separator.separator モジュール内で `from tqdm import tqdm` した
@@ -131,11 +136,49 @@ def _load_model_with_progress(separator_obj, on_progress) -> bool:
     _as_separator_module.tqdm = _RelayTqdm
     _as_separator_module.Separator.download_file_if_not_exists = _patched_download
     try:
+        on_progress(f"モデル読み込み中: {SEPARATOR_CONFIG.model_filename}")
         separator_obj.load_model(model_filename=SEPARATOR_CONFIG.model_filename)
     finally:
         _as_separator_module.tqdm = original_tqdm
         _as_separator_module.Separator.download_file_if_not_exists = original_download
     return state["shown"]
+
+
+def _separate_with_progress(separator_obj, input_wav: Path, on_progress):
+    """separator_obj.separate() を実行し、Demucs推論の実際の進捗を on_progress(f"分離中: {percent}%")
+    で中継する(モデルダウンロードとは別区間。ダウンロード進捗は _load_model_with_progress)。
+
+    audio-separator の DemucsSeparator.demix_demucs は vendored apply_model(...,
+    set_progress_bar=None, ...) を固定引数で呼ぶため、コールバックの差し込み口が無い。
+    demix_demucs が import した名前 `apply_model`(audio_separator.separator.architectures.
+    demucs_separator モジュール内)だけを分離中だけ差し替え、set_progress_bar を注入して
+    委譲する。apply_model はhtdemucs_ftのアンサンブル構成員・区間ごとに自身の名前空間の
+    apply_model を再帰呼び出しするため、この差し替えは再帰呼び出しの名前解決には効かないが、
+    差し込んだ set_progress_bar は呼び出しごとに構築される **kwargs を通じて再帰全体へそのまま
+    伝播するため、最上位の1呼び出しを差し替えるだけで全区間・全構成員ぶんの進捗が中継される。
+    set_progress_bar(step, fraction) の fraction は0から0.8まで単調増加する仕様(0.8-1.0は
+    後処理向けの予約領域で進捗コールバックの対象外)なので、0.8を100%とみなして正規化する。
+    """
+    if on_progress is None:
+        return separator_obj.separate(str(input_wav))
+
+    import audio_separator.separator.architectures.demucs_separator as _demucs_module
+
+    def _relay_progress(_step, fraction):
+        percent = min(100, round(fraction / 0.8 * 100))
+        on_progress(f"分離中: {percent}%")
+
+    original_apply_model = _demucs_module.apply_model
+
+    def _patched_apply_model(*args, **kwargs):
+        kwargs["set_progress_bar"] = _relay_progress
+        return original_apply_model(*args, **kwargs)
+
+    _demucs_module.apply_model = _patched_apply_model
+    try:
+        return separator_obj.separate(str(input_wav))
+    finally:
+        _demucs_module.apply_model = original_apply_model
 
 
 def _build_separator(output_dir: Path):

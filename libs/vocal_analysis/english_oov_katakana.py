@@ -8,6 +8,7 @@ pyopenjtalk-plusが1形態素ノードで完結する未知の英単語を正し
 """
 
 import unicodedata
+from collections.abc import Callable
 
 from .config import (
     DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
@@ -115,8 +116,51 @@ def _select_katakana_model_device() -> str:
 _katakana_model_cache = None
 
 
-def _load_katakana_model():
-    """変換モデルをロードする(プロセス内キャッシュ)。実行デバイスは環境から自動選択する。"""
+def _hf_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+    """huggingface_hub.snapshot_download への薄いラッパー(モンキーパッチの受け口)。"""
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(repo_id, revision=revision, tqdm_class=tqdm_class)
+
+
+def _prefetch_with_progress(repo_id: str, revision: str | None, on_progress: Callable[[str], None]) -> bool:
+    """repo_id のファイル群を事前フェッチし、実際にバイト転送が発生した区間だけ
+    on_progress(f"ダウンロード中: {repo_id} {percent}%") を呼ぶ。戻り値は実際にダウンロードが
+    発生したか。recognizer._prefetch_with_progress と同じ仕組み(huggingface_hub の
+    tqdm_class 差し込み口)で、変換モデルの取得元(huggingface_hub)がrecognizer側と同じ
+    ため同型だが、recognizer側を再利用すると循環import(recognizer→本モジュール)になるため
+    ここで個別に持つ。
+    """
+    from huggingface_hub.utils import tqdm as hf_tqdm
+
+    state = {"shown": False}
+
+    class _RelayTqdm(hf_tqdm):
+        def __init__(self, *args, **kwargs):
+            self._relay_unit = kwargs.get("unit")
+            self._relay_n = kwargs.get("initial") or 0
+            super().__init__(*args, **kwargs)
+
+        def update(self, n=1):
+            result = super().update(n)
+            if self._relay_unit == "B" and self.total:
+                self._relay_n += n or 0
+                state["shown"] = True
+                percent = min(100, int(self._relay_n * 100 / self.total))
+                on_progress(f"ダウンロード中: {repo_id} {percent}%")
+            return result
+
+    _hf_snapshot_download(repo_id, revision=revision, tqdm_class=_RelayTqdm)
+    return state["shown"]
+
+
+def _load_katakana_model(on_progress: Callable[[str], None] | None = None):
+    """変換モデルをロードする(プロセス内キャッシュ)。実行デバイスは環境から自動選択する。
+
+    on_progress はモデルの初回取得が実際にネットワークダウンロードを要した区間だけダウンロード
+    進捗文言を渡して呼ぶことに加え、ロード開始時(ダウンロードの有無に関わらず、キャッシュ済みで
+    ディスクから読み込むだけの場合を含む)にも1回呼び、ロード完了までの区間を無通知にしない。
+    """
     global _katakana_model_cache
     if _katakana_model_cache is not None:
         return _katakana_model_cache
@@ -126,27 +170,42 @@ def _load_katakana_model():
 
     silence_third_party_output()
 
+    downloaded = False
+    if on_progress is not None:
+        downloaded = _prefetch_with_progress(
+            ENGLISH_OOV_KATAKANA_MODEL.model_id, ENGLISH_OOV_KATAKANA_MODEL.model_revision, on_progress)
+
     device = _select_katakana_model_device()
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        ENGLISH_OOV_KATAKANA_MODEL.model_id, revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision
-    )
-    # GPU実行時はfp16でロードし、fp32(約4.4GB)に対して重みのVRAM使用量を半減させる
-    # (実曲の対象語でfp32と変換結果が一致することを確認して採用)。CPU実行時はfp16未対応の
-    # ためfp32のまま。
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        ENGLISH_OOV_KATAKANA_MODEL.model_id,
-        revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision,
-        dtype=dtype,
-    )
+    try:
+        if on_progress is not None:
+            on_progress(f"カタカナ生成モデル読み込み中: {ENGLISH_OOV_KATAKANA_MODEL.model_id}")
+        tokenizer = AutoTokenizer.from_pretrained(
+            ENGLISH_OOV_KATAKANA_MODEL.model_id, revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision
+        )
+        # GPU実行時はfp16でロードし、fp32(約4.4GB)に対して重みのVRAM使用量を半減させる
+        # (実曲の対象語でfp32と変換結果が一致することを確認して採用)。CPU実行時はfp16未対応の
+        # ためfp32のまま。
+        dtype = torch.float16 if device == "cuda" else torch.float32
+        model = AutoModelForCausalLM.from_pretrained(
+            ENGLISH_OOV_KATAKANA_MODEL.model_id,
+            revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision,
+            dtype=dtype,
+        )
+    finally:
+        # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ)。
+        # 例外時もライブ表示側の後始末に合わせクリアする。
+        if downloaded:
+            on_progress("")
     model.to(device)
     model.eval()
     _katakana_model_cache = (tokenizer, model)
     return _katakana_model_cache
 
 
-def _generate_katakana_tinyllama(word: str, phonemes: str) -> str:
+def _generate_katakana_tinyllama(
+    word: str, phonemes: str, on_progress: Callable[[str], None] | None = None
+) -> str:
     """英単語・発音記号からカタカナを生成する(変換モデル呼び出し。method="tinyllama-katakana-
     converter"選択時のみ使う)。
 
@@ -158,7 +217,7 @@ def _generate_katakana_tinyllama(word: str, phonemes: str) -> str:
     """
     import torch
 
-    tokenizer, model = _load_katakana_model()
+    tokenizer, model = _load_katakana_model(on_progress=on_progress)
     try:
         prompt = _PROMPT_TEMPLATE.format(word=word, phonemes=phonemes)
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
@@ -189,7 +248,8 @@ def _generate_katakana_arpakana(word: str, phonemes: str) -> str:
 
 
 def _generate_katakana(
-    word: str, phonemes: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+    word: str, phonemes: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
 ) -> str:
     """英単語・発音記号からカタカナを生成する(methodで変換方式を選択する)。
 
@@ -200,7 +260,7 @@ def _generate_katakana(
     if method == "arpakana":
         return _generate_katakana_arpakana(word, phonemes)
     if method == "tinyllama-katakana-converter":
-        return _generate_katakana_tinyllama(word, phonemes)
+        return _generate_katakana_tinyllama(word, phonemes, on_progress=on_progress)
     raise ValueError(f"未知の変換方式です: {method!r}")
 
 
@@ -300,27 +360,32 @@ def uncached_target_words(
 
 
 def convert_words(
-    words: list[str], method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+    words: list[str], method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
 ) -> None:
     """語のリストをまとめて変換し、結果を語キャッシュへ入れる。
 
     tinyllama-katakana-converter 方式では、変換後に変換モデルを解放する(まとめて変換する
     呼び出し元は変換モデルの常駐を変換中だけに限定でき、他のGPU常駐モデルとの同時常駐による
-    VRAM逼迫を避けられる)。arpakana 方式はモデルを使わないため解放は行わない。
+    VRAM逼迫を避けられる)。arpakana 方式はモデルを使わないため解放は行わない。on_progress は
+    tinyllama-katakana-converter 方式の変換モデルの取得・ロードが実際に発生した区間だけ
+    進捗文言を渡して呼ぶ(_load_katakana_model の契約どおり)。
     """
     try:
         for word in words:
-            _convert_word(word, method)
+            _convert_word(word, method, on_progress=on_progress)
     finally:
         if method == "tinyllama-katakana-converter":
             release_katakana_model()
 
 
 def convert_oov_words(
-    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
 ) -> str:
     """テキスト中の対象語(pyopenjtalkが読めない英単語)をカタカナへ変換する。対象語が無ければ
-    元のテキストをそのまま返す。methodで変換方式を選択する(既定: arpakana)。
+    元のテキストをそのまま返す。methodで変換方式を選択する(既定: arpakana)。on_progress は
+    convert_words と同じ契約(tinyllama-katakana-converter 方式の変換モデル取得時のみ呼ぶ)。
     """
     target_words = _find_target_words(text)
     if not target_words:
@@ -328,7 +393,7 @@ def convert_oov_words(
 
     converted: dict[str, str] = {}
     for word in dict.fromkeys(target_words):
-        result = _convert_word(word, method)
+        result = _convert_word(word, method, on_progress=on_progress)
         if result is not None:
             converted[word] = result
 
@@ -338,7 +403,9 @@ def convert_oov_words(
 _conversion_cache: dict[tuple[EnglishOovKatakanaMethod, str], str | None] = {}
 
 
-def _convert_word(word: str, method: EnglishOovKatakanaMethod) -> str | None:
+def _convert_word(
+    word: str, method: EnglishOovKatakanaMethod, on_progress: Callable[[str], None] | None = None
+) -> str | None:
     """1語をカタカナへ変換する(CMUdict参照→変換→出力妥当性検証)。
 
     _g2p経由でrecognize()の実行中に同じ語が複数回変換対象になりうる(区間全体の音素密度判定・
@@ -355,7 +422,7 @@ def _convert_word(word: str, method: EnglishOovKatakanaMethod) -> str | None:
     result = None
     phonemes = _lookup_cmudict_phonemes(word)
     if phonemes is not None:
-        katakana = _generate_katakana(word, phonemes, method=method)
+        katakana = _generate_katakana(word, phonemes, method=method, on_progress=on_progress)
         if _is_valid_katakana(katakana):
             result = katakana
     _conversion_cache[cache_key] = result

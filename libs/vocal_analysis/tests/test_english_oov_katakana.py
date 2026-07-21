@@ -265,7 +265,8 @@ def test_generate_katakana_tinyllama_returns_invalid_output_when_generation_rais
         def __call__(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(module, "_load_katakana_model", lambda: (_RaisingTokenizer(), object()))
+    monkeypatch.setattr(
+        module, "_load_katakana_model", lambda on_progress=None: (_RaisingTokenizer(), object()))
 
     result = module._generate_katakana_tinyllama("sky", "S K AY1")
 
@@ -287,7 +288,7 @@ def test_generate_katakana_dispatches_to_tinyllama_when_selected(monkeypatch):
     calls = []
     monkeypatch.setattr(
         module, "_generate_katakana_tinyllama",
-        lambda word, phonemes: calls.append((word, phonemes)) or "スカイ",
+        lambda word, phonemes, **kwargs: calls.append((word, phonemes)) or "スカイ",
     )
 
     result = module._generate_katakana("sky", "S K AY1", method="tinyllama-katakana-converter")
@@ -324,7 +325,7 @@ def test_convert_oov_words_converts_target_via_tinyllama_model(monkeypatch):
     calls = []
     monkeypatch.setattr(
         module, "_generate_katakana_tinyllama",
-        lambda word, phonemes: calls.append((word, phonemes)) or "スカイ",
+        lambda word, phonemes, **kwargs: calls.append((word, phonemes)) or "スカイ",
     )
 
     result = module.convert_oov_words("空を見上げてsky", method="tinyllama-katakana-converter")
@@ -348,7 +349,7 @@ def test_convert_oov_words_caches_conversion_result_across_calls(monkeypatch):
     generate_calls = []
     monkeypatch.setattr(
         module, "_generate_katakana_tinyllama",
-        lambda word, phonemes: generate_calls.append(word) or "スカイ",
+        lambda word, phonemes, **kwargs: generate_calls.append(word) or "スカイ",
     )
 
     first = module.convert_oov_words("空を見上げてsky", method="tinyllama-katakana-converter")
@@ -407,7 +408,7 @@ def test_convert_oov_words_caches_separately_per_method(monkeypatch):
     tinyllama_calls = []
     monkeypatch.setattr(
         module, "_generate_katakana_tinyllama",
-        lambda word, phonemes: tinyllama_calls.append(word) or "スカイー",
+        lambda word, phonemes, **kwargs: tinyllama_calls.append(word) or "スカイー",
     )
 
     arpakana_result = module.convert_oov_words("空を見上げてsky")
@@ -441,7 +442,7 @@ def test_convert_words_caches_results_and_releases_tinyllama_model(monkeypatch):
     import vocal_analysis.english_oov_katakana as module
 
     monkeypatch.setattr(
-        module, "_generate_katakana_tinyllama", lambda word, phonemes: "スカイ"
+        module, "_generate_katakana_tinyllama", lambda word, phonemes, **kwargs: "スカイ"
     )
     release_calls = []
     monkeypatch.setattr(
@@ -454,10 +455,33 @@ def test_convert_words_caches_results_and_releases_tinyllama_model(monkeypatch):
     assert release_calls == ["release"]
 
 
+def test_convert_words_forwards_on_progress_to_load_katakana_model(monkeypatch):
+    # convert_words -> _convert_word -> _generate_katakana -> _generate_katakana_tinyllama ->
+    # _load_katakana_model という配線チェーンのどこかで on_progress を落とす退行を検出するため、
+    # _load_katakana_model が実際に受け取った on_progress の同一性を検証する
+    # (**kwargs で黙って吸収するモックでは検出できない)。
+    import vocal_analysis.english_oov_katakana as module
+
+    module._conversion_cache.clear()
+    captured = {}
+
+    def fake_load_katakana_model(on_progress=None):
+        captured["on_progress"] = on_progress
+        return (object(), object())
+
+    monkeypatch.setattr(module, "_load_katakana_model", fake_load_katakana_model)
+    monkeypatch.setattr(module, "release_katakana_model", lambda: None)
+
+    sentinel = lambda note: None  # noqa: E731
+    module.convert_words(["sky"], method="tinyllama-katakana-converter", on_progress=sentinel)
+
+    assert captured["on_progress"] is sentinel
+
+
 def test_convert_words_releases_tinyllama_model_even_when_conversion_fails(monkeypatch):
     import vocal_analysis.english_oov_katakana as module
 
-    def raising_generate(word, phonemes):
+    def raising_generate(word, phonemes, **kwargs):
         raise OSError("モデル取得失敗")
 
     monkeypatch.setattr(module, "_generate_katakana_tinyllama", raising_generate)
@@ -534,3 +558,39 @@ def test_load_katakana_model_selects_dtype_by_device(monkeypatch, device, expect
 
     assert captured["dtype"] == getattr(torch, expected_dtype_name)
     assert captured["to_device"] == device
+
+
+def test_load_katakana_model_shows_loading_note_but_no_download_note_when_already_cached(monkeypatch):
+    # ダウンロードが発生しなくても、ロード自体(ディスク読み込み・GPU転送)の間は
+    # 「カタカナ生成モデル読み込み中」を示す(separator._load_model_with_progress・
+    # recognizer._load_model_and_processor と同じ契約)。ダウンロード進捗通知(クリアの空文字列を
+    # 含む)は出ない。
+    import transformers
+
+    import vocal_analysis.english_oov_katakana as module
+    from vocal_analysis.config import ENGLISH_OOV_KATAKANA_MODEL
+
+    class _FakeModel:
+        def to(self, target):
+            return self
+
+        def eval(self):
+            return self
+
+    monkeypatch.setattr(module, "_katakana_model_cache", None)
+    monkeypatch.setattr(module, "_select_katakana_model_device", lambda: "cpu")
+    monkeypatch.setattr(
+        transformers, "AutoTokenizer",
+        type("_FakeTokenizerLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: object())}),
+    )
+    monkeypatch.setattr(
+        transformers, "AutoModelForCausalLM",
+        type("_FakeModelLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: _FakeModel())}),
+    )
+    # 事前フェッチが tqdm を一切使わない = 実際のダウンロードが発生しないケースを模す。
+    monkeypatch.setattr(module, "_hf_snapshot_download", lambda repo_id, *, revision=None, tqdm_class=None: None)
+
+    notes = []
+    module._load_katakana_model(on_progress=notes.append)
+
+    assert notes == [f"カタカナ生成モデル読み込み中: {ENGLISH_OOV_KATAKANA_MODEL.model_id}"]

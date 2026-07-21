@@ -334,7 +334,7 @@ def _resolve(monkeypatch, text, words=None, duration=10.0, retry_result=None, re
             raise AssertionError("リトライが呼ばれてはならないケースで _transcribe_segment が呼ばれた")
         return retry_result
 
-    def fake_transcribe_text_only(samples, model):
+    def fake_transcribe_text_only(samples, model, on_progress=None):
         if text_only_calls is not None:
             text_only_calls.append(model)
         if text_only_result is None:
@@ -343,7 +343,7 @@ def _resolve(monkeypatch, text, words=None, duration=10.0, retry_result=None, re
 
     monkeypatch.setattr(R, "_transcribe_segment", fake_transcribe)
     monkeypatch.setattr(R, "_transcribe_text_only", fake_transcribe_text_only)
-    monkeypatch.setattr(R, "_g2p", g2p or (lambda t, method=None: ["a"] * len(t.replace(" ", ""))))
+    monkeypatch.setattr(R, "_g2p", g2p or (lambda t, method=None, **kwargs: ["a"] * len(t.replace(" ", ""))))
     return R._resolve_transcription(
         np.zeros(16000, dtype=np.float32), duration, text, words, primary, retry_enabled)
 
@@ -402,7 +402,7 @@ def test_resolve_transcription_normalizes_whole_text_repetition(monkeypatch):
     # 模擬G2P: 1文字=1音素(母音扱い)→ 単位「ラ」=1モーラ。10秒×3.5=35個。
     from vocal_analysis import recognizer as R
 
-    def g2p(t, method=None):
+    def g2p(t, method=None, **kwargs):
         return ["a"] * len(t.replace(" ", ""))
 
     monkeypatch.setattr(R, "_g2p", g2p)
@@ -420,7 +420,7 @@ def test_resolve_transcription_repetition_rescue_passes_english_oov_katakana_met
 
     g2p_methods = []
 
-    def g2p(t, method=None):
+    def g2p(t, method=None, **kwargs):
         g2p_methods.append(method)
         return ["a"] * len(t.replace(" ", ""))
 
@@ -1141,7 +1141,7 @@ def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatc
     oov_calls = []
     monkeypatch.setattr(
         recognizer_module, "convert_oov_words",
-        lambda text, method=None: oov_calls.append(text) or "スカイ",
+        lambda text, method=None, **kwargs: oov_calls.append(text) or "スカイ",
     )
 
     g2p_calls = []
@@ -1176,7 +1176,7 @@ def test_g2p_method_reaches_real_convert_oov_words_dispatch(monkeypatch):
         )
         monkeypatch.setattr(
             oov_module, "_generate_katakana_tinyllama",
-            lambda word, phonemes: tinyllama_calls.append(word) or "スカイ",
+            lambda word, phonemes, **kwargs: tinyllama_calls.append(word) or "スカイ",
         )
 
         recognizer_module._g2p("空を見上げてsky", method="tinyllama-katakana-converter")
@@ -1192,7 +1192,7 @@ def test_g2p_method_reaches_real_convert_oov_words_dispatch(monkeypatch):
     [
         (ImportError("no nltk"), "nltk"),
         (LookupError("cmudict not found"), "cmudict"),
-        (OSError("network error"), "変換モデル"),
+        (OSError("network error"), "カタカナ生成モデル"),
     ],
 )
 def test_g2p_converts_oov_fallback_errors_to_recognition_error(monkeypatch, raised, match):
@@ -1202,7 +1202,7 @@ def test_g2p_converts_oov_fallback_errors_to_recognition_error(monkeypatch, rais
     # nltk/torch/transformers未導入(ImportError)は、他のモデルロード処理
     # (_load_model_and_processor・_load_content_recognizer_pipeline)と同様に、生の例外のまま
     # 公開APIから漏らさずRecognitionErrorへ変換する。
-    def fake_convert_oov_words(text, method=None):
+    def fake_convert_oov_words(text, method=None, **kwargs):
         raise raised
 
     monkeypatch.setattr(recognizer_module, "convert_oov_words", fake_convert_oov_words)
@@ -1260,7 +1260,7 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
         generate_calls = []
         monkeypatch.setattr(
             oov_module, "_generate_katakana",
-            lambda word, phonemes, method=None: generate_calls.append(word) or "スカイ",
+            lambda word, phonemes, method=None, **kwargs: generate_calls.append(word) or "スカイ",
         )
 
         fragments = []
@@ -1394,14 +1394,16 @@ def test_load_model_and_processor_reports_live_download_percentage(monkeypatch):
         "snapshot",
         ("on_progress", f"ダウンロード中: {model_id} 40%"),
         ("on_progress", f"ダウンロード中: {model_id} 100%"),
+        ("on_progress", f"音素モデル読み込み中: {model_id}"),
         "processor", "model",
         ("on_progress", ""),
     ]
 
 
-def test_load_model_and_processor_no_on_progress_when_already_cached(monkeypatch):
+def test_load_model_and_processor_shows_loading_note_but_no_download_note_when_already_cached(monkeypatch):
     # キャッシュ済みでもファイル数バーは update されるが、バイト集約バーの total は 0 のまま
-    # (転送バイト無し)。on_progress はこの場合一度も呼ばれない。
+    # (転送バイト無し)。ダウンロード進捗通知は一度も呼ばれないが、ロード開始時の
+    # 「音素モデル読み込み中」通知はダウンロードの有無に関わらず呼ばれる。
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
     from vocal_analysis import recognizer as recognizer_module
@@ -1437,7 +1439,8 @@ def test_load_model_and_processor_no_on_progress_when_already_cached(monkeypatch
     calls = []
     recognizer_module._load_model_and_processor(on_progress=lambda note: calls.append(note))
 
-    assert calls == []
+    model_id = recognizer_module.RECOGNIZER_CONFIG.model_id
+    assert calls == [f"音素モデル読み込み中: {model_id}"]
 
 
 def test_load_content_recognizer_pipeline_reports_live_download_percentage(monkeypatch):
@@ -1477,12 +1480,15 @@ def test_load_content_recognizer_pipeline_reports_live_download_percentage(monke
     assert timeline == [
         "snapshot",
         ("on_progress", "ダウンロード中: dummy/model 100%"),
+        ("on_progress", "内容認識モデル読み込み中: dummy/model"),
         "pipeline",
         ("on_progress", ""),
     ]
 
 
-def test_load_content_recognizer_pipeline_no_on_progress_when_already_cached(monkeypatch):
+def test_load_content_recognizer_pipeline_shows_loading_note_but_no_download_note_when_already_cached(
+    monkeypatch,
+):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
     from vocal_analysis import recognizer as recognizer_module
@@ -1504,7 +1510,7 @@ def test_load_content_recognizer_pipeline_no_on_progress_when_already_cached(mon
         content_recognizer_model, on_progress=lambda note: calls.append(note)
     )
 
-    assert calls == []
+    assert calls == ["内容認識モデル読み込み中: dummy/model"]
 
 
 # --- _prepare_english_oov_conversion(tinyllama方式のG2P前処理: 内容認識モデルとのGPU入れ替え) ---
@@ -1534,7 +1540,8 @@ def test_prepare_english_oov_conversion_tinyllama_releases_pipeline_before_conve
         R, "_release_content_recognizer_pipeline", lambda: calls.append("release_pipeline")
     )
     monkeypatch.setattr(
-        R, "convert_words", lambda words, method: calls.append(("convert", tuple(words), method))
+        R, "convert_words",
+        lambda words, method, **kwargs: calls.append(("convert", tuple(words), method)),
     )
 
     R._prepare_english_oov_conversion("hello を見上げて", "tinyllama-katakana-converter")
@@ -1543,6 +1550,25 @@ def test_prepare_english_oov_conversion_tinyllama_releases_pipeline_before_conve
         "release_pipeline",
         ("convert", ("hello",), "tinyllama-katakana-converter"),
     ]
+
+
+def test_prepare_english_oov_conversion_tinyllama_forwards_on_progress_to_convert_words(monkeypatch):
+    # convert_words経由でカタカナ生成モデルの読み込み通知に届くon_progressが、
+    # _prepare_english_oov_conversionから正しく転送されることを検証する(配線漏れの検出)。
+    import vocal_analysis.recognizer as R
+
+    monkeypatch.setattr(R, "uncached_target_words", lambda text, method: ["hello"])
+    monkeypatch.setattr(R, "_release_content_recognizer_pipeline", lambda: None)
+    captured = {}
+    monkeypatch.setattr(
+        R, "convert_words",
+        lambda words, method, on_progress=None: captured.setdefault("on_progress", on_progress),
+    )
+
+    sentinel = lambda note: None  # noqa: E731
+    R._prepare_english_oov_conversion("hello を見上げて", "tinyllama-katakana-converter", on_progress=sentinel)
+
+    assert captured["on_progress"] is sentinel
 
 
 def test_prepare_english_oov_conversion_tinyllama_skips_release_when_no_uncached_words(monkeypatch):

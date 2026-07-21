@@ -235,8 +235,9 @@ def test_separate_download_progress_labels_multi_file_models_by_real_filename(mo
     assert not any(filenames[1] in n for n in file1_notes)
 
 
-def test_separate_does_not_call_on_progress_when_no_download_happens(monkeypatch):
+def test_separate_shows_loading_note_but_no_download_note_when_no_download_happens(monkeypatch):
     pytest.importorskip("audio_separator")
+    from vocal_analysis import SEPARATOR_CONFIG
     from vocal_analysis import separator as separator_module
 
     calls = {}
@@ -252,7 +253,10 @@ def test_separate_does_not_call_on_progress_when_no_download_happens(monkeypatch
 
     separator_module.separate(_make_pcm(), mode="always", on_progress=notes.append)
 
-    assert notes == []
+    # ダウンロードが発生しなくても、ロード自体(ディスク読み込み・GPU転送)の間は
+    # 「モデル読み込み中」を示す。「ダウンロード中」やクリア(空文字列)は出ない
+    # (ダウンロードが実際に発生した場合だけの通知のため)。
+    assert notes == [f"モデル読み込み中: {SEPARATOR_CONFIG.model_filename}"]
 
 
 def test_load_model_with_progress_restores_original_tqdm_and_download_method(monkeypatch):
@@ -295,6 +299,69 @@ def test_load_model_with_progress_skips_relay_when_on_progress_is_none():
 
     assert downloaded is False
     assert calls["model_filename"] == SEPARATOR_CONFIG.model_filename
+
+
+def test_separate_with_progress_relays_inference_progress(monkeypatch):
+    # audio-separator の DemucsSeparator.demix_demucs は apply_model(set_progress_bar=None) を
+    # 固定引数で呼ぶため、_separate_with_progress が demucs_separator モジュールの apply_model 名を
+    # 差し替えてコールバックを注入する。ここでは apply_model 自体を fake 化し、注入された
+    # set_progress_bar が実際に呼ばれ、その fraction(0-0.8を100%に正規化)が on_progress へ
+    # 中継されることを検証する(実モデル・実推論は行わない)。
+    pytest.importorskip("audio_separator")
+    import audio_separator.separator.architectures.demucs_separator as demucs_mod
+
+    from vocal_analysis.separator import _separate_with_progress
+
+    def fake_apply_model(*args, set_progress_bar=None, **kwargs):
+        set_progress_bar(0.1, 0.4)
+        set_progress_bar(0.1, 0.8)
+        return "dummy_source"
+
+    monkeypatch.setattr(demucs_mod, "apply_model", fake_apply_model)
+
+    class _FakeSep:
+        def separate(self, audio_file_path):
+            demucs_mod.apply_model(set_progress_bar=None)
+            return ["vocals_output.wav"]
+
+    notes = []
+    _separate_with_progress(_FakeSep(), Path("input.wav"), on_progress=notes.append)
+
+    assert notes == ["分離中: 50%", "分離中: 100%"]
+
+
+def test_separate_with_progress_restores_original_apply_model(monkeypatch):
+    pytest.importorskip("audio_separator")
+    import audio_separator.separator.architectures.demucs_separator as demucs_mod
+
+    from vocal_analysis.separator import _separate_with_progress
+
+    original_apply_model = demucs_mod.apply_model
+
+    class _FakeSep:
+        def separate(self, audio_file_path):
+            assert demucs_mod.apply_model is not original_apply_model
+            return ["vocals_output.wav"]
+
+    _separate_with_progress(_FakeSep(), Path("input.wav"), on_progress=lambda note: None)
+
+    assert demucs_mod.apply_model is original_apply_model
+
+
+def test_separate_with_progress_skips_relay_when_on_progress_is_none(monkeypatch):
+    pytest.importorskip("audio_separator")
+    import audio_separator.separator.architectures.demucs_separator as demucs_mod
+
+    from vocal_analysis.separator import _separate_with_progress
+
+    original_apply_model = demucs_mod.apply_model
+
+    class _FakeSep:
+        def separate(self, audio_file_path):
+            assert demucs_mod.apply_model is original_apply_model  # 差し替えが起きていないこと
+            return ["vocals_output.wav"]
+
+    _separate_with_progress(_FakeSep(), Path("input.wav"), on_progress=None)
 
 
 def test_build_separator_configures_real_separator_with_pinned_values():

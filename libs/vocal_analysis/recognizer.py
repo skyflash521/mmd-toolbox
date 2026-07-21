@@ -130,6 +130,16 @@ def _build_segment_bounds(duration_sec: float, split_points: list[float]) -> lis
     return result
 
 
+def _format_time_range(start_sec: float, end_sec: float) -> str:
+    """on_progress通知に載せる `m:ss-m:ss` 形式の時刻範囲(処理対象が曲中のどこかを示す)。"""
+
+    def _mmss(sec: float) -> str:
+        total = int(sec)
+        return f"{total // 60}:{total % 60:02d}"
+
+    return f"{_mmss(start_sec)}-{_mmss(end_sec)}"
+
+
 def _is_segment_silent(segment_samples: np.ndarray, threshold: float) -> bool:
     """区間全体のRMSがしきい値以下かどうかを判定する(手順2)。"""
     if segment_samples.size == 0:
@@ -239,18 +249,22 @@ def _find_suffix_repetition(text: str) -> tuple[str, int, str] | None:
     return best
 
 
-def _text_mora_count(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD) -> int:
+def _text_mora_count(
+    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
+) -> int:
     """テキストのモーラ数(G2P結果の母音・撥音の数)。反復救済の個数正規化に使う。"""
-    return sum(1 for symbol in _g2p(text, method=method) if symbol in _MORA_G2P_SYMBOLS)
+    return sum(1 for symbol in _g2p(text, method=method, on_progress=on_progress) if symbol in _MORA_G2P_SYMBOLS)
 
 
 def _text_phoneme_density(
-    text: str, duration_sec: float, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+    text: str, duration_sec: float, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
 ) -> float:
     """テキスト全体をG2Pした音素密度(音素/秒)。エコー・反復のトリガ判定に使う。"""
     if not text.strip() or duration_sec <= 0:
         return 0.0
-    return len(_g2p(text, method=method)) / duration_sec
+    return len(_g2p(text, method=method, on_progress=on_progress)) / duration_sec
 
 
 def _resolve_transcription(
@@ -261,6 +275,7 @@ def _resolve_transcription(
     content_recognizer_model: ContentRecognizerModel,
     retry_enabled: bool,
     english_oov_katakana_method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
 ) -> tuple[str, list[tuple[str, float, float]] | None]:
     """書き起こしの後処理: エコー除去→トリガ式区間リトライ→反復救済。
 
@@ -279,7 +294,8 @@ def _resolve_transcription(
         if not candidate.strip():
             # 元から空の書き起こしは既存のgap確定に委ねる。エコー除去で空になった場合のみ再認識する。
             return echo_removed
-        density = _text_phoneme_density(candidate, trim_duration_sec, method=english_oov_katakana_method)
+        density = _text_phoneme_density(
+            candidate, trim_duration_sec, method=english_oov_katakana_method, on_progress=on_progress)
         return density > _HALLUCINATION_PHONEME_RATE
 
     if retry_enabled and _needs_retry(text2):
@@ -288,11 +304,13 @@ def _resolve_transcription(
         # 別モデルはここには使わない(別モデルを主モデルと同時にGPUへ常駐させるとVRAMを圧迫し
         # 推論が不安定になり、処理時間を有界にできない)。
         # 単語タイムスタンプは要求せず破棄する(位置バンド制限で整列するフォールバックへ帰着)。
-        retry_text = _transcribe_text_only(chunk_samples, content_recognizer_model).strip()
+        retry_text = _transcribe_text_only(
+            chunk_samples, content_recognizer_model, on_progress=on_progress).strip()
         retry_text, _retry_echo_removed = _strip_prompt_echo(retry_text)
         text2, words = retry_text, None
 
-    density = _text_phoneme_density(text2, trim_duration_sec, method=english_oov_katakana_method)
+    density = _text_phoneme_density(
+        text2, trim_duration_sec, method=english_oov_katakana_method, on_progress=on_progress)
     if text2.strip() and density > _HALLUCINATION_PHONEME_RATE:
         repetition = _find_suffix_repetition(text2)
         if repetition is not None:
@@ -301,7 +319,8 @@ def _resolve_transcription(
             if head.strip():
                 rescued = head
             else:
-                unit_moras = max(1, _text_mora_count(unit, method=english_oov_katakana_method))
+                unit_moras = max(
+                    1, _text_mora_count(unit, method=english_oov_katakana_method, on_progress=on_progress))
                 normalized = max(1, round(trim_duration_sec * _REPEAT_NORMALIZE_MORA_RATE / unit_moras))
                 if normalized < count:
                     rescued = unit * normalized
@@ -688,7 +707,7 @@ def _ensure_phoneme_model(on_progress: Callable[[str], None] | None):
     except OSError as e:
         raise RecognitionError(
             f"認識モデル({RECOGNIZER_CONFIG.model_id}, revision={RECOGNIZER_CONFIG.model_revision})を"
-            "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
+            "取得できません。ネットワーク接続を確認してください。"
         ) from e
     vocab = processor.tokenizer.get_vocab()
     blank_token_id = processor.tokenizer.pad_token_id
@@ -794,10 +813,12 @@ def recognize(
     (既定`wav2vec2-ctc-forcedalign`)。`forced_aligner="sofa-forcedalign"`を選ぶ場合は
     sofa_aligner(`SofaAlignerConfig`)が必須で、省略(`None`)すると`RecognitionError`にする
     (黙ってwav2vec2へフォールバックしない)。english_oov_katakana_method で英語未知語カタカナ化
-    フォールバックの変換方式を選択する(既定`arpakana`)。on_progress はモデル(内容認識モデル・
-    音素モデル)の初回取得がネットワークダウンロードを要した区間だけ、進捗文言を都度渡して呼ぶ
-    (キャッシュ済みなら一切呼ばない。モデルロード関数へそのまま転送するだけで、判定・文言の
-    組み立ては行わない)。
+    フォールバックの変換方式を選択する(既定`arpakana`。`tinyllama-katakana-converter`選択時は
+    カタカナ生成モデルを使う)。on_progress はモデル(内容認識モデル・音素モデル・カタカナ生成
+    モデルのいずれも)の初回取得がネットワークダウンロードを要した区間、およびロード開始時
+    (ダウンロードの有無に関わらず)の両方で進捗文言を都度渡して呼ぶ。加えて、区間ごとの
+    書き起こし・強制アライメントが実際に進行している区間でも、処理中の時刻範囲を含む進捗文言を
+    都度渡して呼ぶ(ダウンロード・ロードの有無に関わらず)。
     """
     if forced_aligner not in ("wav2vec2-ctc-forcedalign", "sofa-forcedalign"):
         raise RecognitionError(f"未知の forced_aligner です: {forced_aligner!r}")
@@ -822,7 +843,11 @@ def recognize(
     # 逼迫(ページング)で処理時間が大きく悪化し、他プロセスの描画も阻害するため。
     # 内容認識パイプライン(Whisper系)は無音でない最初の区間で遅延ロードし、以降の区間では
     # プロセス内キャッシュで使い回す(区間ごとの再ロードによるモデル転送コスト(特にGPU使用時)の
-    # 浪費を避ける)。
+    # 浪費を避け、全区間が無音の入力ではモデルを一切ロードしない)。ロードは
+    # _load_content_recognizer_for_segment に戻り値をローカル変数へ束縛せず委ねる(プロセス内
+    # キャッシュだけが参照を保持するようにするため。recognize() 側が参照を持ち続けると、
+    # tinyllama-katakana-converter 方式の変換で _release_content_recognizer_pipeline がキャッシュを
+    # 空にしても実体がGPUに残ってしまう)。
     # 音素モデルは強制アライメント対象が1件以上あるときだけアライメントフェーズでロードする
     # (全区間が無音・gap確定ならモデルを一切必要としない。ロード自体の失敗は握りつぶさず
     # 例外にして失敗境界を隠さない)。
@@ -835,7 +860,13 @@ def recognize(
     pending_align_jobs: list[dict] = []
 
     all_segments: list[Segment] = []
-    for start_sec, end_sec in segment_bounds:
+    segment_count = len(segment_bounds)
+    for segment_index, (start_sec, end_sec) in enumerate(segment_bounds, start=1):
+        segment_note = (
+            f"歌詞書き起こし中: {_format_time_range(start_sec, end_sec)}({segment_index}/{segment_count})"
+        )
+        if on_progress is not None:
+            on_progress(segment_note)
         start_index = round(start_sec * RECOGNIZER_CONFIG.sample_rate)
         end_index = round(end_sec * RECOGNIZER_CONFIG.sample_rate)
         chunk_samples = resampled[start_index:end_index]
@@ -862,12 +893,8 @@ def recognize(
         trim_duration_sec = trim_hi_sec - trim_lo_sec
 
         try:
-            # パイプラインへの参照はこの呼び出しの間だけ持つ(プロセス内キャッシュが実体を保持
-            # するため、ここでローカル変数に持ち続けなくても再ロードは起きない)。参照を持ち
-            # 続けると、変換モデルとのGPU入れ替え(_prepare_english_oov_conversion)や二相化の
-            # 解放でキャッシュを手放しても実体がGPUに残ってしまう。
             text, words = _transcribe_segment(
-                _load_content_recognizer_pipeline(content_recognizer_model, on_progress=on_progress),
+                _load_content_recognizer_for_segment(content_recognizer_model, on_progress, segment_note),
                 chunk_samples,
             )
         except ImportError as e:
@@ -879,7 +906,7 @@ def recognize(
             raise RecognitionError(
                 f"内容認識モデル({content_recognizer_model.model_id}, "
                 f"revision={content_recognizer_model.model_revision})を"
-                "取得できません。ネットワーク接続を確認するか、モデルを事前にキャッシュしてください。"
+                "取得できません。ネットワーク接続を確認してください。"
             ) from e
 
         try:
@@ -888,6 +915,7 @@ def recognize(
                 chunk_samples, trim_duration_sec, text, words,
                 content_recognizer_model, retry,
                 english_oov_katakana_method=english_oov_katakana_method,
+                on_progress=on_progress,
             )
         except ImportError as e:
             raise RecognitionError(
@@ -913,13 +941,14 @@ def recognize(
             # 使う)、取得できなかった場合は区間の書き起こし全体を1回で変換する(単語単位に分割しない)。
             if words:
                 words_phonemes = [
-                    (_g2p(word_text, method=english_oov_katakana_method), w_start, w_end)
+                    (_g2p(word_text, method=english_oov_katakana_method, on_progress=on_progress),
+                     w_start, w_end)
                     for word_text, w_start, w_end in words
                 ]
                 phonemes = [p for word_phonemes, _, _ in words_phonemes for p in word_phonemes]
             else:
                 words_phonemes = None
-                phonemes = _g2p(text, method=english_oov_katakana_method)
+                phonemes = _g2p(text, method=english_oov_katakana_method, on_progress=on_progress)
         except ImportError as e:
             raise RecognitionError(
                 "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
@@ -1008,8 +1037,14 @@ def recognize(
         _release_content_recognizer_pipeline()
         if pending_align_jobs:
             processor, model, vocab, blank_token_id = _ensure_phoneme_model(on_progress)
+            job_count = len(pending_align_jobs)
             inserted = 0
-            for job in pending_align_jobs:
+            for job_index, job in enumerate(pending_align_jobs, start=1):
+                if on_progress is not None:
+                    on_progress(
+                        f"音素アライメント中: {_format_time_range(job['trim_lo_sec'], job['trim_hi_sec'])}"
+                        f"({job_index}/{job_count})"
+                    )
                 aligned = _align_wav2vec2_job(processor, model, vocab, blank_token_id, threshold, job)
                 position = job["insert_at"] + inserted
                 all_segments[position:position] = aligned
@@ -1064,7 +1099,9 @@ def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: 
     return resample_poly(mono, up, down).astype(np.float32)
 
 
-def _prepare_english_oov_conversion(text: str, method: EnglishOovKatakanaMethod) -> None:
+def _prepare_english_oov_conversion(
+    text: str, method: EnglishOovKatakanaMethod, on_progress: Callable[[str], None] | None = None
+) -> None:
     """tinyllama-katakana-converter 方式のG2P前処理: 未変換の対象語があるときだけ、内容認識
     パイプラインを解放してからまとめて変換する(変換モデル(GPU実行時はfp16で重み約2.2GB)と内容認識モデルの
     同時GPU常駐によるVRAM逼迫を避ける。変換モデル自体は convert_words が変換後に解放する)。
@@ -1072,7 +1109,8 @@ def _prepare_english_oov_conversion(text: str, method: EnglishOovKatakanaMethod)
     変換結果は語キャッシュに入るため、後続のG2P内の変換(convert_oov_words)はキャッシュに
     当たり、変換モデルのロードは起きない。内容認識パイプラインは次の書き起こしでプロセス内
     キャッシュにより再ロードされる。arpakana 方式(既定)では何も行わない(モデルを使わないため
-    入れ替えが不要で、対象語の検出も走らせない)。
+    入れ替えが不要で、対象語の検出も走らせない)。on_progress は convert_words と同じ契約
+    (変換モデルの取得・ロードが実際に発生した区間だけ進捗文言を渡して呼ぶ)。
     """
     if method != "tinyllama-katakana-converter":
         return
@@ -1080,20 +1118,24 @@ def _prepare_english_oov_conversion(text: str, method: EnglishOovKatakanaMethod)
     if not words:
         return
     _release_content_recognizer_pipeline()
-    convert_words(words, method)
+    convert_words(words, method, on_progress=on_progress)
 
 
-def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD) -> list[str]:
+def _g2p(
+    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
+) -> list[str]:
     """テキストをG2Pで音素記号列へ変換する(手順4。pyopenjtalk-plus、ルールベース)。
 
     pyopenjtalk-plusへ渡す前に、英語未知語カタカナ化フォールバック(convert_oov_words)を適用する。
-    methodで変換方式を選択する(既定`arpakana`)。
+    methodで変換方式を選択する(既定`arpakana`)。on_progress は tinyllama-katakana-converter
+    方式の変換モデルの取得・ロードが実際に発生した区間だけ進捗文言を渡して呼ぶ。
     """
     import pyopenjtalk
 
     try:
-        _prepare_english_oov_conversion(text, method)
-        text = convert_oov_words(text, method=method)
+        _prepare_english_oov_conversion(text, method, on_progress=on_progress)
+        text = convert_oov_words(text, method=method, on_progress=on_progress)
     except ImportError as e:
         raise RecognitionError(
             "arpakana、nltk、または transformers/torch が見つかりません。導入してください"
@@ -1101,13 +1143,11 @@ def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAK
         ) from e
     except LookupError as e:
         raise RecognitionError(
-            "CMUdict(nltkのcmudictコーパス)が見つかりません。`nltk.download('cmudict')`で"
-            "取得するか、事前にキャッシュしてください。"
+            "CMUdict(nltkのcmudictコーパス)が見つかりません。ネットワーク接続を確認してください。"
         ) from e
     except OSError as e:
         raise RecognitionError(
-            "英語未知語カタカナ化フォールバックの変換モデルを取得できません。ネットワーク接続を"
-            "確認するか、モデルを事前にキャッシュしてください。"
+            "カタカナ生成モデルを取得できません。ネットワーク接続を確認してください。"
         ) from e
 
     with suppress_native_stderr():
@@ -1151,7 +1191,10 @@ def _extract_word_timestamps(chunks: list[dict], duration_sec: float) -> list[tu
     return _sanitize_word_timestamps(words, duration_sec)
 
 
-def _transcribe_text_only(samples: np.ndarray, content_recognizer_model: ContentRecognizerModel) -> str:
+def _transcribe_text_only(
+    samples: np.ndarray, content_recognizer_model: ContentRecognizerModel,
+    on_progress: Callable[[str], None] | None = None,
+) -> str:
     """音声をタイムスタンプ無しで書き起こす(トリガ式リトライの再認識用。主モデル自身を呼ぶ)。
 
     リトライは区間全体のテキストを丸ごと採用し単語タイムスタンプを使わないため、単語単位の
@@ -1161,8 +1204,10 @@ def _transcribe_text_only(samples: np.ndarray, content_recognizer_model: Content
     チェックへ通常どおり渡り、密度超過ならgap確定に落ちる(_SEGMENT_MAX_NEW_TOKENS・
     _RETRY_MAX_NEW_TOKENS)。パイプラインは _load_content_recognizer_pipeline の
     プロセス内キャッシュを共有する(主モデルと同じデバイス自動選択・ロード済み再利用が効く)。
+    リトライ判定の密度計算(tinyllama-katakana-converter方式選択時)が内容認識パイプラインを
+    解放してから呼ばれることがあるため、on_progress を転送してその場合の再ロードも無通知にしない。
     """
-    pipeline = _load_content_recognizer_pipeline(content_recognizer_model)
+    pipeline = _load_content_recognizer_pipeline(content_recognizer_model, on_progress=on_progress)
     generate_kwargs = {
         "language": "japanese", "task": "transcribe",
         "num_beams": 1, "do_sample": False, "temperature": 0.0,
@@ -1295,6 +1340,23 @@ def _prefetch_with_progress(repo_id: str, revision: str | None, on_progress: Cal
     return state["shown"]
 
 
+def _load_content_recognizer_for_segment(content_recognizer_model, on_progress, segment_note):
+    """区間ループから内容認識パイプラインを取得する(recognize()専用の薄いラッパー)。
+
+    _load_content_recognizer_pipeline の戻り値をローカル変数へ束縛せず、この関数の戻り値を
+    そのまま呼び出し元の式の中で使わせる(プロセス内キャッシュだけが参照を保持するようにする
+    ため。recognize() 側が参照を持ち続けると、tinyllama-katakana-converter方式の変換で
+    _release_content_recognizer_pipeline がキャッシュを空にしても実体がGPUに残ってしまう)。
+    ロードが実際に発生した場合、そのロード自体の通知(内容認識モデル読み込み中)がこの区間の
+    進捗通知(segment_note)を上書きしたままになるため、ロード完了直後にsegment_noteを出し直す
+    (ロードが起きなかった場合も無害な重複通知として出す)。
+    """
+    pipeline = _load_content_recognizer_pipeline(content_recognizer_model, on_progress=on_progress)
+    if on_progress is not None:
+        on_progress(segment_note)
+    return pipeline
+
+
 def _load_content_recognizer_pipeline(
     content_recognizer_model: ContentRecognizerModel,
     on_progress: Callable[[str], None] | None = None,
@@ -1306,7 +1368,9 @@ def _load_content_recognizer_pipeline(
     ロードした1件だけを保持する単一枠キャッシュで足りる(再ロードを避ける)。別の
     content_recognizer_model が指定されると、直前のキャッシュは破棄して差し替える(複数の
     モデルを同時にプロセス内保持しない)。on_progress はモデルの初回取得が実際にネットワーク
-    ダウンロードを要した区間だけ、進捗文言を渡して呼ぶ。
+    ダウンロードを要した区間だけダウンロード進捗文言を渡して呼ぶことに加え、ロード開始時
+    (ダウンロードの有無に関わらず、キャッシュ済みでディスクから読み込むだけの場合を含む)にも
+    1回呼び、ロード完了までの区間を無通知にしない。
     """
     global _content_recognizer_pipeline_cache
     if _content_recognizer_pipeline_cache is not None:
@@ -1335,6 +1399,8 @@ def _load_content_recognizer_pipeline(
     # 速度低下を避ける)。CPU実行時はfp16未対応のためfp32のまま。
     dtype = torch.float16 if device == "cuda" else torch.float32
     try:
+        if on_progress is not None:
+            on_progress(f"内容認識モデル読み込み中: {content_recognizer_model.model_id}")
         pipeline = _transformers_pipeline(
             "automatic-speech-recognition",
             model=content_recognizer_model.model_id,
@@ -1372,7 +1438,9 @@ def _load_model_and_processor(on_progress: Callable[[str], None] | None = None):
 
     モデル id・revision・dtype は S-1 測定の固定条件どおりに適用し、実行デバイスは
     _select_device() の自動選択で決める(実行デバイスは固定条件に含まれない)。on_progress は
-    モデルの初回取得が実際にネットワークダウンロードを要した区間だけ、進捗文言を渡して呼ぶ。
+    モデルの初回取得が実際にネットワークダウンロードを要した区間だけダウンロード進捗文言を
+    渡して呼ぶことに加え、ロード開始時(ダウンロードの有無に関わらず、キャッシュ済みでディスクから
+    読み込むだけの場合を含む)にも1回呼び、ロード完了までの区間を無通知にしない。
     """
     import torch
 
@@ -1384,6 +1452,8 @@ def _load_model_and_processor(on_progress: Callable[[str], None] | None = None):
             RECOGNIZER_CONFIG.model_id, RECOGNIZER_CONFIG.model_revision, on_progress)
 
     try:
+        if on_progress is not None:
+            on_progress(f"音素モデル読み込み中: {RECOGNIZER_CONFIG.model_id}")
         # wav2vec2-espeak のトークナイザは既定で espeak ネイティブバイナリ(phonemizer)を
         # 要求する。音素IDのデコードのみが必要で音素へのエンコードは不要なため do_phonemize=False
         # でこの依存を回避する。
