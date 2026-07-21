@@ -66,7 +66,7 @@ def test_single_run_calls_stages_in_order(tmp_path, monkeypatch):
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -90,7 +90,7 @@ def test_single_run_diagnostics_forced_split_is_always_false(tmp_path, monkeypat
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -122,7 +122,7 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
         captured.setdefault("load_audio_results", []).append(result)
         return result
 
-    def spy_separate(pcm, mode):
+    def spy_separate(pcm, mode, **kwargs):
         call_order.append("separate")
         captured["separate_pcm"] = pcm
         return vocal_path
@@ -194,7 +194,7 @@ def test_single_run_forwards_mora_event_group_sizes_to_build_diagnostics(tmp_pat
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -233,7 +233,7 @@ def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, m
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -258,7 +258,7 @@ def test_separated_flag_matches_separate_vocals_mode(tmp_path, monkeypatch, mode
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, m: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, m, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -282,7 +282,7 @@ def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeyp
         received["sofa_aligner"] = sofa_aligner
         return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
     given_model = ContentRecognizerModel(model_id="org/custom-recognizer", model_revision="rev1")
@@ -308,7 +308,7 @@ def test_recognizer_receives_selected_english_oov_katakana_method(tmp_path, monk
         received["english_oov_katakana_method"] = english_oov_katakana_method
         return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
     pipeline.run(input_path, **_common_kwargs(
@@ -322,7 +322,7 @@ def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monke
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -386,7 +386,7 @@ def test_chunked_run_diagnostics_forced_split_reflects_any_boundary(
         return [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)]
 
     monkeypatch.setattr(pipeline.chunking, "merge_chunk_segments", fake_merge)
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -416,7 +416,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
 
     separate_calls = []
 
-    def fake_separate(pcm, mode):
+    def fake_separate(pcm, mode, **kwargs):
         separate_calls.append(len(pcm.samples) / pcm.sample_rate)
         return vocal_path
 
@@ -475,7 +475,7 @@ def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_e
     monkeypatch.setattr(
         pipeline.chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -533,7 +533,7 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
 
     separate_call_count = [0]
 
-    def fake_separate(pcm, mode):
+    def fake_separate(pcm, mode, **kwargs):
         separate_call_count[0] += 1
         return quiet_vocal if separate_call_count[0] == 1 else loud_vocal
 
@@ -584,7 +584,7 @@ def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_pat
     ]
     monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(pipeline.chunking, "merge_chunk_segments", lambda *a, **k: combined_segments)
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -645,7 +645,7 @@ def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monk
     monkeypatch.setattr(
         pipeline.chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -665,7 +665,7 @@ def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_reco
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -703,7 +703,7 @@ def test_non_chunked_recognize_on_progress_forwards_download_note(tmp_path, monk
             on_progress("ダウンロード中: dummy-model 42%")
         return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
     progress = _RecordingProgress()
@@ -726,7 +726,7 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monk
     monkeypatch.setattr(
         pipeline.chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
 
     def fake_recognize(path, on_progress=None, **kwargs):
         if on_progress is not None:
@@ -742,6 +742,85 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monk
     download_notes = [c for c in recognize_calls if c["note"] == "ダウンロード中: dummy-model 10%"]
     # 2チャンクとも、そのチャンクの done/total(チャンク進捗)を保ったままダウンロード通知が出る。
     assert [(c["done"], c["total"]) for c in download_notes] == [(0, 2), (1, 2)]
+
+
+def test_non_chunked_separate_on_progress_forwards_download_note(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    captured = {}
+
+    def fake_separate(pcm, mode, on_progress=None, **kwargs):
+        captured["on_progress"] = on_progress
+        if on_progress is not None:
+            on_progress("ダウンロード中: 42%")
+        return vocal_path
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", fake_separate)
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", lambda path, **kwargs: [
+        seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    progress = _RecordingProgress()
+    pipeline.run(input_path, progress=progress, **_common_kwargs())
+
+    assert captured["on_progress"] is not None
+    separate_calls = [c for c in progress.calls if c["stage"] == "separate"]
+    assert any(c["note"] == "ダウンロード中: 42%" for c in separate_calls)
+    # 分割しない実行の既定(done=0, total=None)を、ダウンロード通知後も保ったままにする。
+    assert all(c["done"] == 0 and c["total"] is None for c in separate_calls)
+
+
+def test_chunked_separate_on_progress_preserves_chunk_done_total(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
+    monkeypatch.setattr(
+        pipeline.chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+
+    def fake_separate(pcm, mode, on_progress=None, **kwargs):
+        if on_progress is not None:
+            on_progress("ダウンロード中: 10%")
+        return vocal_path
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", fake_separate)
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", lambda path, **kwargs: [
+        seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    progress = _RecordingProgress()
+    pipeline.run(input_path, progress=progress, **_common_kwargs(max_duration_sec=3.0))
+
+    separate_calls = [c for c in progress.calls if c["stage"] == "separate"]
+    download_notes = [c for c in separate_calls if c["note"] == "ダウンロード中: 10%"]
+    # 2チャンクとも、そのチャンクの done/total(チャンク進捗)を保ったままダウンロード通知が出る。
+    assert [(c["done"], c["total"]) for c in download_notes] == [(0, 2), (1, 2)]
+
+
+def test_run_without_progress_reporter_passes_on_progress_none_to_separate(tmp_path, monkeypatch):
+    # progress 省略時は separate() へも on_progress=None を渡す(recognize と同じ契約)。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    captured = {}
+
+    def fake_separate(pcm, mode, *, on_progress, **kwargs):
+        captured["on_progress"] = on_progress
+        return vocal_path
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", fake_separate)
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", lambda path, **kwargs: [
+        seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    pipeline.run(input_path, **_common_kwargs())
+
+    assert captured["on_progress"] is None
 
 
 def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_path, monkeypatch):
@@ -760,7 +839,7 @@ def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_
         captured["on_progress"] = on_progress
         return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
     pipeline.run(input_path, **_common_kwargs())
@@ -780,7 +859,7 @@ def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_recogn
     monkeypatch.setattr(
         pipeline.chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
 
     captured = []
 
@@ -804,7 +883,7 @@ def test_run_works_without_progress_reporter(tmp_path, monkeypatch):
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -822,7 +901,7 @@ def test_keep_intermediate_dir_none_creates_nothing(tmp_path, monkeypatch):
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -840,7 +919,7 @@ def test_keep_intermediate_saves_normalized_input_vocal_and_segments(tmp_path, m
     write_wav(vocal_path, seconds=1.0, sample_rate=11025, amplitude=0.8)
     given_segments = [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize", lambda path, **kwargs: given_segments)
 
@@ -869,7 +948,7 @@ def test_keep_intermediate_write_failure_raises_intermediate_write_error(tmp_pat
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
@@ -892,7 +971,7 @@ def test_keep_intermediate_chunked_saves_concatenated_vocal(tmp_path, monkeypatc
     monkeypatch.setattr(
         pipeline.chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
-    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode: vocal_path)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])

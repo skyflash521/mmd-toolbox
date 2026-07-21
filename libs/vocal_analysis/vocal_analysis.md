@@ -128,8 +128,20 @@
   - BGM有無の自動判定は持たない。判定コストが実運用の主要ケース(BGM込み入力)では常に純オーバーヘッド
     になり、判定を追加する価値が無いと判断したため。
 - 分離は外部ライブラリで内部実行し(必要時のみサブプロセス)、Separator 抽象の背後で差し替え可能とする(8章)。
-  公開関数は `separate(pcm: AudioPcm, mode: Literal["always","never"]) -> Path`
-  (`vocal_analysis.separator`)。ライブラリ未導入時は `SeparationError` で失敗する。
+  公開関数は
+
+  ```python
+  def separate(
+      pcm: AudioPcm,
+      mode: Literal["always", "never"],
+      *,
+      on_progress: Callable[[str], None] | None = None,
+  ) -> Path: ...
+  ```
+
+  (`vocal_analysis.separator`)。`on_progress`(モデル初回取得の進捗通知。既定`None`)は Recognizer の
+  同名引数と同じ契約(実際にネットワークダウンロードを要した区間だけ、進捗文言を渡して呼ぶ。8.1)。
+  ライブラリ未導入時は `SeparationError` で失敗する。
 - `separate()` は分離前後の一時WAVを格納する作業ディレクトリをOSの一時領域に作る。このディレクトリは
   呼び出し元に公開せず、プロセスの正常終了時に削除を試みる(強制終了時や削除失敗時は残置を許容する)。
   呼び出し元は戻り値の `Path` を読み終えたタイミングを`vocal_analysis`側へ伝える手段を持たず、
@@ -797,9 +809,15 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
 
 ### 8.1 アダプタinterface
 
-- **Separator**: `separate(vocal_source, mode) -> vocal_wav_path`(内部でライブラリ/サブプロセスを呼ぶ)。
-  出力は「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・分離トラック構成・一時ファイルは各実装に
-  閉じる。`mode`(`always`/`never`)もこの抽象が解釈する。
+- **Separator**: `separate(vocal_source, mode, *, on_progress) -> vocal_wav_path`(内部でライブラリ/
+  サブプロセスを呼ぶ)。出力は「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・分離
+  トラック構成・一時ファイルは各実装に閉じる。`mode`(`always`/`never`)もこの抽象が解釈する。
+  `on_progress`(モデル初回取得の進捗通知)はキーワード専用の省略可能引数(既定`None`)で、
+  Recognizer の同名引数と基本契約(実際にネットワークダウンロードを要した区間だけ進捗文言を
+  渡して呼ぶ)は同じだが、文言の内訳は委譲先ライブラリの取得単位に従う: Recognizer 側は
+  モデル1件ぶんの取得を単一の割合で示すのに対し、Separator 側(audio-separator)はモデルが
+  複数ファイルで構成される場合、ファイルごとに実ファイル名付きで 0%→100% を示す(1モデルの
+  取得中に複数回の 0%→100% サイクルが起こりうる)。
 - **Recognizer**: `recognize(vocal_wav_path, content_recognizer_model, *, retry, forced_aligner, sofa_aligner,
   english_oov_katakana_method, on_progress) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
   (文字列なしの音素認識)。

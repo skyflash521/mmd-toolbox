@@ -146,6 +146,157 @@ def test_separate_missing_library_raises_clear_error(monkeypatch):
         separator_module.separate(_make_pcm(), mode="always")
 
 
+def _fake_download_file_if_not_exists(self, url, output_path):
+    """audio_separator.separator.separator.Separator.download_file_if_not_exists の代わり。
+
+    実装(.venv 内 separator.py の download_file_if_not_exists)と同じく、ファイルサイズぶんの
+    tqdm 進捗バーを生成して update する(URL への実アクセスはしない)。
+    """
+    import audio_separator.separator.separator as as_mod
+
+    bar = as_mod.tqdm(total=100, unit="iB", unit_scale=True)
+    bar.update(40)
+    bar.update(60)
+    bar.close()
+
+
+def test_separate_relays_download_progress_when_on_progress_given(monkeypatch):
+    pytest.importorskip("audio_separator")
+    import audio_separator.separator.separator as as_mod
+
+    from vocal_analysis import separator as separator_module
+
+    calls = {}
+    notes = []
+
+    class _FakeSeparatorWithDownload(_FakeSeparator):
+        def load_model(self, model_filename):
+            as_mod.Separator.download_file_if_not_exists(
+                self, "https://example.invalid/htdemucs_ft.yaml", "/models/htdemucs_ft.yaml")
+            super().load_model(model_filename)
+
+        def separate(self, audio_file_path):
+            # クリア通知(空文字列)がロード完了直後に来ることを検証するため、実際の分離処理
+            # (ダウンロードと無関係)の開始をマーカーとして記録する。
+            notes.append("SEPARATE_STARTED")
+            return super().separate(audio_file_path)
+
+    def fake_build_separator(output_dir):
+        return _FakeSeparatorWithDownload(calls)
+
+    monkeypatch.setattr(separator_module, "_build_separator", fake_build_separator)
+    monkeypatch.setattr(as_mod.Separator, "download_file_if_not_exists", _fake_download_file_if_not_exists)
+
+    separator_module.separate(_make_pcm(), mode="always", on_progress=notes.append)
+
+    assert any("40" in n for n in notes)
+    assert any("100" in n for n in notes)
+    # ファイル番号のような合成ラベルではなく、実際のファイル名(output_path のファイル名部分)を使う。
+    assert any("htdemucs_ft.yaml" in n for n in notes)
+    # クリア通知(空文字列)はロード完了直後に来る。実際の分離処理(ダウンロードと無関係)が
+    # 始まるより前にクリアされていることを確認する(分離処理完了後まで遅延してはならない)。
+    assert notes.index("") < notes.index("SEPARATE_STARTED")
+
+
+def test_separate_download_progress_labels_multi_file_models_by_real_filename(monkeypatch):
+    # htdemucs_ft は重み4分割+YAMLの計5ファイルで構成され、audio-separator は
+    # download_file_if_not_exists をファイルごとに呼ぶ(バイト集約された単一の合計進捗が無い)。
+    # 各ファイルで tqdm が 0%→100% を再スタートするため、通知に実際のファイル名を含めて
+    # 「壊れて繰り返している」ように見えず、どのファイルの進捗かを正しく識別できることを検証する。
+    pytest.importorskip("audio_separator")
+    import audio_separator.separator.separator as as_mod
+
+    from vocal_analysis import separator as separator_module
+
+    calls = {}
+    notes = []
+    filenames = ["04573f0d-f3cf25b2.th", "htdemucs_ft.yaml"]
+
+    class _FakeSeparatorWithMultiFileDownload(_FakeSeparator):
+        def load_model(self, model_filename):
+            for name in filenames:
+                as_mod.Separator.download_file_if_not_exists(
+                    self, f"https://example.invalid/{name}", f"/models/{name}")
+            super().load_model(model_filename)
+
+    def fake_build_separator(output_dir):
+        return _FakeSeparatorWithMultiFileDownload(calls)
+
+    monkeypatch.setattr(separator_module, "_build_separator", fake_build_separator)
+    monkeypatch.setattr(as_mod.Separator, "download_file_if_not_exists", _fake_download_file_if_not_exists)
+
+    separator_module.separate(_make_pcm(), mode="always", on_progress=notes.append)
+
+    file1_notes = [n for n in notes if filenames[0] in n]
+    file2_notes = [n for n in notes if filenames[1] in n]
+    assert any("100" in n for n in file1_notes)
+    assert any("100" in n for n in file2_notes)
+    # 2ファイル目の通知は1ファイル目のファイル名を含まず、両者が混同されない。
+    assert not any(filenames[1] in n for n in file1_notes)
+
+
+def test_separate_does_not_call_on_progress_when_no_download_happens(monkeypatch):
+    pytest.importorskip("audio_separator")
+    from vocal_analysis import separator as separator_module
+
+    calls = {}
+    notes = []
+
+    def fake_build_separator(output_dir):
+        # load_model が tqdm を一切使わない = 実際のダウンロードが発生しないケースを模す
+        # (audio-separator が既にキャッシュ済みファイルを検出して download_file_if_not_exists を
+        # 早期returnする経路に相当)。
+        return _FakeSeparator(calls)
+
+    monkeypatch.setattr(separator_module, "_build_separator", fake_build_separator)
+
+    separator_module.separate(_make_pcm(), mode="always", on_progress=notes.append)
+
+    assert notes == []
+
+
+def test_load_model_with_progress_restores_original_tqdm_and_download_method(monkeypatch):
+    pytest.importorskip("audio_separator")
+    import audio_separator.separator.separator as as_mod
+
+    from vocal_analysis.separator import _load_model_with_progress
+
+    original_tqdm = as_mod.tqdm
+    original_download = as_mod.Separator.download_file_if_not_exists
+
+    class _FakeSep:
+        def load_model(self, model_filename):
+            # ロード中だけ両方とも中継用に差し替わっている。
+            assert as_mod.tqdm is not original_tqdm
+            assert as_mod.Separator.download_file_if_not_exists is not original_download
+
+    _load_model_with_progress(_FakeSep(), on_progress=lambda note: None)
+
+    assert as_mod.tqdm is original_tqdm
+    assert as_mod.Separator.download_file_if_not_exists is original_download
+
+
+def test_load_model_with_progress_skips_relay_when_on_progress_is_none():
+    pytest.importorskip("audio_separator")
+    import audio_separator.separator.separator as as_mod
+
+    from vocal_analysis import SEPARATOR_CONFIG
+    from vocal_analysis.separator import _load_model_with_progress
+
+    original = as_mod.tqdm
+    calls = {}
+
+    class _FakeSep:
+        def load_model(self, model_filename):
+            calls["model_filename"] = model_filename
+            assert as_mod.tqdm is original  # 差し替えが起きていないこと
+
+    downloaded = _load_model_with_progress(_FakeSep(), on_progress=None)
+
+    assert downloaded is False
+    assert calls["model_filename"] == SEPARATOR_CONFIG.model_filename
+
+
 def test_build_separator_configures_real_separator_with_pinned_values():
     # audio-separator が実際に導入されている環境でのみ、_build_separator の実体を検証する
     # (vocal-analysis extra が無い最小環境では skip。実モデル・ネットワークは必須にしない)。

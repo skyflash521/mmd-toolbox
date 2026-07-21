@@ -211,7 +211,9 @@ def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
                 forced_aligner, sofa_aligner, english_oov_katakana_method, progress):
     """長尺分割なしの単一実行(通常経路)。"""
     _report_stage(progress, "separate")
-    vocal_path = _va_separator.separate(pcm, separate_vocals)
+    vocal_path = _va_separator.separate(
+        pcm, separate_vocals,
+        on_progress=_model_download_progress(progress, "separate", done=0, total=None))
     _report_stage(progress, "recognize")
     segments = _va_recognizer.recognize(
         vocal_path, content_recognizer_model=content_recognizer_model,
@@ -249,7 +251,9 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
         # done は「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
         # 1個目のチャンクを始める時点(i=0)ではまだ0個も完了していない。
         _report_stage(progress, "separate", done=i, total=n)
-        vocal_path = _va_separator.separate(chunk_pcm, separate_vocals)
+        vocal_path = _va_separator.separate(
+            chunk_pcm, separate_vocals,
+            on_progress=_model_download_progress(progress, "separate", done=i, total=n))
         _report_stage(progress, "recognize", done=i, total=n)
         chunk_segments_list.append(
             _va_recognizer.recognize(
