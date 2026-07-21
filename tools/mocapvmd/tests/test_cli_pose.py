@@ -1,8 +1,8 @@
 """mocapvmd CLI の表現空間ノイズ除去(pose モード)統合テスト。
 
 --denoise-mode bone|pose と --pmx を扱う。pose モードは既定モデルプロファイル
-または指定PMXで動き、必須標準ボーン不足・PMX形式不正は入力不正(終了コード1)、
---pmx のパス不在・非通常ファイルは引数エラー(終了コード2)になる。
+または指定PMXで動き、必須標準ボーン不足・PMX形式不正・パス不在/非通常ファイルは
+いずれも入力不正(終了コード1)になる。
 """
 
 import pytest
@@ -65,7 +65,7 @@ def test_pose_mode_with_pmx(tmp_path):
     assert center_frames == list(range(0, 11))
 
 
-def test_pose_pmx_missing_path_is_arg_error(tmp_path):
+def test_pose_pmx_missing_path_is_input_error(tmp_path):
     src = tmp_path / "in.vmd"
     _write_input(src)
     code = cli.main(
@@ -79,11 +79,11 @@ def test_pose_pmx_missing_path_is_arg_error(tmp_path):
             str(tmp_path / "nope.pmx"),
         ]
     )
-    assert code == 2
+    assert code == 1
 
 
-def test_pose_pmx_directory_is_arg_error(tmp_path):
-    # --pmx が非通常ファイル(ディレクトリ)でも引数エラー。
+def test_pose_pmx_directory_is_input_error(tmp_path):
+    # --pmx が非通常ファイル(ディレクトリ)でも入力不正。
     src = tmp_path / "in.vmd"
     _write_input(src)
     d = tmp_path / "pmxdir"
@@ -91,7 +91,7 @@ def test_pose_pmx_directory_is_arg_error(tmp_path):
     code = cli.main(
         [str(src), "-o", str(tmp_path / "out.vmd"), "--denoise-mode", "pose", "--pmx", str(d)]
     )
-    assert code == 2
+    assert code == 1
 
 
 def test_pose_pmx_unsupported_encoding_is_input_error(tmp_path):

@@ -52,9 +52,16 @@ def _full_doc(path, *, model_name_raw=b"TestModel".ljust(20, b"\x00")):
 # --- パス検証・ガード -------------------------------------------------------
 
 
-def test_missing_input_is_arg_error(tmp_path):
+def test_missing_input_is_input_error(tmp_path):
     code = cli.main([str(tmp_path / "nope.vmd")])
-    assert code == 2
+    assert code == 1
+
+
+def test_input_directory_is_input_error(tmp_path):
+    d = tmp_path / "indir"
+    d.mkdir()
+    code = cli.main([str(d)])
+    assert code == 1
 
 
 def test_non_vmd_input_is_input_error(tmp_path):

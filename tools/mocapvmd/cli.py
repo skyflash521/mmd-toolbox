@@ -438,9 +438,9 @@ def _run(args, machine, emitter, fail):
 
     失敗は fail() 経由で終了コードを返す。機械モードは emitter で progress / warning / result を送出する。
     """
-    # 入力パス検証。不在・非通常ファイルは引数エラー。
+    # 入力パス検証。不在・非通常ファイルは入力不正。
     if not os.path.isfile(args.input):
-        return fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 2, field="input")
+        return fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 1, field="input")
 
     # --list-bones は書き込み・疎化をしない診断モード。出力先・上書きガードや疎化許容値・ボーン値検証
     # (処理・書き込み固有)を行わず、読み込んでボーン一覧と分類を出して終了する。
@@ -482,11 +482,11 @@ def _run(args, machine, emitter, fail):
         return fail("bad_argument", f"--foot-slide-suppression は 0〜1 の有限値が必要: {s}",
                     2, field="--foot-slide-suppression")
 
-    # pose モードで --pmx 指定時は、パスの存在・通常ファイルを引数エラー(pmx_not_file)で検証する。
+    # pose モードで --pmx 指定時は、パスの存在・通常ファイルを入力不正(pmx_not_file)で検証する。
     if args.denoise and args.denoise_mode == "pose" and args.pmx is not None:
         if not os.path.isfile(args.pmx):
             return fail("pmx_not_file", f"--pmx が存在しないか通常ファイルでない: {args.pmx}",
-                        2, field="--pmx")
+                        1, field="--pmx")
 
     # 入力読み込み(VMDでない等 → 入力不正)。
     try:

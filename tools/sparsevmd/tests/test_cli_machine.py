@@ -175,36 +175,7 @@ def test_machine_error_bad_tolerance(tmp_path, capsysbinary):
     assert isinstance(e["message"], str) and e["message"]
 
 
-# --- 引数エラー(パス・競合・上書き)---------------------------------------
-
-
-def test_machine_error_input_not_file(tmp_path, capsysbinary):
-    rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
-    assert rc == 2
-    e = machine_error(capsysbinary)
-    assert e["code"] == "input_not_file" and e["field"] == "input" and e["exit_code"] == 2
-
-
-def test_machine_error_bone_file_not_file(tmp_path, capsysbinary):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
-    rc = cli.main([str(src), "--machine", "--target", "bone",
-                   "--bone-file", str(tmp_path / "nope.txt")])
-    assert rc == 2
-    e = machine_error(capsysbinary)
-    assert e["code"] == "bone_file_not_file" and e["field"] == "--bone-file" and e["exit_code"] == 2
-
-
-def test_machine_error_bad_bone_file(tmp_path, capsysbinary):
-    # 存在するが UTF-8 デコード不能な --bone-file → bad_bone_file(読み込み失敗)。
-    src = tmp_path / "in.vmd"
-    write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
-    bf = tmp_path / "bones.txt"
-    bf.write_bytes(b"\xff\xfe\x00 invalid utf8")
-    rc = cli.main([str(src), "--machine", "--target", "bone", "--bone-file", str(bf)])
-    assert rc == 2
-    e = machine_error(capsysbinary)
-    assert e["code"] == "bad_bone_file" and e["field"] == "--bone-file" and e["exit_code"] == 2
+# --- 引数エラー(競合・上書き・範囲)-----------------------------------------
 
 
 def test_machine_error_target_selection_conflict(tmp_path, capsysbinary):
@@ -259,6 +230,35 @@ def test_machine_error_range_invalid(tmp_path, capsysbinary):
 
 
 # --- 入力不正・処理固有の失敗 ----------------------------------------------
+
+
+def test_machine_error_input_not_file(tmp_path, capsysbinary):
+    rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "input_not_file" and e["field"] == "input" and e["exit_code"] == 1
+
+
+def test_machine_error_bone_file_not_file(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
+    rc = cli.main([str(src), "--machine", "--target", "bone",
+                   "--bone-file", str(tmp_path / "nope.txt")])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bone_file_not_file" and e["field"] == "--bone-file" and e["exit_code"] == 1
+
+
+def test_machine_error_bad_bone_file(tmp_path, capsysbinary):
+    # 存在するが UTF-8 デコード不能な --bone-file → bad_bone_file(読み込み失敗)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
+    bf = tmp_path / "bones.txt"
+    bf.write_bytes(b"\xff\xfe\x00 invalid utf8")
+    rc = cli.main([str(src), "--machine", "--target", "bone", "--bone-file", str(bf)])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bad_bone_file" and e["field"] == "--bone-file" and e["exit_code"] == 1
 
 
 def test_machine_error_not_vmd(tmp_path, capsysbinary):
@@ -327,7 +327,7 @@ def test_machine_error_internal_error(tmp_path, capsysbinary, monkeypatch):
 def test_machine_error_stdout_is_valid_json_lines_lf_only(tmp_path, capsysbinary):
     # エラー経路でも stdout は有効な JSON Lines・LF のみ(\r 不在)。
     rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
-    assert rc == 2
+    assert rc == 1
     raw = capsysbinary.readouterr().out
     assert raw.endswith(b"\n") and b"\r" not in raw
     for ln in raw.decode("utf-8").split("\n"):

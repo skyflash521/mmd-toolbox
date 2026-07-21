@@ -237,15 +237,15 @@ def test_verbose_logs_diagnostics(tmp_path, capsys):
 # --- CLI 堅牢化 -----------------------------------------
 
 
-def test_bone_file_decode_error_is_arg_error(tmp_path):
-    # --bone-file が UTF-8 でデコードできない場合は引数エラー(終了コード2)。
+def test_bone_file_decode_error_is_input_error(tmp_path):
+    # --bone-file が UTF-8 でデコードできない場合は入力不正(終了コード1)。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
     bf = tmp_path / "bones.txt"
     bf.write_bytes(b"\xff\xfe\x00 invalid utf8")
     code = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "bone",
                      "--bone-file", str(bf)])
-    assert code == 2
+    assert code == 1
 
 
 def test_keep_frame_out_of_range_warns(tmp_path, capsys):
@@ -299,10 +299,18 @@ def test_list_bones_does_not_write_output_and_exits_zero(tmp_path):
 # --- 終了コード -------------------------------------------------------------
 
 
-def test_missing_input_is_arg_error(tmp_path):
-    # 入力パスが存在しない → 引数エラー(コード2、読み込み前のパス検証)。
+def test_missing_input_is_input_error(tmp_path):
+    # 入力パスが存在しない → 入力不正(コード1、読み込み前のパス検証)。
     code = cli.main([str(tmp_path / "nope.vmd"), "--target", "camera"])
-    assert code == 2
+    assert code == 1
+
+
+def test_input_directory_is_input_error(tmp_path):
+    # 入力パスが非通常ファイル(ディレクトリ)→ 入力不正(コード1)。
+    d = tmp_path / "indir"
+    d.mkdir()
+    code = cli.main([str(d), "--target", "camera"])
+    assert code == 1
 
 
 def test_bad_range_is_arg_error(tmp_path):
@@ -348,11 +356,11 @@ def test_target_camera_no_camera_keys_is_input_error(tmp_path):
     assert code == 1
 
 
-def test_bone_file_missing_is_arg_error(tmp_path):
+def test_bone_file_missing_is_input_error(tmp_path):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
     code = cli.main([str(src), "--target", "bone", "--bone-file", str(tmp_path / "nope.txt")])
-    assert code == 2
+    assert code == 1
 
 
 def test_keep_frame_negative_is_arg_error(tmp_path):

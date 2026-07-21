@@ -510,13 +510,13 @@ def _run(args, emitter, fail):
 
     失敗は fail() 経由で終了コードを返す。検証の位置・順序は現行のまま。
     """
-    # 入力パス検証。
+    # 入力パス検証。不在・非通常ファイルは入力不正。
     if not os.path.isfile(args.input):
-        return fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 2, field="input")
-    # --bone-file パス検証。不在・非通常ファイルは引数エラー。
+        return fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 1, field="input")
+    # --bone-file パス検証。不在・非通常ファイルは入力不正。
     if args.bone_file is not None and not os.path.isfile(args.bone_file):
         return fail("bone_file_not_file",
-                    f"--bone-file が存在しないか通常ファイルでない: {args.bone_file}", 2, field="--bone-file")
+                    f"--bone-file が存在しないか通常ファイルでない: {args.bone_file}", 1, field="--bone-file")
 
     # フィット制御の検証。max_segment_frames=None は無制限で上限検証の対象外。
     if args.min_segment_frames < 1:
@@ -583,11 +583,11 @@ def _run(args, emitter, fail):
         norm_sections.append("bone")
     doc, _ = io.normalize(doc, sections=norm_sections)
 
-    # --bone-file の読み込み・解析失敗(UTF-8 デコード不能等)は引数エラー(コード2)。
+    # --bone-file の読み込み・解析失敗(UTF-8 デコード不能等)は入力不正(コード1)。
     try:
         includes, excludes = _build_selectors(args)
     except (UnicodeDecodeError, OSError, ValueError) as e:
-        return fail("bad_bone_file", f"--bone-file を読めない: {type(e).__name__}: {e}", 2,
+        return fail("bad_bone_file", f"--bone-file を読めない: {type(e).__name__}: {e}", 1,
                     field="--bone-file")
 
     # --list-bones: ボーン名・キー数・選択状態を表示して終了。

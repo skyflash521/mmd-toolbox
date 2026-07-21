@@ -229,18 +229,18 @@ def test_machine_error_bad_argument_value_validation(tmp_path, capsysbinary, opt
 
 def test_machine_error_input_not_file(tmp_path, capsysbinary):
     rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
-    assert rc == 2
+    assert rc == 1
     e = machine_error(capsysbinary)
-    assert e["code"] == "input_not_file" and e["field"] == "input" and e["exit_code"] == 2
+    assert e["code"] == "input_not_file" and e["field"] == "input" and e["exit_code"] == 1
 
 
 def test_machine_error_pmx_not_file(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     _ramp_doc(src)
     rc = cli.main([str(src), "--machine", "--denoise-mode", "pose", "--pmx", str(tmp_path / "nope.pmx")])
-    assert rc == 2
+    assert rc == 1
     e = machine_error(capsysbinary)
-    assert e["code"] == "pmx_not_file" and e["field"] == "--pmx" and e["exit_code"] == 2
+    assert e["code"] == "pmx_not_file" and e["field"] == "--pmx" and e["exit_code"] == 1
 
 
 def test_machine_error_output_exists(tmp_path, capsysbinary):

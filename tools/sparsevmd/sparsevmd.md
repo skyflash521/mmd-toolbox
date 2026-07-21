@@ -133,8 +133,8 @@ CLI値の共通書式:
   出力VMDを作る場合は対象セクションも含め元のキーを保持する。
   dry-runには「削減対象なし」と記録する。
 - `flag` は値を取らない真偽オプション。同じflagを複数回指定しても1回指定と同じ。
-- `パス` はローカルファイルパス。入力パスが存在しない/通常ファイルでない場合は
-  引数エラー(終了コード2、読み込み前のパス検証で判定)。
+- `パス` はローカルファイルパス。入力として読むパス(主入力・`--bone-file`)が存在しない/
+  通常ファイルでない/内容を読めない場合は入力不正(終了コード1、§9)。
   出力VMDの親ディレクトリが存在しない場合や、
   その他の書き込み失敗(`io.write_file` 等が送出する例外)は出力書き込み失敗
   (終了コード3、§9)。
@@ -384,7 +384,7 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 | コード | 意味 |
 |---|---|
 | 0 | 正常終了 |
-| 1 | 入力ファイル不正(VMDでない / 指定 `--target` の対象セクションにキーが存在しない) |
+| 1 | 入力ファイル不正(パス不在・VMDでない / 指定 `--target` の対象セクションにキーが存在しない / `--bone-file` のパス不在・読み込み失敗) |
 | 2 | 引数エラー(範囲不正・対象ボーンなし・上書き未許可 など) |
 | 3 | VMD書き込み失敗 |
 | 4 | `--strict` 指定時に許容誤差を満たせない |
@@ -627,9 +627,9 @@ camera_distance_tol, camera_fov_tol}`(§2.4 の表の値)。
 | argparse 検出(未知オプション・型エラー・choices 外・positional 欠落・`--range`/`--keep-frame`/カット閾値の書式不正)、および解析後の単一オプション検証(`--min-segment-frames` < 1・`--max-segment-frames` < 1) | `bad_argument` | argparse が示す引数名、解析後検証は該当オプション名 | 2 |
 | `--min-segment-frames` > `--max-segment-frames` | `segment_bounds_conflict` | `null`(2 オプションにまたがる) | 2 |
 | 許容誤差の検証失敗(負値・非有限・fov < 0.5) | `bad_tolerance` | `null`(起因フィールド名は例外文言として `message` に載る) | 2 |
-| 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 2 |
-| `--bone-file` パスが不在・通常ファイルでない | `bone_file_not_file` | `"--bone-file"` | 2 |
-| `--bone-file` の読み込み・解析失敗(UTF-8 デコード不能等) | `bad_bone_file` | `"--bone-file"` | 2 |
+| 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 1 |
+| `--bone-file` パスが不在・通常ファイルでない | `bone_file_not_file` | `"--bone-file"` | 1 |
+| `--bone-file` の読み込み・解析失敗(UTF-8 デコード不能等) | `bad_bone_file` | `"--bone-file"` | 1 |
 | `--target camera` とボーン選択の同時指定 | `target_selection_conflict` | `null` | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | ボーン選択のハードエラー(空文字名・include/exclude 重複名・明示 `--bone` 名の不在・選択結果 0 件) | `bone_selection_invalid` | `null`(対象名は `message` に載る) | 2 |
