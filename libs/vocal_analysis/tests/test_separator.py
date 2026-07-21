@@ -5,6 +5,7 @@
 PCM→WAV書き出しであり、audio-separator が未導入でも動く(実ファイルで検証する)。
 """
 
+import logging
 import tempfile
 from pathlib import Path
 
@@ -159,3 +160,4 @@ def test_build_separator_configures_real_separator_with_pinned_values():
     # Separator は demucs_params 引数を内部で arch_specific_params["Demucs"] へ格納する
     # (audio-separator 実装の実際の格納先。コンストラクタ引数名とインスタンス属性名は異なる)。
     assert sep.arch_specific_params["Demucs"]["shifts"] == SEPARATOR_CONFIG.shifts
+    assert sep.logger.level == logging.CRITICAL

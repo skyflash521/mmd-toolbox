@@ -38,6 +38,7 @@ from .phonemes import (
     _classify_symbol,
     _G2P_TO_VOCAB_SYMBOL,
 )
+from .quiet import silence_third_party_output, suppress_native_stderr
 from .types import Segment
 
 FRAME_DURATION_SEC = 0.02  # 採用モデルの畳み込み総ストライド320サンプル@16kHzで固定
@@ -1109,7 +1110,8 @@ def _g2p(text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAK
             "確認するか、モデルを事前にキャッシュしてください。"
         ) from e
 
-    return pyopenjtalk.g2p(text, kana=False, join=False)
+    with suppress_native_stderr():
+        return pyopenjtalk.g2p(text, kana=False, join=False)
 
 
 def _sanitize_word_timestamps(
@@ -1320,6 +1322,8 @@ def _load_content_recognizer_pipeline(
 
     import torch
 
+    silence_third_party_output()
+
     downloaded = False
     if on_progress is not None:
         downloaded = _prefetch_with_progress(
@@ -1371,6 +1375,8 @@ def _load_model_and_processor(on_progress: Callable[[str], None] | None = None):
     モデルの初回取得が実際にネットワークダウンロードを要した区間だけ、進捗文言を渡して呼ぶ。
     """
     import torch
+
+    silence_third_party_output()
 
     downloaded = False
     if on_progress is not None:

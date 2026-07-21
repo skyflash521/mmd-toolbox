@@ -14,6 +14,7 @@ from .config import (
     ENGLISH_OOV_KATAKANA_MODEL,
     EnglishOovKatakanaMethod,
 )
+from .quiet import silence_third_party_output, suppress_native_stderr
 
 _FULLWIDTH_OFFSET = 0xFEE0
 _FULLWIDTH_LO = 0xFF01
@@ -53,7 +54,9 @@ def _find_target_words(text: str) -> list[str]:
     import pyopenjtalk
 
     targets = []
-    for node in pyopenjtalk.run_frontend(text):
+    with suppress_native_stderr():
+        nodes = pyopenjtalk.run_frontend(text)
+    for node in nodes:
         surface = unicodedata.normalize("NFKC", node["string"])
         if _is_target_node(surface, node["pos"]):
             targets.append(surface)
@@ -120,6 +123,8 @@ def _load_katakana_model():
 
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    silence_third_party_output()
 
     device = _select_katakana_model_device()
 

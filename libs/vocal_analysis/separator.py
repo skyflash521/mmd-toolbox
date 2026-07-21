@@ -6,6 +6,7 @@ S0 の出力(入力レベル正規化済み。ステレオ・元サンプルレ�
 """
 
 import atexit
+import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Literal
 import soundfile as sf
 
 from .config import SEPARATOR_CONFIG
+from .quiet import silence_third_party_output
 from .types import AudioPcm
 
 
@@ -64,10 +66,18 @@ def separate(pcm: AudioPcm, mode: Literal["always", "never"]) -> Path:
 
 
 def _build_separator(output_dir: Path):
-    """audio-separator の Separator を固定条件で構成する。"""
+    """audio-separator の Separator を固定条件で構成する。
+
+    log_level=CRITICAL でログ(モデルロード・処理進行等の逐次通知)を抑える。呼び出し側 CLI の
+    進捗表示(改行なしで同じ行を上書きするライブ行)と同じ標準エラーへ抑制されないまま割り込み、
+    行が連結して読めなくなるため。silence_third_party_output() は tqdm 由来の進捗バー(Demucs
+    内部の推論進捗)を抑える(この Separator の log_level とは別経路のため個別に要る)。
+    """
     from audio_separator.separator import Separator
 
+    silence_third_party_output()
     return Separator(
+        log_level=logging.CRITICAL,
         output_dir=str(output_dir),
         output_single_stem=SEPARATOR_CONFIG.output_single_stem,
         demucs_params={
