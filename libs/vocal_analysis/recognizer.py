@@ -21,16 +21,16 @@ from scipy.signal import resample_poly
 from . import sofa_align
 from .config import (
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
-    DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    DEFAULT_ENGLISH_KATAKANA_METHOD,
     DEFAULT_FORCED_ALIGNER,
     KANA_PROMPT,
     RECOGNIZER_CONFIG,
     ContentRecognizerModel,
-    EnglishOovKatakanaMethod,
+    EnglishKatakanaMethod,
     ForcedAlignerId,
     SofaAlignerConfig,
 )
-from .english_oov_katakana import convert_oov_words, convert_words, uncached_target_words
+from .english_katakana import convert_target_words, convert_words, uncached_target_words
 from .phonemes import (
     _BLANK_G2P_SYMBOLS,
     _MIN_WORD_DURATION_SEC,
@@ -250,7 +250,7 @@ def _find_suffix_repetition(text: str) -> tuple[str, int, str] | None:
 
 
 def _text_mora_count(
-    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    text: str, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> int:
     """テキストのモーラ数(G2P結果の母音・撥音の数)。反復救済の個数正規化に使う。"""
@@ -258,7 +258,7 @@ def _text_mora_count(
 
 
 def _text_phoneme_density(
-    text: str, duration_sec: float, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    text: str, duration_sec: float, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> float:
     """テキスト全体をG2Pした音素密度(音素/秒)。エコー・反復のトリガ判定に使う。"""
@@ -274,7 +274,7 @@ def _resolve_transcription(
     words: list[tuple[str, float, float]] | None,
     content_recognizer_model: ContentRecognizerModel,
     retry_enabled: bool,
-    english_oov_katakana_method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    english_katakana_method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> tuple[str, list[tuple[str, float, float]] | None]:
     """書き起こしの後処理: エコー除去→トリガ式区間リトライ→反復救済。
@@ -295,7 +295,7 @@ def _resolve_transcription(
             # 元から空の書き起こしは既存のgap確定に委ねる。エコー除去で空になった場合のみ再認識する。
             return echo_removed
         density = _text_phoneme_density(
-            candidate, trim_duration_sec, method=english_oov_katakana_method, on_progress=on_progress)
+            candidate, trim_duration_sec, method=english_katakana_method, on_progress=on_progress)
         return density > _HALLUCINATION_PHONEME_RATE
 
     if retry_enabled and _needs_retry(text2):
@@ -310,7 +310,7 @@ def _resolve_transcription(
         text2, words = retry_text, None
 
     density = _text_phoneme_density(
-        text2, trim_duration_sec, method=english_oov_katakana_method, on_progress=on_progress)
+        text2, trim_duration_sec, method=english_katakana_method, on_progress=on_progress)
     if text2.strip() and density > _HALLUCINATION_PHONEME_RATE:
         repetition = _find_suffix_repetition(text2)
         if repetition is not None:
@@ -320,7 +320,7 @@ def _resolve_transcription(
                 rescued = head
             else:
                 unit_moras = max(
-                    1, _text_mora_count(unit, method=english_oov_katakana_method, on_progress=on_progress))
+                    1, _text_mora_count(unit, method=english_katakana_method, on_progress=on_progress))
                 normalized = max(1, round(trim_duration_sec * _REPEAT_NORMALIZE_MORA_RATE / unit_moras))
                 if normalized < count:
                     rescued = unit * normalized
@@ -801,7 +801,7 @@ def recognize(
     retry: bool = True,
     forced_aligner: ForcedAlignerId = DEFAULT_FORCED_ALIGNER,
     sofa_aligner: SofaAlignerConfig | None = None,
-    english_oov_katakana_method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    english_katakana_method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> list[Segment]:
     """ボーカルWAVから母音/子音/gapのセグメント列を認識する(Recognizerアダプタ契約)。
@@ -812,7 +812,7 @@ def recognize(
     G2Pはどのモデル・どの強制アライメント経路でも共通。forced_aligner で強制アライメント段を選択する
     (既定`wav2vec2-ctc-forcedalign`)。`forced_aligner="sofa-forcedalign"`を選ぶ場合は
     sofa_aligner(`SofaAlignerConfig`)が必須で、省略(`None`)すると`RecognitionError`にする
-    (黙ってwav2vec2へフォールバックしない)。english_oov_katakana_method で英語未知語カタカナ化
+    (黙ってwav2vec2へフォールバックしない)。english_katakana_method で英語カタカナ化
     フォールバックの変換方式を選択する(既定`arpakana`。`tinyllama-katakana-converter`選択時は
     カタカナ生成モデルを使う)。on_progress はモデル(内容認識モデル・音素モデル・カタカナ生成
     モデルのいずれも)の初回取得がネットワークダウンロードを要した区間、およびロード開始時
@@ -914,7 +914,7 @@ def recognize(
             text, words = _resolve_transcription(
                 chunk_samples, trim_duration_sec, text, words,
                 content_recognizer_model, retry,
-                english_oov_katakana_method=english_oov_katakana_method,
+                english_katakana_method=english_katakana_method,
                 on_progress=on_progress,
             )
         except ImportError as e:
@@ -941,14 +941,14 @@ def recognize(
             # 使う)、取得できなかった場合は区間の書き起こし全体を1回で変換する(単語単位に分割しない)。
             if words:
                 words_phonemes = [
-                    (_g2p(word_text, method=english_oov_katakana_method, on_progress=on_progress),
+                    (_g2p(word_text, method=english_katakana_method, on_progress=on_progress),
                      w_start, w_end)
                     for word_text, w_start, w_end in words
                 ]
                 phonemes = [p for word_phonemes, _, _ in words_phonemes for p in word_phonemes]
             else:
                 words_phonemes = None
-                phonemes = _g2p(text, method=english_oov_katakana_method, on_progress=on_progress)
+                phonemes = _g2p(text, method=english_katakana_method, on_progress=on_progress)
         except ImportError as e:
             raise RecognitionError(
                 "pyopenjtalk-plus が見つかりません。導入してください(vocal-analysis extra で導入されます)。"
@@ -1099,14 +1099,14 @@ def _resample_to_target(mono: np.ndarray, sample_rate: int, target_sample_rate: 
     return resample_poly(mono, up, down).astype(np.float32)
 
 
-def _prepare_english_oov_conversion(
-    text: str, method: EnglishOovKatakanaMethod, on_progress: Callable[[str], None] | None = None
+def _prepare_english_katakana_conversion(
+    text: str, method: EnglishKatakanaMethod, on_progress: Callable[[str], None] | None = None
 ) -> None:
     """tinyllama-katakana-converter 方式のG2P前処理: 未変換の対象語があるときだけ、内容認識
     パイプラインを解放してからまとめて変換する(変換モデル(GPU実行時はfp16で重み約2.2GB)と内容認識モデルの
     同時GPU常駐によるVRAM逼迫を避ける。変換モデル自体は convert_words が変換後に解放する)。
 
-    変換結果は語キャッシュに入るため、後続のG2P内の変換(convert_oov_words)はキャッシュに
+    変換結果は語キャッシュに入るため、後続のG2P内の変換(convert_target_words)はキャッシュに
     当たり、変換モデルのロードは起きない。内容認識パイプラインは次の書き起こしでプロセス内
     キャッシュにより再ロードされる。arpakana 方式(既定)では何も行わない(モデルを使わないため
     入れ替えが不要で、対象語の検出も走らせない)。on_progress は convert_words と同じ契約
@@ -1122,20 +1122,20 @@ def _prepare_english_oov_conversion(
 
 
 def _g2p(
-    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    text: str, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> list[str]:
     """テキストをG2Pで音素記号列へ変換する(手順4。pyopenjtalk-plus、ルールベース)。
 
-    pyopenjtalk-plusへ渡す前に、英語未知語カタカナ化フォールバック(convert_oov_words)を適用する。
+    pyopenjtalk-plusへ渡す前に、英語カタカナ化フォールバック(convert_target_words)を適用する。
     methodで変換方式を選択する(既定`arpakana`)。on_progress は tinyllama-katakana-converter
     方式の変換モデルの取得・ロードが実際に発生した区間だけ進捗文言を渡して呼ぶ。
     """
     import pyopenjtalk
 
     try:
-        _prepare_english_oov_conversion(text, method, on_progress=on_progress)
-        text = convert_oov_words(text, method=method, on_progress=on_progress)
+        _prepare_english_katakana_conversion(text, method, on_progress=on_progress)
+        text = convert_target_words(text, method=method, on_progress=on_progress)
     except ImportError as e:
         raise RecognitionError(
             "arpakana、nltk、または transformers/torch が見つかりません。導入してください"

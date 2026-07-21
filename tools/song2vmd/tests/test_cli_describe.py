@@ -38,7 +38,7 @@ EXPECTED = {
     "--recognizer-retry": ("flag", None, True),
     "--forced-aligner": ("enum", {"choices": ["wav2vec2-ctc-forcedalign", "sofa-forcedalign"]},
                          "wav2vec2-ctc-forcedalign"),
-    "--english-oov-katakana-method": ("enum", {"choices": ["arpakana", "tinyllama-katakana-converter"]},
+    "--english-katakana-method": ("enum", {"choices": ["arpakana", "tinyllama-katakana-converter"]},
                                       "arpakana"),
     "--device": ("enum", {"choices": ["auto", "cpu"]}, "auto"),
     "--sofa-python": ("str", None, None),

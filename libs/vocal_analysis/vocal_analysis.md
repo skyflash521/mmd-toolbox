@@ -179,7 +179,7 @@
       retry: bool = True,
       forced_aligner: ForcedAlignerId = "wav2vec2-ctc-forcedalign",
       sofa_aligner: SofaAlignerConfig | None = None,
-      english_oov_katakana_method: EnglishOovKatakanaMethod = "arpakana",
+      english_katakana_method: EnglishKatakanaMethod = "arpakana",
       on_progress: Callable[[str], None] | None = None,
   ) -> list[Segment]: ...
   ```
@@ -188,13 +188,13 @@
   リトライ」)。強制アライメント段は
   `forced_aligner`で選択可能(既定`wav2vec2-ctc-forcedalign`。5.3・8.1・8.2・8.3)で、
   `forced_aligner="sofa-forcedalign"`のときのみ`sofa_aligner`(`SofaAlignerConfig`。8.3)が必須になる。
-  `english_oov_katakana_method`で英語未知語カタカナ化フォールバック(5.2手順4)の変換方式を選択
+  `english_katakana_method`で英語カタカナ化フォールバック(5.2手順4)の変換方式を選択
   できる(既定`arpakana`。選択式`tinyllama-katakana-converter`)。
   `content_recognizer_model`は既存どおり第2位置引数のままとし、`retry`・`forced_aligner`・
-  `sofa_aligner`・`english_oov_katakana_method`・`on_progress`はキーワード専用引数とする。
+  `sofa_aligner`・`english_katakana_method`・`on_progress`はキーワード専用引数とする。
   ライブラリ未導入時、またはモデル取得に失敗した場合は `RecognitionError` で失敗する(8.3章)。
   `forced_aligner="sofa-forcedalign"`で`sofa_aligner`が`None`の場合も同様に`RecognitionError`とする。
-  `on_progress`はモデル(内容認識モデル・音素モデル・`english_oov_katakana_method=
+  `on_progress`はモデル(内容認識モデル・音素モデル・`english_katakana_method=
   "tinyllama-katakana-converter"`選択時のカタカナ生成モデルのいずれも)の初回取得が実際にネットワーク
   ダウンロードを要した区間だけ、進捗文言(`f"ダウンロード中: {model_id} {percent}%"`。
   `percent`は取得済みバイト数の百分率)を都度渡して呼ぶ。取得済みモデル(キャッシュ済み)を使う場合や
@@ -389,9 +389,9 @@ CPU実行時で異なる値を使う(具体値は実装が保持する)。音素
    助詞「は」「へ」の読み(わ/え と は/へ の対応)や長音の解釈など、ごく一部は文脈(前後の品詞・
    文節境界)に依存し、内容認識モデルの単語分割の切り方次第で一括変換と異なる読みになることが
    ある(下記の既知の限界に含める)。文中の句読点は `pau`(無音)記号として現れる。
-   **英語未知語のカタカナ化フォールバック**: `pyopenjtalk-plus`へ渡す前に、各形態素ノードの表層形を
+   **英語カタカナ化フォールバック**: `pyopenjtalk-plus`へ渡す前に、各形態素ノードの表層形を
    NFKC正規化(全角英数字・記号を半角相当へ変換する)した上で、文中でASCII英字のみの1形態素ノード
-   として完結し品詞がフィラーと判定される語(`pyopenjtalk-plus`が正しい読みを持たない未知の英単語)を
+   として完結し品詞がフィラーと判定される語(`pyopenjtalk-plus`が正しい読みを持たない英単語)を
    検出し、CMUdict(発音記号辞書)で発音記号(ARPAbet)を引ける場合は変換方式(既定値`arpakana`。
    ARPAbet音素をルールベースでカタカナへ変換する、生成モデル・GPU不要のライブラリ。選択式
    `tinyllama-katakana-converter`。生成モデルによる変換)でカタカナへ補完変換し、対象語をカタカナへ
@@ -400,11 +400,17 @@ CPU実行時で異なる値を使う(具体値は実装が保持する)。音素
    以外を含む場合・変換方式自体が失敗した場合は、その語を変換せず元のテキストのまま`pyopenjtalk-plus`
    へ渡す(安全側フォールバック)。CMUdict本体は他の学習済みモデルと同様に初回使用時に自動取得し、
    利用者に手動コマンドを要求しない。
-   **既知の限界(対象範囲・CMUdict網羅率。未軽減)**: 対象は1形態素ノードで完結する未知語に限る。
-   アポストロフィ・ハイフンを含み複数ノードへ分裂する未知語(`dog's`・`rock-and-roll`等)は対象外
+   **既知の限界(対象範囲・CMUdict網羅率。未軽減)**: 対象は1形態素ノードで完結する語に限る。
+   アポストロフィ・ハイフンを含み複数ノードへ分裂する語(`dog's`・`rock-and-roll`等)は対象外
    で、現行のpyopenjtalk-plus既定動作(アルファベット名の1文字読み)のまま残る。また、CMUdict
    (1993〜2008年収録)は近年の固有名詞・俗語を収録しておらず、該当語も同様に変換されず現行の
    既定動作のまま残る。
+   **既知の限界(対象語の言語判定を持たない。未軽減)**: 対象語の判定(ASCII英字のみ・品詞
+   フィラー)は言語を区別しないため、英語以外のASCII語(フランス語`bonjour`等)も対象語として
+   検出されうる。CMUdictは英語以外の語(英語圏で定着した外来語等)も収録している場合があり、
+   該当すればその語は英語話者の発音に基づいてカタカナへ変換される(実機確認: `bonjour`は
+   CMUdictに`B AH0 N ZH UH1 R`として収録され「バンジュア」に変換される。フランス語の発音
+   「ボンジュール」にはならない)。
    **既知の限界(`tinyllama-katakana-converter`選択時の発音精度。未軽減)**: 出力妥当性検査は
    生成結果がひらがな・カタカナのみで構成されるかだけを見るため、子音の脱落・別の音への置換・
    原語をたどれない変換であっても、出力自体がかなのみで構成されていれば検査を通過し採用される。
@@ -831,15 +837,15 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
   空白にしない。加えて、モデル取得後の分離処理(Demucs推論)が実際に進行している区間でも、
   ダウンロードの有無に関わらず進捗文言(`f"分離中: {percent}%"`)を都度渡して呼ぶ。
 - **Recognizer**: `recognize(vocal_wav_path, content_recognizer_model, *, retry, forced_aligner, sofa_aligner,
-  english_oov_katakana_method, on_progress) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
+  english_katakana_method, on_progress) -> [Segment{type, start_sec, end_sec, phoneme?, confidence?}]`
   (文字列なしの音素認識)。
   `content_recognizer_model`(`ContentRecognizerModel`。5.2・8.3)は既定値を持つ省略可能引数。
   `retry`(内容認識のトリガ式リトライの有効/無効。`bool`。既定`True`。5.2)はキーワード専用の
   省略可能引数。`forced_aligner`(強制アライメント段の選択。`ForcedAlignerId`。既定
   `wav2vec2-ctc-forcedalign`。5.2・5.3・8.2・8.3)はキーワード専用の省略可能引数で、
   `forced_aligner="sofa-forcedalign"`を選ぶときのみ`sofa_aligner`(`SofaAlignerConfig`。8.3)が
-  必須になる(それ以外では無視する)。`english_oov_katakana_method`(英語未知語カタカナ化
-  フォールバックの変換方式選択。`EnglishOovKatakanaMethod`。既定`arpakana`。5.2手順4)は
+  必須になる(それ以外では無視する)。`english_katakana_method`(英語カタカナ化
+  フォールバックの変換方式選択。`EnglishKatakanaMethod`。既定`arpakana`。5.2手順4)は
   キーワード専用の省略可能引数。`on_progress`(モデル初回取得の進捗通知。5章)もキーワード専用の
   省略可能引数(既定`None`)。
   `type` は **母音/子音/gap** の3種で、出力は全時間軸を重複・欠落なく被覆する。

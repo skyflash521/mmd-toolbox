@@ -413,8 +413,8 @@ def test_resolve_transcription_normalizes_whole_text_repetition(monkeypatch):
     assert words is None
 
 
-def test_resolve_transcription_repetition_rescue_passes_english_oov_katakana_method(monkeypatch):
-    # 反復救済(_text_mora_count経由の個数正規化)でも、指定したenglish_oov_katakana_methodが
+def test_resolve_transcription_repetition_rescue_passes_english_katakana_method(monkeypatch):
+    # 反復救済(_text_mora_count経由の個数正規化)でも、指定したenglish_katakana_methodが
     # _g2pへ渡る(密度判定だけでなく反復救済のモーラ数計算も配線されていることの検証)。
     from vocal_analysis import recognizer as R
 
@@ -428,7 +428,7 @@ def test_resolve_transcription_repetition_rescue_passes_english_oov_katakana_met
     text, words = R._resolve_transcription(
         np.zeros(16000, dtype=np.float32), 10.0, "ラ" * 400, None,
         R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False,
-        english_oov_katakana_method="tinyllama-katakana-converter")
+        english_katakana_method="tinyllama-katakana-converter")
 
     assert text == "ラ" * 35
     assert len(g2p_methods) >= 1
@@ -1128,20 +1128,20 @@ def test_path_to_segments_last_token_extends_to_audio_end():
     assert segments[-1].end_sec == pytest.approx(0.10)
 
 
-def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatch):
+def test_g2p_applies_english_katakana_fallback_before_pyopenjtalk(monkeypatch):
     import pyopenjtalk
 
     import vocal_analysis.recognizer as recognizer_module
 
-    # _g2p は pyopenjtalk.g2p() へ渡す前に convert_oov_words で元テキストを変換する。recognizer
-    # モジュール自身が公開する convert_oov_words 属性をモックする(トップレベルimportで束縛される
+    # _g2p は pyopenjtalk.g2p() へ渡す前に convert_target_words で元テキストを変換する。recognizer
+    # モジュール自身が公開する convert_target_words 属性をモックする(トップレベルimportで束縛される
     # 想定の実装契約。_g2pが独自に別名でインポートし直すとこのモックは効かず、それ自体が配線漏れの
-    # 検出になる)。pyopenjtalk.g2p も呼び出し記録付きモックにし、convert_oov_wordsの戻り値が
+    # 検出になる)。pyopenjtalk.g2p も呼び出し記録付きモックにし、convert_target_wordsの戻り値が
     # そのまま渡されることを直接検証する(最終結果の値が偶然一致するだけの弱い検証にしない)。
-    oov_calls = []
+    convert_calls = []
     monkeypatch.setattr(
-        recognizer_module, "convert_oov_words",
-        lambda text, method=None, **kwargs: oov_calls.append(text) or "スカイ",
+        recognizer_module, "convert_target_words",
+        lambda text, method=None, **kwargs: convert_calls.append(text) or "スカイ",
     )
 
     g2p_calls = []
@@ -1154,28 +1154,28 @@ def test_g2p_applies_english_oov_katakana_fallback_before_pyopenjtalk(monkeypatc
 
     result = recognizer_module._g2p("空を見上げてsky")
 
-    assert oov_calls == ["空を見上げてsky"]
+    assert convert_calls == ["空を見上げてsky"]
     assert g2p_calls == [("スカイ", False, False)]
     assert result == ["s", "u", "k", "a", "i"]
 
 
-def test_g2p_method_reaches_real_convert_oov_words_dispatch(monkeypatch):
-    """_g2pに渡したmethodが、モックしていない実際のconvert_oov_words(english_oov_katakanaモジュール)
+def test_g2p_method_reaches_real_convert_target_words_dispatch(monkeypatch):
+    """_g2pに渡したmethodが、モックしていない実際のconvert_target_words(english_katakanaモジュール)
     まで届き、実際にtinyllama-katakana-converter側の生成関数が選ばれることを検証する
-    (convert_oov_words自体をモックする他のテストと異なり、実装の分岐そのものを通す)。"""
-    import vocal_analysis.english_oov_katakana as oov_module
+    (convert_target_words自体をモックする他のテストと異なり、実装の分岐そのものを通す)。"""
+    import vocal_analysis.english_katakana as katakana_module
     import vocal_analysis.recognizer as recognizer_module
 
-    oov_module._conversion_cache.clear()
+    katakana_module._conversion_cache.clear()
     try:
         arpakana_calls = []
         tinyllama_calls = []
         monkeypatch.setattr(
-            oov_module, "_generate_katakana_arpakana",
+            katakana_module, "_generate_katakana_arpakana",
             lambda word, phonemes: arpakana_calls.append(word) or "スカイ",
         )
         monkeypatch.setattr(
-            oov_module, "_generate_katakana_tinyllama",
+            katakana_module, "_generate_katakana_tinyllama",
             lambda word, phonemes, **kwargs: tinyllama_calls.append(word) or "スカイ",
         )
 
@@ -1184,7 +1184,7 @@ def test_g2p_method_reaches_real_convert_oov_words_dispatch(monkeypatch):
         assert tinyllama_calls == ["sky"]
         assert arpakana_calls == []
     finally:
-        oov_module._conversion_cache.clear()
+        katakana_module._conversion_cache.clear()
 
 
 @pytest.mark.parametrize(
@@ -1195,17 +1195,17 @@ def test_g2p_method_reaches_real_convert_oov_words_dispatch(monkeypatch):
         (OSError("network error"), "カタカナ生成モデル"),
     ],
 )
-def test_g2p_converts_oov_fallback_errors_to_recognition_error(monkeypatch, raised, match):
+def test_g2p_converts_katakana_fallback_errors_to_recognition_error(monkeypatch, raised, match):
     import vocal_analysis.recognizer as recognizer_module
 
-    # convert_oov_words内部のCMUdict未取得(LookupError)・変換モデル取得失敗(OSError)・
+    # convert_target_words内部のCMUdict未取得(LookupError)・変換モデル取得失敗(OSError)・
     # nltk/torch/transformers未導入(ImportError)は、他のモデルロード処理
     # (_load_model_and_processor・_load_content_recognizer_pipeline)と同様に、生の例外のまま
     # 公開APIから漏らさずRecognitionErrorへ変換する。
-    def fake_convert_oov_words(text, method=None, **kwargs):
+    def fake_convert_target_words(text, method=None, **kwargs):
         raise raised
 
-    monkeypatch.setattr(recognizer_module, "convert_oov_words", fake_convert_oov_words)
+    monkeypatch.setattr(recognizer_module, "convert_target_words", fake_convert_target_words)
 
     with pytest.raises(recognizer_module.RecognitionError, match=match):
         recognizer_module._g2p("空を見上げてsky")
@@ -1242,7 +1242,7 @@ def _slice_by_segment_lengths(sequence, fragment_lens, target_lens):
 def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text, target_spans):
     import pyopenjtalk
 
-    import vocal_analysis.english_oov_katakana as oov_module
+    import vocal_analysis.english_katakana as katakana_module
     from vocal_analysis.recognizer import _g2p
 
     # 全文再解析方式(_g2pが対象語をカタカナへ置換した文字列全体をあらためてpyopenjtalk.g2pへ
@@ -1255,11 +1255,11 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
     # このテストが他のテストの実行順序に依存せず、かつこのテスト自身も後続テストへ
     # キャッシュ内容を漏らさないよう、開始時・終了時(assert失敗時も含めtry/finallyで確実に)の
     # 両方でキャッシュをクリアする。モックが実際に呼ばれたことも呼び出し記録で直接検証する。
-    oov_module._conversion_cache.clear()
+    katakana_module._conversion_cache.clear()
     try:
         generate_calls = []
         monkeypatch.setattr(
-            oov_module, "_generate_katakana",
+            katakana_module, "_generate_katakana",
             lambda word, phonemes, method=None, **kwargs: generate_calls.append(word) or "スカイ",
         )
 
@@ -1290,7 +1290,7 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
 
         assert before_fragments == after_fragments
     finally:
-        oov_module._conversion_cache.clear()
+        katakana_module._conversion_cache.clear()
 
 
 # --- ダウンロード中の実バイト進捗を on_progress へ中継 --------------------------
@@ -1513,10 +1513,10 @@ def test_load_content_recognizer_pipeline_shows_loading_note_but_no_download_not
     assert calls == ["内容認識モデル読み込み中: dummy/model"]
 
 
-# --- _prepare_english_oov_conversion(tinyllama方式のG2P前処理: 内容認識モデルとのGPU入れ替え) ---
+# --- _prepare_english_katakana_conversion(tinyllama方式のG2P前処理: 内容認識モデルとのGPU入れ替え) ---
 
 
-def test_prepare_english_oov_conversion_arpakana_does_nothing(monkeypatch):
+def test_prepare_english_katakana_conversion_arpakana_does_nothing(monkeypatch):
     import vocal_analysis.recognizer as R
 
     monkeypatch.setattr(
@@ -1528,10 +1528,10 @@ def test_prepare_english_oov_conversion_arpakana_does_nothing(monkeypatch):
         lambda: (_ for _ in ()).throw(AssertionError("arpakanaでは内容認識モデルを解放しない")),
     )
 
-    R._prepare_english_oov_conversion("hello を見上げて", "arpakana")
+    R._prepare_english_katakana_conversion("hello を見上げて", "arpakana")
 
 
-def test_prepare_english_oov_conversion_tinyllama_releases_pipeline_before_converting(monkeypatch):
+def test_prepare_english_katakana_conversion_tinyllama_releases_pipeline_before_converting(monkeypatch):
     import vocal_analysis.recognizer as R
 
     calls = []
@@ -1544,7 +1544,7 @@ def test_prepare_english_oov_conversion_tinyllama_releases_pipeline_before_conve
         lambda words, method, **kwargs: calls.append(("convert", tuple(words), method)),
     )
 
-    R._prepare_english_oov_conversion("hello を見上げて", "tinyllama-katakana-converter")
+    R._prepare_english_katakana_conversion("hello を見上げて", "tinyllama-katakana-converter")
 
     assert calls == [
         "release_pipeline",
@@ -1552,9 +1552,9 @@ def test_prepare_english_oov_conversion_tinyllama_releases_pipeline_before_conve
     ]
 
 
-def test_prepare_english_oov_conversion_tinyllama_forwards_on_progress_to_convert_words(monkeypatch):
+def test_prepare_english_katakana_conversion_tinyllama_forwards_on_progress_to_convert_words(monkeypatch):
     # convert_words経由でカタカナ生成モデルの読み込み通知に届くon_progressが、
-    # _prepare_english_oov_conversionから正しく転送されることを検証する(配線漏れの検出)。
+    # _prepare_english_katakana_conversionから正しく転送されることを検証する(配線漏れの検出)。
     import vocal_analysis.recognizer as R
 
     monkeypatch.setattr(R, "uncached_target_words", lambda text, method: ["hello"])
@@ -1566,12 +1566,12 @@ def test_prepare_english_oov_conversion_tinyllama_forwards_on_progress_to_conver
     )
 
     sentinel = lambda note: None  # noqa: E731
-    R._prepare_english_oov_conversion("hello を見上げて", "tinyllama-katakana-converter", on_progress=sentinel)
+    R._prepare_english_katakana_conversion("hello を見上げて", "tinyllama-katakana-converter", on_progress=sentinel)
 
     assert captured["on_progress"] is sentinel
 
 
-def test_prepare_english_oov_conversion_tinyllama_skips_release_when_no_uncached_words(monkeypatch):
+def test_prepare_english_katakana_conversion_tinyllama_skips_release_when_no_uncached_words(monkeypatch):
     import vocal_analysis.recognizer as R
 
     monkeypatch.setattr(R, "uncached_target_words", lambda text, method: [])
@@ -1584,4 +1584,4 @@ def test_prepare_english_oov_conversion_tinyllama_skips_release_when_no_uncached
         lambda words, method: (_ for _ in ()).throw(AssertionError("未変換対象語が無ければ変換しない")),
     )
 
-    R._prepare_english_oov_conversion("hello を見上げて", "tinyllama-katakana-converter")
+    R._prepare_english_katakana_conversion("hello を見上げて", "tinyllama-katakana-converter")

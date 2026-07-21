@@ -29,7 +29,7 @@ from cli_events import (
 from vocal_analysis import (
     ContentRecognizerModel,
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
-    DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    DEFAULT_ENGLISH_KATAKANA_METHOD,
     DEFAULT_FORCED_ALIGNER,
     SofaAlignerConfig,
 )
@@ -61,8 +61,8 @@ SEPARATOR_NAMES = ("audio-separator-htdemucs-ft",)
 # DEFAULT_FORCED_ALIGNER(wav2vec2-ctc-forcedalign)で、SOFA選択時のみ--sofa-*系が必須になる。
 FORCED_ALIGNER_NAMES = ("wav2vec2-ctc-forcedalign", "sofa-forcedalign")
 
-# 英語未知語カタカナ化フォールバックの変換方式。既定は DEFAULT_ENGLISH_OOV_KATAKANA_METHOD(arpakana)。
-ENGLISH_OOV_KATAKANA_METHOD_NAMES = ("arpakana", "tinyllama-katakana-converter")
+# 英語カタカナ化フォールバックの変換方式。既定は DEFAULT_ENGLISH_KATAKANA_METHOD(arpakana)。
+ENGLISH_KATAKANA_METHOD_NAMES = ("arpakana", "tinyllama-katakana-converter")
 
 # 実行デバイスの選択。cpu はプロセスからGPU(CUDA)を隠して音声前段の全モデルと
 # SOFAサブプロセスをCPUへ倒す(VRAM不足環境の回避手段)。既定 auto は環境から自動選択。
@@ -220,10 +220,10 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    help="SOFAチェックポイント(.ckpt)ファイルパス(--forced-aligner sofa-forcedalign時に必須)")
     p.add_argument("--sofa-timeout", dest="sofa_timeout", type=_positive_float, default=300.0,
                    help="SOFAサブプロセス1回あたりのタイムアウト秒数")
-    p.add_argument("--english-oov-katakana-method", dest="english_oov_katakana_method",
-                   choices=ENGLISH_OOV_KATAKANA_METHOD_NAMES,
-                   default=DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
-                   help="英語未知語カタカナ化フォールバックの変換方式選択(既定arpakana。"
+    p.add_argument("--english-katakana-method", dest="english_katakana_method",
+                   choices=ENGLISH_KATAKANA_METHOD_NAMES,
+                   default=DEFAULT_ENGLISH_KATAKANA_METHOD,
+                   help="英語カタカナ化フォールバックの変換方式選択(既定arpakana。"
                         "tinyllama-katakana-converterは生成モデルを使う選択式オプション)")
     p.add_argument("--device", choices=DEVICE_MODES, default="auto",
                    help="実行デバイスの選択。auto=環境から自動選択(GPU(CUDA)が利用可能ならGPU)、"
@@ -301,7 +301,7 @@ _D_TYPE = {
     "recognizer_model_revision": ("str", None),
     "recognizer_retry": ("flag", None),
     "forced_aligner": ("enum", {"choices": list(FORCED_ALIGNER_NAMES)}),
-    "english_oov_katakana_method": ("enum", {"choices": list(ENGLISH_OOV_KATAKANA_METHOD_NAMES)}),
+    "english_katakana_method": ("enum", {"choices": list(ENGLISH_KATAKANA_METHOD_NAMES)}),
     "device": ("enum", {"choices": list(DEVICE_MODES)}),
     "sofa_python": ("str", None),
     "sofa_root": ("str", None),
@@ -531,7 +531,7 @@ def _run(args, emitter, fail) -> int:
                 silence_on=args.silence_threshold[0], openness=openness, style_gen=style_gen,
                 style_name=args.style, model_name=args.model_name,
                 forced_aligner=args.forced_aligner, sofa_aligner=_resolve_sofa_aligner_config(args),
-                english_oov_katakana_method=args.english_oov_katakana_method,
+                english_katakana_method=args.english_katakana_method,
                 keep_intermediate_dir=keep_intermediate_dir, progress=progress)
         except AudioLoadError as e:
             progress_reporter.close()

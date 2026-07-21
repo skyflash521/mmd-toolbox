@@ -1,8 +1,8 @@
-"""英語未知語カタカナ化フォールバック。
+"""英語カタカナ化フォールバック。
 
-pyopenjtalk-plusが1形態素ノードで完結する未知の英単語を正しく読めない場合(品詞がフィラーと
+pyopenjtalk-plusが1形態素ノードで完結する英単語を正しく読めない場合(品詞がフィラーと
 判定される場合)に、CMUdictで発音記号(ARPAbet)を引き、変換方式(既定: arpakanaによるルール
-ベース変換。選択式: ENGLISH_OOV_KATAKANA_MODELの生成モデルによる変換)でカタカナへ補完変換
+ベース変換。選択式: ENGLISH_KATAKANA_MODELの生成モデルによる変換)でカタカナへ補完変換
 する。CMUdictに無い語・変換結果がひらがな/カタカナ以外を含む場合は変換せず元のテキストのまま
 残す(安全側フォールバック)。
 """
@@ -11,9 +11,9 @@ import unicodedata
 from collections.abc import Callable
 
 from .config import (
-    DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
-    ENGLISH_OOV_KATAKANA_MODEL,
-    EnglishOovKatakanaMethod,
+    DEFAULT_ENGLISH_KATAKANA_METHOD,
+    ENGLISH_KATAKANA_MODEL,
+    EnglishKatakanaMethod,
 )
 from .quiet import silence_third_party_output, suppress_native_stderr
 
@@ -42,7 +42,7 @@ def _is_target_node(surface_normalized: str, pos: str) -> bool:
     """NFKC正規化後の表層形・品詞から対象ノードかどうかを判定する。
 
     ASCII英字のみ(1文字以上)で構成され、かつ品詞がフィラー(pyopenjtalk-plusが正しい読みを
-    持たない未知語)であるノードだけを対象とする。品詞が名詞(既に正しく変換済み)・記号(複数
+    持たない語)であるノードだけを対象とする。品詞が名詞(既に正しく変換済み)・記号(複数
     ノードへ分裂した語の断片)のノードは対象にしない。
     """
     if not surface_normalized or not surface_normalized.isascii() or not surface_normalized.isalpha():
@@ -173,23 +173,23 @@ def _load_katakana_model(on_progress: Callable[[str], None] | None = None):
     downloaded = False
     if on_progress is not None:
         downloaded = _prefetch_with_progress(
-            ENGLISH_OOV_KATAKANA_MODEL.model_id, ENGLISH_OOV_KATAKANA_MODEL.model_revision, on_progress)
+            ENGLISH_KATAKANA_MODEL.model_id, ENGLISH_KATAKANA_MODEL.model_revision, on_progress)
 
     device = _select_katakana_model_device()
 
     try:
         if on_progress is not None:
-            on_progress(f"カタカナ生成モデル読み込み中: {ENGLISH_OOV_KATAKANA_MODEL.model_id}")
+            on_progress(f"カタカナ生成モデル読み込み中: {ENGLISH_KATAKANA_MODEL.model_id}")
         tokenizer = AutoTokenizer.from_pretrained(
-            ENGLISH_OOV_KATAKANA_MODEL.model_id, revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision
+            ENGLISH_KATAKANA_MODEL.model_id, revision=ENGLISH_KATAKANA_MODEL.model_revision
         )
         # GPU実行時はfp16でロードし、fp32(約4.4GB)に対して重みのVRAM使用量を半減させる
         # (実曲の対象語でfp32と変換結果が一致することを確認して採用)。CPU実行時はfp16未対応の
         # ためfp32のまま。
         dtype = torch.float16 if device == "cuda" else torch.float32
         model = AutoModelForCausalLM.from_pretrained(
-            ENGLISH_OOV_KATAKANA_MODEL.model_id,
-            revision=ENGLISH_OOV_KATAKANA_MODEL.model_revision,
+            ENGLISH_KATAKANA_MODEL.model_id,
+            revision=ENGLISH_KATAKANA_MODEL.model_revision,
             dtype=dtype,
         )
     finally:
@@ -248,12 +248,12 @@ def _generate_katakana_arpakana(word: str, phonemes: str) -> str:
 
 
 def _generate_katakana(
-    word: str, phonemes: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    word: str, phonemes: str, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> str:
     """英単語・発音記号からカタカナを生成する(methodで変換方式を選択する)。
 
-    未知のmethod値は、無言でいずれかの方式へ流さずValueErrorにする(EnglishOovKatakanaMethodは
+    未知のmethod値は、無言でいずれかの方式へ流さずValueErrorにする(EnglishKatakanaMethodは
     型検査上の制約に過ぎず実行時には任意の文字列を渡せるため、誤字や将来の値追加が意図せず
     tinyllama-katakana-converter(GPU・生成モデル)側で処理されることを防ぐ)。
     """
@@ -344,11 +344,11 @@ def release_katakana_model() -> None:
 
 
 def uncached_target_words(
-    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD
+    text: str, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD
 ) -> list[str]:
     """テキスト中の対象語のうち、変換結果がまだ語キャッシュに無いものを出現順(重複なし)で返す。
 
-    呼び出し元が「これから convert_oov_words を呼ぶと新たな変換(変換モデルのロードを伴いうる)が
+    呼び出し元が「これから convert_target_words を呼ぶと新たな変換(変換モデルのロードを伴いうる)が
     走るか」を変換前に判定するための照会口。語が返らなければ、後続の変換はすべて語キャッシュに
     当たり、モデルのロードは起きない。
     """
@@ -360,7 +360,7 @@ def uncached_target_words(
 
 
 def convert_words(
-    words: list[str], method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+    words: list[str], method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> None:
     """語のリストをまとめて変換し、結果を語キャッシュへ入れる。
@@ -379,8 +379,8 @@ def convert_words(
             release_katakana_model()
 
 
-def convert_oov_words(
-    text: str, method: EnglishOovKatakanaMethod = DEFAULT_ENGLISH_OOV_KATAKANA_METHOD,
+def convert_target_words(
+    text: str, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
     on_progress: Callable[[str], None] | None = None,
 ) -> str:
     """テキスト中の対象語(pyopenjtalkが読めない英単語)をカタカナへ変換する。対象語が無ければ
@@ -400,11 +400,11 @@ def convert_oov_words(
     return _locate_and_replace(text, target_words, converted)
 
 
-_conversion_cache: dict[tuple[EnglishOovKatakanaMethod, str], str | None] = {}
+_conversion_cache: dict[tuple[EnglishKatakanaMethod, str], str | None] = {}
 
 
 def _convert_word(
-    word: str, method: EnglishOovKatakanaMethod, on_progress: Callable[[str], None] | None = None
+    word: str, method: EnglishKatakanaMethod, on_progress: Callable[[str], None] | None = None
 ) -> str | None:
     """1語をカタカナへ変換する(CMUdict参照→変換→出力妥当性検証)。
 

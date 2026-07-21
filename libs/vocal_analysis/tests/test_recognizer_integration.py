@@ -1396,8 +1396,8 @@ def test_recognize_custom_content_recognizer_model_is_passed_through(tmp_path, m
     assert calls["loaded_model"] == custom_model
 
 
-def test_recognize_english_oov_katakana_method_is_passed_through_to_g2p(tmp_path, monkeypatch):
-    """english_oov_katakana_method に既定値(arpakana)以外を渡すと、_g2p(ひいてはconvert_oov_words)
+def test_recognize_english_katakana_method_is_passed_through_to_g2p(tmp_path, monkeypatch):
+    """english_katakana_method に既定値(arpakana)以外を渡すと、_g2p(ひいてはconvert_target_words)
     へその方式が渡る(製品経路recognize()からTinyLlama方式を実際に選択できることの検証)。"""
     from vocal_analysis import recognizer as recognizer_module
 
@@ -1428,7 +1428,7 @@ def test_recognize_english_oov_katakana_method_is_passed_through_to_g2p(tmp_path
     )
 
     recognizer_module.recognize(
-        wav_path, english_oov_katakana_method="tinyllama-katakana-converter")
+        wav_path, english_katakana_method="tinyllama-katakana-converter")
 
     # _resolve_transcription内の音素密度判定(_text_phoneme_density)も含め、_g2pへの全呼び出しが
     # 同じ指定方式を受け取る(呼び出し回数自体は密度判定の有無に依存するため、回数を1件に固定しない)。
@@ -1436,8 +1436,8 @@ def test_recognize_english_oov_katakana_method_is_passed_through_to_g2p(tmp_path
     assert all(m == "tinyllama-katakana-converter" for m in g2p_calls)
 
 
-def test_recognize_english_oov_katakana_method_reaches_per_word_g2p(tmp_path, monkeypatch):
-    """単語タイムスタンプが取得できた場合の単語ごとのG2P分岐にも、english_oov_katakana_methodが
+def test_recognize_english_katakana_method_reaches_per_word_g2p(tmp_path, monkeypatch):
+    """単語タイムスタンプが取得できた場合の単語ごとのG2P分岐にも、english_katakana_methodが
     渡る(全文G2P分岐だけでなく単語別G2P分岐も配線されていることの検証)。
     """
     from vocal_analysis import recognizer as recognizer_module
@@ -1475,7 +1475,7 @@ def test_recognize_english_oov_katakana_method_reaches_per_word_g2p(tmp_path, mo
     )
 
     recognizer_module.recognize(
-        wav_path, english_oov_katakana_method="tinyllama-katakana-converter")
+        wav_path, english_katakana_method="tinyllama-katakana-converter")
 
     # 単語ごとの呼び出し("あ"・"い")が実際に発生し、いずれも指定方式を受け取っている。
     per_word_calls = [c for c in g2p_calls if c[0] in ("あ", "い")]

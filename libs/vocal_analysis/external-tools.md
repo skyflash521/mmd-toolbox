@@ -180,9 +180,9 @@ SOFA(Singing-Oriented Forced Aligner。<https://github.com/qiuqiao/SOFA>。MIT)�
   低い。また15ms未満の極端に短い音素セグメントを既定構成より多く出力する傾向がある(利用先の
   後処理である程度吸収されるが完全に無害とは確認できていない)。
 
-### 2.4 英語未知語カタカナ化フォールバックの候補([vocal_analysis.md](vocal_analysis.md) §5.2手順4)
+### 2.4 英語カタカナ化フォールバックの候補([vocal_analysis.md](vocal_analysis.md) §5.2手順4)
 
-G2P(pyopenjtalk-plus)が正しく読めない未知の英単語を、CMUdictの発音記号経由でカタカナへ補完変換する
+G2P(pyopenjtalk-plus)が正しく読めない英単語を、CMUdictの発音記号経由でカタカナへ補完変換する
 候補比較。
 
 | 候補 | ライセンス | 評価 |
@@ -195,7 +195,7 @@ G2P(pyopenjtalk-plus)が正しく読めない未知の英単語を、CMUdictの�
 | english2kana(m7142yosuke) | MIT表示 | 依存するTensorFlow系パッケージがプロジェクトのnumpyバージョンと両立せず、依存解決自体が不可能なため不採用 |
 | alkana.py(別名englishToKanaConverter) | GPL-2.0 | 変換品質は良好だがライセンス不適合のため不採用 |
 | alphabet2kana | MIT | 英字を1文字ずつアルファベット名で読む機能のみで、単語の発音近似にならないため不採用 |
-| yokolet/transcript | MIT表示 | CMUdict未収録語を救えず「未知語を救う」目的を満たさない。PyPIに公開されておらずpip installで導入不可 |
+| yokolet/transcript | MIT表示 | CMUdict未収録語を救えず、フォールバック変換の目的を満たさない。PyPIに公開されておらずpip installで導入不可 |
 | English2KanaTransliteration(Luigi-Pizzolito) | MIT | Go実装でPythonからのin-process呼び出しに不向き |
 | SudachiDict / mecab-ipadic-NEologd系 | Apache-2.0 | 既存の慣用カタカナ表記の辞書引きのみで、未知語の生成的な変換ができない |
 
@@ -283,7 +283,7 @@ S1・S2 は [vocal_analysis.md](vocal_analysis.md) §8.1 のアダプタinterfac
   指定する利用者自身の選択・責任の範囲。
 - ffmpeg は同梱・再配布しない(§3)ため、そのビルドのライセンス(LGPL/GPL)による義務は生じない。
 - Julius を採用する場合のみ、その音響モデルの個別ライセンスを確認する。
-- 英語未知語カタカナ化フォールバック([vocal_analysis.md](vocal_analysis.md) §5.2手順4)関連:
+- 英語カタカナ化フォールバック([vocal_analysis.md](vocal_analysis.md) §5.2手順4)関連:
   arpakana MIT(既定の変換方式) / nltk
   Apache-2.0(CMUdict取得用)/ CMUdict(`nltk.corpus.cmudict`が配布するコーパス本体)修正BSD /
   tinyllama-katakana-converter モデル(Hugging Face 配布 `pyon0024/tinyllama-katakana-converter`。

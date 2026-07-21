@@ -50,8 +50,8 @@ KANA_PROMPT = "すべて ひらがなだけで こたえてください。かん
 
 
 @dataclass(frozen=True)
-class EnglishOovKatakanaModel:
-    """英語未知語カタカナ化フォールバックで使う変換モデルの指定。model_revisionを省略(None)
+class EnglishKatakanaModel:
+    """英語カタカナ化フォールバックで使う変換モデルの指定。model_revisionを省略(None)
     すると最新リビジョンを使う。method="tinyllama-katakana-converter"選択時のみ使う。
     """
 
@@ -59,16 +59,16 @@ class EnglishOovKatakanaModel:
     model_revision: str | None = None
 
 
-ENGLISH_OOV_KATAKANA_MODEL = EnglishOovKatakanaModel(
+ENGLISH_KATAKANA_MODEL = EnglishKatakanaModel(
     model_id="pyon0024/tinyllama-katakana-converter",
     model_revision="3319c206a7f62f0da2660a96a1b3395c3048cfec",
 )
 
-# 英語未知語カタカナ化フォールバックの変換方式。既定値"arpakana"はARPAbet音素をルールベースで
+# 英語カタカナ化フォールバックの変換方式。既定値"arpakana"はARPAbet音素をルールベースで
 # カタカナへ変換する(生成モデル・GPU不要)。"tinyllama-katakana-converter"は
-# ENGLISH_OOV_KATAKANA_MODELの生成モデルを使う(選択式オプション)。
-EnglishOovKatakanaMethod = Literal["arpakana", "tinyllama-katakana-converter"]
-DEFAULT_ENGLISH_OOV_KATAKANA_METHOD: EnglishOovKatakanaMethod = "arpakana"
+# ENGLISH_KATAKANA_MODELの生成モデルを使う(選択式オプション)。
+EnglishKatakanaMethod = Literal["arpakana", "tinyllama-katakana-converter"]
+DEFAULT_ENGLISH_KATAKANA_METHOD: EnglishKatakanaMethod = "arpakana"
 
 
 @dataclass(frozen=True)

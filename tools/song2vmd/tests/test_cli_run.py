@@ -137,26 +137,26 @@ def test_run_builds_custom_content_recognizer_model_from_cli_options(tmp_path, m
     assert model == ContentRecognizerModel(model_id="org/model", model_revision="rev1")
 
 
-def test_run_passes_default_english_oov_katakana_method(tmp_path, monkeypatch):
+def test_run_passes_default_english_katakana_method(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 0
-    assert captured["kwargs"]["english_oov_katakana_method"] == "arpakana"
+    assert captured["kwargs"]["english_katakana_method"] == "arpakana"
 
 
-def test_english_oov_katakana_method_option_selects_tinyllama(tmp_path, monkeypatch):
-    """--english-oov-katakana-method tinyllama-katakana-converter を指定すると、
+def test_english_katakana_method_option_selects_tinyllama(tmp_path, monkeypatch):
+    """--english-katakana-method tinyllama-katakana-converter を指定すると、
     pipeline.run へその方式が渡る(recognize()を経て実際に選択できることの配線検証)。"""
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)
 
     rc = cli.main([
-        src, "--english-oov-katakana-method", "tinyllama-katakana-converter", "--dry-run",
+        src, "--english-katakana-method", "tinyllama-katakana-converter", "--dry-run",
     ])
     assert rc == 0
-    assert captured["kwargs"]["english_oov_katakana_method"] == "tinyllama-katakana-converter"
+    assert captured["kwargs"]["english_katakana_method"] == "tinyllama-katakana-converter"
 
 
 def _capture_cvd_at_run(monkeypatch):

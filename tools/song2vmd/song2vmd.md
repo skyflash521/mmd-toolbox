@@ -178,7 +178,7 @@ song2vmd INPUT [options]
 | `--sofa-root PATH` | 無し(必須) | SOFAリポジトリのルートパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
 | `--sofa-checkpoint PATH` | 無し(必須) | SOFAチェックポイント(`.ckpt`)ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
 | `--sofa-timeout SEC` | `300` | SOFAサブプロセス1回あたりのタイムアウト秒数(正の数値のみ) |
-| `--english-oov-katakana-method NAME` | `arpakana` | S2 G2Pの英語未知語カタカナ化フォールバック(vocal_analysis.md §5.2手順4)の変換方式選択。`arpakana`(ルールベース。生成モデル・GPU不要)または `tinyllama-katakana-converter`(生成モデル) |
+| `--english-katakana-method NAME` | `arpakana` | S2 G2Pの英語カタカナ化フォールバック(vocal_analysis.md §5.2手順4)の変換方式選択。`arpakana`(ルールベース。生成モデル・GPU不要)または `tinyllama-katakana-converter`(生成モデル) |
 | `--device MODE` | `auto` | 実行デバイスの選択(`auto` / `cpu`)。`auto` は環境から自動選択(GPU(CUDA)が利用可能ならGPU)。`cpu` はGPUを使わずCPUで実行する(音声前段の全モデルと、環境を継承するSOFAサブプロセスを含む)。GPUはあるがVRAMが不足する環境の回避手段 |
 | `--n-morph` | off(既定は閉口) | 撥音(音節末の鼻音)に「ん」モーフ(`MouthShape.N`)を使う(既定off。6.3)。既定offの明示形 `--no-n-morph` も受理する |
 | `--vowel-gain a:i:u:e:o` | `1:1:1:1:1` | 母音別(あ/い/う/え/お)の開き量微調整倍率。プリセットの母音別倍率(8.1)へ要素ごとに乗算する(既定はプリセット値そのまま。プリセット非依存の共通既定)。「ん」はプリセット値のままで本引数の対象外(8.2) |
@@ -235,7 +235,7 @@ song2vmd INPUT [options]
 リダイレクト・パイプ時や `--quiet` 指定時は表示しない。進捗表示は副作用専用であり、出力VMD・終了コード・
 `--dry-run` の診断を変えない。機械モードでは同じ進捗を progress イベントとして標準出力へ発行する
 (TTY 判定に依存させない。12章)。`separate` 段(分離モデル)・`recognize` 段(内容認識モデル・
-音素モデル・`--english-oov-katakana-method tinyllama-katakana-converter`選択時はカタカナ生成
+音素モデル・`--english-katakana-method tinyllama-katakana-converter`選択時はカタカナ生成
 モデルも)では、それぞれのモデルの初回取得が実際にネットワークダウンロードを要した区間だけ、
 その進捗(取得済み割合)を段の補足へ都度反映し、取得が終わり次第補足を消す(キャッシュ済みの
 取得では補足を出さない。12.1)。両段はさらに、モデルのロード開始時(キャッシュ済みで
@@ -607,7 +607,7 @@ interface(Separator / Recognizer)、正規化中間形式、アダプタの登�
 - バックエンドの選択(`--separator` / `--recognizer-model-id` / `--recognizer-model-revision` /
   `--no-recognizer-retry` /
   `--separate-vocals` / `--forced-aligner` / `--sofa-python` / `--sofa-root` / `--sofa-checkpoint` /
-  `--sofa-timeout` / `--english-oov-katakana-method`)は `song2vmd` の CLI で公開する(5.2)。アダプタの追加・切り替えや内容認識
+  `--sofa-timeout` / `--english-katakana-method`)は `song2vmd` の CLI で公開する(5.2)。アダプタの追加・切り替えや内容認識
   モデルの既定値・リトライ既定の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
 - 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、本リポジトリ本体の
   必須依存は `numpy/scipy` のまま保つ。
@@ -813,7 +813,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
   `done`/`total` は長尺分割(6.6)時の処理済み/総チャンク数(分割しない場合や内訳の無い段は
   `done=0, total=null`)、`note` は補足文字列(無ければ `""`)、`elapsed` は段開始からの経過秒。
   各段は開始時に最低1本の progress を出す。`separate` 段(分離モデル)・`recognize` 段(内容認識
-  モデル・音素モデル・`--english-oov-katakana-method tinyllama-katakana-converter`選択時はカタカナ
+  モデル・音素モデル・`--english-katakana-method tinyllama-katakana-converter`選択時はカタカナ
   生成モデルも)は、そのモデルの初回取得が実際にダウンロードを要した区間だけ、`done`/`total`
   (長尺分割時はそのチャンクの値のまま)を保った追加の progress を都度出し、`note` へ取得済み割合を
   反映する。取得が終わり次第 `note` を空文字列に戻す1本を出す(キャッシュ済みの取得ではこれらの
@@ -843,7 +843,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
   - `mode:"run"`(通常実行): `{type:"result", mode:"run", output, keys, backends, style, separated,
     phonemes, morae, merged_morae, coverage, closed_ranges, max_opening, duration_sec}`。
     `output` は書き出しパス(文字列)、`keys` は出力 VMD のモーフキー数、`backends` は採用バックエンド
-    (`{separator, recognizer, forced_aligner, english_oov_katakana_method}`)、`style` はプリセット名、
+    (`{separator, recognizer, forced_aligner, english_katakana_method}`)、`style` はプリセット名、
     `separated` は分離を実施したか(bool)、
     `phonemes` は認識音素数、`morae` は検出モーラ数、`merged_morae` は併合/間引きしたモーラ数、
     `coverage` は音素認識の被覆率(0〜1)、`closed_ranges` は閉口区間数、`max_opening` は最大開き量(0〜1)、

@@ -28,10 +28,10 @@ pip install ".[vocal-analysis]"
 | `openai/whisper-medium` | 内容認識(既定モデル) | 約6.12GB |
 | `facebook/wav2vec2-lv-60-espeak-cv-ft` | 音素モデル(強制アライメント) | 約1.26GB |
 | Demucs `htdemucs_ft` | ボーカル分離 | 約337MB |
-| CMUdict | 英語未知語カタカナ化(既定 `arpakana`) | 約3.8MB |
+| CMUdict | 英語カタカナ化(既定 `arpakana`) | 約3.8MB |
 | 合計 | | 約7.72GB |
 
-`--recognizer-model-id` で既定と異なるモデルを指定した場合や `--english-oov-katakana-method
+`--recognizer-model-id` で既定と異なるモデルを指定した場合や `--english-katakana-method
 tinyllama-katakana-converter` を指定した場合は、指定したモデルの容量ぶんが初回実行時に別途追加で
 かかる。取得後は各ライブラリの標準キャッシュに保存され、2回目以降の実行では再ダウンロードしない。
 内容認識モデル・音素モデルの取得中は、進捗が画面(標準エラー出力)に表示される。
@@ -131,7 +131,7 @@ song2vmd <入力ファイル名>.wav -o <出力ファイル名>.vmd --style powe
 | `--sofa-root PATH` | なし | SOFA リポジトリのルートパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。 |
 | `--sofa-checkpoint PATH` | なし | SOFA チェックポイント(`.ckpt`)ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。 |
 | `--sofa-timeout SEC` | `300` | SOFA サブプロセス1回あたりのタイムアウト秒数。 |
-| `--english-oov-katakana-method NAME` | `arpakana` | 英語未知語カタカナ化フォールバックの変換方式。`arpakana`(GPU不要)または `tinyllama-katakana-converter`(生成モデル使用)。 |
+| `--english-katakana-method NAME` | `arpakana` | 英語カタカナ化フォールバックの変換方式。`arpakana`(GPU不要)または `tinyllama-katakana-converter`(生成モデル使用)。 |
 
 ### 実行環境と長尺分割
 
