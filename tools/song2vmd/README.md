@@ -44,6 +44,19 @@ song2vmd <入力ファイル名>.wav --recognizer-model-id sbintuitions/kana-whi
 
 リビジョンを固定したい場合は `--recognizer-model-revision` を組み合わせる。
 
+### モデルの保存先(削除する場合)
+
+取得したモデル・辞書は各ライブラリの標準キャッシュに保存される。不要になった場合はフォルダごと
+削除してよい(次回実行時に自動で取得し直す)。
+
+| 対象 | Windows | macOS/Linux |
+|---|---|---|
+| Hugging Face モデル(内容認識モデル・音素モデル・カタカナ生成モデル) | `%USERPROFILE%\.cache\huggingface\hub\` | `~/.cache/huggingface/hub/` |
+| Demucs(ボーカル分離) | `<実行時カレントドライブ>:\tmp\audio-separator-models\` | `/tmp/audio-separator-models/` |
+| CMUdict | `%APPDATA%\nltk_data\corpora\`(`cmudict`フォルダと`cmudict.zip`の両方) | `~/nltk_data/corpora/`(同上) |
+
+CMUdictの保存先は環境によって上記と異なる場合がある(見つからない場合は`nltk_data`フォルダを検索する)。
+
 ## 使い方
 
 基本の形:
