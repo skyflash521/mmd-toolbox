@@ -2,7 +2,6 @@
 
 密なVMDキーフレームを疎なキーフレームと補間曲線へ変換するCLIツール
 
-実装言語: Python 3.12+
 依存: vmd(同リポジトリのフォーマット層ライブラリ、../../libs/vmd/vmd.md), numpy, scipy, click または argparse
 
 ---
