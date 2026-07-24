@@ -8,7 +8,7 @@ description: gitコミットをcommit-workerエージェントに委譲して実
 トークンを使う作業(diff を読む・コミットメッセージを起草する・コミットする・不正コミット防止
 チェック)は `commit-worker` エージェント(ワーカー)に委譲する。**メインモデルはコミットメッセージを
 書かない。** ワーカーの詳細手順・不正コミット防止チェック・メッセージ規約・許可される git コマンド形は
-`commit-worker` エージェント自身の定義(`.claude/agents/commit-worker.md`)に組み込まれており、
+`commit-worker` エージェント自身の定義([`.claude/agents/commit-worker.md`](../../agents/commit-worker.md))に組み込まれており、
 **メインモデルは本文を再掲しない**(再掲は高コストなメインモデルの出力を毎回浪費するため)。
 
 ## メインモデルの責務

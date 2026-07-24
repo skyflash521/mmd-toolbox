@@ -5,7 +5,7 @@ description: 公開CLIツールのリリース作業(版付け・利用者向け
 
 # ツールリリース
 
-作業手順の正本は `docs/conventions/publishing.md`(A 版付け → B 公開前検証 → C 利用者向けドキュメント → D リリース確定)。
+作業手順の正本は [`docs/conventions/publishing.md`](../../../docs/conventions/publishing.md)(A 版付け → B 公開前検証 → C 利用者向けドキュメント → D リリース確定)。
 本スキルは手順を再掲せず、対話的に進める規律と、CHANGELOG の生成手順・PR案のひな形を定める。
 規律: **提案 → ユーザー確認(修正があれば反映して再提示)→ 実行**、を要所ごとに繰り返す。
 **スキルが実行するのは PR の作成まで(git・gh CLI の操作)。判断(版の決定・PR案の確定)は
@@ -20,7 +20,7 @@ description: 公開CLIツールのリリース作業(版付け・利用者向け
 
 - 対象ツール名(`tools/<ツール>/` のパッケージ名。複数ツールの同時リリースなら全部)。
 - リリースする版(ツールごとの MAJOR.MINOR.PATCH)。**原則、版は指定されて実行する。勝手に
-  付けない。** 版の指定が無いツールがある場合は、`docs/conventions/versioning.md` §3 に従い、
+  付けない。** 版の指定が無いツールがある場合は、[`docs/conventions/versioning.md` §3](../../../docs/conventions/versioning.md#3-どの桁をいつ上げるか) に従い、
   PR に記載する版を判断根拠(どの契約面に触れたか)つきで提案し、ユーザーの了承を得てから
   A を実行する。
 
@@ -28,7 +28,7 @@ description: 公開CLIツールのリリース作業(版付け・利用者向け
 
 1. 開始時に作業ツリーとブランチの状態を確認する。**未コミットの変更がある場合、または現在の
    ブランチが develop でない場合は、その状態を提示してユーザーに確認を取る**(勝手に stash・破棄・
-   切り替えをしない)。問題がなければ develop に切り替え、その上で publishing.md の A → B → C を
+   切り替えをしない)。問題がなければ develop に切り替え、その上で [publishing.md](../../../docs/conventions/publishing.md) の A → B → C を
    順に実行する。
    - B(公開前検証)の実行・計測は run-and-bench スキルの規律で行う。
    - C(ドキュメント)の CHANGELOG 更新は下の「CHANGELOG の生成手順」で行う。
@@ -42,7 +42,7 @@ description: 公開CLIツールのリリース作業(版付け・利用者向け
    3. CI の結果を確認し(`gh pr checks`)、緑になったことを報告する。赤なら原因を報告して指示を待つ。
 4. マージとタグ作成・タグ push はユーザーが GitHub・手元で別途行う作業であり、スキルは実行しない。
    CI 緑の報告と合わせて、次を**残タスク**として提示して締める(タグのコマンドはコピーしやすい
-   ようにコードブロックで示す。タグの形式・種別は versioning.md §5):
+   ようにコードブロックで示す。タグの形式・種別は [versioning.md §5](../../../docs/conventions/versioning.md#5-タグ付け)):
    - PR をマージする。
    - main のマージコミットへ、リリースする構成要素ごとの注釈付きタグを打って push する。
    - タグ push で CI が GitHub Release を自動作成するので、作成された Release を確認する。
@@ -69,7 +69,7 @@ gh が使えない(未インストール・未認証)ときは作業を止めず
 
 ## CHANGELOG の生成手順
 
-エントリの形式・粒度・書き方の規準は `docs/conventions/changelog.md` が正。本節は素材の集め方と
+エントリの形式・粒度・書き方の規準は [`docs/conventions/changelog.md`](../../../docs/conventions/changelog.md) が正。本節は素材の集め方と
 対話の順を定める。複数ツールの同時リリースでは、リリースする各ツールについて行う。
 
 1. **前版の特定**: 対象ツールのタグ(`<ツール>/v*`)の最新版を取る。CHANGELOG 先頭の版と一致する
