@@ -105,9 +105,9 @@ mocapvmd <入力ファイル名>.vmd [オプション]
 | `--describe` | off | VMD を読まずにオプション定義とプリセット一覧の result イベントを出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作(10.3) |
 | `--version` | — | バージョンを表示して終了 |
 
-工程は `denoise`(ノイズ軽減 §4.2)・`foot_ik`(足IK接地安定化 §4.3)・`reduce`(キーフレーム圧縮 §5.3)の
+工程は `denoise`(ノイズ軽減 [§4.2](#42-一般ノイズ軽減))・`foot_ik`(足IK接地安定化 [§4.3](#43-足ik安定化))・`reduce`(キーフレーム圧縮 [§5.3](#53-疎化プリセットと種別別許容誤差))の
 3段。有効条件・表記・停滞回避・副作用専用等の一般契約は
-[CLIインターフェース規約](../../docs/conventions/cli-interface.md) §6が正。
+[CLIインターフェース規約 §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性)が正。
 
 キーフレーム圧縮段はカウンタ(done/total)に完了ボーン数・総数を反映し、ノイズ軽減・足IK接地安定化の
 2段は少なくとも経過時間を反映する。mocapvmd はいずれの段でも行末の補足(note)を使わない。
@@ -175,7 +175,7 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 
 `pose` はモデル情報に依存する。`--pmx PATH` を指定するとそのPMXを読んでモデル固有に評価し、未指定時は内蔵の既定モデルプロファイル(標準的なモデル近似)を使うため、ユーザーがPMXを用意しなくても動く。PMX読み取りとFK評価はフォーマット層 `pmx` に委譲する。`--no-denoise` 時は方式によらず一般ノイズ軽減を行わない(`pose` 指定でもPMXは不要)。
 
-`--pmx` のパスが存在しない/通常ファイルでない場合・PMX形式が不正な場合・指すモデルが必須標準ボーンを欠く場合は、いずれも入力不正として終了コード1(非VMD入力と同じ扱い、§9)とする。
+`--pmx` のパスが存在しない/通常ファイルでない場合・PMX形式が不正な場合・指すモデルが必須標準ボーンを欠く場合は、いずれも入力不正として終了コード1(非VMD入力と同じ扱い、[§9](#9-終了コード))とする。
 
 `bone` 方式の検出・平滑化の確定基準は次のとおり(初期値。実データで調整。フィルタの数値計算の内部実装は、この挙動・初期パラメータ・テストを満たす範囲で実装側で決める)。
 
@@ -298,7 +298,7 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 
 ### 5.2 クリーニング強度(`--clean-strength`)
 
-クリーニング強度は名前付きプリセットを持たず、数値の倍率 `--clean-strength`(既定 1.0)で指定する。種別ごとの基準パラメータ(下表)に対し、この倍率を**位置のブレンド率・回転のブレンド率のみ**に掛けて全体の効き量を変える(窓幅は据え置き)。0で無加工相当、1.0で下表の基準どおり、上げるほど強く平準化する。倍率が掛かるのは `bone` 方式(§4.2)の種別別ブレンド率に限る。`pose` 方式(§4.2)はワールド軌跡を専用パラメータで平滑化する別系統で、`--clean-strength` では倍率変更しない(方式は `--denoise-mode` で選ぶ)。
+クリーニング強度は名前付きプリセットを持たず、数値の倍率 `--clean-strength`(既定 1.0)で指定する。種別ごとの基準パラメータ(下表)に対し、この倍率を**位置のブレンド率・回転のブレンド率のみ**に掛けて全体の効き量を変える(窓幅は据え置き)。0で無加工相当、1.0で下表の基準どおり、上げるほど強く平準化する。倍率が掛かるのは `bone` 方式([§4.2](#42-一般ノイズ軽減))の種別別ブレンド率に限る。`pose` 方式([§4.2](#42-一般ノイズ軽減))はワールド軌跡を専用パラメータで平滑化する別系統で、`--clean-strength` では倍率変更しない(方式は `--denoise-mode` で選ぶ)。
 
 初期パラメータ(初期値。実データで調整):
 
@@ -409,7 +409,7 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 
 - 両足接地中にセンターを安定化するか(初期実装ではセンター補正を行わない。4.3)。
 - 接地判定に足IKだけでなく足首・つま先ボーンを併用するか。
-- プリセット値の定量的な合否基準(許容する最大変位・残ノイズ量などの数値しきい値)をどう定義するか。定性的な調整観点・手順は `TUNING.md` で定義済み。
+- プリセット値の定量的な合否基準(許容する最大変位・残ノイズ量などの数値しきい値)をどう定義するか。定性的な調整観点・手順は [`TUNING.md`](TUNING.md) で定義済み。
 - 種別別パラメータをCLIオプションにするか、外部チューニングファイル(`--tuning-file`)にするか(4.5。初期実装では必須としない)。
 
 ---
@@ -424,22 +424,22 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 | 3 | 出力書き込み失敗 |
 | 130 | 協調的な中断(Ctrl-C 等。全ツール共通予約) |
 
-0〜3 は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)(以下「規約」)§5 の基底と同じ意味。130 は規約 §5 の全ツール共通予約(中断。10.5)。想定外の内部エラーは最も近い基底へ寄せて 1 で終え、機械モードでは error イベントの `code` = `internal_error` で識別できる(10.4)。
+0〜3 は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)(以下「規約」)[§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の基底と同じ意味。130 は規約 [§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の全ツール共通予約(中断。10.5)。想定外の内部エラーは最も近い基底へ寄せて 1 で終え、機械モードでは error イベントの `code` = `internal_error` で識別できる(10.4)。
 
 ---
 
 ## 10. 機械モード(機械可読インターフェース)
 
-機械モードは、他のソフトウェアが mocapvmd を子プロセスとして呼ぶための構造化出力を提供する。共通契約(イベント種別の語彙・終端規則・チャネル固定・stdout の UTF-8/LF 固定・終了コードの基底)は規約 §3〜§6・§8・§10 と、共有基盤 [cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は mocapvmd 固有のイベントペイロードと `code` 値だけを定める。イベント送出は共有基盤 cli_events に委譲する。
+機械モードは、他のソフトウェアが mocapvmd を子プロセスとして呼ぶための構造化出力を提供する。共通契約(イベント種別の語彙・終端規則・チャネル固定・stdout の UTF-8/LF 固定・終了コードの基底)は規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動)〜[§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性)・[§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性)・[§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール) と、共有基盤 [cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は mocapvmd 固有のイベントペイロードと `code` 値だけを定める。イベント送出は共有基盤 cli_events に委譲する。
 
 ### 10.1 チャネルと終端
 
-- **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 §3。`--describe` は人間向け既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定し、使用法エラー・想定外エラーも error イベントで終端する(例: `--describe` と未知オプションの併用も `bad_argument` イベント+終了コード 2)。
-- 構造化出力モードの標準出力は 10.2 のイベントのみ。バイナリストリームとして標準出力へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない(規約 §10)。
-- 人間向け標準エラーは、ロケール符号化で表せない文字を置換して出し、符号化失敗でプロセスを落とさない(規約 §10。機械モードに限らず常に適用する)。
+- **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動)。`--describe` は人間向け既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定し、使用法エラー・想定外エラーも error イベントで終端する(例: `--describe` と未知オプションの併用も `bad_argument` イベント+終了コード 2)。
+- 構造化出力モードの標準出力は 10.2 のイベントのみ。バイナリストリームとして標準出力へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない(規約 [§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール))。
+- 人間向け標準エラーは、ロケール符号化で表せない文字を置換して出し、符号化失敗でプロセスを落とさない(規約 [§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール)。機械モードに限らず常に適用する)。
 - ストリームは result または error のちょうど 1 つで終端する。終端は CLI 本体の単一経路で送出し、終端後の送出は拒否される。
-- `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベントストリームには載せない(規約 §3 のメタ操作の例外)。
-- イベント契約の進化は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。受信側は未知要素を無視できる前提)。
+- `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベントストリームには載せない(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動) のメタ操作の例外)。
+- イベント契約の進化は規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換) に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。受信側は未知要素を無視できる前提)。
 
 ### 10.2 イベントペイロード
 
@@ -447,14 +447,14 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 - **warning**: `{type:"warning", code, message, section}`。`section` は対象セクション名の配列(該当が無ければ `null`)。`vmd.io.read` の警告は `VmdWarning.code`(ハイフン区切り。`decode-error`・`sections-missing` など)をそのまま透過し、`section` は単一要素配列にする。人間向け経路と同じ基準(code・section・message の同一組は 1 件)で重複をまとめる。
 - **result**: 正常終了の終端イベント。`mode` で形が決まる:
   - `mode:"process"`(通常実行): `{type:"result", mode:"process", output, input_keys, output_keys}`。`output` は書き出しパス(文字列)、`input_keys` / `output_keys` は入力/出力のボーンキー総数。
-  - `mode:"inspect"`(入力検査 `--machine --dry-run`): VMD を書かず `{type:"result", mode:"inspect", output:null, input_kind:"bone", keys, frame_range, duration_sec, sections, preset, clean_strength, denoise, denoise_mode, foot_ik_stabilize, foot_slide_suppression, curve_mode, reduce, bones, reduction, pose_denoise}` を出す。`keys` は入力ボーンキー総数、`frame_range` は全ボーンキーの `[最小フレーム, 最大フレーム]`(キー 0 件なら `null`)、`duration_sec` は最大フレーム÷30(キー 0 件なら `null`)、`sections` は入力に存在するセクション名の配列。`preset`〜`reduce` は解決済みの実行計画(引数値)。`bones` は初出順の `{name, category, keys, frame_range:[first,last]}` の配列。`reduction` は疎化診断(`--no-reduce` 時は `null`)で、トラック名→ `{input_keys, output_keys, tol_pos, tol_rot, cuts, errors:{pos_x,pos_y,pos_z,rot_deg}}` のオブジェクト。`pose_denoise` は `--denoise-mode pose` かつノイズ軽減有効のときの診断 `{pmx, frames, markers:{available, required_bones_ok}, marker_displacement:{max, mean}, fit:{mean_error_before, mean_error_after, fallback_frames, max_bone_delta_deg, max_center_delta}}`(それ以外は `null`)。クリーニング診断の詳細(スパイク・保護・接地区間)は人間向け dry-run テキストに残し、inspect には載せない(必要になれば規約 §4.1 の後方互換追加で拡張する)。
+  - `mode:"inspect"`(入力検査 `--machine --dry-run`): VMD を書かず `{type:"result", mode:"inspect", output:null, input_kind:"bone", keys, frame_range, duration_sec, sections, preset, clean_strength, denoise, denoise_mode, foot_ik_stabilize, foot_slide_suppression, curve_mode, reduce, bones, reduction, pose_denoise}` を出す。`keys` は入力ボーンキー総数、`frame_range` は全ボーンキーの `[最小フレーム, 最大フレーム]`(キー 0 件なら `null`)、`duration_sec` は最大フレーム÷30(キー 0 件なら `null`)、`sections` は入力に存在するセクション名の配列。`preset`〜`reduce` は解決済みの実行計画(引数値)。`bones` は初出順の `{name, category, keys, frame_range:[first,last]}` の配列。`reduction` は疎化診断(`--no-reduce` 時は `null`)で、トラック名→ `{input_keys, output_keys, tol_pos, tol_rot, cuts, errors:{pos_x,pos_y,pos_z,rot_deg}}` のオブジェクト。`pose_denoise` は `--denoise-mode pose` かつノイズ軽減有効のときの診断 `{pmx, frames, markers:{available, required_bones_ok}, marker_displacement:{max, mean}, fit:{mean_error_before, mean_error_after, fallback_frames, max_bone_delta_deg, max_center_delta}}`(それ以外は `null`)。クリーニング診断の詳細(スパイク・保護・接地区間)は人間向け dry-run テキストに残し、inspect には載せない(必要になれば規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換) の後方互換追加で拡張する)。
   - `mode:"list_bones"`(`--machine --list-bones`): `{type:"result", mode:"list_bones", bones}`。`bones` は初出順の `{name, category}` の配列。VMD は書かない。非機械の `--list-bones` は人間向けテキストを出す。`--list-bones` と `--dry-run` の併用は `--list-bones` を優先する。
   - `mode:"describe"`(自己記述 `--describe`): `{type:"result", mode:"describe", options, presets}`(10.3)。VMD を読まないので他 mode のキーは載せない。
 - **error**: `{type:"error", code, exit_code, field, path, message}`。`field` / `path` は対象が無ければ `null`。失敗の終端イベント(10.4)。
 
 ### 10.3 `--describe` の中身
 
-`options` は処理を駆動する引数の配列(メタ/モード操作 `--describe` / `--version` / `--help` / `--machine` は含めない)。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、該当しない値は `null`)。`type` は固定語彙 `"float"` / `"int"` / `"str"` / `"flag"` / `"enum"`。数値の `constraint` は `{min, max, exclusive_min}` の 3 キー常設(上限が無ければ `max:null`)、`enum` は `{choices:[...]}`、`flag` / `str` は `null`。`help` は 3.2 の説明文。真偽フラグの対(`--denoise` / `--no-denoise`・`--foot-ik-stabilize` / `--no-foot-ik-stabilize`・`--reduce` / `--no-reduce`)は**肯定形の長形式 1 要素だけ**を載せる(型 `flag`。無効化の起動形は名前に `--no-` を前置した否定形。規約 §6 の `--x/--no-x` 様式。呼び出し側は `default` が `true` のフラグを無効化するとき否定形を発行する)。否定形を別要素として重複列挙しない。全 18 要素:
+`options` は処理を駆動する引数の配列(メタ/モード操作 `--describe` / `--version` / `--help` / `--machine` は含めない)。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、該当しない値は `null`)。`type` は固定語彙 `"float"` / `"int"` / `"str"` / `"flag"` / `"enum"`。数値の `constraint` は `{min, max, exclusive_min}` の 3 キー常設(上限が無ければ `max:null`)、`enum` は `{choices:[...]}`、`flag` / `str` は `null`。`help` は 3.2 の説明文。真偽フラグの対(`--denoise` / `--no-denoise`・`--foot-ik-stabilize` / `--no-foot-ik-stabilize`・`--reduce` / `--no-reduce`)は**肯定形の長形式 1 要素だけ**を載せる(型 `flag`。無効化の起動形は名前に `--no-` を前置した否定形。規約 [§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性) の `--x/--no-x` 様式。呼び出し側は `default` が `true` のフラグを無効化するとき否定形を発行する)。否定形を別要素として重複列挙しない。全 18 要素:
 
 | name | type | constraint | default |
 |---|---|---|---|
@@ -498,7 +498,7 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
 
 - `not_vmd` は読み込み例外の種別・文言を `message` に載せる。
-- 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正。
+- 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は [cli_events.md §4](../../libs/cli_events/cli_events.md#4-argparse-エラー変換ヘルパ) が正。
 - `internal_error` は CLI 本体の全体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーでなく中断(`cancelled`/130)として手前で分岐する(10.5)。
 - `--list-bones` は書き込み・疎化をしない診断モードとして、処理固有の検証(上書きガード・疎化許容値・ボーン値検証)に阻まれない(`--machine --list-bones` でも同じ)。機械モードではボーン値の非有限等をこの短絡位置では弾かず、読み込み失敗のみ `not_vmd` にする。
 
@@ -506,9 +506,9 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 
 - VMD 出力は一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ起きるため、途中終了で中途半端な出力ファイルは残らない。
 - CLI は本体の全体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130 で終える。
-- **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として扱う。橋渡しの要否・実装は共有基盤([cli_events.md](../../libs/cli_events/cli_events.md) §5)が正。
+- **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
 - 進捗のライブ表示は try/finally で中断時も止まり、行を消す。機械モードではライブ表示自体を無効化する。
-- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §8 の唯一の例外)。このとき並列ワーカ子プロセスも残りうるため、強制終了する呼び出し側はプロセスツリーごと終了する。出力の原子性により、その場合も中途半端な出力ファイルは残らない(ワーカはファイルを書かない)。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性) の唯一の例外)。このとき並列ワーカ子プロセスも残りうるため、強制終了する呼び出し側はプロセスツリーごと終了する。出力の原子性により、その場合も中途半端な出力ファイルは残らない(ワーカはファイルを書かない)。
 
 ### 10.6 並列疎化と中断・イベントストリームの整合
 
