@@ -29,12 +29,13 @@ from cli_events import (
     error_event,
     install_sigbreak_handler,
 )
+from cli_progress import progress
 from pmx.types import PmxFormatError
 from vmd import io
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey
 
-from . import __version__, classify, denoise, footik, presets, progress, reduce, report
+from . import __version__, classify, denoise, footik, presets, reduce, report
 from .model_profile import MocapModelProfileError
 from .pose_denoise import apply_pose_denoise
 
