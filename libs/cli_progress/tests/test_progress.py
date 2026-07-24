@@ -26,8 +26,6 @@ from cli_progress import progress
 
 ProgressReporter = progress.ProgressReporter
 
-pytestmark = pytest.mark.xfail(reason="impl pending: libs/cli_progress 新設", strict=False)
-
 
 class _TTYStream(io.StringIO):
     def isatty(self):
