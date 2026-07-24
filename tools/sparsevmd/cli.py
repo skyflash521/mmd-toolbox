@@ -627,12 +627,13 @@ def _run(args, emitter, fail):
         curve_mode=args.curve_mode,
     )
 
-    # ボーン選択を先に解決する。明示 --bone 名が不在なら SelectionError → コード2
-    # (ボーンセクションが空の場合を含む)。これは空セクションの入力不正 コード1 より
-    # 優先する(明示名の引数エラーが勝つ)。
+    # ボーン選択を明示していて、かつボーンセクションが空なら、選択条件の一致判定(コード2)より
+    # 入力不正(コード1、no_target_keys)を優先する(入力を変えず引数だけ直しても解消しないため)。
     bone_names = _bone_names_in_order(doc.bone)
     undecodable = _undecodable_bone_names(doc.bone)
     if args.target in ("bone", "all") and _has_bone_selection(args):
+        if not bone_names:
+            return fail("no_target_keys", "ボーン選択を指定したがボーンキーが無い", 1, field="input")
         try:
             sel = selection.resolve_selection(
                 bone_names, includes, excludes, undecodable=undecodable

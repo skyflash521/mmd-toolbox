@@ -5,9 +5,14 @@
 
 選択の流れ:
 - include 指定が1つも無ければ全ボーンを include 扱いとする。その後 exclude を引く。
-- ハード エラー(SelectionError、CLI で終了コード2に対応づけ):
-  空文字 NAME、include と exclude の同名衝突、--bone 明示名が入力に存在しない
-  (ボーンセクションが空の場合を含む)、ボーンキーが存在するのに最終選択が0件。
+- ハード エラー(SelectionError): 空文字 NAME、include と exclude の同名衝突、
+  --bone 明示名が入力に存在しない、ボーンキーが存在するのに最終選択が0件。
+  削減処理の呼び出し元(CLI の通常経路)は、ボーンセクションが空の場合
+  (bone_names が空)をこの関数の呼び出し前に終了コード1(no_target_keys)として
+  弾くため、その経路でこの関数が終了コード2(bone_selection_invalid)に
+  対応づけられるのはボーンセクションにキーが存在する場合に限る。`--list-bones`
+  (検査モード)はこの弾き分けを行わず、bone_names が空でもこの関数を呼び出し、
+  SelectionError を警告として表示するだけで終了コード0のまま続行する。
 - ソフト事象(警告して継続): exclude 名のみの不在、glob/group の不一致。
 
 SelectionError はそこまでに蓄積した警告を .warnings に保持する。警告文字列には

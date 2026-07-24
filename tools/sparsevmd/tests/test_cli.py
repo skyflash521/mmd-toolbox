@@ -370,20 +370,21 @@ def test_keep_frame_negative_is_arg_error(tmp_path):
     assert code == 2
 
 
-def test_target_all_explicit_bone_absent_section_is_arg_error(tmp_path):
-    # target all・カメラあり・ボーンキー無し・明示 --bone NAME → 引数エラー。
+def test_target_all_explicit_bone_absent_section_is_input_error(tmp_path):
+    # target all・カメラあり・ボーンキー無し・明示 --bone NAME → 入力不正(カテゴリ自体が無いため)。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     code = cli.main([str(src), "--target", "all", "--bone", "存在しない"])
-    assert code == 2
+    assert code == 1
 
 
-def test_target_bone_explicit_missing_name_is_arg_error_not_input(tmp_path):
-    # target bone・ボーンキー無し・明示 --bone NAME → 引数エラー2(空セクションの入力不正1より優先)。
+def test_target_bone_explicit_missing_name_is_input_error_when_section_empty(tmp_path):
+    # target bone・ボーンキー無し・明示 --bone NAME → 入力不正1(カテゴリ自体が無いことが
+    # 選択条件の一致判定2より優先)。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())  # bone セクション無し
     code = cli.main([str(src), "--target", "bone", "--bone", "存在しない"])
-    assert code == 2
+    assert code == 1
 
 
 def test_unmatched_glob_warns_in_reduce_path(tmp_path, capsys):
