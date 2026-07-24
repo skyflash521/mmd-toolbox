@@ -26,7 +26,7 @@
 
 リップモーションに必要なのは「時刻ごとの母音(口形)と強弱」であって歌詞の単語ではないため、song2vmd は歌詞
 テキストの入力を要求せず、書き起こしテキストも出力しない。母音・音素を時刻付きで得る認識方式の選定と
-品質測定は vocal_analysis の責務(vocal_analysis.md §5・§9)。
+品質測定は vocal_analysis の責務([vocal_analysis.md §5](../../libs/vocal_analysis/vocal_analysis.md#5-音素母音認識s2)・[§9](../../libs/vocal_analysis/vocal_analysis.md#9-認識品質の測定s-1))。
 
 ### 1.2 設計境界
 
@@ -48,7 +48,7 @@
 - 二段にすると、音声由来の**連続的な開き量(RMS)が音符のベロシティ/休符へ落ち、時刻も音符単位へ量子化される**
   ため、リップモーションの開き量と境界が鈍る。直経路はフル自動・音声→VMD の要件(1.1)とも整合する。
 - 共有するのは**音声前段(vocal_analysis)とモーフ生成コア(lipsync)**であって vpr ではない。各CLIは2入力抽象
-  (口形イベント列＋開き量)を別々の入口で用意して同じコアへ渡すので([lipsync.md](../../libs/lipsync/lipsync.md) §2)、
+  (口形イベント列＋開き量)を別々の入口で用意して同じコアへ渡すので([lipsync.md §2](../../libs/lipsync/lipsync.md#2-入力契約))、
   コア再利用による効率と直経路による品質を両立できる。
 - この劣化評価は設計上の判断であり、`vpr` の読み書きが整えば(vpr 経路を実際に通して)実測で確かめる。
 
@@ -107,7 +107,7 @@ MMDで歌にリップモーションを手付けするのは手間が大きい�
 ## 3. アニメ的リップモーションの定義(品質基準)
 
 本ツールが満たすべきリップモーションの質(アニメ的・MMD的な、はっきり開閉するリップモーション)の品質基準は、共有モジュール
-`lipsync` の [lipsync.md §3](../../libs/lipsync/lipsync.md) を正本とする。設計された母音合成・開きすぎない・保持と
+`lipsync` の [lipsync.md §3](../../libs/lipsync/lipsync.md#3-アニメ的リップモーションの定義品質基準) を正本とする。設計された母音合成・開きすぎない・保持と
 最小保持・協調調音・同母音連結・口形の先行準備・子音と無音の口形・疎なキーといった要件は
 そちらで定義し、本書では重複定義しない。
 
@@ -133,9 +133,9 @@ MMDで歌にリップモーションを手付けするのは手間が大きい�
 ```
 
 - すべての処理は `song2vmd` の1コマンド内で完結する。音声前段の外部ツール(分離・認識・復号)は
-  `vocal_analysis` が内部で呼ぶ。利用者が外部ツールのコマンドを手で叩くことはない(vocal_analysis.md §8)。
+  `vocal_analysis` が内部で呼ぶ。利用者が外部ツールのコマンドを手で叩くことはない([vocal_analysis.md §8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))。
 - S0–S3 の責務(入力読み込み・ch/SR保持・入力レベル正規化・ボーカル分離・音素/母音認識・RMS算出・相対正規化)と
-  正規化中間形式・IPA→5母音写像規則は **vocal_analysis.md §2〜§7 を正本**とする。`song2vmd` はその共有出力を
+  正規化中間形式・IPA→5母音写像規則は **[vocal_analysis.md §2](../../libs/vocal_analysis/vocal_analysis.md#2-共有出力正規化中間形式)〜[§7](../../libs/vocal_analysis/vocal_analysis.md#7-音素5母音写像) を正本**とする。`song2vmd` はその共有出力を
   消費する(6.1)。
 - **口形イベント確定(`song2vmd` 入口)**: vocal_analysis の音素セグメント列に IPA→5母音写像(規則は
   vocal_analysis 提供)を適用し、両唇閉鎖判定・撥音判定・gap解決・無音/閉口の確定・母音境界のRMSオンセット補正を
@@ -169,16 +169,16 @@ song2vmd INPUT [options]
 | `--model-name NAME` | `song2vmd <実行中のツールバージョン>`(例: `song2vmd 1.2.3`) | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
 | `--style NAME` | `pop` | 歌い方スタイルプリセット(8.1)。開き量レンジ・タイミングを切り替える |
 | `--separate-vocals MODE` | `always` | ボーカル分離 `always` / `never` |
-| `--separator NAME` | vocal_analysis の既定アダプタ | S1ボーカル分離バックエンドの選択(7章)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3) |
-| `--recognizer-model-id ID` | vocal_analysis の既定内容認識モデル(`ContentRecognizerModel.model_id`) | S2内容認識モデルの指定(vocal_analysis.md §5.2・§8.3)。未指定時は vocal_analysis の既定モデルを使う |
+| `--separator NAME` | vocal_analysis の既定アダプタ | S1ボーカル分離バックエンドの選択(7章)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う([vocal_analysis.md §8.2](../../libs/vocal_analysis/vocal_analysis.md#82-アダプタの登録と選択)〜[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補)) |
+| `--recognizer-model-id ID` | vocal_analysis の既定内容認識モデル(`ContentRecognizerModel.model_id`) | S2内容認識モデルの指定([vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化)・[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補))。未指定時は vocal_analysis の既定モデルを使う |
 | `--recognizer-model-revision REV` | 既定モデルのリビジョン(`--recognizer-model-id` 未指定時)。`--recognizer-model-id` 指定時は未指定なら最新リビジョン | S2内容認識モデルのリビジョン指定(`ContentRecognizerModel.model_revision`)。`--recognizer-model-id` と組で使う。`--recognizer-model-id` を指定せず本引数だけを指定するのは対象が無く無意味なため引数エラー(11章・12.3) |
-| `--no-recognizer-retry` | off(既定でリトライ有効) | S2内容認識のトリガ式リトライ(エコー幻覚・反復幻覚。主モデル自身をプロンプト無しで再認識する。vocal_analysis.md §5.2手順3)を無効にする。既定onの明示形 `--recognizer-retry` も受理する |
-| `--forced-aligner NAME` | `wav2vec2-ctc-forcedalign` | S2強制アライメント段のバックエンド選択(vocal_analysis.md §5.3・§8.3)。値・選択肢は vocal_analysis の登録アダプタの安定id。既定のままなら以下の `--sofa-*` 系は一切不要で追加設定無しに現行どおり動く |
+| `--no-recognizer-retry` | off(既定でリトライ有効) | S2内容認識のトリガ式リトライ(エコー幻覚・反復幻覚。主モデル自身をプロンプト無しで再認識する。[vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化)手順3)を無効にする。既定onの明示形 `--recognizer-retry` も受理する |
+| `--forced-aligner NAME` | `wav2vec2-ctc-forcedalign` | S2強制アライメント段のバックエンド選択([vocal_analysis.md §5.3](../../libs/vocal_analysis/vocal_analysis.md#53-sofa経路-単語単位アライメント)・[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補))。値・選択肢は vocal_analysis の登録アダプタの安定id。既定のままなら以下の `--sofa-*` 系は一切不要で追加設定無しに現行どおり動く |
 | `--sofa-python PATH` | 無し(必須) | SOFA専用venvのPython実行ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定(`wav2vec2-ctc-forcedalign`)時は指定しても未使用 |
 | `--sofa-root PATH` | 無し(必須) | SOFAリポジトリのルートパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
 | `--sofa-checkpoint PATH` | 無し(必須) | SOFAチェックポイント(`.ckpt`)ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
 | `--sofa-timeout SEC` | `300` | SOFAサブプロセス1回あたりのタイムアウト秒数(正の数値のみ) |
-| `--english-katakana-method NAME` | `arpakana` | S2 G2Pの英語カタカナ化フォールバック(vocal_analysis.md §5.2手順4)の変換方式選択。`arpakana`(ルールベース。生成モデル・GPU不要)または `tinyllama-katakana-converter`(生成モデル) |
+| `--english-katakana-method NAME` | `arpakana` | S2 G2Pの英語カタカナ化フォールバック([vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化)手順4)の変換方式選択。`arpakana`(ルールベース。生成モデル・GPU不要)または `tinyllama-katakana-converter`(生成モデル) |
 | `--device MODE` | `auto` | 実行デバイスの選択(`auto` / `cpu`)。`auto` は環境から自動選択(GPU(CUDA)が利用可能ならGPU)。`cpu` はGPUを使わずCPUで実行する(音声前段の全モデルと、環境を継承するSOFAサブプロセスを含む)。GPUはあるがVRAMが不足する環境の回避手段 |
 | `--n-morph` | off(既定は閉口) | 撥音(音節末の鼻音)に「ん」モーフ(`MouthShape.N`)を使う(既定off。6.3)。既定offの明示形 `--no-n-morph` も受理する |
 | `--vowel-gain a:i:u:e:o` | `1:1:1:1:1` | 母音別(あ/い/う/え/お)の開き量微調整倍率。プリセットの母音別倍率(8.1)へ要素ごとに乗算する(既定はプリセット値そのまま。プリセット非依存の共通既定)。「ん」はプリセット値のままで本引数の対象外(8.2) |
@@ -198,9 +198,9 @@ song2vmd INPUT [options]
 | `--describe` | — | オプション定義とプリセット一覧を構造化して出力し終了する(5.5・12章) |
 
 音声前段の外部ツールは vocal_analysis が内部で呼ぶ(7章)。モデル等の細かな呼び出し設定は vocal_analysis が
-保持し(vocal_analysis.md §5.1・§8)、CLIにはバックエンドの「選択」・実行デバイスの指定(`--device`)と、
+保持し([vocal_analysis.md §5.1](../../libs/vocal_analysis/vocal_analysis.md#51-母音子音の判定基準とフレーム時間rms不要)・[§8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))、CLIにはバックエンドの「選択」・実行デバイスの指定(`--device`)と、
 リップモーションの「効かせ方」のみを置く。
-挙動パラメータの取り回しは[CLI インターフェース規約](../../docs/conventions/cli-interface.md) §9 に従う。
+挙動パラメータの取り回しは[CLI インターフェース規約 §9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し) に従う。
 
 ### 5.3 入出力要件
 
@@ -209,26 +209,26 @@ song2vmd INPUT [options]
 - 文字列(モーフ名・モデル名)はShift-JIS(cp932)で格納する。
 - フル自動のみとし、中間生成物を入力に取ってステージをスキップする運用は設けない。song2vmd 自身は、
   `--keep-intermediate` 未指定時、診断用の中間生成物を追加でディスクへ書き出さない(vocal_analysis が
-  S1 で内部的に使う非公開の一時領域は vocal_analysis.md §4、および
-  [一時ファイル・中間生成物の配置規約](../../docs/conventions/temporary-and-intermediate-files.md) §2.2
+  S1 で内部的に使う非公開の一時領域は [vocal_analysis.md §4](../../libs/vocal_analysis/vocal_analysis.md#4-ボーカル抽出s1)、および
+  [一時ファイル・中間生成物の配置規約 §2.2](../../docs/conventions/temporary-and-intermediate-files.md#22-非公開の内部一時領域)
   の対象であり、本節の対象外)。指定時のみ、出力に隣接する `<出力ファイル名>.intermediate/` へ
   `input_normalized.wav`(S0正規化PCM)・`vocal.wav`(分離後ボーカルWAV。長尺分割時は重複区間を除いた
   各チャンクの担当区間(6.6)を連結した曲全体分。`--separate-vocals never` 指定時は分離を行わないため
   `input_normalized.wav` と同内容)・`segments.json`(S2認識結果)として保存する(5.2)。置き場所・命名・
-  有効化契約の一般規約は同配置規約 §2.3 を正本とし、本機能はそこに従う。`--dry-run` と併用した場合も、
+  有効化契約の一般規約は同配置規約 [§2.3](../../docs/conventions/temporary-and-intermediate-files.md#23-利用者向けオプトイン診断用中間生成物) を正本とし、本機能はそこに従う。`--dry-run` と併用した場合も、
   最終VMDの書き出し(5.2)だけが抑制され、中間生成物の保存は実施する。
-- **上書きガード**: 出力先の既存ファイル保護は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)
-  §6 に従う(終了コード2。11章)。
+- **上書きガード**: 出力先の既存ファイル保護は[CLI インターフェース規約
+  §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性) に従う(終了コード2。11章)。
 - **出力の原子性**: VMD は一時ファイルへ書き切ってから最終パスへ置換する(`vmd.io`)。途中終了で中途半端な
   出力ファイルを残さない(中断は12章)。
-- **入出力の受け渡し・移植性**は規約 §9・§10 に従う(ファイルパス受け渡し・非ASCIIパス対応)。
+- **入出力の受け渡し・移植性**は規約 [§9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し)・[§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール) に従う(ファイルパス受け渡し・非ASCIIパス対応)。
 
 ### 5.4 進捗表示
 
 工程は `load`(音声読み込み)・`separate`(ボーカル分離)・`recognize`(音素認識)・`rms`(音量解析)・
 `events`(口形イベント確定)・`generate`(モーフ生成)・`write`(書き出し)の7段(12.1)。有効条件・
-表記・停滞回避・副作用専用等の一般契約は[CLIインターフェース規約](../../docs/conventions/cli-interface.md)
-§6が正。
+表記・停滞回避・副作用専用等の一般契約は[CLIインターフェース規約
+§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性)が正。
 
 `separate` 段(分離モデル)・`recognize` 段(内容認識モデル・音素モデル・
 `--english-katakana-method tinyllama-katakana-converter`選択時はカタカナ生成モデルも)では、
@@ -258,9 +258,9 @@ song2vmd INPUT [options]
   `mode:"describe"`)を出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない
   独立メタ操作。
 - `--help`/`--version` は `--machine` と併用しても人間向けテキストを出して終了コード0で終わり、イベント
-  ストリームには載せない(処理を起動しないメタ操作のため。規約 §3 のメタ操作の例外)。`--help` は各
+  ストリームには載せない(処理を起動しないメタ操作のため。規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動) のメタ操作の例外)。`--help` は各
   オプション・引数の役割を人間向けに説明し、対話利用者が `--help` だけで使い方を把握できるようにする。
-- 真偽フラグを対で持つ場合は `--x`/`--no-x` の様式に揃える(規約 §6)。
+- 真偽フラグを対で持つ場合は `--x`/`--no-x` の様式に揃える(規約 [§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性))。
 
 ---
 
@@ -269,7 +269,7 @@ song2vmd INPUT [options]
 ### 6.1 入力読み込み(S0)
 
 入力読み込み(復号・入力レベル正規化・チャンネル数/サンプルレート保持)は共有モジュール
-[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の S0(vocal_analysis.md §3)に委譲する。正規化の
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の S0([vocal_analysis.md §3](../../libs/vocal_analysis/vocal_analysis.md#3-入力読み込みs0))に委譲する。正規化の
 実処理そのもの(復号・レベル正規化)には `song2vmd` は関与しない。ただし `song2vmd` はその S0 出力(正規化PCM)
 をパイプライン内で保持し、長尺分割の境界決定・チャンク処理(6.6)、および `--keep-intermediate` の保存(5.3)
 に用いる。
@@ -280,24 +280,24 @@ song2vmd INPUT [options]
 ### 6.2 ボーカル抽出・音素認識・強弱RMS(S1–S3)
 
 ボーカル抽出(S1)・音素/母音認識(S2)・強弱RMS算出(S3)は共有モジュール
-[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する(vocal_analysis.md §4〜§6)。`song2vmd` は共有
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する([vocal_analysis.md §4](../../libs/vocal_analysis/vocal_analysis.md#4-ボーカル抽出s1)〜[§6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3))。`song2vmd` は共有
 出力(ボーカルWAV・音素セグメント列・RMS)を消費する。
 
-- **ボーカル抽出(S1)**: vocal_analysis.md §4。分離の挙動 `always`/`never` の選択は `song2vmd` の CLI
+- **ボーカル抽出(S1)**: [vocal_analysis.md §4](../../libs/vocal_analysis/vocal_analysis.md#4-ボーカル抽出s1)。分離の挙動 `always`/`never` の選択は `song2vmd` の CLI
   (`--separate-vocals`、5.2)で公開する。
-- **音素/母音認識(S2)**: vocal_analysis.md §5。母音/子音/gap の全被覆セグメント列＋IPAラベル(任意の信頼度)を
+- **音素/母音認識(S2)**: [vocal_analysis.md §5](../../libs/vocal_analysis/vocal_analysis.md#5-音素母音認識s2)。母音/子音/gap の全被覆セグメント列＋IPAラベル(任意の信頼度)を
   得る。内容認識モデルの選択は CLI(`--recognizer-model-id`・`--recognizer-model-revision`、5.2)で公開する。
-- **強弱RMS算出(S3)**: vocal_analysis.md §6。相対正規化したRMSを得る。RMS を使う判断(無音/閉口・開き量)は
+- **強弱RMS算出(S3)**: [vocal_analysis.md §6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3)。相対正規化したRMSを得る。RMS を使う判断(無音/閉口・開き量)は
   `song2vmd` 入口(6.3・6.4)。
 
 ### 6.3 口形イベント列の確定(入口)
 
 [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の音素セグメント列(母音/子音/gap＋IPAラベル)と RMS から、
 `song2vmd` 入口で口形イベント列(母音・「ん」・両唇閉鎖・無音)を確定する。母音認識そのもの・IPA→5母音写像規則・
-認識構成の採用と S-1 認識測定は vocal_analysis.md(§5・§7・§9)を正本とする。確定処理は次のとおり(確定した
+認識構成の採用と S-1 認識測定は [vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md)([§5](../../libs/vocal_analysis/vocal_analysis.md#5-音素母音認識s2)・[§7](../../libs/vocal_analysis/vocal_analysis.md#7-音素5母音写像)・[§9](../../libs/vocal_analysis/vocal_analysis.md#9-認識品質の測定s-1))を正本とする。確定処理は次のとおり(確定した
 口形イベント列からのリップモーション生成は lipsync。6.5):
 
-- **あいうえお写像の適用**: vocal_analysis の IPA→5母音写像規則(vocal_analysis.md §7)を母音セグメントへ適用し、
+- **あいうえお写像の適用**: vocal_analysis の IPA→5母音写像規則([vocal_analysis.md §7](../../libs/vocal_analysis/vocal_analysis.md#7-音素5母音写像))を母音セグメントへ適用し、
   a→あ, i→い, u→う, e→え, o→お とする。
 - **時刻の確定(オンセット補正)**: 認識のトークン境界を一次情報とし、近傍に S3 のRMS立ち上がり(オンセット)が
   あるときだけそれへ寄せて精緻化する。無い(レガートで同程度の音量が続く等)場合はトークン境界を用いる。
@@ -306,12 +306,12 @@ song2vmd INPUT [options]
   窓幅・傾きしきい値は 8.3 の初期パラメータと同様に実データで調整する。
 - **閉じ側の境界調整**: 認識構成の境界は母音の開始側が終端より相対的に正確で、終端(閉じ側=後続の
   子音・無音への切り替わり)は
-  近似となる(vocal_analysis.md §9。開始側にも歌唱ではフレーズ内のずれがある。10章)。閉じ側のタイミングは
+  近似となる([vocal_analysis.md §9](../../libs/vocal_analysis/vocal_analysis.md#9-認識品質の測定s-1)。開始側にも歌唱ではフレーズ内のずれがある。10章)。閉じ側のタイミングは
   上記のオンセット補正(母音開始側の判定が共有境界を動かすことで間接的に反映される)と、無音/閉口判定
   (6.4)の gap 走査だけで決まり、子音種別に応じた先行量調整や母音終端の打ち切り規則は持たない。息継ぎ
   (息の音が乗る短い区間)へ母音の開きが多少残ることは許容し、過剰に閉じ込まない側に倒す。
 - **観測できる音響イベントで規則を書く**: 文字列が無いため、字面上の特殊モーラ(促音・語末など)を音響
-  だけから一般には確定できない。撥音は採用構成(vocal_analysis.md §5.2)が専用の音素記号で頭子音の
+  だけから一般には確定できない。撥音は採用構成([vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化))が専用の音素記号で頭子音の
   鼻音と区別して出力するため、その記号から確定する(下記)。よって口形イベントの確定は次の観測可能な
   イベントに基づく:
   - **連続した同一母音区間**: 同一母音が続き、かつ間に子音を挟まない(認識上の分割による観測上の連続で、
@@ -321,19 +321,19 @@ song2vmd INPUT [options]
     間の子音が前後で同じ音素であっても(例:「たた」)同じ規則で独立イベントとして渡す: 前後で唇の方向・
     顎の開口減衰の分類が同じでも、モーラの区切り(子音の再構音)そのものは実在するため、独立イベントとして
     渡すことで lipsync 側がこの境界にモーラ境界の谷(開口減衰の強さに応じた深さの一時的な閉じ)を入れて
-    区別できるようにする(lipsync.md §4.2。谷はモーラの長さ・密集度によって間引かれたり、極端に短い
-    区間では単一のピークへ平滑化されたりする。同§4.2・§4.9)。各モーラの開き量はその区間ごとの代表RMSから
+    区別できるようにする([lipsync.md §4.2](../../libs/lipsync/lipsync.md#42-同一母音的口形の連結)。谷はモーラの長さ・密集度によって間引かれたり、極端に短い
+    区間では単一のピークへ平滑化されたりする。[lipsync.md §4.2](../../libs/lipsync/lipsync.md#42-同一母音的口形の連結)・[§4.9](../../libs/lipsync/lipsync.md#49-形状アタック保持リリース))。各モーラの開き量はその区間ごとの代表RMSから
     決まるため、開き量の違いがあればそこにも反映される。異なる母音は別の口形イベントとして渡す。統合の
     有無によらず、保持区間化・同母音連結・境界の協調調音は lipsync が行う(6.5)。
-  - **撥音区間**: 撥音専用の音素記号(採用構成=G2P強制アライメントでは `ɴ`。vocal_analysis.md
-    §5.2 の写像表で頭子音の鼻音(な行 `n`・にゃ行 `ɲ`・ま行 `m`/`mʲ` 等)とは記号が分かれているため、
+  - **撥音区間**: 撥音専用の音素記号(採用構成=G2P強制アライメントでは `ɴ`。[vocal_analysis.md
+    §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化) の写像表で頭子音の鼻音(な行 `n`・にゃ行 `ɲ`・ま行 `m`/`mʲ` 等)とは記号が分かれているため、
     後続母音の有無を観測しなくても記号だけで一意に判定できる)を持つ子音セグメントを、既定では閉口
     にする。`--n-morph`(5.2)指定時のみ
     「ん」(`MouthShape.N`)にする。音節末の鼻音は口を閉じ気味に保つ有声の鼻音で、`--n-morph` 指定時は
-    閉口や母音には倒さず「ん」モーフを正に立て(lipsync.md §2.1)、その開き量は区間の代表RMSから決める
+    閉口や母音には倒さず「ん」モーフを正に立て([lipsync.md §2.1](../../libs/lipsync/lipsync.md#21-口形イベントタイムライン))、その開き量は区間の代表RMSから決める
     (閉じ気味なので通常は控えめ。6.4)。既定(`--n-morph` 未指定)の閉口は開き量を持たない(0)。
   - **閉鎖・無音区間**: 子音セグメントがま行・ば行・ぱ行の頭子音(採用構成の音素記号で `m`/`mʲ`・`b`/`bʲ`・
-    `p`/`pʲ`。vocal_analysis.md §5.2)なら一瞬の閉口にする(撥音は専用記号 `ɴ` で上記のとおり
+    `p`/`pʲ`。[vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化))なら一瞬の閉口にする(撥音は専用記号 `ɴ` で上記のとおり
     区別されるため、ここで頭子音と撥音を振り分ける必要はない)。ɸ(ふ)は両唇音だが閉口しない(唇を
     丸める子音)ため閉鎖にしない。gap 区間は RMS で判定し、発声が続いている間は直前の母音的口形
     (母音・「ん」)を継続し、発声が終わった時点から gap の残りを無音(閉口)にする
@@ -355,9 +355,9 @@ song2vmd INPUT [options]
   しない(前後母音の協調調音は lipsync が扱う。6.5)。舌位置が主体の子音は、唇の方向は変えないが
   ApertureClass(開口減衰)により開口量を部分的に減衰させる。
 - **先頭子音種別の付与**: 各母音イベントには、唇に影響する子音の口形変調のため、先頭子音種別
-  (`lipsync` の ConsonantClass)を付与して渡す(判定・付与は入口の責務。lipsync.md §2.1)。母音セグメントに
+  (`lipsync` の ConsonantClass)を付与して渡す(判定・付与は入口の責務。[lipsync.md §2.1](../../libs/lipsync/lipsync.md#21-口形イベントタイムライン))。母音セグメントに
   時間的に隣接して先行する子音セグメント(複数あれば母音に隣接する最後のもの)の IPA から判定する
-  (採用構成=vocal_analysis.md §5.2 の音素記号で示す):
+  (採用構成=[vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化) の音素記号で示す):
   ɸ・w(ふ・わ)は ROUNDED、ɕ・tɕ・dʑ・ɲ・ç(し・ち・じ・にゃ行・ひゃ行)および硬口蓋化(`ʲ` 付き。
   きゃ/ぎゃ/びゃ/ぴゃ/みゃ行等の拗音)の子音は SPREAD、その他の子音は NEUTRAL、先行する隣接子音が
   無ければ NONE。判定表に無い子音は NEUTRAL に倒す(唇を動かさない扱い)。
@@ -369,7 +369,7 @@ song2vmd INPUT [options]
   クラスをその母音の ApertureClass として付与する: FIRM_CLOSURE > NARROW_CHANNEL > SLIGHT_CLOSURE >
   NONE(区切りからその母音までに対象子音が現れなければ NONE)。両唇閉鎖は独立した完全閉口イベントであり、それより前の
   非両唇子音による開口減衰を閉鎖後の母音へ引き継ぐ理由はないため、区切りとして扱う。判定表(採用構成
-  =vocal_analysis.md §5.2 の音素記号で示す):
+  =[vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化) の音素記号で示す):
   - `FIRM_CLOSURE`(舌先を歯茎へしっかり当てる): `t`, `d`, `n`, `ts`, `ɲ`(に行。硬口蓋鼻音だが「舌をしっかり
     当てる鼻音」として本クラスへ含める)。
   - `NARROW_CHANNEL`(狭めを作るが接触は無い/弱い): `s`, `z`, `ɕ`, `tɕ`, `dʑ`, `ç`, `j`。
@@ -395,7 +395,7 @@ song2vmd INPUT [options]
 ### 6.4 強弱(RMS)に基づく入口処理(S3の消費)
 
 RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) の S3
-(vocal_analysis.md §6)に委譲する(入力ゲインに不変)。`song2vmd` 入口は、その相対正規化済みRMSを使って
+([vocal_analysis.md §6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3))に委譲する(入力ゲインに不変)。`song2vmd` 入口は、その相対正規化済みRMSを使って
 無音/閉口判定と開き量決定を行う。
 
 - **低ダイナミクス曲での閉口抑制**: 相対正規化は曲内に十分な強弱(無音と発声の差)がある前提のため、終始
@@ -409,7 +409,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
   中央 60%(初期値)の平均RMSと、(b) 吸収した先行子音区間を含むモーラ区間全体の中央 60% の平均RMS、
   の大きい方とする。(a) を基本に置くのは、子音トランジェントで開き量が乱れるのを防ぐため(母音区間は
   vocal_analysis の音素セグメントから得る)。(b) との最大を取るのは、強制アライメント
-  (vocal_analysis.md §5.2)が伸ばして歌う発声の大部分を先行子音トークン側へ割り当て、母音区間を
+  ([vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化))が伸ばして歌う発声の大部分を先行子音トークン側へ割り当て、母音区間を
   数十msまで狭めることがあり、その狭い母音区間のRMSだけでは発声中のモーラを代表できない(大声で
   歌っている最中のモーラが無音補正で閉口したり、開き量が過小になる)ため。この代表RMSを、開き量の
   決定(6.5)・母音区間の無音補正(6.3・本節ヒステリシス)・低信頼/無声の母音判定(6.3)のすべてに使う。
@@ -420,7 +420,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
 - **gap の走査による分割**: 直前が母音的口形の gap は、gap 全体をひとまとめに判定せず、正規化RMS
   エンベロープを先頭から走査して判定する。伸ばして歌う発声の尾部と真の無音が1つの gap に混在する
   ことがあり(強制アライメントは伸ばした母音の大部分を母音セグメントの外へ割り当てる。
-  vocal_analysis.md §5.2 の既知の限界)、gap 全体の平均等による一発判定では継続・無音のどちらへ
+  [vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化) の既知の限界)、gap 全体の平均等による一発判定では継続・無音のどちらへ
   倒しても gap の一部に対して必ず誤るため。下降側しきい値以下が **0.2秒**(初期値)以上連続した
   最初の連続の開始時点、または gap 終端まで続く連続の開始時点で発声終了とみなし、そこで gap を
   分割して前半は直前の母音的口形の継続・残りは無音(閉口)とする。0.2秒の連続要件は、発声が同じ
@@ -436,21 +436,21 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
 ### 6.5 開き量の決定とモーフ生成への受け渡し
 
 キーフレーム生成そのもの(3章の品質基準を満たすアニメ的リップモーション)は共有モジュール `lipsync` の
-[lipsync.md §4](../../libs/lipsync/lipsync.md) のモーフ生成コアに委譲する。`song2vmd` は入口処理として開き量を決定し、
+[lipsync.md §4](../../libs/lipsync/lipsync.md#4-モーフ生成アルゴリズム) のモーフ生成コアに委譲する。`song2vmd` は入口処理として開き量を決定し、
 口形イベント列(6.3)・開き量・生成パラメータを `lipsync` に渡す。
 
 - **モーラ代表RMSの声量レンジ再正規化(song2vmd 入口)**: 6.4のモーラ代表RMSは曲全体のフレームRMS基準
-  ([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md) §6.1)で相対正規化された値であり、
+  ([vocal_analysis.md §6.1](../../libs/vocal_analysis/vocal_analysis.md#61-rms算出確定))で相対正規化された値であり、
   無音/発声の分離には有効だが、発声(母音・「ん」)区間だけを取り出すと正規化後の上端に偏りやすい。
   開き量の決定にだけ使う値として、曲全体の全モーラ(母音・「ん」)の代表RMS集合に対し、
-  vocal_analysis.md §6.1と同じ方式(パーセンタイル線形正規化。初期値 `p10`→0・`p90`→1、範囲外は
+  [vocal_analysis.md §6.1](../../libs/vocal_analysis/vocal_analysis.md#61-rms算出確定)と同じ方式(パーセンタイル線形正規化。初期値 `p10`→0・`p90`→1、範囲外は
   クリップ)で再正規化した値を用いる。無音/閉口判定(6.3・6.4のヒステリシス)・弱い/無声の母音判定
   (6.3)・低ダイナミクス抑制(6.4)は、この再正規化の対象にせず6.4の元の値(曲全体基準)をそのまま使う。
   長尺分割時は、結合後の曲全体のモーラ代表RMS集合に対して1回だけ再正規化を行う(6.6の曲全体基準の
   原則に従う)。分布に十分なばらつきが無い曲(縮退ケース。基準パーセンタイルの上下境界が一致する)
-  では、全モーラを一律0.5に倒す(vocal_analysis.md §6.1の同種の縮退処理は無音判定用の正規化のため
+  では、全モーラを一律0.5に倒す([vocal_analysis.md §6.1](../../libs/vocal_analysis/vocal_analysis.md#61-rms算出確定)の同種の縮退処理は無音判定用の正規化のため
   0.0に倒すが、本節は開き量という別用途のため、無音側でなく開閉の中間値0.5に倒す)。パーセンタイル比
-  の相対計算であり入力ゲインに不変(vocal_analysis.md §6.1と同じ理由)。パーセンタイル範囲は実データで
+  の相対計算であり入力ゲインに不変([vocal_analysis.md §6.1](../../libs/vocal_analysis/vocal_analysis.md#61-rms算出確定)と同じ理由)。パーセンタイル範囲は実データで
   調整する。モーラが0件の曲(発声区間が検出されない)では本節の再正規化処理自体を行わない(開き量を
   決定する対象が無いため)。
 - **開き量の決定(song2vmd 入口。RMS→開き量の写像)**: 各モーラ区間の再正規化後RMS(上記)を
@@ -459,7 +459,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
   長時間モーラのサブウィンドウ分割(後述)では、この項目のクランプする写像ではなく、分割後の項目で
   定める連続的な写像を用いる。声が強いモーラ
   ほど大きく、ただし上限を超えて開かない。**このRMS→開き量の写像は `song2vmd` 側に残し、`lipsync` へは
-  確定した開き量を渡す**(lipsync.md §2.2・§6)。`--intensity-curve` の指数と8.1の開き量レンジは、
+  確定した開き量を渡す**([lipsync.md §2.2](../../libs/lipsync/lipsync.md#22-開き量モーラ別の強弱)・[§6](../../libs/lipsync/lipsync.md#6-含まないもの呼び出し側の責務))。`--intensity-curve` の指数と8.1の開き量レンジは、
   上記の再正規化後RMS分布(0〜1に広く分布)を前提に実データで調整する。
 - **声量→開き量が機能している基準(実データ検証)**: モーラ代表RMSの再正規化とRMS→開き量の写像が
   実際に声量の強弱を開き量へ反映できているかは、代表サンプルで次の2基準の両方を満たすことで確認する。
@@ -477,7 +477,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
   イベントの先頭子音種別(ConsonantClass)・開口減衰種別(ApertureClass、いずれも6.3)、上記のモーラ別開き量、
   およびスタイルプリセット(8章)が与える生成パラメータ(アタック/リリース・協調調音・
   先行・最小保持・誇張など)。母音合成プロファイル・各生成パラメータの意味・キーフレーム生成方針
-  (母音合成・保持・協調調音・先行準備・最小保持・疎キー配置・伸び表現)は lipsync.md を
+  (母音合成・保持・協調調音・先行準備・最小保持・疎キー配置・伸び表現)は [lipsync.md](../../libs/lipsync/lipsync.md) を
   正本とし、本書では重複定義しない。
 - **無音/閉口・両唇閉鎖の確定は入口で行う**: 無音・休符の区間や両唇閉鎖は、6.3・6.4 の観測イベント規則
   (RMSヒステリシス・両唇音判定)で口形イベントとして確定してから `lipsync` に渡す。`lipsync` 内では音量判定を
@@ -486,7 +486,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
   実際の声量が変化することがあり、代表RMSを1つだけ使う通常の決定では区間内の変化が開き量へ反映されない。
   この変化を追従させるため、区間長が長いモーラを複数のサブウィンドウへ分割し、サブウィンドウごとに開き量を
   決めて、同じ母音的口形を持つ、時間順・隙間なく連続する複数の口形イベントとして `lipsync` へ渡す(`lipsync`
-  は既存の同母音連結(lipsync.md §4.2)によりこれらを1つの保持区間として連結し、各サブウィンドウの開き量を
+  は既存の同母音連結([lipsync.md §4.2](../../libs/lipsync/lipsync.md#42-同一母音的口形の連結))によりこれらを1つの保持区間として連結し、各サブウィンドウの開き量を
   強弱節点として扱う)。
   - **対象と閾値**: モーラ(母音・「ん」)の区間長(終了時刻マイナス開始時刻、秒)が閾値(初期値1.0秒)
     以上のとき、そのモーラを複数のサブウィンドウへ分割する。閾値未満のモーラは、モーラ全体から求めた代表
@@ -516,10 +516,10 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
     から一度だけ行う(サブウィンドウごとにやり直さない)。弱判定の場合は、全サブウィンドウの開き量へ一律に
     0.5倍のスケールを適用する。
   - **lipsyncへの受け渡し**: 分割後の各サブウィンドウは、元のモーラと同じ母音的口形を持つ、時間順・隙間
-    なく連続する複数の口形イベントとして、lipsync.md §2の入力契約に従ってlipsyncへ渡す。先頭サブウィンドウ
+    なく連続する複数の口形イベントとして、[lipsync.md §2](../../libs/lipsync/lipsync.md#2-入力契約)の入力契約に従ってlipsyncへ渡す。先頭サブウィンドウ
     だけが元のユニットの先頭子音種別(ConsonantClass)・開口減衰種別(ApertureClass)を持ち、2番目以降の
     サブウィンドウは両方ともNONEとする(2番目以降には実在の先頭子音が無いため)。lipsyncは同母音連結
-    (lipsync.md §4.2)によりこれらを1つの保持区間として連結し、各サブウィンドウの開き量を保持区間内の
+    ([lipsync.md §4.2](../../libs/lipsync/lipsync.md#42-同一母音的口形の連結))によりこれらを1つの保持区間として連結し、各サブウィンドウの開き量を保持区間内の
     強弱節点として扱う。ApertureClassを先頭サブウィンドウだけに残すのは、lipsyncのモーラ境界の谷が、内部
     境界の直後のサブウィンドウのApertureClassが非NONEであることを谷生成の候補条件の一つとするため(この値を
     NONEにすれば当該境界は谷生成の候補にすらならず、実在しない谷が挿入される余地を確実に断てる)。
@@ -597,7 +597,7 @@ RMSエンベロープの算出と相対正規化は [vocal_analysis](../../libs/
 音声前段(S0–S3)の外部ツール連携機構——内部呼び出し方針(利用者にコマンドを叩かせない)、アダプタ
 interface(Separator / Recognizer)、正規化中間形式、アダプタの登録と選択、採用ツールと代替候補、S-1 認識
 測定——は共有モジュール
-[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md)(§2・§8・§9)を正本とし、候補比較は
+[vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md)([§2](../../libs/vocal_analysis/vocal_analysis.md#2-共有出力正規化中間形式)・[§8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構)・[§9](../../libs/vocal_analysis/vocal_analysis.md#9-認識品質の測定s-1))を正本とし、候補比較は
 [vocal_analysis/external-tools.md](../../libs/vocal_analysis/external-tools.md) を補助資料とする。本書では重複定義しない。
 
 - 利用者は `song2vmd INPUT` の1コマンドだけを実行する。音声前段の外部ツール(分離・認識・復号)は
@@ -657,15 +657,15 @@ interface(Separator / Recognizer)、正規化中間形式、アダプタの登�
 生成コアを使うリップモーション生成系のMMD視覚チューニングで確定した標準値。他スタイルは未チューニングの
 出発点値で、必要になったら個別に視覚で詰める。プリセットは母音別倍率を含む上記の生成パラメータの
 大半を明示的に持つが、モーラ境界の谷(半幅/最低間隔)だけは全プリセットが `lipsync` の生成既定
-(lipsync.md §4.8)をそのまま使い、値を個別には持たない。
+([lipsync.md §4.8](../../libs/lipsync/lipsync.md#48-生成パラメータの一覧初期目安))をそのまま使い、値を個別には持たない。
 
 `pop` の最小保持(`--min-hold`。単位は本節冒頭のとおり30fpsフレーム)は、他スタイルおよび移植元の
-リップモーション生成系とは異なる値(1)を持つ。S2の最小滞在制約(vocal_analysis.md §5.2。単位は20msフレーム)
+リップモーション生成系とは異なる値(1)を持つ。S2の最小滞在制約([vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化)。単位は20msフレーム)
 により song2vmd のモーラ長は概ね最小滞在に相当する **120ms(30fps換算で約3.6フレーム)** 付近に
 集まり、`lipsync` の三角形短区間分類(30fpsフレームで「区間長 − 最小保持 < 2」なら三角形扱い。
-lipsync.md §4.4)の閾値に接近しやすい。最小保持がこの移植元の値(3)のままだと 3.6 − 3 = 0.6 < 2 で
+[lipsync.md §4.4](../../libs/lipsync/lipsync.md#44-最小保持競合短縮))の閾値に接近しやすい。最小保持がこの移植元の値(3)のままだと 3.6 − 3 = 0.6 < 2 で
 無音直後の母音(先行準備の対象)を含む多くのモーラが三角形扱いになり、三角形は先行準備の対象外
-(lipsync.md §4.9・§4.10)のため先行準備(`--anticipation`)が実効上まったく発動しない実測結果に
+([lipsync.md §4.9](../../libs/lipsync/lipsync.md#49-形状アタック保持リリース)・[§4.10](../../libs/lipsync/lipsync.md#410-先行準備anticipationと後行残しrelease-lag))のため先行準備(`--anticipation`)が実効上まったく発動しない実測結果に
 なった。1へ調整すると 3.6 − 1 = 2.6 ≥ 2 で三角形扱いを避けやすくなり、song2vmd の実際のモーラ長
 分布に合う(実データで再調整する)。
 
@@ -677,12 +677,12 @@ lipsync.md §4.4)の閾値に接近しやすい。最小保持がこの移植元
 ### 8.2 母音口形(母音合成プロファイルは lipsync が確定)
 
 母音ごとの口形を標準口モーフの重みへ合成する母音合成プロファイルは、共有モジュール `lipsync` が
-ドメイン規約として確定する。正本は [lipsync.md §4.1](../../libs/lipsync/lipsync.md) であり、本書は参照のみで
+ドメイン規約として確定する。正本は [lipsync.md §4.1](../../libs/lipsync/lipsync.md#41-母音合成プロファイル純母音子音変調開口減衰) であり、本書は参照のみで
 定義を複製しない(主: `lipsync` / 従: 本書)。`song2vmd` はプロファイルを定義・上書きせず、6.3 で確定した
 口形イベント列と開き量・生成パラメータ(誇張係数など)を `lipsync` へ渡す(6.5)。`song2vmd` 側で母音の
 口形に関与するのは母音別の開き量倍率(プリセットの母音別倍率と `--vowel-gain`)と開き量レンジ・上限
 (8.1・8.3)であって、母音→モーフ重みの合成規則そのものではない。`lipsync` の `vowel_scale` は
-母音的口形別(a, i, u, e, o, ん)の6要素倍率(lipsync.md §4.8)なので、`song2vmd` は**プリセットの
+母音的口形別(a, i, u, e, o, ん)の6要素倍率([lipsync.md §4.8](../../libs/lipsync/lipsync.md#48-生成パラメータの一覧初期目安))なので、`song2vmd` は**プリセットの
 母音別倍率(6要素。8.1)の a〜o の5要素へ `--vowel-gain` の5母音値を要素ごとに乗算**し、「ん」は
 プリセット値のまま `(a, i, u, e, o, ん)` の6要素として渡す。`--vowel-gain` はプリセットのチューニング済み
 バランスからの相対微調整であり(既定 1:1:1:1:1 はプリセット値そのまま)、撥音の開き量は `--vowel-gain`
@@ -734,12 +734,12 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 - 日本語の歌のみを対象とする。母音認識の誤り(歌唱の崩れ・ロングトーン・無声化・コーラス混入など)は
   そのまま口形に出る。
 - 母音認識は歌唱で誤ることがある。認識方式・認識構成の選定と品質測定は vocal_analysis が正本
-  (vocal_analysis.md §5・§9)。認識の時刻は開始側が母音の終端(閉じ側)より相対的に正確で、終端は
+  ([vocal_analysis.md §5](../../libs/vocal_analysis/vocal_analysis.md#5-音素母音認識s2)・[§9](../../libs/vocal_analysis/vocal_analysis.md#9-認識品質の測定s-1))。認識の時刻は開始側が母音の終端(閉じ側)より相対的に正確で、終端は
   近似のため、境界は入口の
   RMSオンセット補正・閉じ側調整で補正する(6.3・6.4)。ただし開始側にも歌唱ではフレーズ内の
   ずれ(次項)がある。将来、任意の歌詞テキスト指定による精度向上の余地を残す。
 - **フレーズ内のモーラ時刻ずれへの入口側補正は実測で棄却済み(再試行しない)**: 歌唱では認識の
-  フレーズ内時刻が実発声から数百msずれることがある(音響証拠の欠如による。vocal_analysis.md §5.2 の
+  フレーズ内時刻が実発声から数百msずれることがある(音響証拠の欠如による。[vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化) の
   既知の限界「歌唱でのフレーズ内時刻ずれ」)。これを入口側で補正する次の2方式は、人手作成の
   リップシンクVMDを参照とした母音一致の開発時比較(vocal_analysis の S-1 測定とは別)の実測で
   効果が無い(悪化する)ことを確認済み: (a) RMSエンベロープの谷(子音の閉鎖・息継ぎ)へモーラ
@@ -751,7 +751,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
   前提自体が成立しない)。時刻ずれの根治は vocal_analysis 側の音響モデル/アライナー差し替えで行う。
 - 処理資源に配慮し、長尺は自動分割する(6.6。VMDフレーム番号は u32 で十分大きく上限対策ではない)。
 - 音声前段の入力読み込みの方式(対応形式・復号のフォールバック・復号器を再配布しない方針・利用者にコマンドを
-  叩かせない方針)は vocal_analysis.md §3・§8 を正本とする(7章)。
+  叩かせない方針)は [vocal_analysis.md §3](../../libs/vocal_analysis/vocal_analysis.md#3-入力読み込みs0)・[§8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構) を正本とする(7章)。
 - 外部ツール・モデルの取得失敗や実行失敗の場合は、どのステージで失敗したかを明示して停止する
   (終了コード4・`stage_failed`。11章・12.3)。
 - 将来拡張(初期非対象): 感情・表情モーフの付与、英語等の多言語対応、歌詞テキスト指定による高精度化。
@@ -769,7 +769,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 | 4 | 音声前段の外部依存の失敗(復号器未検出・分離/認識のモデル取得・実行失敗。失敗ステージを明示する。10章) |
 | 130 | 協調的な中断(Ctrl-C 等。12.4) |
 
-- `0`〜`3` は[CLI インターフェース規約](../../docs/conventions/cli-interface.md) §5 の基底と同じ意味。
+- `0`〜`3` は[CLI インターフェース規約 §5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の基底と同じ意味。
   `4` は song2vmd 固有の追加コード、`130` は全ツール共通の中断予約コードで、いずれも基底 `0`〜`3` の意味へ
   押し込めない。
 - 想定外の内部エラーは最も近い基底へ寄せて `1` で終える。機械モードでは `internal_error` の error イベント
@@ -788,13 +788,13 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 イベント送出は共有基盤 [cli_events](../../libs/cli_events/cli_events.md) を用いる。本章は **song2vmd 固有の
 ペイロード形・`code` 値**を定める(規約は種別の語彙と終端規則のみを共通化し、ツール固有ペイロードは持たない)。
 
-- **チャネル固定・符号化**(規約 §3・§10): 機械モードの標準出力は §12.1 のイベント**のみ**。人間向けログ・
+- **チャネル固定・符号化**(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動)・[§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール)): 機械モードの標準出力は [§12.1](#121-イベントペイロード) のイベント**のみ**。人間向けログ・
   警告テキストは標準エラーへ出す。
-- **終端規則**(規約 §4): ストリームは result または error の**ちょうど1つ**で終端する(強制終了時のみ
+- **終端規則**(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力)): ストリームは result または error の**ちょうど1つ**で終端する(強制終了時のみ
   例外。12.4)。
 - 各イベントは種別フィールド `type` を持つ。`code` は機械利用側の分岐に使い、人間向け `message` と分離する。
   song2vmd 由来の `code` は安定 snake_case とする。
-- **イベント契約の進化**は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
+- **イベント契約の進化**は規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換) に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
   受信側は未知要素を無視できる前提)。実装で増える警告・統計は本章へ追記して追加する。
 
 ### 12.1 イベントペイロード
@@ -833,7 +833,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
     `process_rss_mib`(検出時点の本プロセスツリーの使用量)・`ram_total_mib`(搭載RAM量)。
     いずれもMiBの整数。
 
-  その他の警告は実装で本章へ追記して増やす(追加は後方互換。規約 §4.1)。
+  その他の警告は実装で本章へ追記して増やす(追加は後方互換。規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換))。
 - **result**: 正常終了の終端イベント。`mode` で形が決まる:
   - `mode:"run"`(通常実行): `{type:"result", mode:"run", output, keys, backends, style, separated,
     phonemes, morae, merged_morae, coverage, closed_ranges, max_opening, duration_sec}`。
@@ -891,7 +891,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 | 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。組み合わせ検証(5.2)も含む: `--recognizer-model-id` を指定せず `--recognizer-model-revision` だけを指定した場合、`--forced-aligner sofa-forcedalign` 選択時に `--sofa-python`/`--sofa-root`/`--sofa-checkpoint` のいずれかが欠落した場合 | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は対象引数の長形式フラグ名(SOFA必須検証は `--sofa-python`→`--sofa-root`→`--sofa-checkpoint` の順で最初に見つかった欠落1件のみ) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定(5.3) | `output_exists` | `"--output"` | 2 |
 | 出力書き込み失敗、または `--keep-intermediate` 指定時の中間生成物書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"` または `"--keep-intermediate"`(+ `path`) | 3 |
-| 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない(vocal_analysis.md §3) | `decoder_missing` | `"input"` | 4 |
+| 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない([vocal_analysis.md §3](../../libs/vocal_analysis/vocal_analysis.md#3-入力読み込みs0)) | `decoder_missing` | `"input"` | 4 |
 | 分離・認識のモデル取得/実行失敗 | `stage_failed`(+ `stage`) | `null` | 4 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
@@ -901,7 +901,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 - `internal_error` は表の各分類に当たらない未捕捉例外の受け皿で、CLI 本体の全体をトップレベルで
   捕捉して畳む。`KeyboardInterrupt` は内部エラーでなく中断(`cancelled`/`130`、12.4)として手前で分岐する。
 - 複数の検証失敗が同一終了コードへ集約される場合も、`code`/`field` でどの検証がなぜ失敗したかを区別できる
-  ようにする(規約 §5)。
+  ようにする(規約 [§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード))。
 
 ### 12.4 中断
 
@@ -914,6 +914,6 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
   **機械モード**では `cancelled` の error イベントを標準出力へ出してストリームを終端し、**非機械モード**では
   標準出力に JSON を出さず中断理由を標準エラーへ1行出す。どちらも終了コード `130` を返す。
 - **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
-  扱う。橋渡しの要否・実装は共有基盤([cli_events.md](../../libs/cli_events/cli_events.md) §5)が正。
-- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の唯一の例外)。
+  扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) の唯一の例外)。
   原子性により中途半端な出力は残らない。
