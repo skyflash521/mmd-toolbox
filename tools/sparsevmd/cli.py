@@ -24,9 +24,10 @@ from cli_events import (
     error_event,
     install_sigbreak_handler,
 )
+from cli_progress import progress
 from vmd import io
 
-from . import __version__, presets, progress, ranges, report, selection
+from . import __version__, presets, ranges, report, selection
 from .cuts import parse_cut_threshold_bone, parse_cut_threshold_camera
 from .reduce import (
     StrictError,
