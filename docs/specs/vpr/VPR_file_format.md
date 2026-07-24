@@ -66,7 +66,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `parts[]` | list | パート(歌唱区間/オーディオ区間) |
 | その他 | — | `color`/`busNo`/`volume`/`panpot`/`isMuted` 等 |
 
-### parts[](歌唱トラック)
+### `parts[]`(歌唱トラック)
 
 | フィールド | 型 | 説明 |
 |---|---|---|
