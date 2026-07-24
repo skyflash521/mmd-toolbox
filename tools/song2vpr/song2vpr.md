@@ -68,7 +68,7 @@
 ```
 
 - **音声前段(vocal_analysis)**: ボーカル抽出・音素認識は `vocal_analysis` に委譲し、ボーカルWAVと音素セグメント
-  列を得る(vocal_analysis.md §2〜§6)。
+  列を得る([vocal_analysis.md §2](../../libs/vocal_analysis/vocal_analysis.md#2-共有出力正規化中間形式)〜[§6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3))。
 - **F0ピッチ推定(`song2vpr` 固有)**: `vocal_analysis` のボーカルWAVから F0(基本周波数)と有声/無声を推定し、
   音高(半音/ノート番号)へ写像する。ピッチ推定は `song2vmd` では不要なため `vocal_analysis` には含めず、
   `song2vpr` 固有処理として置く。
@@ -77,8 +77,8 @@
   セグメントを基にする(意味のある歌詞書き起こしは行わない)。`--lyrics` なし時は表示歌詞に**母音仮名**
   (あ/い/う/え/お)、撥音「ん」(音節末の鼻音)の音符には「ん」を入れ、音素はセグメント由来を入れる。`--lyrics`
   指定時は歌詞テキストをモーラ単位で音符へ順次対応付ける。強弱は相対正規化RMSをベロシティ(0–127)へ写像する(7.2)。
-- **vpr 書き出し(vpr)**: 音符列・テンポを `vpr` のデータモデルへ載せ、vpr を書き出す(vpr.md §2・§4)。
-  `vpr` の書き出しは `song2vpr` 着手時に拡張する(vpr.md §4)。
+- **vpr 書き出し(vpr)**: 音符列・テンポを `vpr` のデータモデルへ載せ、vpr を書き出す([vpr.md §2](../../libs/vpr/vpr.md#2-データモデルvpr-が公開する抽象)・[§4](../../libs/vpr/vpr.md#4-書き出しwrite))。
+  `vpr` の書き出しは `song2vpr` 着手時に拡張する([vpr.md §4](../../libs/vpr/vpr.md#4-書き出しwrite))。
 
 ---
 
@@ -100,7 +100,7 @@ song2vpr INPUT [options]
 | `-o, --output PATH` | `<入力名>.vpr` | 出力 vpr |
 | `--overwrite` | off | 出力先の既存ファイルへの上書きを許可する(上書きガードの解除。5章) |
 | `--separate-vocals MODE` | `always` | ボーカル分離 `always` / `never`(vocal_analysis へ渡す) |
-| `--recognizer NAME` | vocal_analysis の既定アダプタ | 音素認識バックエンドの選択(vocal_analysis へ渡す)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う(vocal_analysis.md §8.2〜§8.3。採用構成の確定も同節が正本) |
+| `--recognizer NAME` | vocal_analysis の既定アダプタ | 音素認識バックエンドの選択(vocal_analysis へ渡す)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う([vocal_analysis.md §8.2](../../libs/vocal_analysis/vocal_analysis.md#82-アダプタの登録と選択)〜[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補)。採用構成の確定も同節が正本) |
 | `--tempo BPM` | `120` | テンポ(BPM)。未指定時は既定 120 で仮置きし警告を出す(自動推定は将来。7.3) |
 | `--lyrics PATH` | なし | 任意の歌詞テキスト(かな表記前提。モーラ単位で音符へ対応。漢字の読み変換は将来。7.2) |
 | `--dry-run` | off | 出力せず処理計画と診断を表示。引数検証(上書きガード等)は dry-run でも実施する |
@@ -111,8 +111,8 @@ song2vpr INPUT [options]
 | `--describe` | — | オプション定義を構造化して出力し終了する(4.4・9章) |
 
 音声前段のバックエンド選択(`--separate-vocals` / `--recognizer`)は `vocal_analysis` のアダプタを CLI で公開する
-(選択肢の追加・切り替えは vocal_analysis 側。vocal_analysis.md §8)。挙動パラメータの取り回しは
-[CLI インターフェース規約](../../docs/conventions/cli-interface.md) §9 に従う。
+(選択肢の追加・切り替えは vocal_analysis 側。[vocal_analysis.md §8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))。挙動パラメータの取り回しは
+[CLI インターフェース規約 §9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し) に従う。
 
 ### 4.3 進捗表示
 
@@ -136,9 +136,9 @@ song2vpr INPUT [options]
 - `--describe`: 自己記述。音声を読まずにオプション定義の result イベント(9章の `mode:"describe"`)を出して
   終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作。
 - `--help`/`--version` は `--machine` と併用しても人間向けテキストを出して終了コード0で終わり、イベント
-  ストリームには載せない(処理を起動しないメタ操作のため。規約 §3 のメタ操作の例外)。`--help` は各
+  ストリームには載せない(処理を起動しないメタ操作のため。規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動) のメタ操作の例外)。`--help` は各
   オプション・引数の役割を人間向けに説明し、対話利用者が `--help` だけで使い方を把握できるようにする。
-- 真偽フラグを対で持つ場合は `--x`/`--no-x` の様式に揃える(規約 §6)。
+- 真偽フラグを対で持つ場合は `--x`/`--no-x` の様式に揃える(規約 [§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性))。
 
 ---
 
@@ -147,12 +147,12 @@ song2vpr INPUT [options]
 - 出力 vpr の書き出しは `vpr` に委譲する。`song2vpr` は vpr のバイナリ/直列化構造を直接扱わない。
 - 音声前段(分離・認識)は `vocal_analysis` の共有出力を使う。利用者は `song2vpr INPUT` の1コマンドだけを実行し、
   外部ツールは内部で呼ばれる。
-- **上書きガード**: 出力先の既存ファイル保護は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)
-  §6 に従う(終了コード2。8章)。
+- **上書きガード**: 出力先の既存ファイル保護は[CLI インターフェース規約
+  §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性) に従う(終了コード2。8章)。
 - **出力の原子性**: vpr は一時ファイルへ書き切ってから最終パスへ置換する(書き出し自体は `vpr` へ委譲し、
   一時パスへの書き出しと最終パスへの置換は `song2vpr` が行う)。途中終了で中途半端な出力ファイルを残さない
   (中断は9章)。
-- **入出力の受け渡し・移植性**は規約 §9・§10 に従う(ファイルパス受け渡し・非ASCIIパス対応)。
+- **入出力の受け渡し・移植性**は規約 [§9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し)・[§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール) に従う(ファイルパス受け渡し・非ASCIIパス対応)。
 
 ---
 
@@ -162,7 +162,7 @@ song2vpr INPUT [options]
   ピッチ推定・音符分割・歌詞/音素対応付けという `song2vpr` 固有処理を担う。
 - 時間軸: `vocal_analysis` の出力は秒。`vpr` は vpr のテンポに基づく時間表現(tick)を扱う。秒→tick の変換
   (テンポは `--tempo` 指定または既定 120 BPM の仮置き。自動推定は将来)は `song2vpr` 側で行う(7.3)。
-- 設計境界どおり、CLI は別CLIに依存しない(`song2vmd.md` を参照しない)。共有は `vocal_analysis`・`vpr` を
+- 設計境界どおり、CLI は別CLIに依存しない([`song2vmd.md`](../song2vmd/song2vmd.md) を参照しない)。共有は `vocal_analysis`・`vpr` を
   通じてのみ行う。
 
 ---
@@ -180,8 +180,8 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 - **半音丸め**: 有声フレームの F0(Hz)を `note = round(69 + 12·log2(F0/440))`(A4=440Hz=MIDI 69)で MIDI
   ノート番号へ丸める。
 - **無声→休符**: 有声区間のみ音符化し、無声(F0 の有声/無声判定が無声)の区間は音符を作らない(休符は
-  `vpr` が発音区間の補集合として導出。[vpr.md](../../libs/vpr/vpr.md) §2.1)。gap セグメントは**それ単独では
-  休符にしない**: gap は認識器が音素を割り当てなかった区間で発声の継続中にも出る(vocal_analysis.md §5)
+  `vpr` が発音区間の補集合として導出。[vpr.md §2.1](../../libs/vpr/vpr.md#21-公開する具体型と関数))。gap セグメントは**それ単独では
+  休符にしない**: gap は認識器が音素を割り当てなかった区間で発声の継続中にも出る([vocal_analysis.md §5](../../libs/vocal_analysis/vocal_analysis.md#5-音素母音認識s2))
   ため、有声なら音符化対象に含める(`lyric`/`phonemes` は 7.2 のとおり重なる音素セグメントから導出し、
   無ければフォールバックする)。
 - **同一音高連結**: 隣接する有声区間が同一の丸めノート番号で、間に休符(無声)も母音の切り替わり
@@ -193,14 +193,14 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 
 ### 7.2 歌詞・音素・強弱の付与
 
-最終音符区間の各音符に `vpr.Note` の `lyric`・`phonemes`・`velocity` を割り当てる(vpr.md §2.1)。
+最終音符区間の各音符に `vpr.Note` の `lyric`・`phonemes`・`velocity` を割り当てる([vpr.md §2.1](../../libs/vpr/vpr.md#21-公開する具体型と関数))。
 
 - **`phonemes`(常に)**: 音符区間に重なる音素セグメント(vowel/consonant)を時間順に並べ、各 IPA を `vpr` の
   音素表現へ写像した列とする。`phoneme` が `None` のセグメント・gap セグメントは除外し、除外で空になっても
   許容する。IPA→VOCALOID 日本語音素アルファベットの具体対応表は `vpr` の音素表現の確定に従う
-  (vpr.md §4。「`None`・gap を除く音素セグメントを時間順に採る」という規則自体は記号集合に依らない)。
+  ([vpr.md §4](../../libs/vpr/vpr.md#4-書き出しwrite)。「`None`・gap を除く音素セグメントを時間順に採る」という規則自体は記号集合に依らない)。
 - **`lyric`(`--lyrics` なし)**: 音符区間で最も長い vowel セグメントの IPA を IPA→5母音写像
-  (vocal_analysis.md §7)で5母音へ落とし、対応する母音仮名(あ/い/う/え/お)を入れる。vowel セグメントが無く
+  ([vocal_analysis.md §7](../../libs/vocal_analysis/vocal_analysis.md#7-音素5母音写像))で5母音へ落とし、対応する母音仮名(あ/い/う/え/お)を入れる。vowel セグメントが無く
   鼻音子音セグメント(IPA の m/n/ŋ/ɲ/ɴ 等)が主体の音符は撥音「ん」(音節末=後続母音を持たない有声の鼻音)として
   歌詞「ん」を入れる。母音も鼻音も得られない音符は「あ」を入れ、診断に記録する。
 - **`lyric`(`--lyrics` あり)**: 歌詞テキストを**モーラ単位**に分割し、先頭から1音符=1モーラで対応付ける
@@ -237,7 +237,7 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 | 4 | 音声前段の外部依存の失敗(復号器未検出・分離/認識のモデル取得・実行失敗。失敗ステージを明示する) |
 | 130 | 協調的な中断(Ctrl-C 等。9.4) |
 
-- `0`〜`3` は[CLI インターフェース規約](../../docs/conventions/cli-interface.md) §5 の基底と同じ意味。
+- `0`〜`3` は[CLI インターフェース規約 §5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の基底と同じ意味。
   `4` は song2vpr 固有の追加コード、`130` は全ツール共通の中断予約コードで、いずれも基底 `0`〜`3` の意味へ
   押し込めない。
 - 想定外の内部エラー(F0推定・音符分割・書き出し等の未捕捉例外)は最も近い基底へ寄せて `1` で終える。
@@ -256,13 +256,13 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 イベント送出は共有基盤 [cli_events](../../libs/cli_events/cli_events.md) を用いる。本章は **song2vpr 固有の
 ペイロード形・`code` 値**を定める(規約は種別の語彙と終端規則のみを共通化し、ツール固有ペイロードは持たない)。
 
-- **チャネル固定・符号化**(規約 §3・§10): 機械モードの標準出力は §9.1 のイベント**のみ**。人間向けログ・
+- **チャネル固定・符号化**(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動)・[§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール)): 機械モードの標準出力は [§9.1](#91-イベントペイロード) のイベント**のみ**。人間向けログ・
   警告テキストは標準エラーへ出す。
-- **終端規則**(規約 §4): ストリームは result または error の**ちょうど1つ**で終端する(強制終了時のみ
+- **終端規則**(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力)): ストリームは result または error の**ちょうど1つ**で終端する(強制終了時のみ
   例外。9.4)。
 - 各イベントは種別フィールド `type` を持つ。`code` は機械利用側の分岐に使い、人間向け `message` と分離する。
   song2vpr 由来の `code` は安定 snake_case とする。
-- **イベント契約の進化**は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
+- **イベント契約の進化**は規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換) に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
   受信側は未知要素を無視できる前提)。実装で増える警告・統計は本章へ追記して追加する。
 
 ### 9.1 イベントペイロード
@@ -277,7 +277,7 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 - **warning**: `{type:"warning", code, message}`。仕様が定める警告は `tempo_defaulted`(`--tempo` 未指定で
   120 BPM を仮置きした。7.3)、`non_kana_skipped`(歌詞の非かな文字を読み飛ばした。7.2)、
   `mora_count_mismatch`(音符数とモーラ数が一致しなかった。7.2)。その他の警告は実装で本章へ追記して増やす
-  (追加は後方互換。規約 §4.1)。
+  (追加は後方互換。規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換))。
 - **result**: 正常終了の終端イベント。`mode` で形が決まる:
   - `mode:"run"`(通常実行): `{type:"result", mode:"run", output, notes, tempo_bpm, resolution, duration_sec,
     separated, recognizer, vowel_undetermined_notes, moraic_nasal_notes, fallback_lyric_notes, dropped_morae,
@@ -326,7 +326,7 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 | 出力先に既存ファイルがある・`--overwrite` 未指定(5章) | `output_exists` | `"--output"` | 2 |
 | `--lyrics` のファイルを読めない | `lyrics_unreadable` | `"--lyrics"`(+ `path`) | 1 |
 | 出力書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"`(+ `path`) | 3 |
-| 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない(vocal_analysis.md §3) | `decoder_missing` | `"input"` | 4 |
+| 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない([vocal_analysis.md §3](../../libs/vocal_analysis/vocal_analysis.md#3-入力読み込みs0)) | `decoder_missing` | `"input"` | 4 |
 | 分離・認識のモデル取得/実行失敗 | `stage_failed`(+ `stage`) | `null` | 4 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
@@ -337,7 +337,7 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 - `internal_error` は表の各分類に当たらない未捕捉例外の受け皿で、CLI 本体の全体をトップレベルで
   捕捉して畳む。`KeyboardInterrupt` は内部エラーでなく中断(`cancelled`/`130`、9.4)として手前で分岐する。
 - 複数の検証失敗が同一終了コードへ集約される場合も、`code`/`field` でどの検証がなぜ失敗したかを区別できる
-  ようにする(規約 §5)。
+  ようにする(規約 [§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード))。
 
 ### 9.4 中断
 
@@ -349,6 +349,6 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
   **機械モード**では `cancelled` の error イベントを標準出力へ出してストリームを終端し、**非機械モード**では
   標準出力に JSON を出さず中断理由を標準エラーへ1行出す。どちらも終了コード `130` を返す。
 - **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
-  扱う。橋渡しの要否・実装は共有基盤([cli_events.md](../../libs/cli_events/cli_events.md) §5)が正。
-- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の唯一の例外)。
+  扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) の唯一の例外)。
   原子性により中途半端な出力は残らない。
