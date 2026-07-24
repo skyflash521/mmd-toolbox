@@ -19,8 +19,6 @@ from vocal_analysis.quiet import STDERR_WRITE_LOCK
 
 ProgressReporter = progress.ProgressReporter
 
-pytestmark = pytest.mark.xfail(reason="impl pending: song2vmdファサード化", strict=False)
-
 
 class _TTYStream(io.StringIO):
     def isatty(self):
