@@ -11,7 +11,8 @@
 import io
 import sys
 
-from shakevmd import cli, progress
+from cli_progress import progress
+from shakevmd import cli
 from vmd import io as vmd_io
 from vmd.types import CameraKey, VmdDocument
 

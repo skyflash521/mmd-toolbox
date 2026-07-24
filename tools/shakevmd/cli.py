@@ -20,9 +20,10 @@ from cli_events import (
     error_event,
     install_sigbreak_handler,
 )
+from cli_progress import progress
 from vmd import interp, io
 from vmd.reduce import Tolerances, reduce_camera_track
-from shakevmd import __version__, cuts, presets, progress
+from shakevmd import __version__, cuts, presets
 from shakevmd.bake import RangeOverlapError, bake
 from shakevmd.warn import ShakeWarning
 
