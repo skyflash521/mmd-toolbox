@@ -5,18 +5,18 @@
 ## 原則
 
 - 公開対象以外のツール・共通ライブラリには触れない。
-- 正本ドキュメント(versioning.md / 対象ツールの仕様書)を先に整えてから、実装・テストと整合させる。
+- 正本ドキュメント([versioning.md](versioning.md) / 対象ツールの仕様書)を先に整えてから、実装・テストと整合させる。
 - リリース作業一式(A〜C)は develop ブランチ上で行い、develop から main への PR を経て確定する(D)。複数ツールの同時リリースは1つの PR で行ってよい。
 - コミット手順はリポジトリの開発ルールに従う。各まとまりごとにコミットする。
 
 ## A. 版付け
 
-版番号の付与・正本の所在・表示内容はすべて versioning.md に従う。本節はその「作業」を列挙するに留め、規約自体は再掲しない。
+版番号の付与・正本の所在・表示内容はすべて [versioning.md](versioning.md) に従う。本節はその「作業」を列挙するに留め、規約自体は再掲しない。
 
-1. `<tool>/__init__.py` の `__version__` を更新する。初回は付与し(初期版の選び方は versioning.md §4)、以降のリリースでは該当桁を上げる(どの桁を上げるかは versioning.md §3)。
-2. CLI に `--version` を備える。初回はこのオプションを追加する(表示内容と番号源は versioning.md §1)。表示は対象ツール自身の版のみとする(共通ライブラリは版を持たない。versioning.md §1)。
-3. ドキュメントに版番号を記載している箇所(トップ `README.md` のツール表のバージョン列など)を、現在の `__version__` に合わせて更新する(番号源は versioning.md §1 のとおり `__version__` 一本)。
-4. `pyproject.toml` の version をその日の CalVer へ更新する(値の付け方は versioning.md §1)。
+1. `<tool>/__init__.py` の `__version__` を更新する。初回は付与し(初期版の選び方は [versioning.md §4](versioning.md#4-初期版の付与))、以降のリリースでは該当桁を上げる(どの桁を上げるかは [versioning.md §3](versioning.md#3-どの桁をいつ上げるか))。
+2. CLI に `--version` を備える。初回はこのオプションを追加する(表示内容と番号源は [versioning.md §1](versioning.md#1-管理単位))。表示は対象ツール自身の版のみとする(共通ライブラリは版を持たない。[versioning.md §1](versioning.md#1-管理単位))。
+3. ドキュメントに版番号を記載している箇所(トップ `README.md` のツール表のバージョン列など)を、現在の `__version__` に合わせて更新する(番号源は [versioning.md §1](versioning.md#1-管理単位) のとおり `__version__` 一本)。
+4. `pyproject.toml` の version をその日の CalVer へ更新する(値の付け方は [versioning.md §1](versioning.md#1-管理単位))。
 
 ## B. 公開前検証
 
@@ -37,19 +37,19 @@
    - 対象ツールの概要節(目的・最小コマンド・要点)。
    - リポジトリ構成表は `tools/<ツール>/` の汎用行が既に対象ツールを含むため、個別の行は追加しない。
    - 依存・開発環境に対象ツール固有の事項があれば反映(無ければ変更不要)。
-4. 対象ツールの仕様書を公開水準に点検する: 目的・非目標・CLI仕様・既知の制約が現実装と整合するか。作業過程参照(ラウンド番号・計画書参照)が残っていれば除去([artifact-hygiene.md](artifact-hygiene.md) §2 が混入禁止対象の正本)。ツール仕様書は恒久仕様書なので、[document-authoring.md](document-authoring.md) §2 の観点でロールアウト過程が残っていないかも点検。→ [terminology.md](terminology.md) の観点で参照切れ・用語規約を直接確認。
+4. 対象ツールの仕様書を公開水準に点検する: 目的・非目標・CLI仕様・既知の制約が現実装と整合するか。作業過程参照(ラウンド番号・計画書参照)が残っていれば除去([artifact-hygiene.md §2](artifact-hygiene.md#2-作業過程参照の混入禁止) が混入禁止対象の正本)。ツール仕様書は恒久仕様書なので、[document-authoring.md §2](document-authoring.md#2-恒久仕様書の記述範囲) の観点でロールアウト過程が残っていないかも点検。→ [terminology.md](terminology.md) の観点で参照切れ・用語規約を直接確認。
 
 ## D. リリース確定
 
 1. すべて緑・収束後、develop から main への PR を作成し、CI(PR で走る検査)が緑であることを確認する。
 2. マージは明示指示で行う(自動でマージしない)。
-3. main のマージコミットへ、リリースする CLIツールごとのタグを打ち、push する(タグの形式・種別・版の一致・同時リリース時の別タグは versioning.md §5)。タグ付け・push は明示指示で行う(自動で打たない)。
+3. main のマージコミットへ、リリースする CLIツールごとのタグを打ち、push する(タグの形式・種別・版の一致・同時リリース時の別タグは [versioning.md §5](versioning.md#5-タグ付け))。タグ付け・push は明示指示で行う(自動で打たない)。
 
    ```sh
    git push origin <tool>/v<MAJOR.MINOR.PATCH>
    ```
 
-4. タグの push をトリガに、CI が GitHub Release を作成して CHANGELOG の該当版の節を本文へ転記する(転記の規則は [changelog.md](changelog.md) §4)。CI の workflow が成功し Release が作られたことを確認する。
+4. タグの push をトリガに、CI が GitHub Release を作成して CHANGELOG の該当版の節を本文へ転記する(転記の規則は [changelog.md §4](changelog.md#4-github-releases-への転記))。CI の workflow が成功し Release が作られたことを確認する。
 
 ## 順序の目安
 
