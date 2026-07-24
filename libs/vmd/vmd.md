@@ -15,14 +15,14 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
 共有するフォーマット層。
 
 フォーマット層共通の設計原則(形式の事実のみを扱う・ロスレス・CLI非依存・無出力・構造化警告/エラー)は
-[../../docs/conventions/layering.md](../../docs/conventions/layering.md) §3 を正本とし、本書では重複記述しない。
+[../../docs/conventions/layering.md §3](../../docs/conventions/layering.md#3-フォーマット層共通の設計原則) を正本とし、本書では重複記述しない。
 
 ### 1.2 VMD 固有規約
 
 - **時間軸は30fps基準**: VMD 自体は fps を保持しない(各キーはフレーム番号のみを持つ)。
   本リポジトリの取り決めとして `frame=30` を 1.0 秒と解釈する。この取り決めの定義は本書を正とする。
 
-その他の VMD 固有規約(例外 `VmdFormatError`・構造化警告の項目・文字列 cp932)は §3 に定める。
+その他の VMD 固有規約(例外 `VmdFormatError`・構造化警告の項目・文字列 cp932)は [§3](#3-共通規約) に定める。
 
 ### 1.3 非目標
 
@@ -49,7 +49,7 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
 カメラ枠を含む共通 `Tolerances` を扱うが、ボーンだけを扱うツール向けに、ボーンの位置・回転許容誤差だけを
 受け取り未使用のカメラ枠を内部で埋めて `Tolerances` を返すヘルパ `build_bone_tolerances` を提供する。
 
-バイナリレイアウトの正は `../../docs/specs/vmd/VMD_file_format.md` とし、本書ではバイトレイアウトを重複記載しない。
+バイナリレイアウトの正は [`../../docs/specs/vmd/VMD_file_format.md`](../../docs/specs/vmd/VMD_file_format.md) とし、本書ではバイトレイアウトを重複記載しない。
 
 ---
 
@@ -92,13 +92,13 @@ VMD(MMD のモーション/カメラデータ形式)の読み書きと、VMD に
   検証する(ラウンドトリップでは検出できない「reader/writerが対称に間違う」
   解釈誤りを検出するため。MMD産ファイルは使わない)。
 - MMD本体互換は、独立実装との数値クロスバリデーション(自動・pytest内)で
-  担保する(vmd-interp.md §5、vmd-camera.md §4)。
+  担保する([vmd-interp.md §5](vmd-interp.md#5-mmd互換性の検証)、[vmd-camera.md §4](vmd-camera.md#4-規約の確定と検証))。
   人間が MMD 本体で行う作業は、テストデータ VMD の作成(モーションを作って保存)と
   視覚 A/B スモーク(揺れ0ベイクが元と同じに見えることの確認)の 2 つのみとし、
   数値の目視転記を要求する手順は採用しない。
-  手順(MMDのバージョン・操作内容)は `libs/vmd/tests/data/README.md` に記録する。
+  手順(MMDのバージョン・操作内容)は [`libs/vmd/tests/data/README.md`](tests/data/README.md) に記録する。
 - `libs/vmd/tests/data/` に置くのは MMD産ファイルのみ(内容と作成手順は
-  `libs/vmd/tests/data/README.md`)。既知値が必要なデータ(カット入り・順不同・切り詰め・
+  [`libs/vmd/tests/data/README.md`](tests/data/README.md))。既知値が必要なデータ(カット入り・順不同・切り詰め・
   v1形式・混在セクション・ベイク済み等)はテストコード内のフィクスチャとして
   組み立てる。
 
