@@ -646,17 +646,18 @@ camera_distance_tol, camera_fov_tol}`(§2.4 の表の値)。
   (人間向け経路の順序と同じ)。
 - 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は
   [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正。
-- `internal_error` は引数解析後の本体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
+- `internal_error` は CLI 本体の全体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
   なく中断(`cancelled`/130)として手前で分岐する(§12.5)。
 
 ### 12.5 中断と出力の原子性
 
 - VMD 出力は一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
   起きるため、途中終了で中途半端な出力ファイルは残らない。
-- CLI は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
+- CLI は本体の全体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
   error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130
-  で終える。POSIX シグナル API には依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む(sparsevmd の
-  削減は単一プロセスで走り、子プロセスは持たない)。
+  で終える(sparsevmd の削減は単一プロセスで走り、子プロセスは持たない)。
+- **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
+  扱う。橋渡しの要否・実装は共有基盤([cli_events.md](../../libs/cli_events/cli_events.md) §5)が正。
 - 進捗のライブ表示は中断・例外経路でも行を閉じてから終える(try/finally で保証する)。
   機械モードではライブ表示自体を無効化する。
 - 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の終端保証の

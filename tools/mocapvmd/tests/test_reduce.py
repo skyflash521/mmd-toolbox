@@ -6,6 +6,8 @@ vmd.reduce.reduce_bone_track により疎化する(全範囲・全ボーン・�
 結果と突き合わせて検証する。疎化アルゴリズムそのものは vmd 側のテストに委ねる。
 """
 
+import sys
+
 import pytest
 
 from vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
@@ -431,13 +433,16 @@ def test_progress_contract_parallel(monkeypatch):
 
 
 def test_reduce_worker_init_ignores_sigint():
-    # ワーカ initializer は SIGINT を SIG_IGN に設定する。親プロセスで直接呼び、getsignal で検証して復元する。
+    # ワーカ initializer は SIGINT と(Windows では)SIGBREAK を SIG_IGN に設定する。親プロセスで
+    # 直接呼び、getsignal で検証して復元する(SIGBREAK の復元は conftest の共有フィクスチャが担う)。
     import signal
 
     prev = signal.getsignal(signal.SIGINT)
     try:
         mreduce._reduce_worker_init()
         assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+        if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
+            assert signal.getsignal(signal.SIGBREAK) == signal.SIG_IGN
     finally:
         signal.signal(signal.SIGINT, prev)
 

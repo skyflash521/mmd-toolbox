@@ -27,6 +27,7 @@ from cli_events import (
     MachineArgumentParser,
     argparse_error_field,
     error_event,
+    install_sigbreak_handler,
 )
 from pmx.types import PmxFormatError
 from vmd import io
@@ -369,68 +370,90 @@ def _build_inspect(args, doc, reduction_diag, pose_diag):
     }
 
 
+def _fail(emitter, code, message, exit_code, *, field=None, path=None):
+    """失敗を報告して終了コードを返す。構造化出力モードは error イベントでストリームを終端し、
+    それ以外は理由を標準エラーへ 1 行出す(トレースバックは出さない)。main() が emitter 未確立の
+    段階の中断・想定外例外でも呼べるよう、emitter を closure でなく引数に取る。emitter が既に終端済み
+    (result/error 送出後)なら StreamTerminatedError を避け、標準エラーへの1行へ後退する(result 送出
+    直後などの極小区間での二重の中断・想定外例外を握り潰さないため)。"""
+    if emitter is not None and not emitter.terminated:
+        emitter.error(**error_event(
+            code=code, message=message, exit_code=exit_code, field=field, path=path))
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return exit_code
+
+
 def main(argv=None):
     """CLI エントリポイント。終了コードを返す(0/1/2/3、中断 130)。"""
-    # 人間向け標準エラーはロケール符号化(cp932 等)で表せない文字を含んでも UnicodeEncodeError で
-    # プロセスを落とさない。エラーハンドラを緩め、表せない文字は退避表記へ置換して出す。
-    # argparse 使用法エラー・fail() の error 行・警告ループの警告行の人間向け stderr を一様に覆う
-    # (機械モードの stdout はバイナリ + UTF-8 の別経路 cli_events なので影響しない)。
-    if hasattr(sys.stderr, "reconfigure"):
+    # emitter は try の外側で初期化する: 下の except KeyboardInterrupt/Exception は、emitter 構築より
+    # 前(argv 解決・--machine 判定 中)に中断・想定外例外が起きた場合でも参照できる必要があるため
+    # (この区間の SIGINT は install_sigbreak_handler() の登録有無に関係なく既定ハンドラで常に有効)。
+    emitter = None
+    # main() の冒頭から本体実行までを1つの try で畳む。KeyboardInterrupt(CTRL_BREAK_EVENT の橋渡し先・
+    # 通常の SIGINT の両方を含む)はどの時点で届いても取りこぼさず中断として cancelled へ、それ以外の
+    # 想定外例外は internal_error へ畳む。どちらもトレースバックを漏らさない。
+    #
+    # try 内での並びに注意: emitter・fail を組んでから install_sigbreak_handler() を呼ぶ。逆順だと、
+    # ハンドラ登録直後〜emitter 構築完了までの区間で中断された場合に --machine 指定でも構造化 cancelled
+    # イベントを出せず人間向け1行へ後退する(その時点では emitter が未確立=None のため)。この並びなら、
+    # ハンドラが有効になった時点で emitter は既に完成しており、以後どこで中断されても正しい経路で
+    # 報告できる。
+    try:
+        if argv is None:
+            argv = sys.argv[1:]
+
+        # 構造化出力モード判定。解析前に argv で先取りする: 引数エラー時も出力チャネルを決めるため。
+        # --describe は --machine を要さない独立メタ操作。どちらかがあれば emitter を用意し、
+        # MachineArgumentParser で使用法エラーも error イベントへ振り替える。emitter はバイナリ stdout へ
+        # UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None(従来の人間向け経路)。
+        machine = "--machine" in argv
+        describe = "--describe" in argv
+        emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
+
+        def fail(code, message, exit_code, *, field=None, path=None):
+            return _fail(emitter, code, message, exit_code, field=field, path=path)
+
+        # Windows の CTRL_BREAK_EVENT を下の except KeyboardInterrupt へ橋渡しする(他 OS では no-op)。
+        install_sigbreak_handler()
+        # 人間向け標準エラーはロケール符号化(cp932 等)で表せない文字を含んでも UnicodeEncodeError で
+        # プロセスを落とさない。エラーハンドラを緩め、表せない文字は退避表記へ置換して出す。
+        # argparse 使用法エラー・fail() の error 行・警告ループの警告行の人間向け stderr を一様に覆う
+        # (機械モードの stdout はバイナリ + UTF-8 の別経路 cli_events なので影響しない)。
+        if hasattr(sys.stderr, "reconfigure"):
+            try:
+                sys.stderr.reconfigure(errors="backslashreplace")
+            except Exception:
+                pass
+        # ArgumentParseError/SystemExit の捕捉は引数解析だけに閉じる(_run() 以下が送出しうる
+        # SystemExit まで飲み込んで exit 0/2 に押し込めないため)。
+        parser = _build_parser(machine or describe)
         try:
-            sys.stderr.reconfigure(errors="backslashreplace")
-        except Exception:
-            pass
-    if argv is None:
-        argv = sys.argv[1:]
+            args = parser.parse_args(argv)
+        except ArgumentParseError as e:
+            # 構造化出力モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
+            return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
+        except SystemExit as e:
+            # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
+            # (メタ操作・code 0)。例外を握って終了コードへ変換する。
+            code = e.code
+            return code if isinstance(code, int) else (0 if code is None else 2)
 
-    # 構造化出力モード判定。解析前に argv で先取りする: 引数エラー時も出力チャネルを決めるため。
-    # --describe は --machine を要さない独立メタ操作。どちらかがあれば emitter を用意し、
-    # MachineArgumentParser で使用法エラーも error イベントへ振り替える。emitter はバイナリ stdout へ
-    # UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None(従来の人間向け経路)。
-    machine = "--machine" in argv
-    describe = "--describe" in argv
-    emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
+        # 自己記述。VMD を読まず options/presets の result を出して終了する独立メタ操作。
+        if args.describe:
+            emitter.result(mode="describe", options=_describe_options(parser), presets=_describe_presets())
+            return 0
+        # input は nargs="?"(--describe を入力無しで成立させるため)。非 describe 実行では必須。
+        if args.input is None:
+            return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
 
-    def fail(code, message, exit_code, *, field=None, path=None):
-        """失敗を報告して終了コードを返す。構造化出力モードは error イベントでストリームを終端し、
-        それ以外は理由を標準エラーへ 1 行出す(トレースバックは出さない)。"""
-        if emitter is not None:
-            emitter.error(**error_event(
-                code=code, message=message, exit_code=exit_code, field=field, path=path))
-        else:
-            print(f"error: {message}", file=sys.stderr)
-        return exit_code
-
-    parser = _build_parser(machine or describe)
-    try:
-        args = parser.parse_args(argv)
-    except ArgumentParseError as e:
-        # 構造化出力モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
-        return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
-    except SystemExit as e:
-        # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
-        # (メタ操作・code 0)。例外を握って終了コードへ変換する。
-        code = e.code
-        return code if isinstance(code, int) else (0 if code is None else 2)
-
-    # 自己記述。VMD を読まず options/presets の result を出して終了する独立メタ操作。
-    if args.describe:
-        emitter.result(mode="describe", options=_describe_options(parser), presets=_describe_presets())
-        return 0
-    # input は nargs="?"(--describe を入力無しで成立させるため)。非 describe 実行では必須。
-    if args.input is None:
-        return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
-
-    # 引数解析後の本体を畳む。KeyboardInterrupt は中断として cancelled へ、それ以外の想定外例外は
-    # internal_error へ。どちらもトレースバックを漏らさない。
-    try:
         return _run(args, machine, emitter, fail)
     except KeyboardInterrupt:
         # 協調的な中断(Ctrl-C / 親プロセスの中断)。書き込みは全計算後に 1 回だけで原子的なので、ここに
         # 来た時点で出力は未書き込みか原子置換済みのいずれかで、中途半端な出力は残らない。
-        return fail("cancelled", "中断された(Ctrl-C 等)", 130)
+        return _fail(emitter, "cancelled", "中断された(Ctrl-C 等)", 130)
     except Exception as e:
-        return fail("internal_error", f"{type(e).__name__}: {e}", 1)
+        return _fail(emitter, "internal_error", f"{type(e).__name__}: {e}", 1)
 
 
 def _run(args, machine, emitter, fail):

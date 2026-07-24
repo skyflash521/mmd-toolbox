@@ -5,7 +5,8 @@ CLI ツールの機械モード出力(JSON Lines イベントストリーム)を
 層: **共有ドメイン層**(../../docs/conventions/layering.md §1)。複数の CLI ツールが共有する CLI 出力契約
 (機械モードのイベント送出)を、特定形式の入出力でも単一ツール固有でもないため共有ドメイン層に置く。
 
-依存: Python 標準ライブラリのみ(`json` / `argparse` 連携)。フォーマット層・他の共有ドメイン層へは依存しない。
+依存: Python 標準ライブラリのみ(`json` / `argparse` 連携)。フォーマット層・他の共有ドメイン層へは依存しない
+(テスト専用の `cli_events.testing` は例外で、`pytest` に依存する。§5)。
 
 正本関係: 機械モードの契約(イベント種別の語彙・終端規則・チャネル固定・終了コードの基底・stdout の
 UTF-8 固定)は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)が正
@@ -23,6 +24,9 @@ UTF-8 固定)は[CLI インターフェース規約](../../docs/conventions/cli-
   組み立てないようにする(各ツールでの重複実装と語彙のずれを防ぐ。規約 §6 の横断一貫性に対応)。
 - argparse のエラーを `error` イベントへ変換するヘルパを提供し、各 CLI が argparse のエラー出力経路を
   機械モードのエラーイベントへ振り替えられるようにする。
+- OS依存の協調的中断シグナルを `KeyboardInterrupt` へ橋渡しするヘルパを提供し、各 CLI が既存の
+  `except KeyboardInterrupt` 経路(規約 §8 の `cancelled` エラーイベント終端)で、プラットフォームを
+  問わず中断を捕捉できるようにする(OS のイベント配送自体に起因する残存限界は §5)。
 
 本モジュールはイベントの**封筒(`type` と送出・終端規則)**を担い、各イベントの**中身(ペイロードのキー)は
 呼び出し側(各ツール)が決める**。規約 §4 の「種別の語彙と終端規則だけを共通化し、ペイロードは各ツールが
@@ -90,7 +94,37 @@ argparse は既定で使用法エラーを標準エラーへ出して終了す�
   - 「`the following arguments are required: `」で始まる文言 → 続く名前列の先頭(カンマ区切りの最初)。
   - いずれにも当たらない文言 → `None`。
 
-## 5. テスト
+## 5. 中断シグナルの橋渡し
+
+規約 §8 の協調的な中断は、各 CLI が `KeyboardInterrupt` を捕捉して `cancelled` エラーイベントへ変換する
+形で実装する(§1)。CPython は SIGINT(Ctrl-C)には既定で `KeyboardInterrupt` を送出するハンドラを
+持つが、Windows の `CTRL_BREAK_EVENT`(SIGBREAK)には持たない。呼び出し側(GUI 等)が
+`CREATE_NEW_PROCESS_GROUP` で起動した子プロセスへは `CTRL_C_EVENT` を送れず `CTRL_BREAK_EVENT` のみが
+使えるため、このハンドラを登録しない CLI は Windows からの中断要求で、Python の例外処理を経ないまま
+OS の既定動作(`STATUS_CONTROL_C_EXIT`)により即座に終了し、`cancelled` エラーイベントも出せない。
+
+公開 API:
+
+- `install_sigbreak_handler()`: Windows かつ SIGBREAK が存在する環境でのみ、SIGBREAK を
+  `KeyboardInterrupt` へ変換するハンドラを登録する。それ以外の環境では何もしないため、各 CLI は
+  プラットフォームを判定せず無条件に呼べる。登録が有効になった時点で構造化出力(機械モードの
+  `EventEmitter` 等)が既に組み上がっている必要があるため、呼ぶ順序は「構造化出力の準備が済んだ後・
+  本体処理より前」とする。
+
+`install_sigbreak_handler()` は呼び出されたプロセスの SIGBREAK ハンドラを書き換える。同一プロセス内で
+これを繰り返し呼ぶテスト(CLI の `main()` を直接呼ぶテスト等)がテスト間でハンドラを引き継がないよう、
+`cli_events.testing` が pytest フィクスチャ `restore_sigbreak_handler`(各テストの前後で SIGBREAK
+ハンドラを保存・復元する。Windows 以外・SIGBREAK 非搭載環境では何もしない)を提供する。
+`install_sigbreak_handler()` を呼ぶ各 CLI ツールのテストは、このフィクスチャを利用してテスト間の
+副作用漏れを防ぐ。
+
+**既知の残存限界**: ハンドラを登録していても、環境によっては `CTRL_BREAK_EVENT` の配送の一部で
+`cancelled` エラーイベントを出せないままプロセスが終了する場合がある(頻度は環境依存で、無条件に
+発生するわけではない)。この場合、呼び出し側からは規約 §8 の「呼び出し側がプロセスを強制終了した
+場合」と区別が付かないため、新たな契約は設けず同じ扱い(終端イベント無しの途切れを中断として扱う)
+で足りる。
+
+## 6. テスト
 
 `pytest libs/cli_events` で単体検証する(テスト方針は ../vmd/vmd.md §4 に準ずる。決定論的・外部依存なし)。
 
@@ -100,3 +134,7 @@ argparse は既定で使用法エラーを標準エラーへ出して終了す�
 - argparse エラー変換ヘルパが `type:"error"` のイベントを生成すること。
 - argparse 文言からの `field` 抽出(§4)が規則どおり(`argument` / `unrecognized` / `required` の 3 形式と、
   いずれにも当たらない文言の `None` フォールバック)であること。
+- SIGBREAK 橋渡しヘルパ(§5)が、Windows ではハンドラ登録後に `KeyboardInterrupt` を送出し、Windows
+  以外では no-op であること。
+- 実子プロセスへの実際の `CTRL_BREAK_EVENT` 配送は、OS 配送自体が非決定的なため(§5)通常スイートには
+  含めず、手動診断用として別途用意する。

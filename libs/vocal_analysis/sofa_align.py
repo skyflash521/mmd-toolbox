@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -29,6 +30,11 @@ from .types import Segment
 # 直前にこの写像で正規化する(G2P記号→音素モデル語彙の写像表がI→i・U→ɯのIPA記号へ
 # 既に集約しているのと同じ対応関係で、Segmentの最終的なphoneme値には影響しない)。
 _SOFA_VOCAB_SYMBOL_NORMALIZE: dict[str, str] = {"I": "i", "U": "u"}
+
+# SOFA サブプロセスの完了待ちを区切る周期(秒)。長時間 1 回の communicate(timeout=長時間) で
+# 待つと、待機中に届いた中断(KeyboardInterrupt)が待機完了まで反映されない(OS 待機プリミティブは
+# 完了かタイムアウトまで戻らない)。短周期に分割し待ち直すことで、中断の反映を最大この秒数まで縮める。
+_COMMUNICATE_POLL_SEC = 1.0
 
 
 def _normalize_for_sofa_vocab(symbol: str) -> str:
@@ -78,6 +84,24 @@ def _popen_kwargs() -> dict:
     return {"start_new_session": True}
 
 
+def _terminate_and_reap(proc: subprocess.Popen) -> None:
+    """proc とその子孫を終了し、標準出力/標準エラーを回収する。呼び出し元が伝播させたい中断・
+    エラーを上書きしないベストエフォート処理で、内部の失敗を外へ伝播させない(無期限待機も避ける
+    ため回収は _COMMUNICATE_POLL_SEC 以内に区切る)。"""
+    try:
+        _kill_process_tree(proc.pid)
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.communicate(timeout=_COMMUNICATE_POLL_SEC)
+    except Exception:
+        pass
+
+
 def _kill_process_tree(pid: int) -> None:
     if sys.platform == "win32":
         subprocess.run(
@@ -125,30 +149,52 @@ def _check_paths_exist(config: SofaAlignerConfig) -> None:
 def _run_sofa_subprocess(basenames: list[str], config: SofaAlignerConfig, work_dir: Path) -> None:
     """infer.pyを1回呼ぶ。タイムアウト・異常終了・出力欠落/空はいずれも RecognitionError にする。"""
     cmd = _build_sofa_command(config, work_dir)
+    # SOFA は独自のプロセスグループ(_popen_kwargs)で起動するため、呼び出し元プロセスへの中断は
+    # 子プロセスへ伝わらない。Popen 成功直後(proc 取得直後)から中断(KeyboardInterrupt)捕捉の
+    # 保護下に入るよう、起動から待機までを1つの try で畳む。proc は起動失敗時に None のままなので、
+    # 中断時の後始末は取得できている場合だけ行う。
+    proc = None
     try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(config.sofa_root),
-            encoding="utf-8",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            **_popen_kwargs(),
-        )
-    except FileNotFoundError as e:
-        # 事前検証(_check_paths_exist)後にパスが消える競合等の受け皿。起動失敗も外部依存の
-        # 実行失敗として扱い、候補パスを明示する。
-        raise RecognitionError(
-            "SOFAサブプロセスを起動できませんでした(実行ファイルまたは作業ディレクトリが"
-            f"見つかりません): sofa_python={config.sofa_python}, sofa_root={config.sofa_root}"
-        ) from e
-    try:
-        _, stderr = proc.communicate(timeout=config.timeout_sec)
-    except subprocess.TimeoutExpired as e:
-        _kill_process_tree(proc.pid)
-        proc.communicate()
-        raise RecognitionError(
-            f"SOFA呼び出しが{config.timeout_sec}秒以内に完了しませんでした(タイムアウト)"
-        ) from e
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(config.sofa_root),
+                encoding="utf-8",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **_popen_kwargs(),
+            )
+        except FileNotFoundError as e:
+            # 事前検証(_check_paths_exist)後にパスが消える競合等の受け皿。起動失敗も外部依存の
+            # 実行失敗として扱い、候補パスを明示する。
+            raise RecognitionError(
+                "SOFAサブプロセスを起動できませんでした(実行ファイルまたは作業ディレクトリが"
+                f"見つかりません): sofa_python={config.sofa_python}, sofa_root={config.sofa_root}"
+            ) from e
+
+        # communicate() を短周期ポーリングへ分割する(_COMMUNICATE_POLL_SEC 参照)。再呼び出しは
+        # subprocess.communicate() の仕様上安全(TimeoutExpired 後の再呼び出しは公式に想定された経路)。
+        deadline = time.monotonic() + config.timeout_sec
+        stderr = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _terminate_and_reap(proc)
+                raise RecognitionError(
+                    f"SOFA呼び出しが{config.timeout_sec}秒以内に完了しませんでした(タイムアウト)"
+                )
+            try:
+                _, stderr = proc.communicate(timeout=min(_COMMUNICATE_POLL_SEC, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except KeyboardInterrupt:
+        # 中断(KeyboardInterrupt)を待機中に受けた場合も、タイムアウト時と同様にプロセスツリーを
+        # 終了・回収してから中断を再送出する(子プロセスを取り残さない)。後始末自体は失敗しても
+        # 元の中断を上書きしないベストエフォート(_terminate_and_reap)。
+        if proc is not None:
+            _terminate_and_reap(proc)
+        raise
 
     if proc.returncode != 0:
         raise RecognitionError(f"SOFA呼び出しが終了コード{proc.returncode}で失敗しました: {stderr}")
@@ -267,7 +313,10 @@ def _align_batch(
         checkpoint_path=config.checkpoint_path.absolute(),
     )
 
-    with tempfile.TemporaryDirectory() as tmp:
+    # ignore_cleanup_errors=True: 中断時にプロセスツリーを終了しても、Windows では子プロセスの
+    # ファイルハンドル解放に遅延がありうる。片付け失敗を無視しないと、その例外が伝播中の
+    # KeyboardInterrupt を上書きしてしまう。
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         work_dir = Path(tmp)
         _check_ascii_paths(work_dir, config)
         _check_paths_exist(config)

@@ -14,8 +14,12 @@ import numpy as np
 import pytest
 
 
-def _make_config(tmp_path):
-    """SOFA起動前の実在検証(_check_paths_exist)を通る実在パスの構成を作る。"""
+def _make_config(tmp_path, *, timeout_sec=None):
+    """SOFA起動前の実在検証(_check_paths_exist)を通る実在パスの構成を作る。
+
+    timeout_sec を指定すると SofaAlignerConfig の既定(300秒)を上書きする(タイムアウト経路の
+    テストが実時間で長時間待たされないようにするため)。
+    """
     from vocal_analysis import SofaAlignerConfig
 
     sofa_python = tmp_path / "sofa-venv" / "python"
@@ -26,10 +30,12 @@ def _make_config(tmp_path):
     sofa_root.mkdir(exist_ok=True)
     (sofa_root / "infer.py").write_text("", encoding="utf-8")
     checkpoint_path.write_text("", encoding="utf-8")
+    overrides = {} if timeout_sec is None else {"timeout_sec": timeout_sec}
     return SofaAlignerConfig(
         sofa_python=sofa_python,
         sofa_root=sofa_root,
         checkpoint_path=checkpoint_path,
+        **overrides,
     )
 
 
@@ -43,6 +49,9 @@ class _FakeCompletedPopen:
         self.returncode = returncode
         self._on_communicate = on_communicate
 
+    def kill(self):
+        pass
+
     def communicate(self, timeout=None):
         if self._on_communicate is not None:
             self._on_communicate()
@@ -50,19 +59,74 @@ class _FakeCompletedPopen:
 
 
 class _FakeTimeoutPopen:
-    """communicate() の初回呼び出しで必ず TimeoutExpired を送出する Popen の代替。"""
+    """communicate() を呼ぶたびに TimeoutExpired を送出し、完了しないプロセスを模す Popen の代替。
+    実装は後始末で kill() を呼んでから communicate() で回収するため、kill() 呼び出し後の
+    communicate() だけは終了済みプロセスの回収として即座に成功させる。"""
 
     def __init__(self, cmd, *, pid=4242, **kwargs):
         self.cmd = cmd
         self.kwargs = kwargs
         self.pid = pid
         self.returncode = None
-        self._raised = False
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
 
     def communicate(self, timeout=None):
+        if self.killed:
+            return ("", "")
+        raise subprocess.TimeoutExpired(cmd=self.cmd, timeout=timeout)
+
+
+class _FakeInterruptedPopen:
+    """communicate() を最初に呼んだ時だけ KeyboardInterrupt を送出する Popen の代替。中断待機中の
+    子プロセスを模す(kill() 呼び出し後の communicate() は後始末として成功させる)。"""
+
+    def __init__(self, cmd, *, pid=4242, **kwargs):
+        self.cmd = cmd
+        self.kwargs = kwargs
+        self.pid = pid
+        self.returncode = None
+        self.killed = False
+        self._raised = False
+
+    def kill(self):
+        self.killed = True
+
+    def communicate(self, timeout=None):
+        if self.killed:
+            return ("", "")
         if not self._raised:
             self._raised = True
+            raise KeyboardInterrupt()
+        return ("", "")
+
+
+class _FakeSlowThenCompletePopen:
+    """communicate() をタイムアウト付きで stall_calls 回だけ TimeoutExpired にし、以降は完了させる
+    Popen の代替。短周期ポーリング(_COMMUNICATE_POLL_SEC)が「未完了なだけ」を早すぎるタイムアウトと
+    誤判定せず、デッドライン内なら待ち直して最終的に成功させることを検証する。"""
+
+    def __init__(self, cmd, *, stall_calls, on_communicate=None, pid=4242, **kwargs):
+        self.cmd = cmd
+        self.kwargs = kwargs
+        self.pid = pid
+        self.returncode = 0
+        self._remaining_stalls = stall_calls
+        self._on_communicate = on_communicate
+        self.communicate_call_count = 0
+
+    def kill(self):
+        pass
+
+    def communicate(self, timeout=None):
+        self.communicate_call_count += 1
+        if self._remaining_stalls > 0:
+            self._remaining_stalls -= 1
             raise subprocess.TimeoutExpired(cmd=self.cmd, timeout=timeout)
+        if self._on_communicate is not None:
+            self._on_communicate()
         return ("", "")
 
 
@@ -447,11 +511,35 @@ def test_align_batch_starts_new_session_on_posix(tmp_path, monkeypatch):
     assert captured.get("start_new_session") is True
 
 
+def test_align_batch_keyboard_interrupt_kills_process_tree_and_reraises(tmp_path, monkeypatch):
+    # 待機中に KeyboardInterrupt を受けた場合も、タイムアウト時と同様にプロセスツリーを終了・回収
+    # してから元の KeyboardInterrupt をそのまま再送出する(RecognitionError 等へ変換しない)。
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path, timeout_sec=10.0)
+    killed_pids = []
+
+    monkeypatch.setattr(sofa_align.sys, "platform", "win32")
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", lambda cmd, **kwargs: _FakeInterruptedPopen(cmd))
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "taskkill"
+        killed_pids.append(cmd[cmd.index("/PID") + 1])
+
+    monkeypatch.setattr(sofa_align.subprocess, "run", fake_run)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(KeyboardInterrupt):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    assert killed_pids == ["4242"]
+
+
 def test_align_batch_timeout_kills_process_tree_on_windows(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
     from vocal_analysis.phonemes import RecognitionError
 
-    config = _make_config(tmp_path)
+    config = _make_config(tmp_path, timeout_sec=0.05)
     killed_pids = []
 
     monkeypatch.setattr(sofa_align.sys, "platform", "win32")
@@ -471,11 +559,38 @@ def test_align_batch_timeout_kills_process_tree_on_windows(tmp_path, monkeypatch
     assert killed_pids == ["4242"]
 
 
+def test_align_batch_survives_transient_timeout_within_deadline(tmp_path, monkeypatch):
+    # 短周期ポーリングは「まだ完了していないだけ」を早すぎるタイムアウトと誤判定せず、デッドライン内
+    # なら待ち直して最終的に成功させる(kill・RecognitionErrorに至らない)。
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path, timeout_sec=10.0)
+    fake = {}
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "pau")])
+
+        p = _FakeSlowThenCompletePopen(cmd, stall_calls=2, on_communicate=write_output)
+        fake["proc"] = p
+        return p
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    # 2 回 TimeoutExpired → 3 回目で成功、の 3 回 communicate() が呼ばれている。
+    assert fake["proc"].communicate_call_count == 3
+
+
 def test_align_batch_timeout_kills_process_tree_on_posix(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
     from vocal_analysis.phonemes import RecognitionError
 
-    config = _make_config(tmp_path)
+    config = _make_config(tmp_path, timeout_sec=0.05)
     killed = []
     fake_sigkill = object()
 
@@ -703,7 +818,7 @@ class _FakeTemporaryDirectory:
     設計なので、検証で弾かれるテストでは実際のファイルI/Oへ到達しない)を返す。
     """
 
-    def __init__(self, path):
+    def __init__(self, path, **kwargs):
         self._path = path
 
     def __enter__(self):
@@ -729,7 +844,8 @@ def test_align_batch_non_ascii_checkpoint_path_does_not_start_subprocess(monkeyp
 
     monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
     monkeypatch.setattr(
-        sofa_align.tempfile, "TemporaryDirectory", lambda: _FakeTemporaryDirectory("ascii_root/work_dir")
+        sofa_align.tempfile, "TemporaryDirectory",
+        lambda **kwargs: _FakeTemporaryDirectory("ascii_root/work_dir"),
     )
 
     samples = np.zeros(16000, dtype=np.float32)
@@ -752,7 +868,8 @@ def test_align_batch_non_ascii_work_dir_does_not_start_subprocess(monkeypatch):
 
     monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
     monkeypatch.setattr(
-        sofa_align.tempfile, "TemporaryDirectory", lambda: _FakeTemporaryDirectory("ascii_root/一時ディレクトリ")
+        sofa_align.tempfile, "TemporaryDirectory",
+        lambda **kwargs: _FakeTemporaryDirectory("ascii_root/一時ディレクトリ"),
     )
 
     samples = np.zeros(16000, dtype=np.float32)

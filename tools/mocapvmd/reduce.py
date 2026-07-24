@@ -13,6 +13,7 @@
 
 import os
 import signal
+import sys
 from multiprocessing import get_context
 
 from vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
@@ -74,20 +75,24 @@ def _reduce_one(item):
 
 
 def _reduce_worker_init():
-    """プロセスプールのワーカ initializer。ワーカに SIGINT を無視させ、中断の
+    """プロセスプールのワーカ initializer。ワーカに SIGINT/SIGBREAK を無視させ、中断の
     畳み込みを親プロセスへ一元化する。
 
     Windows の Ctrl-C(CTRL_C_EVENT)は同一コンソールの全プロセスへ配送されるため、無視しないとワーカが
-    任意の位置で KeyboardInterrupt 死し、トレースバックが標準エラーへ漏れるうえ、失われたタスク結果を
-    親が待ち続ける余地が生まれる。spawn で pickle 可能にするため module-level 関数にする。
+    任意の位置で未捕捉の KeyboardInterrupt により終了し、トレースバックが標準エラーへ漏れるうえ、
+    失われたタスク結果を親が待ち続ける余地が生まれる。CTRL_BREAK_EVENT(SIGBREAK)も同じプロセスグループ
+    の子孫へ配送され、ワーカにはハンドラが無いため無視しないと OS の既定動作で即座に終了する。spawn で
+    pickle 可能にするため module-level 関数にする。
     """
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
 
 
 def _make_pool(workers):
     """ワーカ数 workers のプロセスプールを生成する。OS 既定に依らず spawn を明示し(Windows と同条件で
-    pickle 可能性を担保)、ワーカに SIGINT を無視させる initializer を配線し、プール生成を1か所に
-    閉じ込める。
+    pickle 可能性を担保)、ワーカに SIGINT/SIGBREAK を無視させる initializer を配線し、プール生成を
+    1か所に閉じ込める。
     """
     return get_context("spawn").Pool(processes=workers, initializer=_reduce_worker_init)
 

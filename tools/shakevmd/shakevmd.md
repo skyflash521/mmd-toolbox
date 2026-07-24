@@ -585,7 +585,7 @@ CLI 非公開なので `values` に出さない(§8 の非公開方針と一致)
 - `value_overflow`・`non_finite_output` の `field` を `null` にするのは、起因引数を単一に帰属させられないため
   (無理に1つ選ばず `message` に状況を載せる)。書き込み例外のうち `OverflowError` は過大値起因なので
   `value_overflow`(exit 2)、それ以外の I/O 失敗のみ `write_failed`(exit 3)。
-- `internal_error` は表の各分類に当たらない未捕捉例外の受け皿で、CLI 本体(引数解析後)をトップレベルで
+- `internal_error` は表の各分類に当たらない未捕捉例外の受け皿で、CLI 本体の全体をトップレベルで
   捕捉して畳む。終了コードは最も近い基底へ寄せて `1` とし、機械モードでは `code:"internal_error"` で read 起因の
   `not_vmd` と識別できる。`KeyboardInterrupt` は内部エラーでなく中断(`cancelled`/`130`、§12.6)として手前で分岐する。
 
@@ -600,7 +600,8 @@ CLI 非公開なので `values` に出さない(§8 の非公開方針と一致)
   出さず中断理由を標準エラーへ1行出す。どちらも終了コード `130` を返す。VMD 書き込みは全計算後に1回だけ起きる
   ため、ベイク・スムージング実行中の `KeyboardInterrupt` は書き込み前に処理を中断し、原子性により中途半端な出力は
   残らない。専用の停止フラグ・チェックポイント API は設けない。
-- **Windows**: POSIX シグナルに依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む。
+- **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
+  扱う。橋渡しの要否・実装は共有基盤([cli_events.md](../../libs/cli_events/cli_events.md) §5)が正。
 - **終了コード `130`**: 基底 `0`〜`3` へ押し込めず、全ツール共通の中断予約コード(規約 §5/§8)とする。
 - 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の唯一の例外)。
   原子性により中途半端な出力は残らない。
