@@ -14,9 +14,9 @@ PMXのうちFK評価に必要なボーン情報だけを保持する読み取り
 VMDローカル姿勢をPMXボーン階層に適用する近似FK評価を提供する。
 PMXの編集・書き出し、IK解決、付与親・物理演算の評価は対象外。
 
-`pmx` はフォーマット層モジュール([../../docs/conventions/layering.md](../../docs/conventions/layering.md) §1)で、
+`pmx` はフォーマット層モジュール([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))で、
 フォーマット層共通の設計原則(形式の事実のみを扱う・ロスレス・CLI非依存/無出力・構造化警告/エラー)は
-layering.md §3 を正本とする。
+[layering.md §3](../../docs/conventions/layering.md#3-フォーマット層共通の設計原則) を正本とする。
 
 対応バージョンは PMX 2.0 / 2.1。非対応バージョンは読み取りを中断する。
 
