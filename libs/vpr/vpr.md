@@ -17,7 +17,7 @@ CLI間依存になる)。
 
 [../../docs/conventions/layering.md](../../docs/conventions/layering.md) の層タクソノミーに従う。vpr は非 MMD 形式
 (VOCALOID vpr)の入出力を担うフォーマット層モジュールで、フォーマット層共通の設計原則(形式の事実のみを扱う・
-ロスレス・CLI非依存・無出力・構造化警告/エラー)は layering.md §3 を正本とする(本書では重複記述しない)。
+ロスレス・CLI非依存・無出力・構造化警告/エラー)は [layering.md §3](../../docs/conventions/layering.md#3-フォーマット層共通の設計原則) を正本とする(本書では重複記述しない)。
 
 - vpr の解析・直列化(形式の事実)は `vpr` に置く。
 - 上記の共通原則により、ツール固有の判断は持ち込まない。vpr から口形イベント列・
@@ -54,12 +54,12 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 は音符全体とテンポを書き出す。データモデルは利用先の和集合を表現できれば足り、利用しないフィールドの
 読み出しは各利用先が選ぶ。
 
-**確定事項**(机上で確定する。具体的な型・公開関数シグネチャは §2.1。
-形式レイアウト確定でモデルが変わる場合は本書を先に更新する。§5・§6):
+**確定事項**(机上で確定する。具体的な型・公開関数シグネチャは [§2.1](#21-公開する具体型と関数)。
+形式レイアウト確定でモデルが変わる場合は本書を先に更新する。[§5](#5-形式レイアウトの正本)・[§6](#6-フォーマット層との関係時間軸)):
 
 - **時刻の単位・座標系**: vpr ネイティブの **tick(整数)** で保持し、音符の時刻は**プロジェクト絶対 tick**で
   正規化する(パート相対で格納する vpr は読み込み時に絶対化する)。秒/フレーム/拍への変換は呼び出し側が行う
-  (§6)。tick⇔秒変換に必要なテンポマップ・分解能(tick/四分音符)・拍子も公開する。
+  ([§6](#6-フォーマット層との関係時間軸))。tick⇔秒変換に必要なテンポマップ・分解能(tick/四分音符)・拍子も公開する。
 - **音素の粒度**: 音素は **音符単位** とし、各音符が音素列(発音記号の並び)を持つ。音符内の音素別タイミングは
   初期スコープ外(必要になれば拡張)。
 - **強弱の表現**: 各音符の **ベロシティ(0〜127 の生値)** を持つ。加えて、パート単位の**連続コントローラ曲線**を
@@ -70,17 +70,17 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
   観測する(隣接差分でなく和集合の補集合とすることで、万一区間が重なっても偽の休符を作らない)。先頭音符より
   前・解析範囲末尾までの無音を含み、解析範囲は呼び出し側が定める。歌唱トラックは単音想定(発音区間の重なりを
   想定しない)で、重なる入力は `read` が `VprWarning` で報告する。
-- **公開関数**: 読み(§3)とデータモデル、書き(§4)の2方向。読みはデータモデルを返し、書きはデータモデルを
+- **公開関数**: 読み([§3](#3-読み込みread))とデータモデル、書き([§4](#4-書き出しwrite))の2方向。読みはデータモデルを返し、書きはデータモデルを
   vpr へ直列化する。
 
 ### 2.1 公開する具体型と関数
 
 型は Python の dataclass、公開関数はモジュール関数とする。
-時刻は vpr ネイティブの **tick(整数)** で保持し、秒/フレーム/拍への変換は持たない(§6)。
+時刻は vpr ネイティブの **tick(整数)** で保持し、秒/フレーム/拍への変換は持たない([§6](#6-フォーマット層との関係時間軸))。
 
 - `VprProject`: `resolution: int`(tick/四分音符)、`tempos: list[TempoEvent]`、
   `time_signatures: list[TimeSignature]`、`tracks: list[Track]`、
-  `raw_sequence: dict | None`(未解釈データのロスレス保持。§3。`read` は `sequence.json` 全体を保持し、
+  `raw_sequence: dict | None`(未解釈データのロスレス保持。[§3](#3-読み込みread)。`read` は `sequence.json` 全体を保持し、
   手組みの `VprProject` では `None`)。
 - `TempoEvent`: `tick: int`、`bpm: float`。
 - `TimeSignature`: `tick: int`、`numerator: int`、`denominator: int`。
@@ -107,7 +107,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
     `code` は英小文字の `snake_case`(例: `overlapping_notes`)。
   - `VprFormatError` は原因特定のため `message: str`、`path: str | None`、`key: str | None`、
     `value: object | None` を持つ。`path` は ZIP エントリ名または JSON パス(例 `tracks[2].parts[0].notes[4].pos`)、
-    `key` は欠落・型不一致の対象キー、`value` は問題になった実値。詳細な範囲は §3。
+    `key` は欠落・型不一致の対象キー、`value` は問題になった実値。詳細な範囲は [§3](#3-読み込みread)。
 - **公開関数**(`vmd.io` に倣う):
   - `read(src: str | Path | bytes) -> tuple[VprProject, list[VprWarning]]`(読み)。
   - `write(project: VprProject) -> bytes` / `write_file(project: VprProject, path: str | Path) -> None`
@@ -115,7 +115,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
     `os.replace`)で、書き込み途中の中断・ディスクフルでも既存の出力先を破損させない
     (`vmd.io.write_file` に倣う)。
 - 未解釈データ(ロスレス保持)は `VprProject.raw_sequence` に `sequence.json` 全体を保持する範囲とする
-  (保持範囲と往復保証の限界は §3・§5)。オブジェクト単位の未マップキー保持(`extras` 等)は必要が確認された
+  (保持範囲と往復保証の限界は [§3](#3-読み込みread)・[§5](#5-形式レイアウトの正本))。オブジェクト単位の未マップキー保持(`extras` 等)は必要が確認された
   時点で書き利用(write)で検討する。
 
 ---
@@ -123,25 +123,25 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 ## 3. 読み込み(read)
 
 - vpr を読み、データモデル(2章)を返す。
-- フォーマット層共通の設計原則(ロスレス・CLI非依存・無出力・構造化警告/エラー)は layering.md §3 に従う。
+- フォーマット層共通の設計原則(ロスレス・CLI非依存・無出力・構造化警告/エラー)は [layering.md §3](../../docs/conventions/layering.md#3-フォーマット層共通の設計原則) に従う。
   vpr 固有の保持範囲: 解釈しないデータは可能な範囲で保持し無加工なら書き戻せることを目標とし、保持の範囲は
-  形式レイアウトの確定(5章)に依存する(§3.3)。形式の異常は `VprFormatError`、続行可能な事象は `VprWarning` で返す。
+  形式レイアウトの確定(5章)に依存する([§3.3](#33-未解釈データのロスレス保持))。形式の異常は `VprFormatError`、続行可能な事象は `VprWarning` で返す。
 
 `read` は形式仕様([docs/specs/vpr/VPR_file_format.md](../../docs/specs/vpr/VPR_file_format.md))の `sequence.json` を
-次のとおりデータモデル(§2.1)へ写像する(フィールドのレイアウトは形式仕様を正とする):
+次のとおりデータモデル([§2.1](#21-公開する具体型と関数))へ写像する(フィールドのレイアウトは形式仕様を正とする):
 
 - `VprProject.resolution` = 480(形式仕様の固定分解能)。
 - `VprProject.tempos` ← `masterTrack.tempo.events`。`TempoEvent(tick=pos, bpm=value/100)`。
 - `VprProject.time_signatures` ← `masterTrack.timeSig.events`。小節番号 `bar` を tick へ変換
   (分解能と先行する拍子から各小節の tick 長を積算)して `TimeSignature(tick, numerator=numer, denominator=denom)`。
 - `VprProject.tracks` ← `tracks` のうち歌唱トラック(`type` = 2)。`Track(name, parts)`。オーディオトラック
-  (`type` = 1)は音符を持たず公開データモデルに現れない(その保持は §3.3)。
+  (`type` = 1)は音符を持たず公開データモデルに現れない(その保持は [§3.3](#33-未解釈データのロスレス保持))。
 - `Part(name, start_tick=part.pos, notes, controllers)`。`notes` は `start_tick` 昇順。
 - `Note(start_tick=part.pos + note.pos, duration_tick=duration, pitch=number, lyric, velocity, phonemes=phoneme.split())`。
 - `Part.controllers` ← `part.controllers`。各 `ControllerCurve(name, events)` で、`events` は
   `ControllerEvent(tick=part.pos + event.pos, value=event.value)`(音符と同じく part 開始位置を加算して絶対化)を
   `tick` 昇順に整列。声量に限らず全コントローラを生値で公開する(選別・正規化は利用先)。
-- 休符は専用型を持たず、§2.1 のとおり発音区間の和集合の補集合として導出する。
+- 休符は専用型を持たず、[§2.1](#21-公開する具体型と関数) のとおり発音区間の和集合の補集合として導出する。
 
 ### 3.1 構造異常(`VprFormatError`)
 
@@ -156,9 +156,9 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
   - `masterTrack.tempo.events[]` / `masterTrack.timeSig.events[]` から `TempoEvent` / `TimeSignature` を構築するための
     必須キーまたは型が不正である。
   - 歌唱トラック・パート・音符の公開モデル対象フィールドが欠落・型不正である。音符は `pos`・`duration`・`number`・
-    `lyric`・`phoneme`・`velocity` の6フィールドを必須とする(形式仕様 VPR_file_format.md)。
+    `lyric`・`phoneme`・`velocity` の6フィールドを必須とする(形式仕様 [VPR_file_format.md](../../docs/specs/vpr/VPR_file_format.md))。
 - **`VprFormatError` としない入力(許容)**:
-  - 公開データモデル対象外の未知キー・未解釈キー(ロスレス保持側 §3.3 に回す)。
+  - 公開データモデル対象外の未知キー・未解釈キー(ロスレス保持側 [§3.3](#33-未解釈データのロスレス保持) に回す)。
   - 形式仕様で省略可とされる音符フィールド(`exp`/`aiExp`/`vibrato`/`singingSkill`/`phonemePositions`)の欠如。
   - オーディオトラックなど公開データモデルの `Track` に写像しないトラックの存在。
   - 歌唱パートに `notes` が無い場合は空の音符列として扱う。
@@ -177,7 +177,7 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 - **保証しない範囲**: `Project/sequence.json` 以外の ZIP エントリ(`Project/Audio/*.wav` 等)・ZIP エントリ属性・
   JSON の空白/キー順/数値表記などの字句差・公開モデルの並び替えで失われる元順序・公開モデル各オブジェクトと
   `raw_sequence` 内 JSON オブジェクトとの対応関係は、公開 API として保証しない。
-- 実際の往復(読み→書き→読み)検証と保持範囲の拡張(オブジェクト単位の `extras` 等)は `write` 実装時に行う(§4・§5)。
+- 実際の往復(読み→書き→読み)検証と保持範囲の拡張(オブジェクト単位の `extras` 等)は `write` 実装時に行う([§4](#4-書き出しwrite)・[§5](#5-形式レイアウトの正本))。
 
 ---
 
@@ -194,8 +194,8 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 - vpr の具体的な直列化レイアウト(コンテナ構造・フィールド配置・バージョン差)は**形式仕様を正本**とし、
   本書では重複定義しない。本書は `vpr` モジュールの責務とデータモデル(2章)を定める。
 - 形式仕様は [docs/specs/vpr/VPR_file_format.md](../../docs/specs/vpr/VPR_file_format.md) を正本とする(MMD の VMD
-  レイアウトを `../../docs/specs/vmd/VMD_file_format.md` が正本とし、`vmd` モジュールがそれを実装するのと同じ扱い)。
-  ロスレスの保持範囲(未解釈データの保持表現)は §3.3 に定める(`VprProject.raw_sequence` に `sequence.json`
+  レイアウトを [`../../docs/specs/vmd/VMD_file_format.md`](../../docs/specs/vmd/VMD_file_format.md) が正本とし、`vmd` モジュールがそれを実装するのと同じ扱い)。
+  ロスレスの保持範囲(未解釈データの保持表現)は [§3.3](#33-未解釈データのロスレス保持) に定める(`VprProject.raw_sequence` に `sequence.json`
   全体を保持。往復検証と範囲拡張は `write` 実装時)。
 
 ---
@@ -204,6 +204,6 @@ vpr の音楽情報のうち、利用先(1.3)が必要とするものを、特�
 
 - vpr は MMD 形式でないため `vmd`・`pmx` とは別のフォーマット層モジュールとする。MMD 形式(VMD)の入出力は
   `vmd`、vpr 側は `vpr`。
-- vpr はテンポ・拍子に基づく時間表現(tick/拍)を持つ。一方 VMD 側は 30fps 基準(vmd.md §1.2 の規約)。
+- vpr はテンポ・拍子に基づく時間表現(tick/拍)を持つ。一方 VMD 側は 30fps 基準([vmd.md §1.2](../vmd/vmd.md#12-vmd-固有規約) の規約)。
   時刻⇔フレーム/拍の変換は利用先(各CLI)が行い、`vpr` は vpr の時間表現とテンポ・拍子を正規化して
   渡すまでを担う(変換ポリシーは持たない)。
