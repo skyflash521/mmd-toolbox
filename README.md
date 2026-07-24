@@ -36,12 +36,12 @@ Git が使える人は clone して
 git clone https://github.com/skyflash521/mmd-toolbox.git
 ```
 
-### 3. README.md が入っているフォルダへ移動する
+### 3. [README.md](README.md) が入っているフォルダへ移動する
 
 Windows では PowerShell、macOS ではターミナルを開き、この README が入っているフォルダへ移動する。
 
 1. PowerShell またはターミナルに `cd ` と入力する。`cd` の後ろには半角スペースを入れる。
-2. 展開したフォルダを開き、`README.md` が見えるフォルダを PowerShell またはターミナルへドラッグ＆ドロップする。
+2. 展開したフォルダを開き、[`README.md`](README.md) が見えるフォルダを PowerShell またはターミナルへドラッグ＆ドロップする。
 3. Enter キーを押す。
 
 Enter キーを押す前は、たとえば次のようになる。
