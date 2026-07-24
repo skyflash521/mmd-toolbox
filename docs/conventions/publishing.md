@@ -15,7 +15,7 @@
 
 1. `<tool>/__init__.py` の `__version__` を更新する。初回は付与し(初期版の選び方は [versioning.md §4](versioning.md#4-初期版の付与))、以降のリリースでは該当桁を上げる(どの桁を上げるかは [versioning.md §3](versioning.md#3-どの桁をいつ上げるか))。
 2. CLI に `--version` を備える。初回はこのオプションを追加する(表示内容と番号源は [versioning.md §1](versioning.md#1-管理単位))。表示は対象ツール自身の版のみとする(共通ライブラリは版を持たない。[versioning.md §1](versioning.md#1-管理単位))。
-3. ドキュメントに版番号を記載している箇所(トップ `README.md` のツール表のバージョン列など)を、現在の `__version__` に合わせて更新する(番号源は [versioning.md §1](versioning.md#1-管理単位) のとおり `__version__` 一本)。
+3. ドキュメントに版番号を記載している箇所(トップ [`README.md`](../../README.md) のツール表のバージョン列など)を、現在の `__version__` に合わせて更新する(番号源は [versioning.md §1](versioning.md#1-管理単位) のとおり `__version__` 一本)。
 4. `pyproject.toml` の version をその日の CalVer へ更新する(値の付け方は [versioning.md §1](versioning.md#1-管理単位))。
 
 ## B. 公開前検証
@@ -32,7 +32,7 @@
    - 非目標と既知の制約。
    - 詳細は仕様の重複を避け、対象ツールの仕様書へ誘導。
 2. `<tool>/CHANGELOG.md` を更新する(形式・粒度・書き方・初回リリース時の作成・README からのリンクは [changelog.md](changelog.md) を正とする)。
-3. トップ `README.md` の対象ツールの記載を整える(ツールの列挙は名前順)。初回は次を追記し、以降のリリースでは既存の記載を更新する:
+3. トップ [`README.md`](../../README.md) の対象ツールの記載を整える(ツールの列挙は名前順)。初回は次を追記し、以降のリリースでは既存の記載を更新する:
    - ツール表へ行(できること・`<tool>/README.md` リンク)。
    - 対象ツールの概要節(目的・最小コマンド・要点)。
    - リポジトリ構成表は `tools/<ツール>/` の汎用行が既に対象ツールを含むため、個別の行は追加しない。

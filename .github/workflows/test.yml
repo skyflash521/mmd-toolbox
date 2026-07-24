@@ -26,3 +26,14 @@ jobs:
 
       - name: Run pytest
         run: pytest
+
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config lychee.toml . .claude
+          lycheeVersion: v0.24.2
+      - name: Check for bare section references
+        run: python .github/scripts/check_section_references.py
