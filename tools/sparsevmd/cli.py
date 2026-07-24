@@ -843,9 +843,9 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
     for name, keys in groups.items():
         ks = sorted(keys, key=lambda k: k.frame)
         if name in selected and len(ks) >= 2:
-            # reporter(人間向けライブ表示)は処理に着手する前に現在対象を出す(§6.1「現在対象などの
-            # 補足は行末へ併記する」)。on_progress(機械モードイベント)は仕様書の契約どおり完了後に
-            # 呼ぶ(sparsevmd.md 12.2: bone 段は 1 件の完了ごとに done/total/note を出す)。
+            # reporter(人間向けライブ表示)は処理に着手する前に現在対象を出し、on_progress(機械モード
+            # イベント)は完了後に呼ぶ。人間向けは「今何を処理中か」を示すため着手前、機械向けは
+            # done/total/note の完了実績を示すため完了後、と発火タイミングを使い分ける。
             if reporter is not None:
                 reporter.update(done, total, note=name)
             track_ranges = ranges.intersect(global_ranges, ks[0].frame, ks[-1].frame)
