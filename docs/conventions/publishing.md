@@ -21,8 +21,9 @@
 ## B. 公開前検証
 
 1. **テスト緑**: `pytest <tool>` と全体を実行し緑を確認する。
-2. **CLI スモークテスト**: 代表入力で end-to-end 実行する。終了コード0・出力の実体(サイズ・件数)・`--version`・`--help`・`--dry-run` を確認。前景で exit と生成物の実体を見届けてから合格判断する。生成物は利用者から見える所定ディレクトリに置く。
-3. **配布物の確認**: `pyproject.toml` の `project.scripts` に対象コマンド、`packages.find` に対象パッケージが含まれることを確認。開発インストールで `<tool> --version` が通ること。
+2. **リンク検査**: `lychee --config lychee.toml . .claude` と `python .github/scripts/check_section_references.py` を実行しエラー0件を確認する。
+3. **CLI スモークテスト**: 代表入力で end-to-end 実行する。終了コード0・出力の実体(サイズ・件数)・`--version`・`--help`・`--dry-run` を確認。前景で exit と生成物の実体を見届けてから合格判断する。生成物は利用者から見える所定ディレクトリに置く。
+4. **配布物の確認**: `pyproject.toml` の `project.scripts` に対象コマンド、`packages.find` に対象パッケージが含まれることを確認。開発インストールで `<tool> --version` が通ること。
 
 ## C. 利用者向けドキュメント
 
@@ -37,7 +38,7 @@
    - 対象ツールの概要節(目的・最小コマンド・要点)。
    - リポジトリ構成表は `tools/<ツール>/` の汎用行が既に対象ツールを含むため、個別の行は追加しない。
    - 依存・開発環境に対象ツール固有の事項があれば反映(無ければ変更不要)。
-4. 対象ツールの仕様書を公開水準に点検する: 目的・非目標・CLI仕様・既知の制約が現実装と整合するか。作業過程参照(ラウンド番号・計画書参照)が残っていれば除去([artifact-hygiene.md §2](artifact-hygiene.md#2-作業過程参照の混入禁止) が混入禁止対象の正本)。ツール仕様書は恒久仕様書なので、[document-authoring.md §2](document-authoring.md#2-恒久仕様書の記述範囲) の観点でロールアウト過程が残っていないかも点検。→ [terminology.md](terminology.md) の観点で参照切れ・用語規約を直接確認。
+4. 対象ツールの仕様書を公開水準に点検する: 目的・非目標・CLI仕様・既知の制約が現実装と整合するか。作業過程参照(ラウンド番号・計画書参照)が残っていれば除去([artifact-hygiene.md §2](artifact-hygiene.md#2-作業過程参照の混入禁止) が混入禁止対象の正本)。ツール仕様書は恒久仕様書なので、[document-authoring.md §2](document-authoring.md#2-恒久仕様書の記述範囲) の観点でロールアウト過程が残っていないかも点検。→ [cross-references.md](cross-references.md)・[terminology.md](terminology.md) の観点で参照の記法・用語規約を直接確認(リンク先の実在は B の手順2のリンク検査で確認する)。
 
 ## D. リリース確定
 

@@ -3,7 +3,7 @@
 Markdownリンクとして書かれた参照は lychee がリンク切れを検査できるが、平文表記(そもそも
 リンクでない)は lychee の検査対象外のため、この再発防止チェッカーで別途検査する。
 節参照は必ず `[表示](path.md#アンカー)`、ファイル相互参照は必ず `[表示](path.md)` として
-書く規約(docs/conventions/terminology.md)への適合を機械的に確認する。違反があれば
+書く規約(docs/conventions/cross-references.md)への適合を機械的に確認する。違反があれば
 ファイル:行を列挙して終了コード1で終わる。
 """
 import re

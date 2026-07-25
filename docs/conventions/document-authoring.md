@@ -1,10 +1,10 @@
 # 文書記述規約
 
 恒久仕様書と実装計画書について、文書種別ごとの記述範囲・粒度を定める。本書は**各文書種別に何を
-どの粒度で書くかの正本**とする。用語の正記法・参照切れの確認は [terminology.md](terminology.md)、
-成果物全般への作業過程参照・個人情報・環境固有情報の混入禁止は
-[artifact-hygiene.md](artifact-hygiene.md)、層と参照依存は [layering.md](layering.md) を正本とし、
-本書はそれらへ委譲する。
+どの粒度で書くかの正本**とする。用語の正記法は [terminology.md](terminology.md)、参照の書き方・
+整合確認は [cross-references.md](cross-references.md)、成果物全般への作業過程参照・個人情報・
+環境固有情報の混入禁止は [artifact-hygiene.md](artifact-hygiene.md)、層と参照依存は
+[layering.md](layering.md) を正本とし、本書はそれらへ委譲する。
 
 大前提として**コードが主、ドキュメントは従**とする。ドキュメントはコードを理解するための手段で
 あり、実装の詳細の正本はコードである。この主従は実装の詳細(コードがどう実現しているか)について

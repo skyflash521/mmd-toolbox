@@ -3,7 +3,8 @@
 リポジトリに残すすべての成果物に、後から参照できない作業過程の記述・個人情報・環境固有情報・
 秘密情報・自明な内容やコードの逐語的な書き写しを混入させないための規約。本書は**混入を禁じる
 対象と、正しい置き換え方の正本**とする。
-用語の正記法・参照切れの確認は [terminology.md](terminology.md)、文書種別ごとの記述範囲・粒度
+用語の正記法は [terminology.md](terminology.md)、参照の書き方・整合確認は
+[cross-references.md](cross-references.md)、文書種別ごとの記述範囲・粒度
 (恒久仕様書は到達状態のみ、実装計画書は確定粒度)は [document-authoring.md](document-authoring.md)
 を正本とし、本書はそれらへ委譲する。
 
