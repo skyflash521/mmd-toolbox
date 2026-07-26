@@ -1,11 +1,11 @@
 ---
 name: release-tool
-description: 公開CLIツールのリリース作業(版付け・利用者向けドキュメント・CHANGELOG・検証・PR・タグ)を publishing.md の手順で進める。ツールをリリースするとき、版を上げて公開するとき、リリースPRやタグを作るときに使用する。
+description: 公開CLIツールのリリース作業(版付け・利用者向けドキュメント・CHANGELOG・検証・PR・タグ)を、ツール公開手順の規約に従って進める。ツールをリリースするとき、版を上げて公開するとき、リリースPRやタグを作るときに使用する。
 ---
 
 # ツールリリース
 
-作業手順の正本は [`docs/conventions/publishing.md`](../../../docs/conventions/publishing.md)(A 版付け → B 公開前検証 → C 利用者向けドキュメント → D リリース確定)。
+作業手順の正本は [`docs/conventions/publishing.md`](../../../docs/conventions/publishing.md)。
 本スキルは手順を再掲せず、対話的に進める規律と、CHANGELOG の生成手順・PR案のひな形を定める。
 規律: **提案 → ユーザー確認(修正があれば反映して再提示)→ 実行**、を要所ごとに繰り返す。
 **スキルが実行するのは PR の作成まで(git・gh CLI の操作)。判断(版の決定・PR案の確定)は
@@ -31,11 +31,11 @@ description: 公開CLIツールのリリース作業(版付け・利用者向け
    切り替えをしない)。問題がなければ develop に切り替え、その上で [publishing.md](../../../docs/conventions/publishing.md) の A → B → C を
    順に実行する。
    - B(公開前検証)の実行・計測は run-and-bench スキルの規律で行う。
-   - C(ドキュメント)の CHANGELOG 更新は下の「CHANGELOG の生成手順」で行う。
+   - C(ドキュメント)の CHANGELOG 更新は [CHANGELOG の生成手順](#changelog-の生成手順)で行う。
 2. 各まとまりの編集が終わるごとに codex-review-loop で収束させ、commit スキルでコミットする。
 3. D(リリース確定)は PR の作成までをスキルが実行する(gh の利用開始時のアカウント確認と、
-   gh が使えないときの代替は下の「gh の利用とフォールバック」に従う):
-   1. 下のひな形で PR案(タイトル・本文)を作成して提示し、ユーザーの確認(修正があれば反映して
+   gh が使えないときの代替は [gh の利用とフォールバック](#gh-の利用とフォールバック)に従う):
+   1. [PR案のひな形](#pr案のひな形)で PR案(タイトル・本文)を作成して提示し、ユーザーの確認(修正があれば反映して
       再提示)を経て確定する。
    2. 確定したら、develop を push し、確定した PR案どおりに develop から main への PR を作成する
       (`gh pr create`)。PR案の確定をもってこの2操作の確認とみなし、個別には確認しない。
