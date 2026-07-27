@@ -8,13 +8,23 @@
 
 ## インストール
 
-`song2vmd` は音声認識・ボーカル分離に torch/transformers 等の追加依存を使う。トップ [README.md の 4. 初回準備コマンドを実行する](../../README.md#4-初回準備コマンドを実行する)
+`song2vmd` は音声認識・ボーカル分離に torch/transformers 等の追加依存を使う。トップ [README.md の 4. 仮想環境を作成する](../../README.md#4-仮想環境を作成する)
 の `pip install .` だけでは `song2vmd` コマンド自体は入るが、
 これらの依存(`soundfile` を含む)が入らない。その状態で `song2vmd --help` などを実行すると、
 不足している依存と導入コマンドを1行で示して終了する。`song2vmd` を使う場合は、代わりに次を実行する。
 
 ```sh
 pip install ".[vocal-analysis]"
+```
+
+### GPU(NVIDIA)を使う場合
+
+上の `pip install ".[vocal-analysis]"` で入る `torch` は CPU 専用版で、NVIDIA GPU を搭載していても使わない。
+GPU を使う場合は CUDA 版の `torch` を入れる。
+[PyTorch 公式サイト](https://pytorch.org/get-started/locally/) の `Compute Platform` で CUDA のバージョンを選び、次のコマンドの `--index-url` をそれに合わせて実行する(次は CUDA 12.6 の場合)。
+
+```sh
+pip install torch --index-url https://download.pytorch.org/whl/cu126 --force-reinstall --no-deps
 ```
 
 ## 初回実行時のモデルダウンロード
@@ -98,8 +108,8 @@ song2vmd <入力ファイル名>.wav -o <出力ファイル名>.vmd --style powe
   など追加の形式にも対応する。
 - 長い曲は無音区間で自動分割して処理する(`--max-duration`、既定300秒。VMDのフレーム番号上限対策
   ではなく処理資源対策)。
-- GPU(CUDA)があれば自動的に使う(`--device auto`)。VRAM が不足すると大幅に遅くなり、警告が表示
-  される。その場合は `--device cpu` を指定すると改善することがある。
+- GPU(CUDA)は CUDA 版の `torch` を入れてあれば自動的に使う(`--device auto`)。VRAM が不足すると
+  大幅に遅くなり、警告が表示される。その場合は `--device cpu` を指定すると改善することがある。
 - PC の性能(GPU の有無・CPU 性能など)によっては、処理に時間がかかることがある。
 - 出力先パスに既存ファイルがある場合、`--overwrite` を付けない限り上書きしない。
 - 処理中に GPU メモリ超過やスワップの発生を実際に観測した場合、標準エラーへ警告を出す(処理内容や
