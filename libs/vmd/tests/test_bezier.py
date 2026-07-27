@@ -78,5 +78,5 @@ def test_error_is_measured_on_quantized_curve():
     xs = _internal_xs()
     ys = [interp._solve_factor(30, 5, 100, 120, x) for x in xs]
     cp, err = fit_bezier_curve(xs, ys)
-    recomputed = max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
+    recomputed = max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys, strict=True))
     assert err == pytest.approx(recomputed, abs=1e-9)

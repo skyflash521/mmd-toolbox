@@ -41,7 +41,7 @@ def test_single_n_four_key_envelope():
     assert set(env) == {"ん"}
     keys = env["ん"]
     assert [f for f, _ in keys] == [0, 2, 8, 10]
-    for (_, w), expected in zip(keys, [0.0, 0.5, 0.5, 0.0]):
+    for (_, w), expected in zip(keys, [0.0, 0.5, 0.5, 0.0], strict=True):
         assert w == pytest.approx(expected)
 
 
@@ -103,7 +103,7 @@ def _assert_n_mirrors_a(n_events, a_events, params=None):
     )
     a_sorted = sorted((k.name, k.frame, k.weight) for k in ak)
     assert [(n, f) for n, f, _ in n_mapped] == [(n, f) for n, f, _ in a_sorted]
-    for (_, _, nw), (_, _, aw) in zip(n_mapped, a_sorted):
+    for (_, _, nw), (_, _, aw) in zip(n_mapped, a_sorted, strict=True):
         assert nw == pytest.approx(aw)
 
 
@@ -185,8 +185,8 @@ def test_n_vowel_boundary_short_coarticulation():
         by_morph[name].sort()
     assert set(by_morph) == {"ん", "あ"}
     assert [f for f, _ in by_morph["ん"]] == [0, 2, 9, 10, 11]
-    for (_, w), e in zip(by_morph["ん"], [0.0, 0.5, 0.5, 0.25, 0.0]):
+    for (_, w), e in zip(by_morph["ん"], [0.0, 0.5, 0.5, 0.25, 0.0], strict=True):
         assert w == pytest.approx(e)
     assert [f for f, _ in by_morph["あ"]] == [9, 10, 11, 18, 20]
-    for (_, w), e in zip(by_morph["あ"], [0.0, 0.25, 0.5, 0.5, 0.0]):
+    for (_, w), e in zip(by_morph["あ"], [0.0, 0.25, 0.5, 0.5, 0.0], strict=True):
         assert w == pytest.approx(e)

@@ -25,7 +25,7 @@ def _envelope(events, params=None):
 
 def _approx_envelope(actual, expected):
     assert [f for f, _ in actual] == [f for f, _ in expected]
-    for (_, aw), (_, ew) in zip(actual, expected):
+    for (_, aw), (_, ew) in zip(actual, expected, strict=True):
         assert aw == pytest.approx(ew)
 
 
@@ -216,7 +216,7 @@ def _total_open(env, frame):
             return keys[0][1]
         if f >= keys[-1][0]:
             return keys[-1][1]
-        for (f0, v0), (f1, v1) in zip(keys, keys[1:]):
+        for (f0, v0), (f1, v1) in zip(keys, keys[1:], strict=False):
             if f0 <= f <= f1:
                 return v0 if f1 == f0 else v0 + (v1 - v0) * (f - f0) / (f1 - f0)
         return keys[-1][1]

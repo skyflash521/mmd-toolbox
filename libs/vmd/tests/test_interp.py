@@ -160,7 +160,7 @@ class TestExtremeControlPoints:
         keys = [cam_key(0, distance=0.0, curves={"distance": cp}),
                 cam_key(20, distance=20.0, curves={"distance": cp})]
         vals = [interp.sample(keys, "distance", f) for f in range(0, 21)]
-        assert all(b >= a - 1e-9 for a, b in zip(vals, vals[1:]))
+        assert all(b >= a - 1e-9 for a, b in zip(vals, vals[1:], strict=False))
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +336,7 @@ class TestCrossValidationRealFile:
             "fov": lambda k: float(k.fov),
         }
         checked = 0
-        for k0, k1 in zip(keys, keys[1:]):
+        for k0, k1 in zip(keys, keys[1:], strict=False):
             span = k1.frame - k0.frame
             if span <= 1:
                 continue

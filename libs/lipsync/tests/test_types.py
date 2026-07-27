@@ -139,7 +139,7 @@ def test_generated_keys_roundtrip_through_vmd():
     assert keys
     restored, _warnings = read(write(VmdDocument(morph=keys)))
     assert len(restored.morph) == len(keys)
-    for src, dst in zip(keys, restored.morph):
+    for src, dst in zip(keys, restored.morph, strict=True):
         assert dst.name == src.name
         assert dst.frame == src.frame
         assert dst.weight == pytest.approx(src.weight)

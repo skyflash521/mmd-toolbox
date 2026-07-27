@@ -46,7 +46,7 @@ def _unit(q):
 def _quat_angle_deg(a, b):
     # 入力を正規化してから角度を測る(非単位入力で見かけ0度にしない)。
     a, b = _unit(a), _unit(b)
-    d = abs(sum(x * y for x, y in zip(a, b)))
+    d = abs(sum(x * y for x, y in zip(a, b, strict=True)))
     d = min(1.0, d)
     return math.degrees(2.0 * math.acos(d))
 
@@ -69,9 +69,9 @@ def test_zero_strength_is_identity():
     pos = [(x, 0.0, 0.0) for x in xs]
     rots = [quat_y(2.0 * ((-1) ** i)) for i in range(11)]
     out_pos, out_rot = apply(pos, rots, pos_strength=0.0, rot_strength=0.0)
-    for o, i in zip(out_pos, pos):
+    for o, i in zip(out_pos, pos, strict=True):
         assert o == pytest.approx(i)
-    for o, i in zip(out_rot, rots):
+    for o, i in zip(out_rot, rots, strict=True):
         assert _quat_angle_deg(o, i) == pytest.approx(0.0, abs=1e-6)
     _assert_unit_quaternions(out_rot)
 
@@ -145,8 +145,8 @@ def test_position_change_clamped_per_axis():
     seq = [0.0, 0.6, 0.0, 0.6, 0.0, 0.6, 0.0, 0.6, 0.0, 0.6, 0.0]
     pos = [(v, v, 0.0) for v in seq]
     out_pos, _ = apply(pos, [IDENT] * 11, pos_strength=1.0)
-    dx = [abs(o[0] - i[0]) for o, i in zip(out_pos, pos)]
-    dy = [abs(o[1] - i[1]) for o, i in zip(out_pos, pos)]
+    dx = [abs(o[0] - i[0]) for o, i in zip(out_pos, pos, strict=True)]
+    dy = [abs(o[1] - i[1]) for o, i in zip(out_pos, pos, strict=True)]
     assert max(dx) <= 0.3 + 1e-9
     assert max(dy) <= 0.3 + 1e-9
     # クランプ未実装(青天井)を排除: 各軸が独立に上限 0.3 へクランプされる。
@@ -160,7 +160,7 @@ def test_rotation_change_clamped():
     degs = [0.0, 20.0, 0.0, 20.0, 0.0, 20.0, 0.0, 20.0, 0.0, 20.0, 0.0]
     rots = [quat_y(d) for d in degs]
     _, out_rot = apply([(0.0, 0.0, 0.0)] * 11, rots, rot_strength=1.0)
-    changes = [_quat_angle_deg(o, i) for o, i in zip(out_rot, rots)]
+    changes = [_quat_angle_deg(o, i) for o, i in zip(out_rot, rots, strict=True)]
     assert max(changes) <= 5.0 + 1e-6
     assert max(changes) == pytest.approx(5.0, abs=1e-3)
     _assert_unit_quaternions(out_rot)

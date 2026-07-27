@@ -72,7 +72,7 @@ _CURVED_YS = [interp._solve_factor(96, 0, 96, 30, x) for x in _CURVED_XS]
 
 
 def _linear_err(xs, ys):
-    return max(abs(interp._solve_factor(*LIN, x) - y) for x, y in zip(xs, ys))
+    return max(abs(interp._solve_factor(*LIN, x) - y) for x, y in zip(xs, ys, strict=True))
 
 
 def _is_linear_curve(cp, xs):
@@ -98,7 +98,7 @@ def test_skip_fastpath_forces_real_bezier(monkeypatch):
 def test_skip_fastpath_coeff_forces_real_bezier(monkeypatch):
     # 回転の係数曲線でも、skip_fastpath=True で線形ファストパスを切り非線形制御点を返す。
     def resid_at(coeff):
-        return [coeff(x) - y for x, y in zip(_CURVED_XS, _CURVED_YS)]
+        return [coeff(x) - y for x, y in zip(_CURVED_XS, _CURVED_YS, strict=True)]
 
     lin_res = max(abs(r) for r in resid_at(lambda x: interp._solve_factor(*LIN, x)))
     thr = lin_res + 1e-6
@@ -116,7 +116,7 @@ def test_skip_fastpath_cheap_accept_also_skipped(monkeypatch):
     # 固定 ease 候補 (53,0,127,127) で生成した曲線は、線形では大きく外れるが当該 ease では誤差0。
     cand = fit._CHEAP_EASE_CPS[0]
     ys = [interp._solve_factor(*cand, x) for x in _CURVED_XS]
-    cand_err = max(abs(interp._solve_factor(*cand, x) - y) for x, y in zip(_CURVED_XS, ys))
+    cand_err = max(abs(interp._solve_factor(*cand, x) - y) for x, y in zip(_CURVED_XS, ys, strict=True))
     thr = cand_err + 1e-6
     # 既定: 線形は外れるが cheap accept が発火して固定 ease を即採用(least_squares なし)
     calls_default = _count_least_squares(monkeypatch)

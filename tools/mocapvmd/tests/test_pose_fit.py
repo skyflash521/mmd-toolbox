@@ -43,8 +43,8 @@ def _marker_error(profile, dense, target):
     got = _fk_markers(profile, dense)
     total = 0.0
     for name, series in target.items():
-        for g, t in zip(got[name], series):
-            total += sum((a - b) ** 2 for a, b in zip(g, t)) ** 0.5
+        for g, t in zip(got[name], series, strict=True):
+            total += sum((a - b) ** 2 for a, b in zip(g, t, strict=True)) ** 0.5
     return total
 
 
@@ -60,8 +60,8 @@ def test_no_displacement_returns_original():
     target = _fk_markers(profile, dense)  # FKそのまま=変位なし
     res = fit(profile, dense, target)
     assert isinstance(res, FitResult)
-    for fitted_frame, orig_frame in zip(res.poses, dense):
-        for fb, ob in zip(fitted_frame, orig_frame):
+    for fitted_frame, orig_frame in zip(res.poses, dense, strict=True):
+        for fb, ob in zip(fitted_frame, orig_frame, strict=True):
             assert fb.position == pytest.approx(ob.position, abs=1e-9)
             assert fb.rotation == pytest.approx(ob.rotation, abs=1e-9)
 
@@ -76,8 +76,8 @@ def test_micro_displacement_preserves_original():
     hx = target["head"][0]
     target["head"][0] = (hx[0] + eps, hx[1], hx[2])
     res = fit(profile, dense, target)
-    for fitted_frame, orig_frame in zip(res.poses, dense):
-        for fb, ob in zip(fitted_frame, orig_frame):
+    for fitted_frame, orig_frame in zip(res.poses, dense, strict=True):
+        for fb, ob in zip(fitted_frame, orig_frame, strict=True):
             assert fb.position == pytest.approx(ob.position, abs=1e-9)
             assert fb.rotation == pytest.approx(ob.rotation, abs=1e-9)
 
@@ -127,13 +127,13 @@ def test_corrections_within_limits():
         target[n][0] = (p[0] + 5.0, p[1], p[2])
     res = fit(profile, dense, target)
     max_rot = math.radians(DEFAULT_FIT_PARAMS.max_rot_deg)
-    for fitted_frame, orig_frame in zip(res.poses, dense):
-        for fb, ob in zip(fitted_frame, orig_frame):
+    for fitted_frame, orig_frame in zip(res.poses, dense, strict=True):
+        for fb, ob in zip(fitted_frame, orig_frame, strict=True):
             # 位置補正
-            dp = sum((a - b) ** 2 for a, b in zip(fb.position, ob.position)) ** 0.5
+            dp = sum((a - b) ** 2 for a, b in zip(fb.position, ob.position, strict=True)) ** 0.5
             assert dp <= DEFAULT_FIT_PARAMS.max_pos + 1e-6
             # 回転補正角(クォータニオン間角度)
-            dot = abs(sum(a * b for a, b in zip(fb.rotation, ob.rotation)))
+            dot = abs(sum(a * b for a, b in zip(fb.rotation, ob.rotation, strict=True)))
             dot = min(1.0, dot)
             angle = 2.0 * math.acos(dot)
             assert angle <= max_rot + 1e-6
@@ -161,11 +161,11 @@ def test_proportional_correction_limit():
     pos_limit = DEFAULT_FIT_PARAMS.k_pos * d
     rot_limit = DEFAULT_FIT_PARAMS.k_rot * d
     max_rot = 0.0
-    for fitted_frame, orig_frame in zip(res.poses, dense):
-        for fb, ob in zip(fitted_frame, orig_frame):
-            dp = sum((a - b) ** 2 for a, b in zip(fb.position, ob.position)) ** 0.5
+    for fitted_frame, orig_frame in zip(res.poses, dense, strict=True):
+        for fb, ob in zip(fitted_frame, orig_frame, strict=True):
+            dp = sum((a - b) ** 2 for a, b in zip(fb.position, ob.position, strict=True)) ** 0.5
             assert dp <= pos_limit + 1e-6
-            dot = min(1.0, abs(sum(a * b for a, b in zip(fb.rotation, ob.rotation))))
+            dot = min(1.0, abs(sum(a * b for a, b in zip(fb.rotation, ob.rotation, strict=True))))
             angle = 2.0 * math.acos(dot)
             assert angle <= rot_limit + 1e-6
             max_rot = max(max_rot, angle)

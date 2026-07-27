@@ -33,7 +33,7 @@ def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_durati
     while target < duration_sec:
         lo, hi = target - search_window_sec, target + search_window_sec
         candidates = [
-            (t, v) for t, v in zip(rms_times_sec, rms_values) if lo <= t <= hi and t > previous_boundary
+            (t, v) for t, v in zip(rms_times_sec, rms_values, strict=True) if lo <= t <= hi and t > previous_boundary
         ]
         if candidates:
             quietest_time, quietest_value = min(candidates, key=lambda tv: tv[1])

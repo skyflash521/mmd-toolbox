@@ -146,7 +146,7 @@ def test_diagnostics_change_and_ratio():
     frames = list(range(len(pos)))
     ts = footik.stabilize_foot_ik({"右足ＩＫ": ("foot_ik", frames, pos)}, _S)["右足ＩＫ"]
 
-    changes = [_euclid(p, q) for p, q in zip(pos, ts.locked_positions)]
+    changes = [_euclid(p, q) for p, q in zip(pos, ts.locked_positions, strict=True)]
     in_seg = sum(s.end - s.start + 1 for s in ts.grounding.segments)
     assert ts.max_change == pytest.approx(max(changes))
     assert ts.mean_change == pytest.approx(sum(changes) / len(changes))

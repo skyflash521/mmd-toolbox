@@ -68,7 +68,7 @@ def _qmul(a, b):
 
 def _qangle_deg(a, b):
     """2つの quaternion 間の角度距離(度)。符号反転は同一姿勢として 0 になる。"""
-    d = abs(sum(x * y for x, y in zip(a, b)))
+    d = abs(sum(x * y for x, y in zip(a, b, strict=True)))
     d = min(1.0, d)
     return math.degrees(2.0 * math.acos(d))
 
@@ -92,7 +92,7 @@ def _vlen(v):
 
 
 def _vdot(a, b):
-    return sum(x * y for x, y in zip(a, b))
+    return sum(x * y for x, y in zip(a, b, strict=True))
 
 
 def _slerp(a, b, t):

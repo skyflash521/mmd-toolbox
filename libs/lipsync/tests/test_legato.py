@@ -28,7 +28,7 @@ def _envelope(events, params):
 
 def _approx_envelope(actual, expected):
     assert [f for f, _ in actual] == [f for f, _ in expected]
-    for (_, aw), (_, ew) in zip(actual, expected):
+    for (_, aw), (_, ew) in zip(actual, expected, strict=True):
         assert aw == pytest.approx(ew)
 
 

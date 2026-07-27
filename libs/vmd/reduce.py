@@ -465,7 +465,7 @@ def reduce_track(boundaries, channels, min_seg, max_seg, strict, splits=None, ca
             resolved += span
             progress(resolved, total)
 
-    for a, b in zip(bounds, bounds[1:]):
+    for a, b in zip(bounds, bounds[1:], strict=False):
         _process_segment(a, b, channels, min_seg, max_seg, strict, keys, splits, caps, on_resolve)
     return sorted(keys)
 

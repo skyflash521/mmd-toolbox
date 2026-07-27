@@ -508,7 +508,7 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
     mouth_events = []
     mora_event_group_sizes = []
     weak_vowels = 0
-    for u, mora_rms in zip(units, mora_rms_raw):
+    for u, mora_rms in zip(units, mora_rms_raw, strict=True):
         if u.kind in ("vowel", "n"):
             is_weak = u.kind == "vowel" and _is_weak_vowel(u.confidence, mora_rms)
             if is_weak:

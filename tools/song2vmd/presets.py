@@ -109,7 +109,7 @@ def resolve(style, *, open_max=None, coarticulation=None, anticipation=None, min
         open_max=open_max if open_max is not None else preset["open_max"],
     )
     preset_scale = preset["vowel_scale"]
-    vowel_scale = tuple(p * g for p, g in zip(preset_scale[:5], vowel_gain)) + (preset_scale[5],)
+    vowel_scale = tuple(p * g for p, g in zip(preset_scale[:5], vowel_gain, strict=True)) + (preset_scale[5],)
     gen = StyleGenParams(
         attack_frames=preset["attack"],
         release_frames=preset["release"],

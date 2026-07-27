@@ -68,7 +68,7 @@ def test_fit_coeff_loosens_tolerance_for_large_segment(monkeypatch):
     targets = [math.sin(math.pi * x) for x in xs]  # 山型=1本のベジェで表現不可
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     fit._fit_coeff_curve(xs, resid_at)
     assert cap, "least_squares が呼ばれていない"

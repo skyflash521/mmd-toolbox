@@ -51,7 +51,7 @@ def expand_and_normalize(parsed_ranges, global_min, global_max):
         expanded.append((s, e))
 
     expanded.sort()
-    for prev, cur in zip(expanded, expanded[1:]):
+    for prev, cur in zip(expanded, expanded[1:], strict=False):
         # 端の接触(cur.start == prev.end)も1フレーム重複としてエラー。
         if cur[0] <= prev[1]:
             raise RangeError(f"範囲が重複しています: {prev} と {cur}")

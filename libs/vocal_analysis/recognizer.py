@@ -221,7 +221,7 @@ def _strip_prompt_echo(text: str) -> tuple[str, bool]:
 
 def _common_prefix_len(a: str, b: str) -> int:
     n = 0
-    for ca, cb in zip(a, b):
+    for ca, cb in zip(a, b, strict=False):
         if ca != cb:
             break
         n += 1

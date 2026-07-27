@@ -516,7 +516,7 @@ def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
     )["右足ＩＫ"].locked_positions
     out_foot = sorted((k for k in out_doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
     assert [k.frame for k in out_foot] == [k.frame for k in foot]  # 件数・フレーム列の一致
-    for got, exp in zip(out_foot, expected):
+    for got, exp in zip(out_foot, expected, strict=True):
         assert got.position == pytest.approx(exp)
 
 

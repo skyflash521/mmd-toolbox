@@ -1066,7 +1066,7 @@ def test_confirm_mouth_events_output_is_invariant_to_uniform_audio_gain():
     # 無音境界もRMSに依存するため、開き量だけの比較では見逃しうる差を検出する。float32音声
     # サンプルの絶対値スケール差に伴う浮動小数点丸め誤差(1e-6程度)は許容し近似比較する。
     assert len(events_full_gain) == len(events_low_gain)
-    for e_full, e_low in zip(events_full_gain, events_low_gain):
+    for e_full, e_low in zip(events_full_gain, events_low_gain, strict=True):
         assert e_full.shape == e_low.shape
         assert e_full.consonant_class == e_low.consonant_class
         assert e_full.aperture_class == e_low.aperture_class
@@ -1247,7 +1247,7 @@ def test_events_are_time_ordered_contiguous_and_cover_full_range():
     assert mouth_events[-1].end == pytest.approx(0.65 * FRAME_RATE)
     for event in mouth_events:
         assert event.start <= event.end  # 負長イベントを作らない
-    for prev, nxt in zip(mouth_events, mouth_events[1:]):
+    for prev, nxt in zip(mouth_events, mouth_events[1:], strict=False):
         assert prev.end == pytest.approx(nxt.start)  # 隙間なく連続(非重複も兼ねる)
         assert prev.start <= nxt.start  # 時間順(開始時刻が後退しない)
 
@@ -1305,7 +1305,7 @@ def test_split_into_subwindows_are_contiguous_equal_width_and_cover_range():
     width = (end - start) / 5
     for sub_start, sub_end in bounds:
         assert sub_end - sub_start == pytest.approx(width)
-    for (_, e1), (s2, _) in zip(bounds, bounds[1:]):
+    for (_, e1), (s2, _) in zip(bounds, bounds[1:], strict=False):
         assert e1 == pytest.approx(s2)  # 隙間なく連続
 
 
@@ -1355,7 +1355,7 @@ def test_long_mora_splits_into_contiguous_events_tracking_rms_changes():
     assert group_sizes == [1, 5, 1]  # 下アンカー(1)・対象(5分割)・上アンカー(1)
     assert e_events[0].start == pytest.approx(lo_end * FRAME_RATE)
     assert e_events[-1].end == pytest.approx(target_end * FRAME_RATE)
-    for prev, nxt in zip(e_events, e_events[1:]):
+    for prev, nxt in zip(e_events, e_events[1:], strict=False):
         assert prev.end == pytest.approx(nxt.start)  # 隙間なく連続
     amounts = [e.open_amount for e in e_events]
     assert amounts == sorted(amounts)
@@ -1533,7 +1533,7 @@ def test_split_weak_vowel_scaling_applies_uniformly_to_all_subwindows():
     weak_events = build(confidence=0.2)  # 低信頼 -> モーラ全体の代表RMSも弱判定閾値未満 -> 弱判定
     strong_events = build(confidence=0.9)  # 高信頼 -> 弱判定にならない
     assert len(weak_events) == len(strong_events) == 4
-    for w, s in zip(weak_events, strong_events):
+    for w, s in zip(weak_events, strong_events, strict=True):
         assert w.open_amount == pytest.approx(s.open_amount * 0.5)
 
 

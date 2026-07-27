@@ -14,7 +14,7 @@ from mocapvmd import classify, denoise, footik, presets
 
 def _quat_angle_deg(q1, q0):
     """2つの quaternion 間の角度距離(度)。符号反転は同一姿勢として 0 に近づく。"""
-    dot = abs(sum(a * b for a, b in zip(q1, q0)))
+    dot = abs(sum(a * b for a, b in zip(q1, q0, strict=True)))
     dot = min(1.0, dot)
     return math.degrees(2.0 * math.acos(dot))
 
@@ -23,7 +23,7 @@ def _track_diagnostics(keys):
     """時系列順のキー列から (最大速度, 最大角速度) を 1フレームあたりで返す。"""
     max_speed = 0.0
     max_ang = 0.0
-    for a, b in zip(keys, keys[1:]):
+    for a, b in zip(keys, keys[1:], strict=False):
         gap = b.frame - a.frame
         if gap <= 0:
             continue  # 同一フレームの重複キーはゼロ除算を避けて飛ばす

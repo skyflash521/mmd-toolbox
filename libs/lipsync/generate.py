@@ -175,7 +175,7 @@ def _shape_diff(
         return [x / norm for x in vec] if norm > 0.0 else vec
 
     ua, ub = _unit(shape_a, class_a), _unit(shape_b, class_b)
-    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ua, ub)))
+    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ua, ub, strict=True)))
     return dist / math.sqrt(2.0)
 
 
@@ -535,7 +535,7 @@ def _interp_open(points: Sequence[tuple[float, float]], t: float) -> float:
         return points[0][1]
     if t >= points[-1][0]:
         return points[-1][1]
-    for (f0, v0), (f1, v1) in zip(points, points[1:]):
+    for (f0, v0), (f1, v1) in zip(points, points[1:], strict=False):
         if f0 <= t <= f1:
             return v0 if f1 == f0 else v0 + (v1 - v0) * (t - f0) / (f1 - f0)
     return points[-1][1]
@@ -592,7 +592,7 @@ def _vibrato_targets(
     points: list[tuple[float, float]] = [(plateau_start, holds[0])]
     aperture_points: list[tuple[float, float]] = [(plateau_start, scales[0])]
     if len(group.events) >= 2:
-        for ev, hold, scale in zip(group.events, holds, scales):
+        for ev, hold, scale in zip(group.events, holds, scales, strict=True):
             mid = (ev.start + ev.end) / 2.0
             if plateau_start < mid < plateau_end:
                 points.append((mid, hold))
@@ -690,7 +690,7 @@ def generate_morph_keys(
                 total_len = sum(lens)
                 peak_morphs = sorted({morph for w in gw for morph in w})
                 peak_weight = {
-                    morph: sum(length * w.get(morph, 0.0) for length, w in zip(lens, gw)) / total_len
+                    morph: sum(length * w.get(morph, 0.0) for length, w in zip(lens, gw, strict=True)) / total_len
                     for morph in peak_morphs
                 }
             else:
@@ -749,7 +749,7 @@ def generate_morph_keys(
                 targets.append((morph, f_end, 0.0))
             plateau_end = f_hold_end
         if len(g.events) >= 2:
-            for ev, w in zip(g.events, gw):
+            for ev, w in zip(g.events, gw, strict=True):
                 f_mid = (ev.start + ev.end) / 2.0
                 for morph in group_morphs:
                     targets.append((morph, f_mid, w.get(morph, 0.0)))

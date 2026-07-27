@@ -240,7 +240,7 @@ def _check_segment_contract(
         if start > end:
             raise RecognitionError(f"Segmentの開始時刻が終了時刻より後です: start={start}, end={end}")
 
-    for (_, prev_end, _), (next_start, _, _) in zip(segments, segments[1:]):
+    for (_, prev_end, _), (next_start, _, _) in zip(segments, segments[1:], strict=False):
         if abs(prev_end - next_start) > tolerance:
             raise RecognitionError(
                 f"隣接するSegmentの境界が一致しません: {prev_end} != {next_start}"

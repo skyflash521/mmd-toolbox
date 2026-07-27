@@ -71,7 +71,7 @@ def test_coeff_curve_exits_after_first_init(monkeypatch):
     targets = [interp._solve_factor(*EASE, x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     fit._fit_coeff_curve(xs, resid_at, early_exit_err=EE)
     assert calls["n"] == 1
@@ -159,7 +159,7 @@ def test_coeff_early_exit_output_identical_to_full_search(curve):
     targets = [interp._solve_factor(*curve, x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     cp_full = fit._fit_coeff_curve(xs, resid_at)
     cp_fast = fit._fit_coeff_curve(xs, resid_at, early_exit_err=EE)
@@ -172,7 +172,7 @@ def test_coeff_noisy_data_early_exit_matches_full_search():
     targets = [math.sin(math.pi * x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     cp_full = fit._fit_coeff_curve(xs, resid_at)
     cp_fast = fit._fit_coeff_curve(xs, resid_at, early_exit_err=EE)

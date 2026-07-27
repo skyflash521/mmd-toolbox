@@ -18,7 +18,7 @@ from .model_profile import load_mocap_profile
 
 def _quat_angle_deg(q1, q0):
     """2つの quaternion 間の角度距離(度)。符号反転(q と -q は同一姿勢)は 0 に近づく。"""
-    dot = abs(sum(a * b for a, b in zip(q1, q0)))
+    dot = abs(sum(a * b for a, b in zip(q1, q0, strict=True)))
     dot = min(1.0, dot)
     return math.degrees(2.0 * math.acos(dot))
 
@@ -58,7 +58,7 @@ def _collect_diagnostics(out, profile, model, pmx_path, n, dense, world, fitted,
         ea = [math.dist(wa[bindings[m].bone].position, smoothed_markers[m][f]) for m in marker_names]
         err_before.append(sum(eb) / len(eb) if eb else 0.0)
         err_after.append(sum(ea) / len(ea) if ea else 0.0)
-        for bi, (dl, fl) in enumerate(zip(dense[f], fitted.poses[f])):
+        for bi, (dl, fl) in enumerate(zip(dense[f], fitted.poses[f], strict=True)):
             ang = _quat_angle_deg(dl.rotation, fl.rotation)
             if ang > max_rot_deg:
                 max_rot_deg = ang

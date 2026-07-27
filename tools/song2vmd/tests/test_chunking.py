@@ -172,5 +172,5 @@ def test_merged_segments_cover_full_duration_without_gaps():
     )
     assert merged[0].start_sec == 0.0
     assert merged[-1].end_sec == 20.0
-    for prev, nxt in zip(merged, merged[1:]):
+    for prev, nxt in zip(merged, merged[1:], strict=False):
         assert prev.end_sec == nxt.start_sec

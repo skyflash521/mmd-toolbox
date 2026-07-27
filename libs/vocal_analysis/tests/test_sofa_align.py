@@ -1010,7 +1010,7 @@ def test_covered_invalid_words_produce_no_gap_and_intervals_tile_whole_duration(
         [(start, end) for _, start, end in valid_words] + gaps, key=lambda iv: iv[0])
     assert intervals[0][0] == 0.0
     assert intervals[-1][1] == trim_duration_sec
-    for (_, prev_end), (next_start, _) in zip(intervals, intervals[1:]):
+    for (_, prev_end), (next_start, _) in zip(intervals, intervals[1:], strict=False):
         assert prev_end == next_start
 
 

@@ -153,7 +153,7 @@ def fit(profile, dense_pose, smoothed_markers, *, params=DEFAULT_FIT_PARAMS):
                 w = params.w_marker * bindings[m].weight
                 res.extend((w * (p[0] - t[0]), w * (p[1] - t[1]), w * (p[2] - t[2])))
             res.extend(params.w_pose * xi for xi in xv)  # 元姿勢保持
-            res.extend(params.w_vel * (xi - pi) for xi, pi in zip(xv, _prev))  # 前フレーム差分
+            res.extend(params.w_vel * (xi - pi) for xi, pi in zip(xv, _prev, strict=True))  # 前フレーム差分
             return res
 
         sol = least_squares(

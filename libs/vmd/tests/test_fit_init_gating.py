@@ -60,7 +60,7 @@ def test_fit_coeff_reduces_inits_for_large_segment(monkeypatch):
     targets = [math.sin(math.pi * x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     fit._fit_coeff_curve(xs, resid_at)
     assert len(cap) == len(fit._BEZIER_INITS_LARGE)

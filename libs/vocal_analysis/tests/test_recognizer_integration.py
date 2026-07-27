@@ -1612,7 +1612,7 @@ def test_recognize_sofa_path_splits_words_and_reassembles_segments(tmp_path, mon
         ("gap", None, 0.35, 0.4),
     ]
     assert len(segments) == len(expected)
-    for seg, (exp_type, exp_phoneme, exp_start, exp_end) in zip(segments, expected):
+    for seg, (exp_type, exp_phoneme, exp_start, exp_end) in zip(segments, expected, strict=True):
         assert seg.type == exp_type
         assert seg.phoneme == exp_phoneme
         assert seg.start_sec == pytest.approx(exp_start)

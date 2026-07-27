@@ -143,7 +143,7 @@ def remove_invalid_time_segments(segments: list[CategorySegment]) -> list[Catego
     boundaries = sorted({seg.start_sec for seg in valid} | {seg.end_sec for seg in valid})
     result: list[CategorySegment] = []
     owner_of_last: int | None = None
-    for lo, hi in zip(boundaries, boundaries[1:]):
+    for lo, hi in zip(boundaries, boundaries[1:], strict=False):
         if hi <= lo:
             continue
         mid = (lo + hi) / 2

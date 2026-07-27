@@ -102,7 +102,7 @@ def test_clean_moving_motion_passes_through_unchanged():
     after = _marker_trajectory(profile, apply_pose_denoise(keys, pmx_path=None), "head")
     # 明確に動いている(静止テストと別物であることを担保)。
     assert math.dist(before[0], before[-1]) > 0.1
-    for a, b in zip(before, after):
+    for a, b in zip(before, after, strict=True):
         assert a == pytest.approx(b, abs=1e-6)
 
 

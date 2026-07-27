@@ -90,19 +90,19 @@ def _slerp(q0, q1, t: float):
     nb = math.sqrt(sum(c * c for c in b))
     a = [c / na for c in a]
     b = [c / nb for c in b]
-    d = sum(x * y for x, y in zip(a, b))
+    d = sum(x * y for x, y in zip(a, b, strict=True))
     if d < 0.0:
         b = [-c for c in b]
         d = -d
     if d > 0.9995:
-        r = [x + t * (y - x) for x, y in zip(a, b)]
+        r = [x + t * (y - x) for x, y in zip(a, b, strict=True)]
         n = math.sqrt(sum(c * c for c in r))
         return tuple(c / n for c in r)
     th0 = math.acos(d)
     th = th0 * t
     s0 = math.sin(th0 - th) / math.sin(th0)
     s1 = math.sin(th) / math.sin(th0)
-    return tuple(s0 * x + s1 * y for x, y in zip(a, b))
+    return tuple(s0 * x + s1 * y for x, y in zip(a, b, strict=True))
 
 
 # ---------------------------------------------------------------------------

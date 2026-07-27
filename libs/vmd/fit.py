@@ -387,7 +387,7 @@ class FovChannel:
 
 
 def _quat_dot(a, b):
-    return sum(x * y for x, y in zip(a, b))
+    return sum(x * y for x, y in zip(a, b, strict=True))
 
 
 def _quat_normalize(q):
@@ -863,10 +863,10 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None, skip_fastpath=F
     def residual(v):
         x1, t, y1, y2 = v
         x2 = x1 + (1.0 - x1) * t
-        return [_bezier_y_at(x1, y1, x2, y2, x) - y for x, y in zip(xs, ys)]
+        return [_bezier_y_at(x1, y1, x2, y2, x) - y for x, y in zip(xs, ys, strict=True)]
 
     def quantized_err(cp):
-        return max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
+        return max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys, strict=True))
 
     # 線形ファストパス: 線形制御点で許容内に収まる区間は least_squares を呼ばず即採用する。
     # 采否は量子化後誤差 <= 許容 の二値なので区間境界(キー数)は変わらず、最適化呼び出しを丸ごと

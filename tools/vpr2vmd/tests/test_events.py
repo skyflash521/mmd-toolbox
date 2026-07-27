@@ -236,7 +236,7 @@ def test_build_is_contiguous_and_covers_full_axis():
     adopted = [_note(240, 240, phonemes=["m", "a"]), _note(720, 240, phonemes=["i"])]
     result, _diag = events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=True)
     assert result[0].start == 0.0
-    for a, b in zip(result, result[1:]):
+    for a, b in zip(result, result[1:], strict=False):
         assert a.end == b.start
     assert result[-1].end == 30.0  # 960/32
 

@@ -238,7 +238,7 @@ def test_bone_position_and_rotation_bezier_reconstructs():
     for f in range(11):
         assert abs(interp.sample(bez, "pos_x", f) - pos[f]) <= TOLS.bone_pos
         got = interp.sample(bez, "rot", f)
-        ang = math.degrees(2.0 * math.acos(min(1.0, abs(sum(a * b for a, b in zip(got, quats[f]))))))
+        ang = math.degrees(2.0 * math.acos(min(1.0, abs(sum(a * b for a, b in zip(got, quats[f], strict=True))))))
         assert ang <= TOLS.bone_rot
 
 

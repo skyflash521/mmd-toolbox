@@ -378,7 +378,7 @@ def stabilize_foot_ik(tracks, suppression):
         partner[pair.foot] = pair.toe
         partner[pair.toe] = pair.foot
 
-    frame_pos = {name: dict(zip(frames, positions)) for name, (_, frames, positions) in tracks.items()}
+    frame_pos = {name: dict(zip(frames, positions, strict=True)) for name, (_, frames, positions) in tracks.items()}
     det = presets.resolve_foot_detection(suppression)
 
     result = {}
@@ -397,7 +397,7 @@ def stabilize_foot_ik(tracks, suppression):
             max_displacement=det["max_displacement"],
         )
 
-        changes = [math.dist(o, l) for o, l in zip(positions, locked)]
+        changes = [math.dist(o, l) for o, l in zip(positions, locked, strict=True)]
         in_seg = sum(s.end - s.start + 1 for s in grounding.segments)
         result[name] = TrackStabilization(
             name=name,

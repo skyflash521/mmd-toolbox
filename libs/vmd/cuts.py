@@ -20,7 +20,7 @@ def _axis_angle_deg(r1, r0):
 
 def _quat_angle_deg(q1, q0):
     """2つのquaternion間の角度距離(度)。"""
-    dot = abs(sum(a * b for a, b in zip(q1, q0)))
+    dot = abs(sum(a * b for a, b in zip(q1, q0, strict=True)))
     dot = min(1.0, dot)
     return math.degrees(2.0 * math.acos(dot))
 

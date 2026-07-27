@@ -77,7 +77,7 @@ def test_max_segment_sliding_cap():
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
     assert keys[0] == 0 and keys[-1] == 100
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3  # ceil(100/40) の最小区間数
 
@@ -146,7 +146,7 @@ def test_loose_non_constant_span_capped():
     # 緩い線形(定数でない)長い span は maxspan-cap で上限以下に保たれる(編集容易性の回帰防止)。
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3  # 定数判定が誤発火せず非定数として maxspan-cap が効く
 
@@ -168,7 +168,7 @@ def test_maxspan_cap_requires_all_channels_constant():
     const_ch = lin(0, [5.0] * 101, tol=0.01)
     vary_ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [const_ch, vary_ch], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3
 
@@ -180,7 +180,7 @@ def test_non_constant_fallback_when_channel_lacks_is_constant():
             return (0.0, None)  # 常に許容内(tol 分割しない)
 
     keys = reduce_track([0, 100], [StubChannel()], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3  # is_constant 不在 → 非定数扱いで maxspan-cap
 
@@ -219,7 +219,7 @@ def test_fitting_long_span_capped_and_recorded():
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)  # 線形=1本で表現可
     caps = []
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False, caps=caps)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert caps and all(0 < c["frame"] < 100 for c in caps)
 
