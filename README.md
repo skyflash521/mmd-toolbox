@@ -74,9 +74,9 @@ pip install .
 
 ### 5. ツールを実行する
 
-ツールは、仮想環境(.venv)を有効にしたウィンドウで実行する。手順4をした直後の同じウィンドウなら、すでに有効なのでそのまま実行できる。
+ツールは、仮想環境(.venv)を有効にしたウィンドウで実行する。[手順4](#4-初回準備コマンドを実行する)をした直後の同じウィンドウなら、すでに有効なのでそのまま実行できる。
 
-ウィンドウを開き直したときは、手順3と同じようにフォルダへ移動してから仮想環境を有効にする。Windows では PowerShell で次を実行する。
+ウィンドウを開き直したときは、[手順3](#3-readmemd-が入っているフォルダへ移動する)と同じようにフォルダへ移動してから仮想環境を有効にする。Windows では PowerShell で次を実行する。
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
@@ -163,7 +163,7 @@ shakevmd <入力ファイル名>.vmd
 使い方:
 
 1. 歌の音声ファイル(wav・mp3 等)を用意する。
-2. 上の「4. 初回準備コマンドを実行する」の `pip install .` の代わりに次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを含める)。
+2. 上の [4. 初回準備コマンドを実行する](#4-初回準備コマンドを実行する) の `pip install .` の代わりに次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを含める)。
 
 ```sh
 pip install ".[vocal-analysis]"
@@ -210,7 +210,7 @@ song2vmd <入力ファイル名>.wav
 | `libs/vmd/` | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
 | `libs/vocal_analysis/` | 音声解析の共有ドメインライブラリ |
 | `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
-| `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は `pyproject.toml`、おもなツールの使い方は冒頭「ツール」一覧 |
+| `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は [pyproject.toml](pyproject.toml)、おもなツールの使い方は冒頭の [ツール](#ツール) 一覧 |
 
 ### 開発環境
 
@@ -261,7 +261,7 @@ cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替え�
 | Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**既定モデルに追従するため最新版を推奨**(古いとモデル非対応で API エラーになる) |
 | Codex プラグイン | Claude Code 内で `/plugin marketplace add openai/codex-plugin-cc` の後 `/plugin install codex@openai-codex` | Claude Code から Codex を呼ぶ連携(`codex-review-loop` スキルが使用) |
 
-**Windows 追加要件**: Claude Code は Bash ツール・フック・`watchdog.sh` の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
+**Windows 追加要件**: Claude Code は Bash ツール・フック・[watchdog.sh](.claude/skills/codex-watchdog/watchdog.sh) の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
 
 ### テスト実行
 
