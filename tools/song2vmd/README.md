@@ -10,8 +10,8 @@
 
 `song2vmd` は音声認識・ボーカル分離に torch/transformers 等の追加依存を使う。トップ [README.md の 4. 初回準備コマンドを実行する](../../README.md#4-初回準備コマンドを実行する)
 の `pip install .` だけでは `song2vmd` コマンド自体は入るが、
-これらの依存(`soundfile` を含む)が入らないため、`song2vmd --help` を含めコマンドを呼び出した
-直後に `ModuleNotFoundError` で失敗する。`song2vmd` を使う場合は、代わりに次を実行する。
+これらの依存(`soundfile` を含む)が入らない。その状態で `song2vmd --help` などを実行すると、
+不足している依存と導入コマンドを1行で示して終了する。`song2vmd` を使う場合は、代わりに次を実行する。
 
 ```sh
 pip install ".[vocal-analysis]"

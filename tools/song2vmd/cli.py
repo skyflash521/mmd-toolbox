@@ -6,7 +6,8 @@
 `vmd.io` による VMD 出力・レポート/診断(`report`)・進捗表示(`progress`)への配線を実装する。
 
 終了コード: 0 正常 / 1 入力不正 / 2 引数エラー(範囲・書式・上書きガード等) /
-3 出力書き込み失敗 / 4 音声前段の外部依存の失敗(失敗ステージ明示) / 130 協調的な中断(Ctrl-C 等)。
+3 出力書き込み失敗 / 4 音声前段の外部依存の失敗(失敗ステージ明示)・追加依存の未導入 /
+130 協調的な中断(Ctrl-C 等)。
 
 `--machine`/`--describe` は構造化出力モード。標準出力を JSON Lines の
 イベントストリーム専用にし、失敗も error イベントで理由を返す。イベント送出は共有基盤
@@ -34,17 +35,29 @@ from vocal_analysis import (
     DEFAULT_FORCED_ALIGNER,
     SofaAlignerConfig,
 )
-from vocal_analysis.io import AudioLoadError
-from vocal_analysis.recognizer import RecognitionError
-from vocal_analysis.separator import SeparationError
 from vmd import write_file as _vmd_write_file
 
 from . import __version__
-from . import pipeline as _pipeline
 from . import presets as _presets
 from . import progress as _progress
 from . import report as _report
 from . import resource_watch as _resource_watch
+
+# 追加依存(vocal-analysis extra)を要する取り込みだけをここへ集める。コンソールスクリプトは追加依存
+# なしの導入でも登録されるため、依存が揃わない環境から起動されうる。取り込み失敗を例外のまま保持して
+# モジュール自体の取り込みは成立させ、main() が理由1行へ畳めるようにする(失敗時に未定義になる名前は、
+# main() が引数解析より前に終了するため参照されない)。追加依存を要しない配布物内のモジュール(共有
+# ライブラリ・自身のモジュール)は、導入の破損と区別するため取り込み文をここへ入れない。
+try:
+    from vocal_analysis.io import AudioLoadError
+    from vocal_analysis.recognizer import RecognitionError
+    from vocal_analysis.separator import SeparationError
+
+    from . import pipeline as _pipeline
+except ImportError as exc:
+    _MISSING_DEPENDENCY = exc
+else:
+    _MISSING_DEPENDENCY = None
 
 # 歌い方スタイルプリセット名。具体値の解決は presets モジュールが持つ。
 STYLE_NAMES = _presets.STYLE_NAMES
@@ -387,6 +400,16 @@ def _fail(emitter, code, message, exit_code, *, field=None, path=None, stage=Non
     return exit_code
 
 
+def _missing_dependency_message(exc) -> str:
+    """追加依存が未導入のときの理由1行。取り込めなかったモジュール名と導入コマンドを示す。"""
+    # ModuleNotFoundError は不足モジュール名を name に持つ。持たない ImportError(名前の解決失敗等)は
+    # 例外の文言をそのまま理由に使う。
+    name = getattr(exc, "name", None)
+    missing = repr(name) if name else str(exc)
+    return (f"音声前段の依存パッケージ {missing} を取り込めません。"
+            'song2vmd は追加依存を要します: pip install ".[vocal-analysis]"')
+
+
 def main(argv=None) -> int:
     """CLI エントリポイント。終了コードを返す(0/1/2/3/4/130)。"""
     # emitter は try の外側で初期化する: 下の except KeyboardInterrupt/Exception は、emitter 構築より
@@ -425,6 +448,12 @@ def main(argv=None) -> int:
                 sys.stderr.reconfigure(errors="backslashreplace")
             except Exception:
                 pass
+        # 追加依存が未導入なら本体はどの経路も実行できないため、引数解析より前にここで畳む
+        # (--version/--help/--describe を含む全経路が対象)。emitter 構築後に置くことで、
+        # 構造化出力モードでは error イベント、それ以外では標準エラーへの1行になる。
+        if _MISSING_DEPENDENCY is not None:
+            return fail("missing_dependency", _missing_dependency_message(_MISSING_DEPENDENCY), 4)
+
         # ArgumentParseError/SystemExit の捕捉は引数解析だけに閉じる(_run() 以下が送出しうる
         # SystemExit まで飲み込んで exit 0/2 に押し込めないため)。
         parser = _build_parser(machine or describe)
