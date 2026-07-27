@@ -720,7 +720,6 @@ def test_voiced_blank_penalty_applies_only_to_voiced_frames_blank_column():
     from vocal_analysis.recognizer import _VOICED_BLANK_PENALTY, _apply_voiced_blank_penalty
 
     # 16kHz・20msフレーム(320サンプル)×4フレーム。フレーム0-1は無音、フレーム2-3は有声。
-    sr = 16000
     samples = np.concatenate([np.zeros(640, dtype=np.float32), np.full(640, 0.5, dtype=np.float32)])
     log_probs = np.zeros((4, 3))
 

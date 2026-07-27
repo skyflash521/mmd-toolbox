@@ -198,7 +198,6 @@ def reduce_bones(
                 progress(done, total)
         out.extend(reduced)
         if want_diag:
-            f0, f1 = ks[0].frame, ks[-1].frame
             diagnostics_out[name] = {
                 "input_keys": len(ks),
                 "output_keys": len(reduced),

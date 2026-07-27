@@ -59,7 +59,8 @@ def _build_parser(machine=False):
     p.add_argument("--overwrite", action="store_true",
                    help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="medium",
-                   help="キーフレーム圧縮の許容誤差プリセット(速度観点): slower/slow/medium/fast/faster。種別スケールの基準値")
+                   help="キーフレーム圧縮の許容誤差プリセット(速度観点): slower/slow/medium/fast/faster。"
+                        "種別スケールの基準値")
     p.add_argument("--clean-strength", dest="clean_strength", type=float, default=1.0,
                    help="ノイズ軽減の効き量の倍率(ブレンド率に掛ける。0で無加工相当、上げるほど強く平準化する。窓幅は据え置き)")
     p.add_argument("--denoise", dest="denoise", action="store_true", default=True,

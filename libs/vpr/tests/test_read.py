@@ -26,7 +26,10 @@ def _sequence(tracks, tempo_events=None, timesig_events=None) -> dict:
         "masterTrack": {
             "samplingRate": 44100,
             "tempo": {"events": tempo_events if tempo_events is not None else [{"pos": 0, "value": 12000}]},
-            "timeSig": {"events": timesig_events if timesig_events is not None else [{"bar": 0, "numer": 4, "denom": 4}]},
+            "timeSig": {
+                "events": timesig_events if timesig_events is not None
+                else [{"bar": 0, "numer": 4, "denom": 4}]
+            },
         },
         "voices": [],
         "tracks": tracks,

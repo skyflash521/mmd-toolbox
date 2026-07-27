@@ -26,17 +26,17 @@ def parse_sections(path: Path) -> dict[str, str]:
     def close_section() -> None:
         if current is None:
             return
-        if not any(l.strip() and not l.startswith("###") for l in body):
+        if not any(text.strip() and not text.startswith("###") for text in body):
             raise FormatError(f"版 {current} の節の本文が空")
         category = None
         category_has_content = True
-        for l in body:
-            if l.startswith("###"):
+        for text in body:
+            if text.startswith("###"):
                 if not category_has_content:
                     raise FormatError(f"版 {current} の「{category}」に変更の行が無い(該当のない節は置かない)")
-                category = l
+                category = text
                 category_has_content = False
-            elif l.strip():
+            elif text.strip():
                 category_has_content = True
         if not category_has_content:
             raise FormatError(f"版 {current} の「{category}」に変更の行が無い(該当のない節は置かない)")

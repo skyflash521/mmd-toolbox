@@ -42,7 +42,7 @@ def _parse_thresholds(text, n):
         try:
             v = float(p)
         except ValueError:
-            raise ValueError(f"閾値は数値: {text!r}")
+            raise ValueError(f"閾値は数値: {text!r}") from None
         if not math.isfinite(v) or v < 0.0:
             raise ValueError(f"閾値は0以上の有限値: {text!r}")
         vals.append(v)

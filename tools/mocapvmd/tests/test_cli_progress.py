@@ -90,7 +90,9 @@ def test_disabled_stages_are_skipped(tmp_path, monkeypatch):
     _curve_doc(src)
     assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize"]) == 0
     assert [e[1] for e in _RecordingReporter.instances[-1].events if e[0] == "stage"] == ["キーフレーム圧縮"]
-    assert cli.main([str(src), "-o", str(out), "--overwrite", "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"]) == 0
+    assert cli.main([
+        str(src), "-o", str(out), "--overwrite", "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce",
+    ]) == 0
     assert [e[1] for e in _RecordingReporter.instances[-1].events if e[0] == "stage"] == []
 
 

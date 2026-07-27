@@ -1669,7 +1669,10 @@ def test_recognize_sofa_path_never_loads_wav2vec2_model(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(recognizer_module, "_transcribe_segment", lambda pipeline, samples: ("あ", None))
     monkeypatch.setattr(recognizer_module, "_g2p", lambda text, method=None, **kwargs: {"あ": ["a"]}[text])
-    monkeypatch.setattr(recognizer_module.sofa_align, "_align_batch", lambda targets, cfg: {"segment_0000": [(0.0, 0.2, "a")]})
+    monkeypatch.setattr(
+        recognizer_module.sofa_align, "_align_batch",
+        lambda targets, cfg: {"segment_0000": [(0.0, 0.2, "a")]},
+    )
 
     def fail_if_called():
         raise AssertionError("SOFA経路でwav2vec2の音素モデルをロードしてはならない")

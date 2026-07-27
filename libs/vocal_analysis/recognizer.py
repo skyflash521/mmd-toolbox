@@ -579,9 +579,10 @@ def _forced_align(log_probs: np.ndarray, token_ids: list[int]) -> list[int]:
             return 0.0
         return (state_index / (num_states - 1)) * (num_frames - 1)
 
-    out_of_band = np.array(
-        [[abs(t - expected_frame(l)) > band_frames for l in range(num_states)] for t in range(num_frames)]
-    )
+    out_of_band = np.array([
+        [abs(t - expected_frame(state)) > band_frames for state in range(num_states)]
+        for t in range(num_frames)
+    ])
 
     path = _viterbi_monotonic(log_probs, token_ids, out_of_band)
     if path is None:

@@ -87,7 +87,7 @@ def _parse_range(text):
         try:
             n = int(v)
         except ValueError:
-            raise argparse.ArgumentTypeError(f"範囲端は整数: {v!r}")
+            raise argparse.ArgumentTypeError(f"範囲端は整数: {v!r}") from None
         if n < 0:
             raise argparse.ArgumentTypeError(f"フレーム番号は非負: {v!r}")
         return n
@@ -106,7 +106,7 @@ def _parse_rot_weights(text):
     try:
         vals = tuple(float(p) for p in parts)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"--rot-weights は数値3要素: {text!r}")
+        raise argparse.ArgumentTypeError(f"--rot-weights は数値3要素: {text!r}") from None
     if not all(math.isfinite(v) for v in vals):
         raise argparse.ArgumentTypeError(f"--rot-weights は有限値: {text!r}")
     return vals
@@ -120,7 +120,7 @@ def _parse_cut_threshold(text):
     try:
         vals = tuple(float(p) for p in parts)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"--cut-threshold は数値2要素: {text!r}")
+        raise argparse.ArgumentTypeError(f"--cut-threshold は数値2要素: {text!r}") from None
     if not all(math.isfinite(v) for v in vals):
         raise argparse.ArgumentTypeError(f"--cut-threshold は有限値: {text!r}")
     if any(v < 0 for v in vals):
@@ -137,7 +137,7 @@ def _parse_impulse(text):
     try:
         f, s, d = int(f_str), float(s_str), float(d_str)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"--impulse は F:S:D(F=整数, S/D=数値): {text!r}")
+        raise argparse.ArgumentTypeError(f"--impulse は F:S:D(F=整数, S/D=数値): {text!r}") from None
     if f < 0:
         raise argparse.ArgumentTypeError(f"--impulse の F(フレーム)は非負: {text!r}")
     if not (math.isfinite(s) and math.isfinite(d)):
@@ -202,7 +202,8 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
     # 既定 on: ベイク後にプロセス内で疎ベジェへ削減し、30fps 超再生のカクつきを低減する。
     # --no-smooth で無効化(密キー＋線形のまま出力する)。
     p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction,
-                   help="ベイク後の密なキーをベジェ補間でなめらかに整理する(スムージング。既定 on。--no-smooth で密キー+線形)")
+                   help="ベイク後の密なキーをベジェ補間でなめらかに整理する"
+                        "(スムージング。既定 on。--no-smooth で密キー+線形)")
     # 進捗表示の抑制。抑制するのは進捗表示だけで、警告・統計・終了コードは変えない。
     p.add_argument("--quiet", dest="quiet", action="store_true",
                    help="進捗表示を抑制する(警告・統計・終了コードは抑制しない)")
@@ -549,7 +550,7 @@ def _run(args, machine, emitter, fail) -> int:
         if machine:
             bake_start = time.monotonic()
             emitter.progress(stage="bake", done=0, total=None, note="", elapsed=0.0)
-            bake_cb = lambda done, total: emitter.progress(
+            bake_cb = lambda done, total: emitter.progress(  # noqa: E731
                 stage="bake", done=done, total=total, note="",
                 elapsed=time.monotonic() - bake_start,
             )
@@ -675,7 +676,7 @@ def _run(args, machine, emitter, fail) -> int:
             if machine:
                 smooth_start = time.monotonic()
                 emitter.progress(stage="smooth", done=0, total=None, note="", elapsed=0.0)
-                smooth_cb = lambda done, total, note="": emitter.progress(
+                smooth_cb = lambda done, total, note="": emitter.progress(  # noqa: E731
                     stage="smooth", done=done, total=total, note=note,
                     elapsed=time.monotonic() - smooth_start,
                 )

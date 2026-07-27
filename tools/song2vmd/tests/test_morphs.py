@@ -89,7 +89,7 @@ def test_morph_keys_are_sorted_and_deduplicated_per_name():
     by_name = {}
     for key in document.morph:
         by_name.setdefault(key.name, []).append(key.frame)
-    for name, frames in by_name.items():
+    for frames in by_name.values():
         assert frames == sorted(frames)
         assert len(frames) == len(set(frames))
 

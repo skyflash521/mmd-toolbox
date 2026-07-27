@@ -369,7 +369,8 @@ class TestCli:
         common = ["--amp-rot", "0", "--amp-pos", "0", "--settle", "0"]
         assert cli.main([inp, "-o", str(base), *common, "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(one), *common, "--impulse", "20:10:0.5", "--no-smooth"]) == 0
-        assert cli.main([inp, "-o", str(two), *common, "--impulse", "20:10:0.5", "--impulse", "45:10:0.5", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(two), *common,
+                         "--impulse", "20:10:0.5", "--impulse", "45:10:0.5", "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(last), *common, "--impulse", "45:10:0.5", "--no-smooth"]) == 0
         assert base.read_bytes() != one.read_bytes()    # 1つ目が効く
         assert one.read_bytes() != two.read_bytes()      # 2つ目(複数指定)も効く
@@ -449,7 +450,8 @@ class TestCli:
         inp = write_input(tmp_path / "acut.vmd", ANGLE_CUT_KEYS)
         lo, hi = tmp_path / "lo.vmd", tmp_path / "hi.vmd"
         assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0   # 角度34°>20 → カット
-        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "5,200", "--no-smooth"]) == 0  # 角度閾値200° → カットなし
+        # 角度閾値200° → カットなし
+        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "5,200", "--no-smooth"]) == 0
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cut_threshold_world_position_zoom(self, tmp_path):
@@ -457,8 +459,9 @@ class TestCli:
         # (「カメラ中心またはカメラワールド位置」)。位置側閾値で分割が変わる。
         inp = write_input(tmp_path / "zcut.vmd", ZOOM_CUT_KEYS)
         lo, hi = tmp_path / "lo.vmd", tmp_path / "hi.vmd"
-        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0   # world_jump≈25>5 → カット
-        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200", "--no-smooth"]) == 0  # 位置閾値100 → カットなし
+        # world_jump≈25>5 → カット / 位置閾値100 → カットなし
+        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200", "--no-smooth"]) == 0
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cli_flags_wire_to_correct_bake_params(self, tmp_path):

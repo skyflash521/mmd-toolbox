@@ -89,7 +89,7 @@ def _validate(name, value):
     try:
         v = float(value)
     except (TypeError, ValueError):
-        raise ValueError(f"許容誤差は数値が必要: {name}={value!r}")
+        raise ValueError(f"許容誤差は数値が必要: {name}={value!r}") from None
     if not math.isfinite(v):
         raise ValueError(f"許容誤差は有限値が必要: {name}={value!r}")
     if v < 0.0:

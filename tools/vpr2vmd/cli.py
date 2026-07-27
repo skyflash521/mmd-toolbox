@@ -61,7 +61,7 @@ def _model_name(text: str) -> str:
     except UnicodeEncodeError:
         raise argparse.ArgumentTypeError(
             f"モデル名は Shift-JIS(cp932)で表現できる文字のみ: {text!r}"
-        )
+        ) from None
     if len(encoded) > _MODEL_NAME_MAX_BYTES:
         raise argparse.ArgumentTypeError(
             f"モデル名は cp932 で {_MODEL_NAME_MAX_BYTES} バイト以内"

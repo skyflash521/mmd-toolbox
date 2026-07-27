@@ -397,7 +397,7 @@ def stabilize_foot_ik(tracks, suppression):
             max_displacement=det["max_displacement"],
         )
 
-        changes = [math.dist(o, l) for o, l in zip(positions, locked, strict=True)]
+        changes = [math.dist(orig, locked_pos) for orig, locked_pos in zip(positions, locked, strict=True)]
         in_seg = sum(s.end - s.start + 1 for s in grounding.segments)
         result[name] = TrackStabilization(
             name=name,

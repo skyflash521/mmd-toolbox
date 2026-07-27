@@ -921,8 +921,10 @@ class TestProfileCrossfadeAndBreathing:
         src_s, src_m = self._static_input(), self._moving_input()
         pst = by_frame(bake.bake(src_s, seed=1, amp_rot=0.0, amp_pos=1.0, motion_damp=0.0, settle=0.0, fade_sec=0.3))
         pmv = by_frame(bake.bake(src_m, seed=1, amp_rot=0.0, amp_pos=1.0, motion_damp=0.0, settle=0.0, fade_sec=0.3))
-        rst = by_frame(bake.bake(src_s, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, motion_damp=0.0, settle=0.0, fade_sec=0.3))
-        rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2, motion_damp=0.0, settle=0.0, fade_sec=0.3))
+        rst = by_frame(bake.bake(src_s, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2,
+                                 motion_damp=0.0, settle=0.0, fade_sec=0.3))
+        rmv = by_frame(bake.bake(src_m, seed=1, amp_rot=5.0, amp_pos=0.0, freq=1.2,
+                                 motion_damp=0.0, settle=0.0, fade_sec=0.3))
         assert self._e03_sum(pst, src_s, "pos", self.N) > 3.0 * self._e03_sum(pmv, src_m, "pos", self.N)
         assert self._e03_sum(rst, src_s, "rot", self.N) < 2.0 * self._e03_sum(rmv, src_m, "rot", self.N)
         # 完全静止区間は「高周波微動+長周期ドリフト」: 静止でも高周波微動が残る。

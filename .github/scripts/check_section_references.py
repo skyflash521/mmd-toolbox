@@ -92,7 +92,10 @@ def check_bare_md(rel_path: str, text: str) -> list[str]:
 
     first_line_end = text.find('\n')
     first_line = text[:first_line_end] if first_line_end != -1 else text
-    first_line_span = (0, first_line_end if first_line_end != -1 else len(text)) if first_line.startswith('# ') else None
+    first_line_span = (
+        (0, first_line_end if first_line_end != -1 else len(text))
+        if first_line.startswith('# ') else None
+    )
 
     for m in BARE_MD_RE.finditer(text):
         start = m.start()

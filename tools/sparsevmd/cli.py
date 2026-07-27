@@ -706,7 +706,6 @@ def _run(args, emitter, fail):
                     if cam_ranges:  # 有効範囲が空なら実際には削減されない
                         did_reduce = True
                     camera_diag = {} if want_diag else None
-                    cam_total = sum(f1 - f0 for f0, f1 in cam_ranges)
                     if emitter is None:
                         reporter.stage("キーフレーム圧縮")
                         # reduce_camera_track が渡す note(出力後検証など重い段階の注記)を、

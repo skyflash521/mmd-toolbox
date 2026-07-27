@@ -45,7 +45,7 @@ _EXPECTED_PRESET = {
 
 def test_default_preset_covers_all_categories():
     assert set(DEFAULT_PRESET) == _CATEGORIES
-    for cat, p in DEFAULT_PRESET.items():
+    for p in DEFAULT_PRESET.values():
         assert isinstance(p, SmoothParams)
         assert p.window >= 3 and p.window % 2 == 1  # 奇数窓
         assert 0.0 < p.strength <= 1.0

@@ -26,9 +26,10 @@ from .helpers import (
 )
 
 _FORMAT_DRY_RUN = mocap_report.format_dry_run
+_DEFAULT_MODEL_NAME_RAW = b"TestModel".ljust(20, b"\x00")
 
 
-def _full_doc(path, *, model_name_raw=b"TestModel".ljust(20, b"\x00")):
+def _full_doc(path, *, model_name_raw=_DEFAULT_MODEL_NAME_RAW):
     """全セクションにキーを持つVMDを書き出す。透過確認用。
 
     ボーン・カメラには非線形の補間バイトを入れ、再構築・線形化されれば検出できるようにする。
@@ -649,7 +650,8 @@ def test_reduce_error_override_validation(tmp_path):
     out = tmp_path / "out.vmd"
     _ramp_doc(src)
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "0.05"]) == 0
-    assert cli.main([str(src), "-o", str(out), "--overwrite", "--reduce-error-bone-rot", "0.5"]) == 0  # 有効な回転許容値は受理
+    # 有効な回転許容値は受理
+    assert cli.main([str(src), "-o", str(out), "--overwrite", "--reduce-error-bone-rot", "0.5"]) == 0
     assert cli.main([str(src), "--reduce-error-bone-pos", "-1"]) == 2  # 負の許容値は引数エラー
     assert cli.main([str(src), "--reduce-error-bone-rot", "nan"]) == 2  # 非有限は引数エラー
 
@@ -800,7 +802,7 @@ def test_list_bones_appearance_order_and_dedup(tmp_path, capsys):
     write_vmd(src, bone=[bone("右腕", 0), bone("センター", 0), bone("右腕", 5)])
     assert cli.main([str(src), "--list-bones"]) == 0
     lines = _list_lines(capsys)
-    first = lambda name: next(i for i, ln in enumerate(lines) if name in ln)
+    first = lambda name: next(i for i, ln in enumerate(lines) if name in ln)  # noqa: E731
     assert first("右腕") < first("センター")                       # 初出順
     assert sum(1 for ln in lines if "右腕" in ln) == 1            # 重複キーでも1回
     assert sum(1 for ln in lines if "センター" in ln) == 1

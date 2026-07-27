@@ -26,7 +26,8 @@ class RecognizerConfig:
 
     model_id: str = "facebook/wav2vec2-lv-60-espeak-cv-ft"
     model_revision: str = "ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4"
-    sample_rate: int = 16000  # 認識器へ渡す目標サンプルレート(mono化・再サンプリングはS2アダプタ。内容認識・音素モデルで共用)
+    # 認識器へ渡す目標サンプルレート(mono化・再サンプリングはS2アダプタ。内容認識・音素モデルで共用)
+    sample_rate: int = 16000
     dtype: str = "float32"  # 音素モデルの数値精度(S-1 測定で品質を検証済みの推論条件)
 
 

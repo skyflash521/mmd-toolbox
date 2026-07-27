@@ -93,7 +93,7 @@ def _model_name(text: str) -> str:
     except UnicodeEncodeError:
         raise argparse.ArgumentTypeError(
             f"モデル名は Shift-JIS(cp932)で表現できる文字のみ: {text!r}"
-        )
+        ) from None
     if len(encoded) > _MODEL_NAME_MAX_BYTES:
         raise argparse.ArgumentTypeError(
             f"モデル名は cp932 で {_MODEL_NAME_MAX_BYTES} バイト以内"
@@ -154,7 +154,7 @@ def _vowel_gain(text: str) -> tuple:
     try:
         vals = tuple(float(p) for p in parts)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"--vowel-gain は数値5要素: {text!r}")
+        raise argparse.ArgumentTypeError(f"--vowel-gain は数値5要素: {text!r}") from None
     if not all(math.isfinite(v) for v in vals):
         raise argparse.ArgumentTypeError(f"--vowel-gain は有限値: {text!r}")
     if any(v < 0.0 for v in vals):
@@ -175,7 +175,7 @@ def _silence_threshold(text: str) -> tuple:
     try:
         on, off = float(parts[0]), float(parts[1])
     except ValueError:
-        raise argparse.ArgumentTypeError(f"--silence-threshold は数値2要素: {text!r}")
+        raise argparse.ArgumentTypeError(f"--silence-threshold は数値2要素: {text!r}") from None
     if not (math.isfinite(on) and math.isfinite(off)):
         raise argparse.ArgumentTypeError(f"--silence-threshold は有限値: {text!r}")
     if not (0.0 <= on <= 1.0 and 0.0 <= off <= 1.0):

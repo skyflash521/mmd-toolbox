@@ -576,7 +576,10 @@ def test_forced_split_human_warning_line_uses_common_format_and_appears_once(tmp
 
 def test_audio_load_error_maps_to_decoder_missing(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
-    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")))
+    monkeypatch.setattr(
+        cli._pipeline, "run",
+        lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")),
+    )
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 4
@@ -584,7 +587,10 @@ def test_audio_load_error_maps_to_decoder_missing(tmp_path, monkeypatch):
 
 def test_audio_load_error_machine_mode_emits_decoder_missing_error(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
-    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")))
+    monkeypatch.setattr(
+        cli._pipeline, "run",
+        lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")),
+    )
 
     rc = cli.main([src, "--machine", "--dry-run"])
     assert rc == 4

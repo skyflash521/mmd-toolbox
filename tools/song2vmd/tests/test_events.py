@@ -858,7 +858,8 @@ def test_vowel_onset_keeps_token_boundary_when_no_rise_nearby():
 def test_low_confidence_and_low_rms_vowel_is_weakened():
     # 単独モーラでは再正規化が縮退し常に0.5になり生RMS依存の弱判定を開き量から検証できない
     # ため、アンカー較正(confirm_flat_calibrated)で曲全体のモーラ集合を模す。
-    target_event, _diag = confirm_flat_calibrated(0.25, confidence=0.2)  # 無音しきい値は超えるが弱判定のRMS閾値(0.3)未満
+    # 無音しきい値は超えるが弱判定のRMS閾値(0.3)未満
+    target_event, _diag = confirm_flat_calibrated(0.25, confidence=0.2)
     normalized = _anchor_normalized(0.25)
     expected_base = min(max(normalized ** 0.6, 0.30), 0.75)
     assert target_event.open_amount == pytest.approx(expected_base * 0.5)
@@ -872,7 +873,8 @@ def test_vowel_not_weakened_when_confidence_is_high_even_with_low_rms():
 
 
 def test_vowel_not_weakened_when_rms_is_high_even_with_low_confidence():
-    target_event, _diag = confirm_flat_calibrated(0.5, confidence=0.2)  # RMS>=0.3 なので信頼度が低くても弱判定にならない
+    # RMS>=0.3 なので信頼度が低くても弱判定にならない
+    target_event, _diag = confirm_flat_calibrated(0.5, confidence=0.2)
     normalized = _anchor_normalized(0.5)
     expected = min(max(normalized ** 0.6, 0.30), 0.75)
     assert target_event.open_amount == pytest.approx(expected)
