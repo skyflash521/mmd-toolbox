@@ -7,26 +7,42 @@ name = "mmd-toolbox"
 version = "2026.7.3"
 description = "MikuMikuDance 向けユーティリティツール群"
 requires-python = ">=3.12"
+# 上限は、動作実績のある版を既知の天井として次のメジャーを除く形で置く。下限は、実装が実際に
+# その版以降の API を要求する場合だけ置く(通ることを確かめていない版を下限として宣言しない)。
 dependencies = [
-    "numpy",
-    "scipy",
+    "numpy<3",
+    "scipy<2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "soundfile",
+    "pytest<10",
+    "soundfile<1",
 ]
 vocal-analysis = [
-    "soundfile",
+    "soundfile<1",
+    # audio-separator には上限を置かない。進捗表示のためにモジュール直下の tqdm 名・
+    # Separator.download_file_if_not_exists・vendored demucs の apply_model という私的内部へ
+    # 結合しており、これらは公開 API でないため版境界の宣言では守れない(上限を置いても防護に
+    # ならず、動く版を締め出すだけになる)。
     "audio-separator",
-    "onnxruntime",
-    "torch",
-    "transformers",
-    "pyopenjtalk-plus",
-    "nltk",
-    "arpakana",
-    "psutil",
+    # onnxruntime はこのリポジトリのコードからは import しないが、audio-separator の
+    # separator モジュールがモジュール直下で無条件に import するため実行時に要る。
+    # audio-separator 自身は onnxruntime を extras(cpu/gpu/dml)の下でしか要求しないので、
+    # extras を付けない構成ではこの宣言が唯一の供給元になる。
+    "onnxruntime<2",
+    "torch<3",
+    # transformers は 4.56 で数値精度の引数名が torch_dtype から dtype へ変わり、それ以前は
+    # dtype を受け付けない。
+    "transformers>=4.56,<6",
+    # huggingface-hub と tqdm は、モデル取得とその進捗中継のために直接 import する
+    # (transformers・audio-separator の推移依存としても入るが、そちらの都合で外れると壊れる)。
+    "huggingface-hub<2",
+    "tqdm<5",
+    "pyopenjtalk-plus<1",
+    "nltk<4",
+    "arpakana<1",
+    "psutil<8",
 ]
 
 [project.scripts]
