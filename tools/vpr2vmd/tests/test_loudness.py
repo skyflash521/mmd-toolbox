@@ -5,8 +5,8 @@
 """
 
 import pytest
-from vpr import ControllerCurve, ControllerEvent, Note, Part
 
+from vpr import ControllerCurve, ControllerEvent, Note, Part
 from vpr2vmd import loudness
 
 

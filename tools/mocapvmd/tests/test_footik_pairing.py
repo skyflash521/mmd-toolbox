@@ -14,7 +14,6 @@ import pytest
 
 from mocapvmd import footik
 
-
 # --- detect_side ------------------------------------------------------------
 
 

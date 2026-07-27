@@ -11,7 +11,6 @@ import pytest
 
 from vmd.fit import EuclideanVectorChannel, FovChannel, _round_half_up
 
-
 # --- EuclideanVectorChannel -------------------------------------------------
 
 

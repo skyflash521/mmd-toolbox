@@ -17,9 +17,9 @@ import json
 
 import pytest
 
+from sparsevmd import cli
 from vmd import io
 from vmd.types import BoneKey, CameraKey, VmdDocument
-from sparsevmd import cli
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 

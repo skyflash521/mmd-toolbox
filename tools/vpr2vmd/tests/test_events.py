@@ -6,11 +6,8 @@
 長さ 0 以下は除外する。
 """
 
-import pytest
-
 from lipsync import MouthShape
 from vpr import Note, TempoEvent
-
 from vpr2vmd import events
 
 

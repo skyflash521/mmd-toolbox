@@ -13,7 +13,6 @@ from song2vmd.resource_watch import (
     ResourceWatch,
 )
 
-
 _MIB = 2**20
 
 

@@ -8,17 +8,15 @@ import math
 
 import pytest
 
-from pmx.pose import WorldBonePose, evaluate_fk_range
-
-from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
-
-from .helpers import bone, build_standard_pmx
-
 from mocapvmd.markers import (
     MarkerTrajectories,
     evaluate_world_poses,
     extract_markers,
 )
+from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
+from pmx.pose import WorldBonePose, evaluate_fk_range
+
+from .helpers import bone, build_standard_pmx
 
 _EXPECTED_MARKERS = {
     "center", "pelvis", "chest", "head",

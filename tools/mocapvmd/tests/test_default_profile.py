@@ -5,15 +5,14 @@ PMX未指定時に使う既定モデルプロファイルが、FK評価とマー
 共通 PmxModel 相当として提供できることを検証する。
 """
 
-from pmx.pose import evaluate_fk, sample_local_poses
-from pmx.types import PmxModel
-
 from mocapvmd.default_profile import (
     FEATURE_BINDINGS,
     MARKER_BINDINGS,
     ROLE_TO_INDEX,
     build_default_model,
 )
+from pmx.pose import evaluate_fk, sample_local_poses
+from pmx.types import PmxModel
 
 # markers.py が必要とする必須標準ロール(初期マーカー表)。
 _REQUIRED_ROLES = {

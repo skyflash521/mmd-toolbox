@@ -8,13 +8,10 @@
 - C1連続性(無段差 + 微分の連続)・振幅有界
 """
 
-import math
-
 import numpy as np
 import pytest
 
 from shakevmd import noise
-
 
 # ---------------------------------------------------------------------------
 # effective_octaves: 帯域制限のオクターブ数

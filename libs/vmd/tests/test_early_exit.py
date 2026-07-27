@@ -184,8 +184,8 @@ def test_coeff_noisy_data_early_exit_matches_full_search():
 
 def _camera_reduce_source():
     """FOV(整数丸め)・位置(3軸ユークリッド)・回転を同時に動かす reduce 用ソースと許容。"""
-    from vmd.types import CameraKey
     from vmd.reduce import Tolerances
+    from vmd.types import CameraKey
 
     lin = bytes([20, 107, 20, 107]) * 6
     tols = Tolerances(

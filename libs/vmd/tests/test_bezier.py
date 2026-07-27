@@ -7,11 +7,9 @@ fit_bezier_curve(xs, ys) は、正規化時間 xs(0<x<1)と正規化値 ys に�
 
 import math
 
-import numpy as np
 import pytest
 
 from vmd import interp
-from vmd import fit
 from vmd.fit import fit_bezier_curve
 
 

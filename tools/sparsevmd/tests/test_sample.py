@@ -9,10 +9,8 @@ sample.build_tracks は対象セクション(camera/bone)を内部作業ビュ�
 import numpy as np
 import pytest
 
-from vmd.types import BoneKey, CameraKey, VmdDocument
-from sparsevmd import sample
 from sparsevmd.sample import build_tracks, sample_rotation, sample_scalar
-
+from vmd.types import BoneKey, CameraKey, VmdDocument
 
 # 真の線形補間になる制御点(各チャンネル x1==y1, x2==y2 → y=x)。
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6  # 24バイト

@@ -13,7 +13,6 @@
 import pytest
 
 from vmd import interp
-from vmd.types import BoneKey, CameraKey
 from vmd.reduce import (
     StrictError,
     Tolerances,
@@ -21,6 +20,7 @@ from vmd.reduce import (
     verify_bone_track,
     verify_camera_track,
 )
+from vmd.types import BoneKey, CameraKey
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 EASE = (96, 0, 96, 30)

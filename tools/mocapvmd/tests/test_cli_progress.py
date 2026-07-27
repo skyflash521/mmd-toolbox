@@ -6,10 +6,8 @@ reporter.update を progress コールバックとして受け取る。出力書
 表示器は注入(差し替え)で配線を検証する。
 """
 
-import pytest
-
-from vmd import io
 from mocapvmd import cli
+from vmd import io
 
 from .helpers import bone, write_vmd
 

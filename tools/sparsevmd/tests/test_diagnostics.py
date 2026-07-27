@@ -7,10 +7,6 @@ seam_rewrites(継ぎ目で曲線を書き換えたフレーム)を埋める。bu
 エントリに載せ、dry-run に出す。
 """
 
-import pytest
-
-from vmd import interp
-from vmd.types import BoneKey, CameraKey
 from sparsevmd import presets, report
 from sparsevmd.reduce import (
     BONE_LINEAR_INTERP,
@@ -18,6 +14,8 @@ from sparsevmd.reduce import (
     reduce_bone_track,
     reduce_camera_track,
 )
+from vmd import interp
+from vmd.types import BoneKey, CameraKey
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 EASE = (96, 0, 96, 30)
@@ -150,9 +148,9 @@ def test_format_dry_run_shows_cut_positions():
 
 def test_cli_dry_run_includes_diagnostics(tmp_path, capsys):
     # CLI 経由の dry-run が不連続検出位置を含むことをエンドツーエンドで確認する。
+    from sparsevmd import cli
     from vmd import io
     from vmd.types import VmdDocument
-    from sparsevmd import cli
 
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -276,9 +274,9 @@ def test_build_report_preserves_verify_passthrough():
 
 def test_cli_dry_run_includes_verify(tmp_path, capsys):
     # CLI 経由の dry-run に verify レコードが出ることをエンドツーエンドで確認する。
+    from sparsevmd import cli
     from vmd import io
     from vmd.types import VmdDocument
-    from sparsevmd import cli
 
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -326,6 +324,7 @@ def test_log_diagnostics_shows_verify(capsys):
 def test_log_diagnostics_uses_given_file(capsys):
     # 機械モードは file=sys.stderr を渡して stdout をイベント専用に保つ(呼び出し側の契約)。
     import sys
+
     from sparsevmd import cli
 
     diag = dict(_diag())

@@ -5,11 +5,9 @@
 いずれも入力不正(終了コード1)になる。
 """
 
-import pytest
-
-from vmd import io
 from mocapvmd import cli
 from mocapvmd.model_profile import STANDARD_BONE_NAMES
+from vmd import io
 
 from .helpers import bone, build_standard_pmx, write_vmd
 

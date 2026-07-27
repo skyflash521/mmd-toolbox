@@ -11,7 +11,6 @@ import sys
 
 from vmd import read as vmd_read
 from vpr import Note, Part, TempoEvent, Track, VprProject, VprWarning
-
 from vpr2vmd import cli
 
 # cp932(Windows のロケール符号化)で表せない文字(絵文字 U+1F3A5)。ロケール符号化外の文字を

@@ -9,7 +9,6 @@ import math
 
 import pytest
 
-from vmd import fit
 from vmd.fit import LinearScalarChannel
 
 

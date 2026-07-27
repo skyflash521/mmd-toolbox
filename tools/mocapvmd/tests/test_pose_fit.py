@@ -8,18 +8,16 @@ import math
 
 import pytest
 
-from pmx.pose import evaluate_fk, sample_local_poses
-from vmd.types import BoneKey
-
-from mocapvmd.markers import evaluate_world_poses, extract_markers
+from mocapvmd.markers import extract_markers
 from mocapvmd.model_profile import load_mocap_profile
-
 from mocapvmd.pose_fit import (
     DEFAULT_FIT_PARAMS,
     FitParams,
     FitResult,
     fit,
 )
+from pmx.pose import evaluate_fk, sample_local_poses
+from vmd.types import BoneKey
 
 
 def _key(name, *, rotation=(0.0, 0.0, 0.0, 1.0)):

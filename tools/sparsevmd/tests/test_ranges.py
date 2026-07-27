@@ -9,9 +9,7 @@
 
 import pytest
 
-from sparsevmd import ranges
 from sparsevmd.ranges import RangeError, expand_and_normalize, intersect, parse_range
-
 
 # --- parse_range ------------------------------------------------------------
 

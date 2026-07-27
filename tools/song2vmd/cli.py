@@ -28,14 +28,14 @@ from cli_events import (
     error_event,
     install_sigbreak_handler,
 )
+from vmd import write_file as _vmd_write_file
 from vocal_analysis import (
-    ContentRecognizerModel,
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
     DEFAULT_ENGLISH_KATAKANA_METHOD,
     DEFAULT_FORCED_ALIGNER,
+    ContentRecognizerModel,
     SofaAlignerConfig,
 )
-from vmd import write_file as _vmd_write_file
 
 from . import __version__
 from . import presets as _presets

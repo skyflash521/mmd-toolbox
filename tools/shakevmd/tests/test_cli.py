@@ -12,7 +12,6 @@ CLI はコアの薄いラッパー: 引数解析 → VMD読み(vmd.io)→ bake()
 
 import sys
 
-import numpy as np
 import pytest
 
 from shakevmd import cli, presets
@@ -748,6 +747,7 @@ class TestCliOps:
         # 静止/移動プロファイル・settle収束時間・素朴な角度加算モードを含む(転送ループの実効は
         # walking 歩調の等価テストで担保済み=同一機構)。
         import inspect
+
         from shakevmd.bake import bake
         params = inspect.signature(bake).parameters
         for name in presets.INTERNAL_PARAM_NAMES:

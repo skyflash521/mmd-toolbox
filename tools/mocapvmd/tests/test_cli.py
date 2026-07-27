@@ -9,8 +9,9 @@ CLI は引数解析 → VMD読み → 全ボーンの一般ノイズ軽減(ク�
 
 import pytest
 
+from mocapvmd import cli
+from mocapvmd import report as mocap_report
 from vmd import io
-from mocapvmd import cli, report as mocap_report
 
 from .helpers import (
     BONE_NONLINEAR,
@@ -848,8 +849,8 @@ def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
 def test_human_warning_line_uses_common_format(tmp_path, capsys):
     # 警告行は共通コードのラベルで1行にまとめて標準エラーへ出す(安定コードは機械モードの
     # warning イベントと同じ値)。旧来の日本語ラベルは出さず、標準出力には何も漏らさない。
-    from vmd.types import BoneKey, VmdDocument
     from vmd.reduce import BONE_LINEAR_INTERP
+    from vmd.types import BoneKey, VmdDocument
     bad_name = b"\x81\x20name".ljust(15, b"\x00")  # cp932 で復号できないバイト列
     keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
             for f in range(4)]

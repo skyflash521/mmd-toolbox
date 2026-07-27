@@ -14,10 +14,9 @@ import pytest
 import soundfile as sf
 
 from lipsync import MouthEvent, MouthShape
+from song2vmd import pipeline, presets
 from vocal_analysis import ContentRecognizerModel, RmsEnvelope, Segment
 from vocal_analysis.types import AudioPcm
-
-from song2vmd import pipeline, presets
 
 _TEST_MODEL = ContentRecognizerModel(model_id="test-content-recognizer")
 

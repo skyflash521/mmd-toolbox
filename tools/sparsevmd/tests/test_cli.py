@@ -7,12 +7,11 @@ VMD書き。終了コード: 0 正常 / 1 入力不正(VMDでない・対象セ�
 
 import sys
 
-import numpy as np
 import pytest
 
+from sparsevmd import cli
 from vmd import interp, io
 from vmd.types import BoneKey, CameraKey, VmdDocument
-from sparsevmd import cli
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 

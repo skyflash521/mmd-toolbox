@@ -9,8 +9,6 @@ ftol/xtol/gtol を緩め、少数サンプルの小区間(緩めても速度効�
 
 import math
 
-import pytest
-
 from vmd import fit, interp
 from vmd import reduce as vreduce
 from vmd.reduce import build_bone_tolerances, reduce_bone_track, verify_bone_track

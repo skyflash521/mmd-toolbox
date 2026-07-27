@@ -6,14 +6,13 @@
 
 import pytest
 
-from mocapvmd.model_profile import load_mocap_profile
-
 from mocapvmd.marker_denoise import (
     DEFAULT_PRESET,
     SmoothParams,
     SmoothResult,
     smooth,
 )
+from mocapvmd.model_profile import load_mocap_profile
 
 _CATEGORIES = {"center", "torso", "head", "arms", "wrists", "legs", "feet"}
 

@@ -9,9 +9,8 @@ VmdDocument を組み立てる morphs.build_vmd_document を検証する。共�
 import pytest
 
 from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
-from vmd import MorphKey, io
-
 from song2vmd import morphs
+from vmd import MorphKey, io
 
 
 def ev(shape, start, end, open_amount=0.0, consonant_class=ConsonantClass.NONE):

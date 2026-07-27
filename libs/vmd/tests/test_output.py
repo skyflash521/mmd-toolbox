@@ -7,7 +7,6 @@ linear mode では補間ブロックは線形固定。perspective は直近ホ�
 
 import pytest
 
-from vmd.types import BoneKey, CameraKey, VmdDocument  # noqa: F401
 from vmd import reduce as reducer  # noqa: F401
 from vmd.reduce import (
     BONE_LINEAR_INTERP,
@@ -16,6 +15,7 @@ from vmd.reduce import (
     build_bone_keys,
     build_camera_keys,
 )
+from vmd.types import BoneKey, CameraKey, VmdDocument  # noqa: F401
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 # pos_x チャンネルだけ非線形(ease)なカメラ補間(到達側カーブ評価の検証用)。

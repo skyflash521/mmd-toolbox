@@ -66,7 +66,8 @@ def test_report_adds_grounding_diagnostics_for_toe():
 
 def test_report_grounding_reflects_denoise_then_stabilize():
     # denoise on のとき接地診断は denoise 後のトラックを安定化した結果と一致する(パイプライン整合)。
-    from mocapvmd import denoise as dn, footik
+    from mocapvmd import denoise as dn
+    from mocapvmd import footik
 
     keys = _grounded_foot_keys()
     rep = report.build_report(keys, denoise=True)

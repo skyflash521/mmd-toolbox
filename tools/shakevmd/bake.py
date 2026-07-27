@@ -13,10 +13,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from vmd import camera, interp
-from vmd.types import CameraKey
 from shakevmd import cuts, motion, noise
 from shakevmd.warn import ShakeWarning
+from vmd import camera, interp
+from vmd.types import CameraKey
 
 
 class RangeOverlapError(ValueError):

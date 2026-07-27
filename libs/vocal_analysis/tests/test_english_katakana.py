@@ -237,12 +237,12 @@ def test_generate_katakana_arpakana_converts_phonemes_to_kana():
 
 
 def test_generate_katakana_arpakana_returns_invalid_output_when_conversion_raises(monkeypatch):
-    import vocal_analysis.english_katakana as module
-
     # arpabet_to_kana自体が例外を送出しても、CMUdict未収録・出力不正と同じ安全側フォールバック
     # (呼び出し元が変換不可と判定できる値)にする。ライブラリ未導入時のインポート例外はこの経路の
     # 対象外(呼び出し元まで伝播させる。設計上の意図は_generate_katakana_arpakanaのdocstring参照)。
     import arpakana
+
+    import vocal_analysis.english_katakana as module
 
     def _raise(phonemes):
         raise ValueError("boom")

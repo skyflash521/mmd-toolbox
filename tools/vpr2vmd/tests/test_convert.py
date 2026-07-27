@@ -8,7 +8,7 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 
 import re
 
-import pytest
+from vmd import read as vmd_read
 from vpr import (
     ControllerCurve,
     ControllerEvent,
@@ -19,8 +19,6 @@ from vpr import (
     VprFormatError,
     VprProject,
 )
-
-from vmd import read as vmd_read
 from vpr2vmd import __version__, cli
 
 

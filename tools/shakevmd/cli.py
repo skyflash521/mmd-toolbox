@@ -21,11 +21,11 @@ from cli_events import (
     install_sigbreak_handler,
 )
 from cli_progress import progress
-from vmd import interp, io
-from vmd.reduce import Tolerances, reduce_camera_track
 from shakevmd import __version__, cuts, presets
 from shakevmd.bake import RangeOverlapError, bake
 from shakevmd.warn import ShakeWarning
+from vmd import interp, io
+from vmd.reduce import Tolerances, reduce_camera_track
 
 # 公開引数の hard-default。プリセット/個別引数が未指定の項目に使う。
 # fade はプリセット対象外(プリセットは7引数)だが、None センチネル解決のため hard-default を持つ。

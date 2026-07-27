@@ -12,7 +12,6 @@ reduce_camera_track へ force_bezier フラグを設け、True でファスト�
 import math
 
 from vmd import interp
-from vmd.types import CameraKey
 from vmd.fit import (
     CameraRotationChannel,
     EuclideanVectorChannel,
@@ -27,6 +26,7 @@ from vmd.reduce import (
     camera_interp_bytes,
     reduce_camera_track,
 )
+from vmd.types import CameraKey
 
 EASE = (96, 0, 96, 30)
 LIN = (20, 20, 107, 107)

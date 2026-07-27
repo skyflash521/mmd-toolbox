@@ -11,8 +11,6 @@ curve(a,b) と residual(a,b) は同一区間に対して同じベジェ曲線フ
 
 import math
 
-import pytest
-
 from vmd import fit, interp
 
 EASE = (96, 0, 96, 30)

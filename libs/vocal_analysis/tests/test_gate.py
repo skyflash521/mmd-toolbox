@@ -454,9 +454,8 @@ def test_exclude_ranges_from_segments_leaves_unaffected_segment_unchanged():
 
 
 def test_ticks_to_seconds_at_tick_zero_is_zero():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import ticks_to_seconds
+    from vpr.types import TempoEvent
 
     tempos = [TempoEvent(tick=0, bpm=120.0)]
 
@@ -464,9 +463,8 @@ def test_ticks_to_seconds_at_tick_zero_is_zero():
 
 
 def test_ticks_to_seconds_single_tempo_one_quarter_note():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import ticks_to_seconds
+    from vpr.types import TempoEvent
 
     # BPM120では四分音符(1拍)は60/120=0.5秒。resolution(tick/四分音符)が480なら480tickで0.5秒。
     tempos = [TempoEvent(tick=0, bpm=120.0)]
@@ -475,9 +473,8 @@ def test_ticks_to_seconds_single_tempo_one_quarter_note():
 
 
 def test_ticks_to_seconds_across_tempo_change():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import ticks_to_seconds
+    from vpr.types import TempoEvent
 
     # tick 0〜480: BPM120(0.5秒)。tick 480〜960: BPM60(四分音符1拍=60/60=1.0秒)。
     # 合計 tick=960 で 0.5+1.0=1.5秒。
@@ -487,9 +484,8 @@ def test_ticks_to_seconds_across_tempo_change():
 
 
 def test_ticks_to_seconds_mid_segment_after_tempo_change():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import ticks_to_seconds
+    from vpr.types import TempoEvent
 
     # tick=720は tempo変化後(tick 480, BPM60)の区間の途中(240tick=0.5拍=0.5秒分)。
     # 0.5(最初の区間) + 0.5(2番目の区間の途中) = 1.0秒。
@@ -499,9 +495,8 @@ def test_ticks_to_seconds_mid_segment_after_tempo_change():
 
 
 def test_ticks_to_seconds_accepts_unsorted_tempo_list():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import ticks_to_seconds
+    from vpr.types import TempoEvent
 
     # テンポイベントが tick 降順で渡されても、内部で並べ替えて正しく計算する。
     tempos = [TempoEvent(tick=480, bpm=60.0), TempoEvent(tick=0, bpm=120.0)]
@@ -522,9 +517,8 @@ def _part(notes):
 
 
 def test_generate_vpr_reference_segments_single_vowel_note():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import generate_vpr_reference_segments
+    from vpr.types import TempoEvent
 
     part = _part([_note(0, 480, ["a"])])
 
@@ -534,9 +528,8 @@ def test_generate_vpr_reference_segments_single_vowel_note():
 
 
 def test_generate_vpr_reference_segments_uses_last_phoneme_as_representative():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import generate_vpr_reference_segments
+    from vpr.types import TempoEvent
 
     # 子音+母音(例: "s","a")の音符は、末尾の音素(母音)を代表として1区間にする
     # (音符内の音素別タイミングは持たないため)。
@@ -548,9 +541,8 @@ def test_generate_vpr_reference_segments_uses_last_phoneme_as_representative():
 
 
 def test_generate_vpr_reference_segments_consonant_only_phoneme_maps_to_c():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import generate_vpr_reference_segments
+    from vpr.types import TempoEvent
 
     part = _part([_note(0, 480, ["k"])])
 
@@ -560,9 +552,8 @@ def test_generate_vpr_reference_segments_consonant_only_phoneme_maps_to_c():
 
 
 def test_generate_vpr_reference_segments_continuation_inherits_and_merges_with_previous():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import generate_vpr_reference_segments
+    from vpr.types import TempoEvent
 
     # 継続記号「-」の音符は直前の音符の音素を継承し、同一カテゴリで連続するため1区間に結合する。
     part = _part([_note(0, 480, ["a"]), _note(480, 480, ["-"])])
@@ -573,9 +564,8 @@ def test_generate_vpr_reference_segments_continuation_inherits_and_merges_with_p
 
 
 def test_generate_vpr_reference_segments_includes_internal_rest_as_sil():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import generate_vpr_reference_segments
+    from vpr.types import TempoEvent
 
     # 音符間の隙間[480tick, 960tick)(0.5〜1.0秒)は休符としてsil区間になる。
     part = _part([_note(0, 480, ["a"]), _note(960, 480, ["i"])])
@@ -586,9 +576,8 @@ def test_generate_vpr_reference_segments_includes_internal_rest_as_sil():
 
 
 def test_generate_vpr_reference_segments_leading_continuation_with_no_previous_is_skipped():
-    from vpr.types import TempoEvent
-
     from vocal_analysis.gate import generate_vpr_reference_segments
+    from vpr.types import TempoEvent
 
     # 最初の音符が継続記号のみで継承元が無い場合、解決できないためその音符は区間を生成しない。
     part = _part([_note(0, 480, ["-"])])

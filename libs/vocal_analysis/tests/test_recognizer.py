@@ -8,7 +8,6 @@
 import numpy as np
 import pytest
 
-
 # 母音記号基準集合(IPA母音チャートの基本母音28記号+R音性母音2記号+拡張母音記号1)を
 # 過不足なく列挙する(この有限集合をそのまま固定する)。
 _VOWEL_BASE_SYMBOLS = [
@@ -1446,8 +1445,8 @@ def test_load_model_and_processor_shows_loading_note_but_no_download_note_when_a
 def test_load_content_recognizer_pipeline_reports_live_download_percentage(monkeypatch):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
-    from vocal_analysis import recognizer as recognizer_module
     from vocal_analysis import ContentRecognizerModel
+    from vocal_analysis import recognizer as recognizer_module
 
     monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
     calls = []
@@ -1491,8 +1490,8 @@ def test_load_content_recognizer_pipeline_shows_loading_note_but_no_download_not
 ):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
-    from vocal_analysis import recognizer as recognizer_module
     from vocal_analysis import ContentRecognizerModel
+    from vocal_analysis import recognizer as recognizer_module
 
     monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
 

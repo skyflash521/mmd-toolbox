@@ -10,6 +10,7 @@ import json
 import zipfile
 
 import pytest
+
 from vpr import (
     Note,
     Part,
@@ -19,7 +20,6 @@ from vpr import (
     rest_intervals,
 )
 from vpr import read as vpr_read
-
 from vpr2vmd import io as vio
 
 

@@ -10,10 +10,9 @@ import sys
 
 import pytest
 
-from vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
-
 from mocapvmd import presets
 from mocapvmd import reduce as mreduce
+from vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
 
 from .helpers import BONE_NONLINEAR, bone
 

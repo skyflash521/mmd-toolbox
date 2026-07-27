@@ -10,8 +10,7 @@
 import pytest
 
 import lipsync
-from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
-from lipsync import generate
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape, generate
 
 
 def _envelope(events, params=None):

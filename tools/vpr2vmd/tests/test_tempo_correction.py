@@ -5,8 +5,8 @@
 """
 
 import pytest
-from lipsync import GenerationParams
 
+from lipsync import GenerationParams
 from vpr2vmd.tempo_correction import apply_tempo_correction
 
 

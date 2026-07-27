@@ -11,7 +11,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from vmd.interp import sample
-from .types import PmxModel
 
 _IDENTITY_QUAT = (0.0, 0.0, 0.0, 1.0)
 

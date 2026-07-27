@@ -15,8 +15,7 @@ parse_bone_file はテキストを受ける。パス検証は CLI(argparse)層�
 import pytest
 
 from sparsevmd import selection
-from sparsevmd.selection import Selector, SelectionError, resolve_selection
-
+from sparsevmd.selection import SelectionError, Selector, resolve_selection
 
 # テスト用のボーン名集合(キーが存在するボーン)。case 比較用に head/Head を併置。
 BONES = [

@@ -9,9 +9,9 @@ import io
 import sys
 import types
 
+from sparsevmd import cli
 from vmd import io as vmd_io
 from vmd.types import BoneKey, CameraKey, VmdDocument
-from sparsevmd import cli
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 

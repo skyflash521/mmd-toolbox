@@ -7,7 +7,6 @@ VOCALOID 日本語の音素(X-SAMPA)を、口形イベント確定で使うカ�
 """
 
 from lipsync import ApertureClass, ConsonantClass, MouthShape
-
 from vpr2vmd import phonemes
 
 Cat = phonemes.PhonemeCategory

@@ -12,15 +12,13 @@
 範囲全体がトラックを覆う(範囲外キーなし)場合と linear モードでは継ぎ目の書き換えをしない。
 """
 
-import pytest
-
 from vmd import interp
-from vmd.types import CameraKey
 from vmd.reduce import (
     Tolerances,
     camera_interp_bytes,
     reduce_camera_track,
 )
+from vmd.types import CameraKey
 
 # balanced プリセット相当の許容値。
 TOLS = Tolerances(

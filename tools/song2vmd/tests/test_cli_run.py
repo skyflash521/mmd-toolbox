@@ -12,19 +12,17 @@ import sys
 
 import pytest
 
-from vmd import VmdDocument
-from vmd import read as vmd_read
-from vocal_analysis import ContentRecognizerModel, DEFAULT_CONTENT_RECOGNIZER_MODEL
-from vocal_analysis.io import AudioLoadError
-from vocal_analysis.recognizer import RecognitionError
-from vocal_analysis.separator import SeparationError
-
-from song2vmd import __version__
-from song2vmd import cli
+from song2vmd import __version__, cli
 from song2vmd import events as _events
 from song2vmd import pipeline as _pipeline
 from song2vmd import presets as _presets
 from song2vmd import report as _report
+from vmd import VmdDocument
+from vmd import read as vmd_read
+from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL, ContentRecognizerModel
+from vocal_analysis.io import AudioLoadError
+from vocal_analysis.recognizer import RecognitionError
+from vocal_analysis.separator import SeparationError
 
 
 def _touch(path):

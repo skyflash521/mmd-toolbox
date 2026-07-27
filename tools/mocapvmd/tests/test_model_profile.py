@@ -9,18 +9,16 @@ import struct
 
 import pytest
 
-from pmx.types import PmxFormatError, PmxModel
-
 from mocapvmd.default_profile import ROLE_TO_INDEX as _DEFAULT_ROLE_TO_INDEX
 from mocapvmd.default_profile import build_default_model
-
 from mocapvmd.model_profile import (
+    STANDARD_BONE_NAMES,
     MocapModelProfile,
     MocapModelProfileError,
-    STANDARD_BONE_NAMES,
     load_mocap_profile,
     validate_required_roles,
 )
+from pmx.types import PmxFormatError, PmxModel
 
 _EXPECTED_MARKERS = {
     "center", "pelvis", "chest", "head",

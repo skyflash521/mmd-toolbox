@@ -14,9 +14,9 @@ import json
 
 import pytest
 
-from vmd import io
 from mocapvmd import cli, presets
 from mocapvmd.model_profile import STANDARD_BONE_NAMES
+from vmd import io
 
 from .helpers import bone, build_standard_pmx, write_vmd
 
@@ -145,8 +145,8 @@ def test_machine_disabled_stages_emit_no_progress(tmp_path, capsysbinary):
 def test_machine_emits_decode_error_warning(tmp_path, capsysbinary):
     # デコード不能なボーン名を含む入力 → vmd.io の decode-error 警告を warning イベントへ透過。
     # 不正な cp932 シーケンスを名前フィールドに埋めた密トラックを書く。
-    from vmd.types import BoneKey, VmdDocument
     from vmd.reduce import BONE_LINEAR_INTERP
+    from vmd.types import BoneKey, VmdDocument
     bad_name = b"\x81\x20name".ljust(15, b"\x00")  # cp932 で復号できないバイト列
     keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
             for f in range(4)]
@@ -163,8 +163,8 @@ def test_machine_emits_decode_error_warning(tmp_path, capsysbinary):
 
 def test_machine_warning_dedup_matches_human(tmp_path, capsysbinary):
     # 同一(code, section, message)の警告は 1 件へ集約する(人間向け経路と同じ基準)。
-    from vmd.types import BoneKey, VmdDocument
     from vmd.reduce import BONE_LINEAR_INTERP
+    from vmd.types import BoneKey, VmdDocument
     bad_name = b"\x81\x20name".ljust(15, b"\x00")
     # 同名のデコード不能キーを複数フレーム持たせても decode-error は 1 件へ集約される。
     keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)

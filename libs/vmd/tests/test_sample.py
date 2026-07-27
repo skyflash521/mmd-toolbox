@@ -6,9 +6,8 @@ perspective_series は各フレームの perspective を直近キー値で保持
 
 import pytest
 
-from vmd.types import CameraKey
 from vmd.sample import perspective_series
-
+from vmd.types import CameraKey
 
 # 真の線形補間になる制御点(各チャンネル x1==y1, x2==y2 → y=x)。
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6  # 24バイト

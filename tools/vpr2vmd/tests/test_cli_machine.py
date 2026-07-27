@@ -12,7 +12,6 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 import json
 
 from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
-
 from vpr2vmd import __version__, cli
 
 

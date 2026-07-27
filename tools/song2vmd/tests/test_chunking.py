@@ -12,9 +12,8 @@
 RMS算出を1回だけ行うことで満たされ、本モジュールが担うセグメント結合とは別の関心事)。
 """
 
-from vocal_analysis import Segment
-
 from song2vmd import chunking
+from vocal_analysis import Segment
 
 
 def seg(type_, start, end, phoneme=None, confidence=None):

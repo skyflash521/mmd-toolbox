@@ -10,7 +10,6 @@
 import json
 
 from vpr import Note, Part, TempoEvent, Track, VprProject
-
 from vpr2vmd import cli
 
 

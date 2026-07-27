@@ -9,7 +9,6 @@
 import pytest
 
 from lipsync import GenerationParams
-
 from vpr2vmd import presets
 
 _STYLES = ("pop", "ballad", "powerful", "whisper", "rap")

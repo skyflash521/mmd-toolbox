@@ -11,8 +11,7 @@ import math
 import pytest
 
 import lipsync
-from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
-from lipsync import generate
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape, generate
 
 # T=4 を得るための overlap_max=4(T=clamp(4, 1, 短い側10/2=5)=4、境界 b±2 の整数窓[8,12])。
 _WIDE = GenerationParams(coartic_overlap_max=4)

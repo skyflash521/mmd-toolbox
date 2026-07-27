@@ -9,7 +9,6 @@ report.build_diagnostics と、それを人間向けテキスト(--dry-run)・�
 import pytest
 
 from lipsync import MouthEvent, MouthShape
-
 from song2vmd import events, report
 from vocal_analysis import Segment
 

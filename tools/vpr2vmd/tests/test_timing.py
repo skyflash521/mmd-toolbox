@@ -5,8 +5,8 @@ vpr の tick(整数、resolution=tick/四分音符)とテンポマップから 3
 """
 
 import pytest
-from vpr import Note, TempoEvent
 
+from vpr import Note, TempoEvent
 from vpr2vmd import timing
 
 

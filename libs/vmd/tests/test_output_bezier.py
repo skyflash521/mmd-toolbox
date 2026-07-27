@@ -12,10 +12,7 @@ bone_interp_bytes のシフトコピー 64 バイト。回転はカメラが 3 �
 
 import math
 
-import pytest
-
 from vmd import interp
-from vmd.types import BoneKey, CameraKey
 from vmd.fit import (
     BoneRotationChannel,
     CameraRotationChannel,
@@ -30,6 +27,7 @@ from vmd.reduce import (
     reduce_bone_track,
     reduce_camera_track,
 )
+from vmd.types import BoneKey, CameraKey
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 EASE = (96, 0, 96, 30)

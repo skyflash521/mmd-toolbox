@@ -644,8 +644,8 @@ def test_validate_and_normalize_segments_snaps_within_tolerance_to_exact_values(
 
 
 def test_validate_and_normalize_segments_rejects_start_after_end():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     # (b)(c)(d)はいずれも許容誤差50ミリ秒以内で通過し、2件目のみ(a) start<=end に単独で違反する
     # (0.53 > 0.51)。(b)(c)(d)しか検証しない誤実装でもこの入力を通してしまわないことを確認する。
@@ -655,8 +655,8 @@ def test_validate_and_normalize_segments_rejects_start_after_end():
 
 
 def test_validate_and_normalize_segments_rejects_non_adjacent_boundary():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     # 境界の差が許容誤差50ミリ秒を超える(隙間: 次の開始が先行の終了より後ろに離れている)。
     segments = [(0.0, 0.5, "pau"), (0.56, 1.0, "a")]
@@ -665,8 +665,8 @@ def test_validate_and_normalize_segments_rejects_non_adjacent_boundary():
 
 
 def test_validate_and_normalize_segments_rejects_overlapping_boundary():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     # 境界の差が許容誤差50ミリ秒を超える(重複: 次の開始が先行の終了より前にある)。絶対差での判定
     # なので、隙間方向だけでなく重複方向も同じしきい値で拒否されることを確認する。
@@ -676,8 +676,8 @@ def test_validate_and_normalize_segments_rejects_overlapping_boundary():
 
 
 def test_validate_and_normalize_segments_rejects_first_start_far_from_zero():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     segments = [(0.06, 0.5, "pau"), (0.5, 1.0, "a")]
     with pytest.raises(RecognitionError):
@@ -685,8 +685,8 @@ def test_validate_and_normalize_segments_rejects_first_start_far_from_zero():
 
 
 def test_validate_and_normalize_segments_rejects_last_end_far_from_trim_duration():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     # 全長に不足する方向(0.93 < 1.0)。
     segments = [(0.0, 0.5, "pau"), (0.5, 0.93, "a")]
@@ -695,8 +695,8 @@ def test_validate_and_normalize_segments_rejects_last_end_far_from_trim_duration
 
 
 def test_validate_and_normalize_segments_rejects_last_end_exceeding_trim_duration():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     # 全長を超過する方向(1.07 > 1.0)。絶対差での判定なので、不足方向だけでなく超過方向も同じ
     # しきい値で拒否されることを確認する。
@@ -706,16 +706,16 @@ def test_validate_and_normalize_segments_rejects_last_end_exceeding_trim_duratio
 
 
 def test_validate_and_normalize_segments_rejects_empty_list():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     with pytest.raises(RecognitionError):
         _validate_and_normalize_segments([], trim_duration_sec=1.0)
 
 
 def test_validate_and_normalize_segments_rejects_new_violation_created_by_snapping():
-    from vocal_analysis.sofa_align import _validate_and_normalize_segments
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
 
     # 一次検証(許容誤差50ミリ秒)は通るが、正規化(後続の開始時刻を先行の終了時刻へ上書き)により
     # 新たな逆順(start > end)を生む例。極端に短い2件目のセグメント(終了時刻1.02)へ、1件目の
@@ -749,8 +749,8 @@ def test_check_ascii_paths_accepts_all_ascii_paths():
 
 
 def test_check_ascii_paths_rejects_non_ascii_work_dir():
-    from vocal_analysis.sofa_align import _check_ascii_paths
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
 
     config = _make_ascii_config()
     with pytest.raises(RecognitionError):
@@ -759,8 +759,8 @@ def test_check_ascii_paths_rejects_non_ascii_work_dir():
 
 def test_check_ascii_paths_rejects_non_ascii_sofa_root():
     from vocal_analysis import SofaAlignerConfig
-    from vocal_analysis.sofa_align import _check_ascii_paths
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
 
     config = SofaAlignerConfig(
         sofa_python=Path("ascii_root") / "sofa-venv" / "python",
@@ -773,8 +773,8 @@ def test_check_ascii_paths_rejects_non_ascii_sofa_root():
 
 def test_check_ascii_paths_rejects_non_ascii_checkpoint_path():
     from vocal_analysis import SofaAlignerConfig
-    from vocal_analysis.sofa_align import _check_ascii_paths
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
 
     config = SofaAlignerConfig(
         sofa_python=Path("ascii_root") / "sofa-venv" / "python",
@@ -788,8 +788,8 @@ def test_check_ascii_paths_rejects_non_ascii_checkpoint_path():
 def test_check_ascii_paths_rejects_non_ascii_in_intermediate_component():
     """末端要素だけでなく、パス中間の要素の非ASCIIも拒否対象(パス文字列全体を判定する)。"""
     from vocal_analysis import SofaAlignerConfig
-    from vocal_analysis.sofa_align import _check_ascii_paths
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
 
     config = SofaAlignerConfig(
         sofa_python=Path("ascii_root") / "sofa-venv" / "python",
@@ -1117,8 +1117,8 @@ def test_map_symbol_to_segment_fields_sp_is_gap():
 
 
 def test_map_symbol_to_segment_fields_unmapped_symbol_raises():
-    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
     with pytest.raises(RecognitionError):
         _map_symbol_to_segment_fields("xyz_unknown")
@@ -1143,8 +1143,8 @@ def test_segments_from_raw_empty_input_returns_empty():
 
 
 def test_segments_from_raw_propagates_unmapped_symbol_error():
-    from vocal_analysis.sofa_align import _segments_from_raw
     from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _segments_from_raw
 
     with pytest.raises(RecognitionError):
         _segments_from_raw([(0.0, 0.5, "xyz_unknown")])

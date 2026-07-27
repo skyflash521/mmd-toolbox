@@ -9,10 +9,10 @@ import io
 import sys
 import types
 
+from mocapvmd import cli
 from vmd import io as vmd_io
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey, VmdDocument
-from mocapvmd import cli
 
 from .helpers import bone, write_vmd
 

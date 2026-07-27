@@ -21,9 +21,14 @@ import numpy as np
 import soundfile as sf
 
 from .config import SofaAlignerConfig
-from .phonemes import _BLANK_G2P_SYMBOLS, _MIN_WORD_DURATION_SEC, RecognitionError, _classify_symbol, _G2P_TO_VOCAB_SYMBOL
+from .phonemes import (
+    _BLANK_G2P_SYMBOLS,
+    _G2P_TO_VOCAB_SYMBOL,
+    _MIN_WORD_DURATION_SEC,
+    RecognitionError,
+    _classify_symbol,
+)
 from .types import Segment
-
 
 # SOFAの語彙(チェックポイント学習時の音素セット)は無声化母音の専用記号を持たず、通常の母音記号
 # (i/u)のみを認識する。pyopenjtalk-plus由来のG2P記号列に含まれる無声化マーカーI/Uは、SOFAへ渡す

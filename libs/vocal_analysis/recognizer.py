@@ -33,10 +33,10 @@ from .config import (
 from .english_katakana import convert_target_words, convert_words, uncached_target_words
 from .phonemes import (
     _BLANK_G2P_SYMBOLS,
+    _G2P_TO_VOCAB_SYMBOL,
     _MIN_WORD_DURATION_SEC,
     RecognitionError,
     _classify_symbol,
-    _G2P_TO_VOCAB_SYMBOL,
 )
 from .quiet import silence_third_party_output, suppress_native_stderr
 from .types import Segment

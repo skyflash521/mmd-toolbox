@@ -13,10 +13,9 @@ import numpy as np
 import pytest
 
 from lipsync import ApertureClass, ConsonantClass, MouthShape
+from song2vmd import events
 from vocal_analysis import AudioPcm, RmsEnvelope, Segment
 from vocal_analysis import rms as _va_rms
-
-from song2vmd import events
 
 FRAME_RATE = 30.0
 

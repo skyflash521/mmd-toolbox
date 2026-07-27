@@ -7,13 +7,13 @@ reduce_camera_track / reduce_bone_track は、ソースキー列と処理範囲�
 
 import pytest
 
-from vmd.types import BoneKey, CameraKey
 from vmd.reduce import (
     CAMERA_LINEAR_INTERP,
     Tolerances,
     reduce_bone_track,
     reduce_camera_track,
 )
+from vmd.types import BoneKey, CameraKey
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 

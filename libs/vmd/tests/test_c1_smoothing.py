@@ -8,12 +8,9 @@ strict では C1 が許容を破る範囲では適用せず元フィットを残
 
 import math
 
-import pytest
-
 from vmd import reduce as reducer
 from vmd.reduce import (
     BONE_LINEAR_INTERP,
-    StrictError,
     build_bone_tolerances,
     reduce_bone_track,
     verify_bone_track,

@@ -9,8 +9,8 @@ vpr 読み込み・口形イベント確定・VMD 生成の統合は test_conver
 """
 
 import pytest
-from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
 
+from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
 from vpr2vmd import cli
 
 

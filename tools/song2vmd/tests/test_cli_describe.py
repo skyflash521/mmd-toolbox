@@ -12,8 +12,7 @@ options に載せない。
 
 import json
 
-from song2vmd import __version__
-from song2vmd import cli
+from song2vmd import __version__, cli
 
 _NONNEG_INT = {"min": 0, "max": None, "exclusive_min": False}
 _UNIT = {"min": 0, "max": 1, "exclusive_min": False}

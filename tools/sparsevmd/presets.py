@@ -12,8 +12,9 @@ from dataclasses import fields
 
 # Tolerances(許容誤差の器)の実体は共通ライブラリ vmd.reduce にある。
 # preset 名 → 値の表と検証は sparsevmd の運用ポリシーとして本モジュールに残す。
-# 旧 import パス(sparsevmd.presets.Tolerances)維持のため再公開する。
-from vmd.reduce import Tolerances  # noqa: F401
+# 旧 import パス(sparsevmd.presets.Tolerances)維持のため再公開する。同名への別名付けは、
+# 本モジュール内の使用が将来消えても未使用 import と見なされないようにする再公開の明示。
+from vmd.reduce import Tolerances as Tolerances
 
 # 品質プリセット名。
 PRESET_NAMES = ("precise", "balanced", "aggressive")

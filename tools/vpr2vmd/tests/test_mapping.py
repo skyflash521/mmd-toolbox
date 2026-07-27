@@ -9,7 +9,6 @@ ON(use_n_morph=True)で「ん」(N)。促音「っ」(Q)は無音(閉口)。
 """
 
 from lipsync import ApertureClass, ConsonantClass, MouthShape
-
 from vpr2vmd import mapping
 
 

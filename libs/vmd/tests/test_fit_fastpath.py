@@ -5,8 +5,6 @@
 取らない(閾値が無い)。線形で収まらない区間は従来どおり `least_squares` を回す(過剰発火しない)。
 """
 
-import pytest
-
 from vmd import fit, interp
 
 LIN = fit._BEZIER_LINEAR_CP  # 対角制御点(20,20,107,107)=正規化空間で y=x の直線
