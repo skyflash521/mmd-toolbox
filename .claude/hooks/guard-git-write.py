@@ -31,7 +31,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 CONTROL_CHARS = ";&|<>\n"
 GLOB_CHARS = "*?[]{}"
 # A commit subject counts as Japanese if it holds one Hiragana (U+3040-309F), Katakana

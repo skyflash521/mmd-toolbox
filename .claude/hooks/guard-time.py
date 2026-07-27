@@ -10,10 +10,10 @@ agent can fetch the current time without a prompt, and deny clock changes.
 This is deliberately the only concern here; bundling extra commands with `date`
 falls through to the normal flow rather than being auto-approved.
 """
-import sys
 import json
 import re
 import shlex
+import sys
 
 # date flags that consume the next token as their (read-only) argument.
 TAKES_ARG = {"-d", "--date", "-r", "--reference", "-f", "--file"}

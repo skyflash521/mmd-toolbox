@@ -28,6 +28,25 @@ jobs:
       - name: Run pytest
         run: pytest
 
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # 版の境界は pyproject.toml の dev extra が正本。ここで版を指定すると宣言が二重になる。
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      # 対象はリポジトリ内の Python 全体(gitignore 済みのパスは ruff が自動で外す)。
+      - name: Run ruff
+        run: ruff check
+
   lychee:
     runs-on: ubuntu-latest
     steps:
