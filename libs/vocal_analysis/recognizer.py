@@ -1465,7 +1465,7 @@ def _load_model_and_processor(on_progress: Callable[[str], None] | None = None):
         model = _transformers_auto_model_for_ctc_from_pretrained(
             RECOGNIZER_CONFIG.model_id,
             revision=RECOGNIZER_CONFIG.model_revision,
-            torch_dtype=getattr(torch, RECOGNIZER_CONFIG.dtype),
+            dtype=getattr(torch, RECOGNIZER_CONFIG.dtype),
         )
     finally:
         # ロードが完了した時点で通知を終える(ダウンロードが実際に発生した場合のみ)。

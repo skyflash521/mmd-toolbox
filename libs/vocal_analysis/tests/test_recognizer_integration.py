@@ -996,10 +996,10 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
         captured["do_phonemize"] = do_phonemize
         return _FakeProcessor({0: "<pad>"})
 
-    def fake_model_from_pretrained(model_id, revision=None, torch_dtype=None, **kwargs):
+    def fake_model_from_pretrained(model_id, revision=None, dtype=None, **kwargs):
         captured["model_model_id"] = model_id
         captured["model_revision"] = revision
-        captured["model_torch_dtype"] = torch_dtype
+        captured["model_dtype"] = dtype
         return _FakeModel()
 
     monkeypatch.setattr(transformers.AutoProcessor, "from_pretrained", fake_processor_from_pretrained)
@@ -1018,7 +1018,7 @@ def test_load_model_and_processor_passes_pinned_config(monkeypatch):
     assert captured["model_model_id"] == RECOGNIZER_CONFIG.model_id
     assert captured["model_revision"] == RECOGNIZER_CONFIG.model_revision
     # dtype は固定条件どおりに適用し、実行デバイスは _select_device が返す値を使う。
-    assert captured["model_torch_dtype"] == getattr(torch, RECOGNIZER_CONFIG.dtype)
+    assert captured["model_dtype"] == getattr(torch, RECOGNIZER_CONFIG.dtype)
     assert captured["model_to_device"] == "fake-device"
 
 
