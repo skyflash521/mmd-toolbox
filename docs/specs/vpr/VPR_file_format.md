@@ -74,7 +74,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `pos` | int | パート開始位置(プロジェクト絶対 tick) |
 | `duration` | int | パート長(tick) |
 | `notes[]` | list | 音符 |
-| `controllers[]` | list | パート単位の連続コントローラ曲線(下記「parts[] の controllers[]」) |
+| `controllers[]` | list | パート単位の連続コントローラ曲線(下記の [parts[] の controllers[]](#parts-の-controllers)) |
 | その他 | — | `styleName`/`aiVoice` 等 |
 
 オーディオトラックのパートは `{name, pos, wav, region}` を持ち `notes` を持たない。
