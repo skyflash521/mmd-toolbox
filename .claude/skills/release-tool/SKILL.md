@@ -102,7 +102,6 @@ PR はリポジトリ所有者しか見ないので、必要最小限にする�
 
   ## 検証
 
-  - pytest(全体): 緑
-  - lychee・check_section_references.py: エラー0件
+  - 検証(docs/conventions/verification.md): 全検査エラー0件
   - スモーク: <代表入力での end-to-end 実行結果。リリースする各ツールにつき1行>
   ```

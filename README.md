@@ -210,6 +210,7 @@ song2vmd <入力ファイル名>.wav
 | [pyproject.toml](pyproject.toml) | 公開コマンド、依存関係、テスト対象の設定 |
 | `docs/specs/` | ツールに依存しない仕様・参照資料 |
 | `docs/conventions/` | 層タクソノミー・バージョン付けなどツール横断の規約 |
+| `scripts/` | CI と開発者の双方から実行するリポジトリ保守スクリプト |
 | `libs/cli_events/` | 機械モードのイベント送出の共有ドメインライブラリ |
 | `libs/cli_progress/` | 進捗ライブ表示の共有ドメインライブラリ |
 | `libs/lipsync/` | リップモーション生成の共有ドメインライブラリ |
@@ -228,7 +229,7 @@ song2vmd <入力ファイル名>.wav
 | Python 3.12 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.12 未満のことがあるため `py -3` を使う |
 | Git | バージョン管理 | Windows は Git for Windows(Git Bash 同梱)を推奨 |
 | GitHub CLI(`gh`) | リリース作業(PR 作成・マージ・Release 確認)の実行 | 任意。ツールをリリースするときだけ必要。初回に `gh auth login` で認証する |
-| lychee | ドキュメントのリンク検査 | 任意。設定は [lychee.toml](lychee.toml) |
+| lychee | ドキュメントのリンク検査 | pip では入らないため各自で導入する。設定は [lychee.toml](lychee.toml) |
 | ruff | Python コードの静的検査 | 開発依存として導入される。設定は [pyproject.toml](pyproject.toml) |
 
 `numpy`・`scipy`(実行時依存)と `pytest`・`ruff`(開発依存)は `pip install -e ".[dev,vocal-analysis]"` で導入される。
@@ -272,17 +273,16 @@ cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替え�
 
 **Windows 追加要件**: Claude Code は Bash ツール・フック・[watchdog.sh](.claude/skills/codex-watchdog/watchdog.sh) の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
 
-### テスト実行
+### 検証の実行
 
-```sh
-pytest
-pytest <パッケージまたはツールのディレクトリ>
-```
+変更を確定させる前に通す検査の一覧・コマンド・合格条件は
+[docs/conventions/verification.md](docs/conventions/verification.md) が持つ。
 
-例:
+そのうちテストと静的検査は、作業中に対象を絞って回せる。次は shakevmd だけに絞る例。
 
 ```sh
 pytest tools/shakevmd
+ruff check tools/shakevmd
 ```
 
 テストは外部サービス・ネットワーク・MMD本体を必要としない。

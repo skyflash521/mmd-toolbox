@@ -43,7 +43,6 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      # 対象はリポジトリ内の Python 全体(gitignore 済みのパスは ruff が自動で外す)。
       - name: Run ruff
         run: ruff check
 
@@ -56,4 +55,4 @@ jobs:
           args: --config lychee.toml . .claude
           lycheeVersion: v0.24.2
       - name: Check for bare section references
-        run: python .github/scripts/check_section_references.py
+        run: python scripts/check_section_references.py

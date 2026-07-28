@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 INLINE_LINK_RE = re.compile(r'\[((?:[^\[\]\n]|\n(?!\n))*)\]\(([^)\n]*)\)')
 SECTION_TOKEN_RE = re.compile(r'§\s?\d+(?:\.\d+){0,2}')

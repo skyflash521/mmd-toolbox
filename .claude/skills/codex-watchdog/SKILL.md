@@ -92,8 +92,8 @@ user-invocable: false
   ラウンドを失敗として扱い、同じエージェントを継続せず新規エージェントで再実行する。
 - モデルは既定値を使い、`--` より前に `-m`/`--model` を付けない(呼び出し元が明示的にモデルを
   要求した場合のみ、その要求に従う)。
-- テスト実行が要るなら codex とは別に自前シェルで行い、pytest コマンドを companion の実行
-  オプションとして渡さない。
+- 検証([`docs/conventions/verification.md`](../../../docs/conventions/verification.md))が要るなら codex とは
+  別に自前シェルで行い、検証ツールのコマンドを companion の実行オプションとして渡さない。
 
 ### 失敗は症状のラベルでなく原因で仕分ける
 
