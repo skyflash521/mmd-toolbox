@@ -20,6 +20,7 @@ vmd.types / vmd.io — VMD読み書き・データモデル・正規化
 ## 2. データモデル(types)
 
 ### 2.1 VmdDocument
+
 - ヘッダ: バージョン、model_name(生バイト+表示用デコード文字列)
 - セクション: bone / morph / camera / light / self_shadow / ik_property の
   各キーフレームリスト
@@ -28,6 +29,7 @@ vmd.types / vmd.io — VMD読み書き・データモデル・正規化
   「キー0件で存在」と「セクション不存在」を区別する
 
 ### 2.2 キーフレーム
+
 - 各フィールドはフォーマット仕様書の定義に従う。数値はファイル格納値を
   そのまま保持する(距離の負値、セルフ影distanceのエンコード値などの
   意味的解釈は行わない。解釈は interp / camera / 呼び出し側の領分)

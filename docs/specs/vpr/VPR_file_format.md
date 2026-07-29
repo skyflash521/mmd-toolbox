@@ -28,7 +28,7 @@
 
 ## ZIP エントリ構成
 
-```
+```text
 Project/sequence.json              ← プロジェクト本体(JSON)
 Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個以上)
 ```

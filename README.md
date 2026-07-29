@@ -241,7 +241,7 @@ song2vmd <入力ファイル名>.wav
 
 リポジトリルートで仮想環境を作成し、開発インストールする。
 
-**macOS / Linux**
+#### macOS / Linux
 
 ```sh
 python3 -m venv .venv
@@ -249,7 +249,7 @@ source .venv/bin/activate
 pip install -e ".[dev,vocal-analysis]"
 ```
 
-**Windows (PowerShell)**
+#### Windows (PowerShell)
 
 ```powershell
 py -3 -m venv .venv

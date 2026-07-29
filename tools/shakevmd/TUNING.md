@@ -116,6 +116,7 @@ shakevmd のコードに**暫定で置かれている既定値**を、実際に�
 - 対象: `motion.BREATHING_AMP_FACTOR`(現 0.5)・`BREATHING_HZ`(現 0.3Hz)。完全静止に近い区間で位置に乗る
   0.3Hz 前後のドリフト(振幅 = `amp_pos` × `BREATHING_AMP_FACTOR` ×(1−正規化速度))。`motion` の定数なので、
   候補は**その定数を変えて焼く**:
+
   ```python
   from shakevmd import motion
   for f in (0.0, 0.25, 0.5, 1.0):
@@ -123,6 +124,7 @@ shakevmd のコードに**暫定で置かれている既定値**を、実際に�
       doc.camera = bake(keys, seed=1, amp_pos=0.05).camera_keys
       io.write_file(doc, f"breath_{f:.2f}.vmd")
   ```
+
 - 素材: **長めの完全静止**(止まっている間にドリフトが見える)。`amp_pos>0` で焼く。
 - 候補例: `BREATHING_AMP_FACTOR` = 0 / 0.25 / 0.5 / 1.0(0 で無効)。`BREATHING_HZ` は 0.3 前後。
 - 着眼点: 止まったショットで、わずかに息づくような位置のゆらぎがあるか。大きいと漂いすぎ、0 でカチッと固定。

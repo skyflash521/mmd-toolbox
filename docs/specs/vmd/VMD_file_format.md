@@ -31,7 +31,7 @@
 
 ## ファイル全体構造
 
-```
+```text
 [Header]
 [Bone Keyframes]
 [Morph Keyframes]
@@ -85,7 +85,7 @@
 
 **全 64 バイトのレイアウト（各 1 byte）:**
 
-```
+```text
 Byte[ 0] = X_x1   Byte[ 1] = Y_x1   Byte[ 2] = Z_x1   Byte[ 3] = R_x1
 Byte[ 4] = X_y1   Byte[ 5] = Y_y1   Byte[ 6] = Z_y1   Byte[ 7] = R_y1
 Byte[ 8] = X_x2   Byte[ 9] = Y_x2   Byte[10] = Z_x2   Byte[11] = R_x2
@@ -156,7 +156,7 @@ Byte[60] = R_y2   Byte[61] = 01     Byte[62] = 00     Byte[63] = 00
 
 **軸の順序（libmmd wiki のオフセットに基づく）:**
 
-```
+```text
 Byte[0..3]   = [ax, bx, ay, by] の X位置軸
 Byte[4..7]   = [ax, bx, ay, by] の Y位置軸
 Byte[8..11]  = [ax, bx, ay, by] の Z位置軸
