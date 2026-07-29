@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Best-effort permission-prompt sound for Windows, macOS, and Linux.
+"""Best-effort attention sound for Windows, macOS, and Linux.
+
+Used when Claude needs the user: a permission prompt appeared, or the turn ended and
+the conversation is waiting for input.
 
 Sound playback is deliberately non-critical: missing commands, missing sound files,
 unavailable audio devices, and all other failures are silently ignored. Players are
-launched fire-and-forget so the permission prompt is never delayed by playback.
+launched fire-and-forget so the caller is never delayed by playback.
 """
 
 from __future__ import annotations
@@ -60,7 +63,7 @@ def _first_existing(paths: tuple[str, ...]) -> str | None:
 def _play_linux() -> bool:
     canberra = shutil.which("canberra-gtk-play")
     if canberra:
-        return _spawn([canberra, "--id=dialog-question", "--description=Claude permission request"])
+        return _spawn([canberra, "--id=dialog-question", "--description=Claude needs attention"])
 
     desktop_sound = _first_existing(
         (
