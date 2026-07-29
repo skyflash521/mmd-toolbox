@@ -268,7 +268,7 @@ cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替え�
 |---|---|---|
 | Node.js 20 以上(LTS 推奨) | 公式インストーラ / nvm | Codex companion(レビューループ)の実行 |
 | Claude Code | `npm install -g @anthropic-ai/claude-code` | AI 開発ハーネス(スキル・フック・レビュー) |
-| Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**既定モデルに追従するため最新版を推奨**(古いとモデル非対応で API エラーになる) |
+| Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**既定モデルに追従するため最新バージョンを推奨**(古いとモデル非対応で API エラーになる) |
 | Codex プラグイン | Claude Code 内で `/plugin marketplace add openai/codex-plugin-cc` の後 `/plugin install codex@openai-codex` | Claude Code から Codex を呼ぶ連携(`codex-review-loop` スキルが使用) |
 
 **Windows 追加要件**: Claude Code は Bash ツール・フック・[watchdog.sh](.claude/skills/codex-watchdog/watchdog.sh) の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。

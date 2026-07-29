@@ -2,7 +2,7 @@
 
 常に全公開ツールの CHANGELOG の形式を検査する。さらに main 宛ての PR では、リリース対象
 (main と比べて __version__ が変わった公開ツール。複数可)ごとに、その後のタグ push で
-Release 本文を抽出できること(該当版の節が先頭にある)を検査する。失敗は exit 1。
+Release 本文を抽出できること(該当バージョンの節が先頭にある)を検査する。失敗は exit 1。
 公開ツール = tools/<ツール>/ に利用者向け README.md を持つツール。
 """
 import argparse
@@ -52,13 +52,13 @@ def main() -> None:
                 failures.append(f"tools/{tool}/__init__.py から __version__ を読めない")
                 continue
             if version == version_on_main(tool):
-                continue  # 版が変わっていない = このPRのリリース対象でない
+                continue  # バージョンが変わっていない = このPRのリリース対象でない
             changelog = Path("tools") / tool / "CHANGELOG.md"
             sections = all_sections.get(tool)
             if sections is None:
                 failures.append(f"リリース対象 {tool} v{version}: {changelog} が無いか形式不正")
             elif version not in sections:
-                failures.append(f"リリース対象 {tool} v{version}: {changelog} に版 {version} の節が無い")
+                failures.append(f"リリース対象 {tool} v{version}: {changelog} にバージョン {version} の節が無い")
             elif next(iter(sections)) != version:
                 failures.append(f"リリース対象 {tool} v{version}: {changelog} の先頭の節が {version} でない")
             else:

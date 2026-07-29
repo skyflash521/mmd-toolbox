@@ -348,7 +348,7 @@ def test_dry_run_plan_shows_tuning_overrides(tmp_path, capsys):
     assert "anticipation: 9" in out
 
 
-# --- 版・--version/--n-morph/--verbose・上書きガード統一・非機械の失敗理由 ---
+# --- バージョン・--version/--n-morph/--verbose・上書きガード統一・非機械の失敗理由 ---
 
 
 def _project_with_notes(notes):
@@ -361,14 +361,14 @@ def _project_with_notes(notes):
 
 
 def test_version_attr_exposed():
-    """パッケージが版属性 __version__(非空の文字列)を公開すること(--version が表示する版の源)。"""
+    """パッケージがバージョン属性 __version__(非空の文字列)を公開すること(--version が表示するバージョンの源)。"""
     import vpr2vmd
 
     assert isinstance(vpr2vmd.__version__, str) and vpr2vmd.__version__
 
 
 def test_version_flag_prints_and_exits_zero(capsys):
-    """--version は版(__version__)を表示して終了コード 0 で終わる。"""
+    """--version はバージョン(__version__)を表示して終了コード 0 で終わる。"""
     import vpr2vmd
 
     rc = cli.main(["--version"])

@@ -872,9 +872,9 @@ def test_human_warning_line_uses_common_format(tmp_path, capsys):
 
 
 def test_version_flag_prints_name_and_version_and_exits_zero(capsys):
-    # --version は版を表示して終了コード0。argparse の version アクションは SystemExit を投げるが、
+    # --version はバージョンを表示して終了コード0。argparse の version アクションは SystemExit を投げるが、
     # main はそれを捕捉して終了コードへ変換する(--help と同じ)ため戻り値で確認する。
-    # 版番号は __version__ を正本とし、表示文字列にツール名と版を含む。
+    # バージョン番号は __version__ を正本とし、表示文字列にツール名とバージョンを含む。
     from mocapvmd import __version__
 
     assert cli.main(["--version"]) == 0

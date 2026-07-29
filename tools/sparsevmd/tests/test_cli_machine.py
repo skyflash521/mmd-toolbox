@@ -83,7 +83,7 @@ def test_version_prints_and_exits_zero(capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "sparsevmd" in out and __version__ in out
-    assert __version__ == "0.0.1"  # 初期版の番号を固定する
+    assert __version__ == "0.0.1"  # 初期バージョンの番号を固定する
 
 
 def test_machine_version_stays_human(capsys):

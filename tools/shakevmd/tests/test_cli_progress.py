@@ -80,7 +80,7 @@ def _spy(monkeypatch):
 
 # --- --version -------------------------------------------------------
 def test_version_shows_version_and_exit0(capsys):
-    # --version は __version__ を表示して終了コード0で返る(版の番号源は __version__ 一本)。
+    # --version は __version__ を表示して終了コード0で返る(バージョンの番号源は __version__ 一本)。
     from shakevmd import __version__
     assert cli.main(["--version"]) == 0
     out = capsys.readouterr().out
