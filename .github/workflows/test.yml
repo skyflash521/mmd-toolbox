@@ -46,6 +46,25 @@ jobs:
       - name: Run ruff
         run: ruff check
 
+  rumdl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # rumdl は GitHub Action としても配布されているが、それを使うと版の宣言が
+      # pyproject.toml の dev extra と二重になるため、ruff と同じく pip で入れる。
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run rumdl
+        run: rumdl check
+
   lychee:
     runs-on: ubuntu-latest
     steps:

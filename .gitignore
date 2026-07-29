@@ -38,6 +38,7 @@ htmlcov/
 # 型チェック・リンターのキャッシュ
 .mypy_cache/
 .ruff_cache/
+.rumdl_cache/
 
 # Jupyter(チューニングワークフローで利用)
 .ipynb_checkpoints
