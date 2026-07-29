@@ -39,8 +39,9 @@ Codexの可用性は `codex-review-loop` の判定に従う。可用性の判定
 - `subagent_type: "fable-reviewer"`
 - `run_in_background: false`(ネイティブサブエージェントでハングの心配が無いため、
   Codex版のようなwatchdog・stall検知・タイムアウト監視は不要)
-- `prompt`: `review-loop-judgement` スキルの[レビュー依頼に含めるべき内容](../review-loop-judgement/SKILL.md#レビュー依頼に含めるべき内容レビュアーに依らない共通要件)を満たすレビュー
-  指示文。`fable-reviewer` はツール定義上 Read/Grep/Glob のみで編集不可なので、
+- `prompt`: `review-loop-judgement` スキルの[レビュー依頼に含めるべき内容](../review-loop-judgement/SKILL.md#レビュー依頼に含めるべき内容レビュアーに依らない共通要件)を満たし、
+  [レビュー依頼に含めてはならない内容](../review-loop-judgement/SKILL.md#レビュー依頼に含めてはならない内容レビュアーに検査作業をさせない)(検査をレビュアーに割り当てない・読む量を課さない)に
+  反する記述を含まないレビュー指示文。`fable-reviewer` はツール定義上 Read/Grep/Glob のみで編集不可なので、
   「レビューのみ・編集するな」の指示はツール権限による二重の安全網になる
 - レビュー指示文に「応答の末尾に、自分のシステムプロンプトに示されている実行モデル表示名を
   そのまま記載せよ」を必ず含める(下記[既知の限界](#既知の限界自己申告に依存する検知)で使うモデル代替の検知手段)
