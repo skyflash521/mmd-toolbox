@@ -17,6 +17,7 @@ cli_events を用いる。既定(非機械)の表示・終了コードは変え�
 import argparse
 import math
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -536,6 +537,43 @@ def _report_params(args, openness, style_gen):
     }
 
 
+def _torch_gpu_warning(device_mode):
+    """GPU を使えない構成なら (code, message, human_text, fields) を返す。該当しなければ None。
+
+    NVIDIA GPU を積んだ機材で torch の構成が原因で GPU を使えないときだけ返す。GPU の有無は
+    NVIDIA ドライバが導入する nvidia-smi が PATH 上にあるかで判定する(存在を確かめるだけで実行は
+    しない)。この条件が無いと、GPU を積んでいない機材と macOS で毎回警告が出る。`--device cpu` は
+    利用者が CPU 実行を選んでいるので判定しない。torch を読み込めない環境でも判定しない。
+    """
+    if device_mode == "cpu" or shutil.which("nvidia-smi") is None:
+        return None
+    try:
+        import torch
+    except ImportError:
+        return None
+    version = torch.__version__
+    if torch.version.cuda is None:
+        message = "導入されている torch では GPU を扱えません"
+        return (
+            "cpu_only_torch", message,
+            f"{message}(torch {version} は CPU 専用版)。CPU で処理します",
+            {"torch_version": version},
+        )
+    if not torch.cuda.is_available():
+        # CUDA_VISIBLE_DEVICES が環境から渡っている場合、利用者が見せる GPU を自分で絞った結果
+        # として CUDA が使えないことがある。この構成で「別の CUDA のバージョンで入れ直せ」は
+        # 効かない対処になるため判定しない(--device cpu 時は上の早期リターンで到達しない)。
+        if os.environ.get("CUDA_VISIBLE_DEVICES") is not None:
+            return None
+        message = "この GPU で使えない CUDA 版の torch が入っています"
+        return (
+            "cuda_unavailable", message,
+            f"{message}(torch {version})。別の CUDA のバージョンで入れ直してください",
+            {"torch_version": version},
+        )
+    return None
+
+
 def _run(args, emitter, fail) -> int:
     """引数解析済みの本体(検証 → パイプライン実行 → 空実行/書き出し)。失敗は fail() で終端する。"""
     output = args.output if args.output is not None else _default_output(args.input)
@@ -558,7 +596,7 @@ def _run(args, emitter, fail) -> int:
     progress_reporter = _progress.ProgressReporter(
         machine=emitter is not None, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
 
-    def _emit_resource_warning(code, message, human_text, fields):
+    def _emit_warning(code, message, human_text, fields):
         # 人間向けの警告はライブ進捗行と混線しないよう、書く前に close でライブ行を消す
         # (改行付きの1行として確定し、次の stage() でライブ行が下の行に再開する)。
         if emitter is not None:
@@ -568,7 +606,11 @@ def _run(args, emitter, fail) -> int:
             print(f"warning: {code}: {human_text}", file=sys.stderr)
 
     progress = _resource_watch.ProgressWithResourceCheck(
-        progress_reporter, _resource_watch.ResourceWatch(_emit_resource_warning))
+        progress_reporter, _resource_watch.ResourceWatch(_emit_warning))
+    # GPU を使えない構成は処理を始める前に知らせる(数分かけてから伝えても手遅れなため)。
+    torch_warning = _torch_gpu_warning(args.device)
+    if torch_warning is not None:
+        _emit_warning(*torch_warning)
     # 中間生成物は出力先の隣に <出力ファイル名>.intermediate/ を作って保存する。
     keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
 
