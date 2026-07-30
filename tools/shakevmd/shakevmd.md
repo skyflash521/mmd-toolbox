@@ -584,6 +584,7 @@ CLI 非公開なので `values` に出さない([§8](#8-パッケージ構成) 
 | カメラキー0件 | `no_camera_keys` | `"input"` | 1 |
 | 範囲書式・逆順 `START>END`・未知オプション・型エラー・positional 欠落等(argparse 検出) | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`) | 2 |
 | 省略端を解決した結果が逆順(例 `999:` で末尾<999) | `range_reversed` | `"--range"` | 2 |
+| 出力先が既存のディレクトリ(`--overwrite` の有無に依らない) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | 範囲の重複・接触(ベイクの ValueError) | `range_overlap` | `"--range"` | 2 |
 | 有限だが過大な値が float32 で溢れた(ベイク中・書き込み時の OverflowError) | `value_overflow` | `null` | 2 |
@@ -594,6 +595,8 @@ CLI 非公開なので `values` に出さない([§8](#8-パッケージ構成) 
 
 - `not_vmd` は握り潰していた例外の種別を `message` に載せる。`bad_argument` は複数の検証失敗が同一終了コード `2`
   に集約される場合もイベント側で1件ずつ区別する。
+- 出力先が既存のディレクトリの場合は `--overwrite` でも書けないため、上書きガードより前に
+  `--overwrite` の有無に依らず `output_is_directory` で拒否する(上書きの許可を促す案内を出さない)。
 - `value_overflow`・`non_finite_output` の `field` を `null` にするのは、起因引数を単一に帰属させられないため
   (無理に1つ選ばず `message` に状況を載せる)。書き込み例外のうち `OverflowError` は過大値起因なので
   `value_overflow`(exit 2)、それ以外の I/O 失敗のみ `write_failed`(exit 3)。

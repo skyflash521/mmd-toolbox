@@ -646,6 +646,7 @@ camera_distance_tol, camera_fov_tol}`([§2.4](#24-許容誤差) の表の値)。
 | `--bone-file` パスが不在・通常ファイルでない | `bone_file_not_file` | `"--bone-file"` | 1 |
 | `--bone-file` の読み込み・解析失敗(UTF-8 デコード不能等) | `bad_bone_file` | `"--bone-file"` | 1 |
 | `--target camera` とボーン選択の同時指定 | `target_selection_conflict` | `null` | 2 |
+| 出力先が既存のディレクトリ(`--overwrite` の有無に依らない) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | ボーンセクションにキーがある場合の、ボーン選択のハードエラー(空文字名・include/exclude 重複名・明示 `--bone` 名の不在・選択結果 0 件) | `bone_selection_invalid` | `null`(対象名は `message` に載る) | 2 |
 | `--range` の展開・正規化失敗(重複・省略端解決後の逆順) | `range_invalid` | `"--range"` | 2 |
@@ -663,6 +664,9 @@ camera_distance_tol, camera_fov_tol}`([§2.4](#24-許容誤差) の表の値)。
   [cli_events.md §4](../../libs/cli_events/cli_events.md#4-argparse-エラー変換ヘルパ) が正。
 - `internal_error` は CLI 本体の全体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
   なく中断(`cancelled`/130)として手前で分岐する([§12.5](#125-中断と出力の原子性))。
+- 出力先が既存のディレクトリの場合は `--overwrite` でも書けないため、上書きガードより前に
+  `--overwrite` の有無に依らず `output_is_directory` で拒否する(上書きの許可を促す案内を出さない)。
+  出力を書かない `--list-bones` は上書きガードと同様にこのディレクトリ検査の対象外とする。
 
 ### 12.5 中断と出力の原子性
 

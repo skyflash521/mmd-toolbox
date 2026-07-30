@@ -488,6 +488,7 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 | argparse 検出(未知オプション・型エラー・choices 外・positional 欠落)、および解析後の値検証(`--clean-strength` の非有限/負・`--foot-slide-suppression` の範囲外/非有限・`--reduce-error-bone-pos`/`--reduce-error-bone-rot` の非有限/負) | `bad_argument` | argparse が示す引数名、値検証は該当オプション名 | 2 |
 | 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 1 |
 | `--pmx` パスが不在・通常ファイルでない(pose 方式時) | `pmx_not_file` | `"--pmx"` | 1 |
+| 出力先が既存のディレクトリ(`--overwrite` の有無に依らない) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | 入力が VMD でない・破損 | `not_vmd` | `"input"` | 1 |
 | ボーン値の非有限・ゼロノルム quaternion | `invalid_bone_values` | `"input"` | 1 |
@@ -500,7 +501,8 @@ mocapvmd はボーン選択オプションを持たない。一般ノイズ軽�
 - `not_vmd` は読み込み例外の種別・文言を `message` に載せる。
 - 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は [cli_events.md §4](../../libs/cli_events/cli_events.md#4-argparse-エラー変換ヘルパ) が正。
 - `internal_error` は CLI 本体の全体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーでなく中断(`cancelled`/130)として手前で分岐する([§10.5](#105-中断と出力の原子性))。
-- `--list-bones` は書き込み・疎化をしない診断モードとして、処理固有の検証(上書きガード・疎化許容値・ボーン値検証)に阻まれない(`--machine --list-bones` でも同じ)。機械モードではボーン値の非有限等をこの短絡位置では弾かず、読み込み失敗のみ `not_vmd` にする。
+- 出力先が既存のディレクトリの場合は `--overwrite` でも書けないため、上書きガードより前に `--overwrite` の有無に依らず `output_is_directory` で拒否する(上書きの許可を促す案内を出さない)。
+- `--list-bones` は書き込み・疎化をしない診断モードとして、処理固有の検証(出力先のディレクトリ検査・上書きガード・疎化許容値・ボーン値検証)に阻まれない(`--machine --list-bones` でも同じ)。機械モードではボーン値の非有限等をこの短絡位置では弾かず、読み込み失敗のみ `not_vmd` にする。
 
 ### 10.5 中断と出力の原子性
 

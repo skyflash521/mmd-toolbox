@@ -222,7 +222,9 @@ CLI 上書き**で、`--ref-bpm`/`--tempo-scale-min` はテンポ補正の入力
 非vpr 入力の判定は、内容(ZIPコンテナと `Project/sequence.json`)に基づく `vpr` の読み込み失敗を
 入力不正へ写すことで行い、拡張子では判定しない。
 
-判定順序は引数エラー(コード2)を入力不正(コード1)より先に評価する。上書きガードは出力先パスに
+判定順序は引数エラー(コード2)を入力不正(コード1)より先に評価する。出力先が既存のディレクトリの
+場合は `--overwrite` でも書けないため、上書きガードより前に `--overwrite` の有無に依らず専用コード
+`output_is_directory`(コード2)で拒否する(上書きの許可を促す案内を出さない)。上書きガードは出力先パスに
 既存ファイルがあるかどうかで判定し(入力と同一パスかどうかは問わない)、入力の存在確認より先に行う。
 出力先が入力と同一パスの指定でも、入力 vpr 自体が存在しなければ出力先も存在しないためガードは
 発火せず、後続の入力存在確認でコード1を返す。谷係数の下限>上限(プリセット既定と CLI 上書きの
@@ -389,6 +391,7 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 | 事象 | `code` | `field` | `exit_code` |
 |---|---|---|---|
 | argparse 検出(未知オプション・型/範囲エラー(開き量 0〜1・`--legato-max` 正値・谷係数 0〜1・`--valley-slope` 非負・`--coartic-overlap` 1 以上・`--anticipation` 非負・`--ref-bpm` 正値・`--tempo-scale-min` 0 超〜1・`--model-name` の cp932/20 バイト))、および describe 以外での `input` 欠落(CLI 本体の検査) | `bad_argument` | argparse が示す引数名、`input` 欠落は `"input"` | 2 |
+| 出力先が既存のディレクトリ(`--overwrite` の有無に依らない) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
 | 解決後の谷係数が下限>上限(プリセット既定と CLI 上書きの組み合わせ) | `valley_bounds_inverted` | `null`(2 オプションとプリセットにまたがる。値は `message` に載る) | 2 |
 | `--track` の INDEX 範囲外・NAME 不一致・NAME 複数一致 | `bad_track` | `"--track"` | 2 |

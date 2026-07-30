@@ -218,7 +218,9 @@ song2vmd INPUT [options]
   有効化契約の一般規約は同配置規約 [§2.3](../../docs/conventions/temporary-and-intermediate-files.md#23-利用者向けオプトイン診断用中間生成物) を正本とし、本機能はそこに従う。`--dry-run` と併用した場合も、
   最終VMDの書き出し([§5.2](#52-オプション))だけが抑制され、中間生成物の保存は実施する。
 - **上書きガード**: 出力先の既存ファイル保護は[CLI インターフェース規約
-  §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性) に従う(終了コード2。[§11](#11-終了コード))。
+  §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性) に従う(終了コード2。[§11](#11-終了コード))。出力先が既存のディレクトリの場合は
+  `--overwrite` でも書けないため、上書きガードより前に `--overwrite` の有無に依らず
+  `output_is_directory`(終了コード2。[§12.3](#123-構造化エラー))で拒否する(上書きの許可を促す案内を出さない)。
 - **出力の原子性**: VMD は一時ファイルへ書き切ってから最終パスへ置換する(`vmd.io`)。途中終了で中途半端な
   出力ファイルを残さない(中断は[§12](#12-機械モード機械可読インターフェース))。
 - **入出力の受け渡し・移植性**は規約 [§9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し)・[§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール) に従う(ファイルパス受け渡し・非ASCIIパス対応)。
@@ -1015,6 +1017,7 @@ GPU を使えない構成の2警告([§6.9](#69-gpu-を使えない構成の警�
 |---|---|---|---|
 | 入力ファイルが存在しない、または音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
 | 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。組み合わせ検証([§5.2](#52-オプション))も含む: `--recognizer-model-id` を指定せず `--recognizer-model-revision` だけを指定した場合、`--forced-aligner sofa-forcedalign` 選択時に `--sofa-python`/`--sofa-root`/`--sofa-checkpoint` のいずれかが欠落した場合 | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は対象引数の長形式フラグ名(SOFA必須検証は `--sofa-python`→`--sofa-root`→`--sofa-checkpoint` の順で最初に見つかった欠落1件のみ) | 2 |
+| 出力先が既存のディレクトリ(`--overwrite` の有無に依らない。[§5.3](#53-入出力要件)) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定([§5.3](#53-入出力要件)) | `output_exists` | `"--output"` | 2 |
 | 出力書き込み失敗、または `--keep-intermediate` 指定時の中間生成物書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"` または `"--keep-intermediate"`(+ `path`) | 3 |
 | 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない([vocal_analysis.md §3](../../libs/vocal_analysis/vocal_analysis.md#3-入力読み込みs0)) | `decoder_missing` | `"input"` | 4 |
