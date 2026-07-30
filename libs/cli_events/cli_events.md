@@ -22,8 +22,9 @@ UTF-8 固定)は[CLI インターフェース規約](../../docs/conventions/cli-
 - 機械モードの標準出力を **JSON Lines**(1 行 1 オブジェクト、UTF-8)として送出する共通エミッタを提供する。
 - イベント種別の語彙(`progress` / `warning` / `result` / `error`)を一元的に定義し、各 CLI が個別に JSON を
   組み立てないようにする(各ツールでの重複実装と語彙のずれを防ぐ。規約 [§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性) の横断一貫性に対応)。
-- argparse のエラーを `error` イベントへ変換するヘルパを提供し、各 CLI が argparse のエラー出力経路を
-  機械モードのエラーイベントへ振り替えられるようにする。
+- argparse の使用法エラーを各 CLI が引き取れるようにする。argparse が自ら標準エラーへ出して終了する
+  代わりに例外を送出する ArgumentParser と、その例外を `error` イベントへ変換するヘルパを提供し、
+  構造化出力モードではエラーイベントへ、それ以外では規約 [§6.1](../../docs/conventions/cli-interface.md#61-人間向け表示の表記) のエラー行へ振り替えられるようにする。
 - 失敗報告の共通経路を提供する。構造化出力モードの `error` イベントと、人間向けの
   エラー行(規約 [§6.1](../../docs/conventions/cli-interface.md#61-人間向け表示の表記))の両方を 1 つの入口から出し、標準出力へ書けない場合の後退
   (規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める終端保証の例外)まで含めて各 CLI が同じ挙動になるようにする([§6](#6-失敗報告ヘルパ))。
@@ -76,18 +77,22 @@ UTF-8 固定)は[CLI インターフェース規約](../../docs/conventions/cli-
 
 ## 4. argparse エラー変換ヘルパ
 
-argparse は既定で使用法エラーを標準エラーへ出して終了する。機械モードではこの経路を `error` イベントへ
-振り替える必要がある。本モジュールは、argparse のエラー(メッセージと該当引数)を `error` イベントへ
-変換するヘルパと、argparse の文言から該当引数名(`field`)を取り出すヘルパを提供する。argparse のエラーは
-引数エラーなので、**終了コードは規約 [§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の基底共通の `2` で固定**する(基底 `0`〜`3` の意味は全ツール共通で
-各ツール裁量にしない。規約 [§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性))。一方、安定 `code` 値・該当 `field`・`message` は各ツールが定めるので、
-ヘルパはそれらを呼び出し側から受け取って載せる(具体の `code` 値は各ツールの仕様書が定める)。
+argparse は既定で使用法エラーを用法(usage)込みで標準エラーへ出して終了する。各 CLI はこの経路を自分で
+引き取る必要がある: 構造化出力モードでは `error` イベントへ振り替え、それ以外でも規約 [§6.1](../../docs/conventions/cli-interface.md#61-人間向け表示の表記) のエラー行
+1 行へ揃える。本モジュールは、argparse が終了する代わりに例外を送出する ArgumentParser と、その例外
+(メッセージと該当引数)を `error` イベントへ変換するヘルパ、argparse の文言から該当引数名(`field`)を
+取り出すヘルパを提供する。argparse のエラーは引数エラーなので、**終了コードは規約
+[§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の基底共通の `2` で固定**する(基底 `0`〜`3` の意味は全ツール共通で各ツール裁量にしない。
+規約 [§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性))。安定 `code` 値と該当 `field` は各ツールが定めるのでヘルパは呼び出し側から
+受け取って載せ(具体の `code` 値は各ツールの仕様書が定める)、`message` は例外が保持する argparse 生成の
+文言をそのまま載せる(翻訳・再構築しない。規約 [§6.1](../../docs/conventions/cli-interface.md#61-人間向け表示の表記) が argparse 自身の固定文言を英語のままと定める)。
 
 公開 API:
 
 - `MachineArgumentParser`(`argparse.ArgumentParser` のサブクラス): 使用法エラー時に標準エラーへ出して終了
-  する代わりに `ArgumentParseError`(`message` 保持)を送出する。`--help` / `--version` は `error()` を経由
-  しないため影響を受けない(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動) のメタ操作の例外)。
+  する代わりに `ArgumentParseError`(`message` 保持)を送出する。**構造化出力モードに限らず全経路で使う**
+  (どちらのモードでも argparse 既定の出力・終了を各 CLI が引き取るため)。`--help` / `--version` は
+  `error()` を経由しないため影響を受けない(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動) のメタ操作の例外)。
 - `argparse_error_event(error, *, code, field=None)`: `ArgumentParseError` を `error` イベントへ変換し、
   `exit_code` は基底共通の `2` で固定する(`code`/`field` は呼び出し側が渡す)。
 - `argparse_error_field(message)`: argparse の使用法エラー文言から対象引数名(`error` イベントの `field`)を
