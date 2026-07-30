@@ -159,6 +159,27 @@ def test_render_report_text_includes_backends_style_params_and_stats():
     assert indices == sorted(indices)  # 仕様6.7の列挙順どおりに単調増加
 
 
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: 人間向けレポートに英語カタカナ化のバックエンドが未掲載")
+def test_render_report_text_includes_english_katakana_method_backend():
+    # 機械モードの result が返すバックエンドと同じ集合を人間向けにも出す(採用構成が読み取れないと
+    # 診断に使えない)。並びは他のバックエンドに続けて style の前。
+    diag = diag_of(
+        segments=[seg("vowel", 0.0, 0.5)], mouth_events=[mev(MouthShape.A, 0, 15, 0.6)],
+        event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
+        backends={"separator": "sep-x", "recognizer": "rec-y", "forced_aligner": "aligner-z",
+                  "english_katakana_method": "katakana-w"},
+        style="ballad", separated=True, duration_sec=0.5, keys=4,
+    )
+    lines = report.render_report_text(diag, {}).splitlines()
+
+    def index_of(substring):
+        return next(i for i, line in enumerate(lines) if substring in line)
+
+    assert index_of("forced_aligner: aligner-z") < index_of("english_katakana_method: katakana-w")
+    assert index_of("english_katakana_method: katakana-w") < index_of("style: ballad")
+
+
 # --- result_run_fields / result_inspect_fields ---------------------------------
 
 
