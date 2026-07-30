@@ -53,25 +53,37 @@ def espeak_ipa_to_vowel(symbol: str) -> str | None:
     return _ESPEAK_IPA_TO_VOWEL.get(symbol)
 
 
-# VOCALOID 日本語の X-SAMPA 音素インベントリから確定した母音記号テーブル。長音記号 ":" 付き
-# (例 i:)は母音同一のまま扱う(長さはカテゴリでなく区間長の属性)。vpr を読む CLI(口形イベント確定)と
-# S-1測定(vpr由来ラベル生成)が同一規則で使う(写像表の二重管理を避ける)。
+# VOCALOID 日本語の X-SAMPA 音素インベントリから確定した母音記号テーブル。長音記号 ":" は
+# xsampa_base_symbol で落としてから引くので、長音記号付きの項目は持たない。vpr を読む CLI
+# (口形イベント確定)と S-1測定(vpr由来ラベル生成)が同一規則で使う(写像表の二重管理を避ける)。
 _XSAMPA_VOWEL_LETTERS = {
     "a": "a",
     "i": "i",
-    "i:": "i",
     "M": "u",  # X-SAMPA M は close back unrounded vowel で、日本語「う」の標準表記
     "e": "e",
     "o": "o",
 }
 
+_XSAMPA_LENGTH_MARK = ":"
+
+
+def xsampa_base_symbol(symbol: str) -> str:
+    """X-SAMPA 記号から長音記号を落とした基底の記号を返す。
+
+    長さは音素のカテゴリでなく区間長の属性なので、分類はすべて基底の記号で行う。除去は末尾に
+    連続する長音記号だけを対象にする(記号内の ":" まで落とすと別の記号になり分類が広がる)。
+    長音記号だけからなる記号と空文字列はいずれも空文字列になり、どのテーブルにも一致しない。
+    """
+    return symbol.rstrip(_XSAMPA_LENGTH_MARK)
+
 
 def xsampa_vowel_letter(symbol: str) -> str | None:
     """VOCALOID X-SAMPA の母音記号を5母音(a/i/u/e/o)へ写像する。
 
-    母音記号テーブルに無ければ None(子音・継続記号など、母音でないことを示す)。
+    基底の記号(xsampa_base_symbol)へ正規化してからテーブルを引く。母音記号テーブルに無ければ
+    None(子音・継続記号など、母音でないことを示す)。
     """
-    return _XSAMPA_VOWEL_LETTERS.get(symbol)
+    return _XSAMPA_VOWEL_LETTERS.get(xsampa_base_symbol(symbol))
 
 
 # IPA母音チャートの基本母音28記号 + R音性母音2記号(ɚ・ɝ) + 拡張母音記号1(ᵻ)。

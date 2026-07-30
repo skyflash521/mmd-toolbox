@@ -10,7 +10,7 @@ X-SAMPA・日本語音韻の標準で確定したインベントリに従い、�
 from enum import Enum
 
 from lipsync import ApertureClass, ConsonantClass, MouthShape
-from vocal_analysis.phonemes import xsampa_vowel_letter
+from vocal_analysis.phonemes import xsampa_base_symbol, xsampa_vowel_letter
 
 
 class PhonemeCategory(Enum):
@@ -63,8 +63,8 @@ _SLIGHT_CLOSURE_CONSONANTS = {"k", "k'", "g", "4"}
 def vowel_shape(symbol: str) -> MouthShape | None:
     """母音記号に対応する MouthShape(A/I/U/E/O)。母音でなければ None。
 
-    母音記号テーブル自体は vocal_analysis(共有ドメイン層)が持つ(vpr を読む CLI と S-1認識測定が
-    同一の写像表を使うため、二重管理を避ける)。
+    母音記号テーブル自体と長音記号の正規化は vocal_analysis(共有ドメイン層)が持つ(vpr を読む CLI と
+    S-1認識測定が同一の写像表を使うため、二重管理を避ける)。
     """
     letter = xsampa_vowel_letter(symbol)
     if letter is None:
@@ -78,16 +78,19 @@ def categorize(symbol: str) -> PhonemeCategory:
     母音・両唇音・撥音・促音・継続のいずれにも該当しない記号(既知のその他子音・未知記号)は、両唇閉鎖
     以外の子音と同じく自前イベントを作らず協調調音/直前口形継続へ委ねるため、まとめて OTHER とする。
     未知音素の診断記録(その他子音との区別)は写像でなく診断側で扱う。
+
+    長音記号付きの記号は基底の記号と同じカテゴリにする(長さは区間長の属性)。
     """
     if xsampa_vowel_letter(symbol) is not None:
         return PhonemeCategory.VOWEL
-    if symbol in _BILABIALS:
+    base = xsampa_base_symbol(symbol)
+    if base in _BILABIALS:
         return PhonemeCategory.BILABIAL
-    if symbol in _MORAIC_NASALS:
+    if base in _MORAIC_NASALS:
         return PhonemeCategory.MORAIC_NASAL
-    if symbol in _GEMINATE_STOPS:
+    if base in _GEMINATE_STOPS:
         return PhonemeCategory.GEMINATE_STOP
-    if symbol in _CONTINUATIONS:
+    if base in _CONTINUATIONS:
         return PhonemeCategory.CONTINUATION
     return PhonemeCategory.OTHER
 
@@ -99,11 +102,12 @@ def consonant_class(symbol: str) -> ConsonantClass:
     未知記号は NEUTRAL。両唇音(ま/ば/ぱ行)は MouthShape.BILABIAL で表すので本写像の対象外で、
     呼び出し側が両唇音(BILABIAL カテゴリ)を除いた語頭子音を渡す。この関数が返す ConsonantClass は
     唇の方向だけを表し、開口減衰は別軸の aperture_class 関数が担う(独立に判定し、一方が他方に
-    影響しない)。
+    影響しない)。長音記号付きの記号は基底の記号と同じ扱いにする。
     """
-    if symbol in _ROUNDED_CONSONANTS:
+    base = xsampa_base_symbol(symbol)
+    if base in _ROUNDED_CONSONANTS:
         return ConsonantClass.ROUNDED
-    if symbol in _SPREAD_CONSONANTS:
+    if base in _SPREAD_CONSONANTS:
         return ConsonantClass.SPREAD
     return ConsonantClass.NEUTRAL
 
@@ -113,12 +117,13 @@ def aperture_class(symbol: str) -> ApertureClass:
 
     判定表に無い子音と未知記号は NONE。複数の子音から1つに絞る優先順(FIRM_CLOSURE >
     NARROW_CHANNEL > SLIGHT_CLOSURE > NONE)は呼び出し側の責務で、この関数自体は単一記号の
-    分類のみを行う。
+    分類のみを行う。長音記号付きの記号は基底の記号と同じ扱いにする。
     """
-    if symbol in _FIRM_CLOSURE_CONSONANTS:
+    base = xsampa_base_symbol(symbol)
+    if base in _FIRM_CLOSURE_CONSONANTS:
         return ApertureClass.FIRM_CLOSURE
-    if symbol in _NARROW_CHANNEL_CONSONANTS:
+    if base in _NARROW_CHANNEL_CONSONANTS:
         return ApertureClass.NARROW_CHANNEL
-    if symbol in _SLIGHT_CLOSURE_CONSONANTS:
+    if base in _SLIGHT_CLOSURE_CONSONANTS:
         return ApertureClass.SLIGHT_CLOSURE
     return ApertureClass.NONE

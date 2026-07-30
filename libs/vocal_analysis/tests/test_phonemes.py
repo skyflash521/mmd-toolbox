@@ -76,7 +76,6 @@ def test_xsampa_vowel_letter_non_vowel_is_none(symbol):
 # --- X-SAMPA の長音記号の正規化 ---
 
 
-@pytest.mark.xfail(reason="impl pending: xsampa_base_symbol と正規化経由の母音判定が未実装")
 @pytest.mark.parametrize(
     "symbol,expected",
     [
@@ -98,7 +97,6 @@ def test_xsampa_base_symbol_strips_trailing_length_marks(symbol, expected):
     assert xsampa_base_symbol(symbol) == expected
 
 
-@pytest.mark.xfail(reason="impl pending: xsampa_base_symbol と正規化経由の母音判定が未実装")
 @pytest.mark.parametrize(
     "symbol,expected", [("a:", "a"), ("M:", "u"), ("e:", "e"), ("o::", "o")]
 )

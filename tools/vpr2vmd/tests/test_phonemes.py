@@ -6,7 +6,6 @@ VOCALOID 日本語の音素(X-SAMPA)を、口形イベント確定で使うカ�
 標準で確定したもの。
 """
 
-import pytest
 
 from lipsync import ApertureClass, ConsonantClass, MouthShape
 from vpr2vmd import phonemes
@@ -115,7 +114,6 @@ def test_none_class_consonants_and_unknown_mapped_to_none_aperture():
 # --- 長音記号付きの記号の分類(基底の記号へ正規化してから表を引く)---
 
 
-@pytest.mark.xfail(reason="impl pending: 記号分類の入口での長音記号の正規化が未実装")
 def test_length_marked_symbols_classify_as_base_symbol():
     # 母音以外の基底にも長音記号が付きうる。カテゴリは基底の記号で決まる。
     assert phonemes.categorize("N\\:") is Cat.MORAIC_NASAL
@@ -128,7 +126,6 @@ def test_length_marked_symbols_classify_as_base_symbol():
     assert phonemes.categorize("k:") is Cat.OTHER
 
 
-@pytest.mark.xfail(reason="impl pending: 記号分類の入口での長音記号の正規化が未実装")
 def test_length_marked_vowel_shape_uses_base_symbol():
     assert phonemes.vowel_shape("a:") is MouthShape.A
     assert phonemes.vowel_shape("M:") is MouthShape.U
@@ -137,7 +134,6 @@ def test_length_marked_vowel_shape_uses_base_symbol():
     assert phonemes.vowel_shape("k:") is None
 
 
-@pytest.mark.xfail(reason="impl pending: 記号分類の入口での長音記号の正規化が未実装")
 def test_length_marked_consonant_and_aperture_use_base_symbol():
     # 唇の方向と開口減衰も別々の完全一致表なので、両方とも正規化を通す。
     assert phonemes.consonant_class("S:") is ConsonantClass.SPREAD
