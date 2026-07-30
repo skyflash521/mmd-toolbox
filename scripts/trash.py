@@ -3,7 +3,7 @@
 SHFileOperationW(FOF_ALLOWUNDO)、macOS は Finder への delete AppleScript、Linux は
 XDG Trash 仕様(freedesktop.org)に従う。guard-rm.py が rm を deny し、これへ誘導する。
 
-Usage: python3 .claude/hooks/trash.py <path>...
+Usage: python3 scripts/trash.py <path>...
 """
 import ctypes
 import os
