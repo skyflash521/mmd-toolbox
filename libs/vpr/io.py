@@ -2,6 +2,7 @@
 
 import io
 import json
+import math
 import zipfile
 
 from .types import (
@@ -81,15 +82,27 @@ def _ticks_per_bar(numerator: int, denominator: int) -> int:
 
 
 def _tempos(master) -> list[TempoEvent]:
-    """テンポイベントを TempoEvent(bpm = value/100)へ写像する。"""
+    """テンポイベントを TempoEvent(bpm = value/100)へ写像する。
+
+    テンポマップは tick が指す時刻を決める前提なので、1件以上あり各 BPM が正の有限値であることを
+    要求する。満たさない入力は写像自体はできても利用先が tick を時刻へ写せないため構造異常とする。
+    生の value の型検査は数値までで、小数は型不正としない(非有限値はここを通り下の条件で弾く)。
+    """
     tempo = _require(master, "tempo", "masterTrack", dict)
     events = _require(tempo, "events", "masterTrack.tempo", list)
+    if not events:
+        raise VprFormatError("テンポイベントが 1 件もありません",
+                             path="masterTrack.tempo.events", key="events", value=events)
     result: list[TempoEvent] = []
     for i, event in enumerate(events):
         path = f"masterTrack.tempo.events[{i}]"
         pos = _require(event, "pos", path, int)
         value = _require(event, "value", path, (int, float))
-        result.append(TempoEvent(tick=pos, bpm=value / 100))
+        bpm = value / 100
+        if not math.isfinite(bpm) or bpm <= 0.0:
+            raise VprFormatError("BPM は正の有限値でなければなりません",
+                                 path=path, key="value", value=value)
+        result.append(TempoEvent(tick=pos, bpm=bpm))
     return result
 
 

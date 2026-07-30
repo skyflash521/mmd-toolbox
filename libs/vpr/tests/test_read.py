@@ -651,7 +651,6 @@ def test_controller_event_missing_value_is_format_error():
 # --- テンポマップの条件(read が返す VprProject の条件)---
 
 
-@pytest.mark.xfail(reason="impl pending: read のテンポマップ条件の検証が未実装")
 def test_read_raises_format_error_on_empty_tempo_events():
     from vpr import VprFormatError, read
 
@@ -665,7 +664,6 @@ def test_read_raises_format_error_on_empty_tempo_events():
     assert e.value == []
 
 
-@pytest.mark.xfail(reason="impl pending: read のテンポマップ条件の検証が未実装")
 @pytest.mark.parametrize("raw", [0, -12000, float("nan"), float("inf"), float("-inf")])
 def test_read_raises_format_error_on_non_positive_finite_bpm(raw):
     # BPM が正の有限値でない(0・負・非有限)。非有限値は型不正ではなく本条件の違反として報告する。
