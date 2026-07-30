@@ -629,6 +629,10 @@ def _run(args, emitter, fail) -> int:
                 forced_aligner=args.forced_aligner, sofa_aligner=_resolve_sofa_aligner_config(args),
                 english_katakana_method=args.english_katakana_method,
                 keep_intermediate_dir=keep_intermediate_dir, progress=progress)
+        except _pipeline.IntermediateReadError as e:
+            # 内部生成ファイルの読み直し失敗。利用者入力を指す field は載せず、対象ファイルを path に載せる。
+            progress_reporter.close()
+            return fail("not_audio", str(e), 1, path=str(e.path))
         except AudioLoadError as e:
             progress_reporter.close()
             exit_code = 4 if e.reason == "decoder_missing" else 1

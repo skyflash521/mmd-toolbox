@@ -40,6 +40,31 @@ class IntermediateWriteError(Exception):
     """--keep-intermediate の中間生成物書き込み失敗。"""
 
 
+class IntermediateReadError(Exception):
+    """内部生成ファイル(分離後ボーカルWAV)の読み直し失敗。
+
+    利用者入力の読み込み失敗と同じ例外で送出すると、CLI が利用者入力を指すフィールドで
+    報告してしまうため、対象ファイルを持つ別の例外に分ける。
+    """
+
+    def __init__(self, message, *, path):
+        super().__init__(message)
+        self.path = path
+
+
+def _read_intermediate(path, reader):
+    """内部生成ファイルを reader で読み、失敗を IntermediateReadError へ包む。
+
+    読み手(ピーク正規化ありの読み込みと生読み込み)によらず、失敗の意味は同じ内部生成ファイルの
+    読み直し失敗なので、送出する例外も同じにする。捕捉するのは読み込み自体の失敗を表す例外だけで、
+    実装の不具合を表す例外(型の誤り・メモリ不足等)は内部エラーとして扱えるようそのまま通す。
+    """
+    try:
+        return reader(path)
+    except (_va_io.AudioLoadError, sf.SoundFileError, OSError) as e:
+        raise IntermediateReadError(str(e), path=path) from e
+
+
 @dataclass(frozen=True)
 class PipelineResult:
     """pipeline.run() の戻り値。"""
@@ -224,7 +249,7 @@ def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
         english_katakana_method=english_katakana_method,
         on_progress=_model_download_progress(progress, "recognize", done=0, total=None))
     _report_stage(progress, "rms")
-    vocal_pcm = _va_io.load_audio(vocal_path)
+    vocal_pcm = _read_intermediate(vocal_path, _va_io.load_audio)
     rms_envelope = _va_rms.compute_rms(vocal_pcm)
     return segments, rms_envelope, vocal_pcm
 
@@ -265,7 +290,7 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
                 english_katakana_method=english_katakana_method,
                 on_progress=_model_download_progress(progress, "recognize", done=i, total=n)))
 
-        chunk_vocal_pcm = _read_pcm_raw(vocal_path)
+        chunk_vocal_pcm = _read_intermediate(vocal_path, _read_pcm_raw)
         vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))
 
     merged_segments = chunking.merge_chunk_segments(chunk_segments_list, chunk_offsets_sec, boundaries)

@@ -1005,7 +1005,6 @@ def test_concat_pcm_joins_slices_in_order():
 # --- 内部生成ファイルの読み直し失敗(利用者入力の読み込み失敗と区別する)---
 
 
-@pytest.mark.xfail(reason="impl pending: 内部生成ファイルの読み直し失敗の専用例外が未実装")
 def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
     # 音量解析段の分離後ボーカルの読み直し失敗は、利用者入力の読み込み失敗と混ざらないよう
     # 専用例外へ包み、対象パスを保持する。
@@ -1036,7 +1035,6 @@ def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeyp
     assert str(exc.value.path) == str(vocal_path)
 
 
-@pytest.mark.xfail(reason="impl pending: 内部生成ファイルの読み直し失敗の専用例外が未実装")
 def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
     # 長尺分割の経路は各チャンクのボーカルWAVを別実装で読むが、内部生成ファイルの読み直しである点は
     # 同じなので同じ専用例外へ包む。
@@ -1060,7 +1058,8 @@ def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path,
 
     def fail_on_vocal(path, *a, **kw):
         if str(path) == str(vocal_path):
-            raise RuntimeError("broken vocal wav")
+            # soundfile が読み込み失敗で実際に送出する例外型に合わせる。
+            raise sf.LibsndfileError(1, prefix=str(vocal_path))
         return real_read(path, *a, **kw)
 
     monkeypatch.setattr(pipeline.sf, "read", fail_on_vocal)

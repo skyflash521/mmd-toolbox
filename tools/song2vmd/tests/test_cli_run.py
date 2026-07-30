@@ -1028,7 +1028,6 @@ def test_torch_gpu_warning_reports_cpu_only_build_even_with_visible_devices(monk
     assert cli._torch_gpu_warning("auto")[0] == "cpu_only_torch"
 
 
-@pytest.mark.xfail(reason="impl pending: 内部生成ファイルの読み直し失敗の専用例外が未実装")
 def test_intermediate_read_error_reports_path_without_input_field(tmp_path, monkeypatch,
                                                                   capsysbinary):
     # 内部生成ファイルの読み直し失敗は利用者入力を指さない(field は null、path に対象ファイル)。
