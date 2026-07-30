@@ -760,6 +760,65 @@ def test_three_adjacent_same_vowel_segments_merge_with_merged_count_two():
     assert diag.merged_morae == 2  # 3区間→1イベントで2回統合
 
 
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: gap 継続の断片との統合を merged_morae から除いていない")
+def test_gap_continuation_fragment_does_not_count_as_merged_mora():
+    # gapが直前母音の発声継続になった断片は、1つの発声を時間で切った断片でモーラではないので、
+    # 直前区間へまとまっても併合したモーラ数には数えない。末尾のgapはRMSに依らず閉口するので、
+    # 継続の経路へ乗せるために後続の母音を置く。
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("gap", 0.2, 0.4),
+        seg("vowel", 0.4, 0.6, phoneme="i", confidence=0.9),
+    ]
+    rms = flat_rms(0.6, 0.5)  # 無音しきい値(0.06)を上回る一定音量(gap全体が発声継続になる)
+    mouth_events, diag = confirm(segments, rms)
+    assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.I]
+    assert diag.merged_morae == 0
+
+
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: gap 継続の断片との統合を merged_morae から除いていない")
+def test_gap_continuation_between_same_vowels_counts_only_the_real_mora():
+    # 実モーラ2つの間にgap継続の断片が挟まって1イベントにまとまる場合、数えるのは実モーラの統合だけ。
+    segments = [
+        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("gap", 0.2, 0.4),
+        seg("vowel", 0.4, 0.6, phoneme="a", confidence=0.9),
+    ]
+    rms = flat_rms(0.6, 0.5)
+    mouth_events, diag = confirm(segments, rms)
+    assert [e.shape for e in mouth_events] == [MouthShape.A]
+    assert diag.merged_morae == 1
+
+
+def test_adjacent_moraic_nasal_segments_merge_with_merged_count_one():
+    # 撥音どうしの統合は実モーラの統合なので数える(継続断片の除外を撥音の一律除外にしない)。
+    segments = [
+        seg("consonant", 0.0, 0.2, phoneme="ɴ"),
+        seg("consonant", 0.2, 0.4, phoneme="ɴ"),
+    ]
+    rms = flat_rms(0.4, 0.5)
+    mouth_events, diag = confirm(segments, rms, use_n_morph=True)
+    assert [e.shape for e in mouth_events] == [MouthShape.N]
+    assert diag.merged_morae == 1
+
+
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: gap 継続の断片との統合を merged_morae から除いていない")
+def test_gap_continuation_fragment_of_moraic_nasal_does_not_count():
+    # 撥音の区間を継続したgapの断片も同じ扱いにする(母音側だけの除外にしない)。
+    segments = [
+        seg("consonant", 0.0, 0.2, phoneme="ɴ"),
+        seg("gap", 0.2, 0.4),
+        seg("vowel", 0.4, 0.6, phoneme="i", confidence=0.9),
+    ]
+    rms = flat_rms(0.6, 0.5)
+    mouth_events, diag = confirm(segments, rms, use_n_morph=True)
+    assert [e.shape for e in mouth_events] == [MouthShape.N, MouthShape.I]
+    assert diag.merged_morae == 0
+
+
 def test_adjacent_different_vowels_do_not_merge():
     segments = [
         seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
