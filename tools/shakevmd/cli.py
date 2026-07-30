@@ -17,7 +17,7 @@ from cli_events import (
     ArgumentParseError,
     EventEmitter,
     MachineArgumentParser,
-    error_event,
+    emit_failure,
     install_sigbreak_handler,
 )
 from cli_progress import progress
@@ -390,18 +390,12 @@ def _argparse_field(message: str):
 
 
 def _fail(emitter, code, message, exit_code, *, field=None, path=None):
-    """失敗を報告して終了コードを返す。構造化出力モード(機械モード・自己記述)は error イベントで
-    ストリームを終端し、それ以外は理由を標準エラーへ1行出す(トレースバックは出さない)。emitter の
-    有無(= machine or describe)で分岐する。main() が emitter 未確立の段階の中断・想定外例外でも
-    呼べるよう、emitter を closure でなく引数に取る。emitter が既に終端済み(result/error 送出後)なら
-    StreamTerminatedError を避け、標準エラーへの1行へ後退する(result 送出直後などの極小区間での
-    二重の中断・想定外例外を握り潰さないため)。"""
-    if emitter is not None and not emitter.terminated:
-        emitter.error(**error_event(
-            code=code, message=message, exit_code=exit_code, field=field, path=path))
-    else:
-        print(f"error: {message}", file=sys.stderr)
-    return exit_code
+    """失敗を報告して終了コードを返す。報告の分岐(error イベント / 人間向けのエラー行)と、
+    標準出力へ書けない場合の後退は共有基盤 cli_events の emit_failure が持つ。emitter を渡すのは
+    構造化出力モード(機械モード・自己記述)のときだけ。main() が emitter 未確立の段階の
+    中断・想定外例外でも呼べるよう、emitter を closure でなく引数に取る。"""
+    return emit_failure(emitter, code=code, message=message, exit_code=exit_code,
+                        field=field, path=path)
 
 
 def main(argv=None) -> int:

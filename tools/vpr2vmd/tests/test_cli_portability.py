@@ -10,8 +10,6 @@ import io
 import json
 import sys
 
-import pytest
-
 from vmd import read as vmd_read
 from vpr import Note, Part, TempoEvent, Track, VprProject, VprWarning
 from vpr2vmd import cli
@@ -106,7 +104,6 @@ class _UnwritableStdout:
         self.buffer = self._Buffer()
 
 
-@pytest.mark.xfail(reason="impl pending: cli_events の失敗報告ヘルパ emit_failure が未実装")
 def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
                                                                        capsys):
     # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ

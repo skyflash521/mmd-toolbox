@@ -9,9 +9,7 @@ import sys
 
 import pytest
 
-from cli_events import EventEmitter
-
-PENDING = "impl pending: cli_events の失敗報告ヘルパ emit_failure が未実装"
+from cli_events import EventEmitter, emit_failure
 
 
 class _RaisingStream:
@@ -50,10 +48,7 @@ class _RaisingTextSink:
 SINK_EXCEPTIONS = [OSError("stderr closed"), ValueError("closed file"), RuntimeError("壊れた出力先")]
 
 
-@pytest.mark.xfail(reason=PENDING)
 def test_emits_error_event_when_emitter_usable():
-    from cli_events import emit_failure
-
     buf = io.BytesIO()
     sink = _TextSink()
     rc = emit_failure(EventEmitter(buf), code="not_vmd", message="読めない", exit_code=1,
@@ -71,10 +66,7 @@ def test_emits_error_event_when_emitter_usable():
     }
 
 
-@pytest.mark.xfail(reason=PENDING)
 def test_extra_keys_ride_on_error_event_only():
-    from cli_events import emit_failure
-
     buf = io.BytesIO()
     sink = _TextSink()
     rc = emit_failure(EventEmitter(buf), code="stage_failed", message="分離に失敗", exit_code=4,
@@ -93,10 +85,7 @@ def test_extra_keys_ride_on_error_event_only():
     assert sink.text == ""
 
 
-@pytest.mark.xfail(reason=PENDING)
 def test_error_line_when_emitter_is_none():
-    from cli_events import emit_failure
-
     sink = _TextSink()
     rc = emit_failure(None, code="internal_error", message="RuntimeError: 想定外", exit_code=1,
                       stderr=sink)
@@ -104,10 +93,7 @@ def test_error_line_when_emitter_is_none():
     assert sink.text == "error: RuntimeError: 想定外\n"
 
 
-@pytest.mark.xfail(reason=PENDING)
 def test_error_line_carries_message_only_not_extra_keys():
-    from cli_events import emit_failure
-
     # 追加キー・field・path はイベント専用。人間向けのエラー行は本文だけを載せる。
     sink = _TextSink()
     rc = emit_failure(None, code="stage_failed", message="分離に失敗", exit_code=4,
@@ -116,10 +102,7 @@ def test_error_line_carries_message_only_not_extra_keys():
     assert sink.text == "error: 分離に失敗\n"
 
 
-@pytest.mark.xfail(reason=PENDING)
 def test_error_line_when_emitter_already_terminated():
-    from cli_events import emit_failure
-
     buf = io.BytesIO()
     em = EventEmitter(buf)
     em.result(mode="convert")
@@ -131,11 +114,8 @@ def test_error_line_when_emitter_already_terminated():
     assert sink.text == "error: 中断された\n"
 
 
-@pytest.mark.xfail(reason=PENDING)
 @pytest.mark.parametrize("exc", [OSError("broken pipe"), ValueError("closed file")])
 def test_falls_back_to_error_line_when_event_write_fails(exc):
-    from cli_events import emit_failure
-
     # 送出失敗でも受け取った終了コードをそのまま返す(特定の値へ正規化しない)。追加キーは
     # 人間向けのエラー行へ載せない。
     sink = _TextSink()
@@ -146,10 +126,7 @@ def test_falls_back_to_error_line_when_event_write_fails(exc):
     assert sink.text == "error: 出力先に既存ファイルがあります\n"
 
 
-@pytest.mark.xfail(reason=PENDING)
 def test_other_event_write_exceptions_are_not_swallowed():
-    from cli_events import emit_failure
-
     # 人間向けのエラー行へ後退するのは、書き込み先が使えないことを示す OSError と ValueError だけ。
     # それ以外の例外(イベントの中身の不備など、標準出力が使えることと両立する失敗)は握り潰さず
     # 呼び出し側へ渡す。握り潰すと、終端イベントを出せる状況なのに黙って途切れさせてしまう。
@@ -160,32 +137,23 @@ def test_other_event_write_exceptions_are_not_swallowed():
     assert sink.text == ""
 
 
-@pytest.mark.xfail(reason=PENDING)
 @pytest.mark.parametrize("sink_exc", SINK_EXCEPTIONS)
 def test_swallows_failure_of_the_error_line_after_event_write_failed(sink_exc):
-    from cli_events import emit_failure
-
     # イベント送出も人間向けのエラー行も書けない場合。例外を漏らさず終了コードだけを返す。
     rc = emit_failure(EventEmitter(_RaisingStream(OSError("broken pipe"))), code="internal_error",
                       message="どこにも書けない", exit_code=1, stderr=_RaisingTextSink(sink_exc))
     assert rc == 1
 
 
-@pytest.mark.xfail(reason=PENDING)
 @pytest.mark.parametrize("sink_exc", SINK_EXCEPTIONS)
 def test_swallows_failure_of_the_error_line_without_emitter(sink_exc):
-    from cli_events import emit_failure
-
     # 直接エラー行へ進む分岐(エミッタ無し)でも、エラー行の書き込み失敗を握り潰す。
     rc = emit_failure(None, code="internal_error", message="どこにも書けない", exit_code=1,
                       stderr=_RaisingTextSink(sink_exc))
     assert rc == 1
 
 
-@pytest.mark.xfail(reason=PENDING)
 def test_stderr_default_resolves_at_call_time(monkeypatch):
-    from cli_events import emit_failure
-
     # 既定値 None は呼び出しの時点で標準エラーへ解決する(定義時に束縛しない)。
     sink = _TextSink()
     monkeypatch.setattr(sys, "stderr", sink)

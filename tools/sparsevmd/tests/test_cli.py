@@ -5,6 +5,7 @@ VMD書き。終了コード: 0 正常 / 1 入力不正(VMDでない・対象セ�
 2 引数エラー / 3 出力書き込み失敗 / 4 strict で許容誤差を満たせない。
 """
 
+import builtins
 import sys
 
 import pytest
@@ -620,7 +621,7 @@ def test_selection_unresolved_warning_line_uses_common_format(tmp_path, capsys):
 
 class _SpyProgressReporter:
     """ProgressReporter の差し替え。close/summary の呼び出しを、共有の calls リストへ記録する
-    (下記 spy_progress フィクスチャが標準エラーへの print 呼び出しも同じリストへ記録するため、
+    (下記 spy_progress フィクスチャが標準エラーへの書き込みも同じリストへ記録するため、
     close とエラー行表示の相対順序を1本のタイムラインで検証できる)。"""
 
     calls = None  # クラス変数: monkeypatch 先のコンストラクタから書けるよう、テストごとにリセットする
@@ -654,7 +655,9 @@ def spy_progress(monkeypatch):
             calls.append(("stderr_print", args[0]))
         real_print(*args, **kwargs)
 
-    monkeypatch.setattr(cli, "print", spy_print, raising=False)
+    # 警告行は CLI 本体が、エラー行は共有基盤の失敗報告ヘルパが書くため、モジュール単位でなく
+    # 組み込みの print を差し替えて両方を1本のタイムラインへ載せる。
+    monkeypatch.setattr(builtins, "print", spy_print)
     return calls
 
 

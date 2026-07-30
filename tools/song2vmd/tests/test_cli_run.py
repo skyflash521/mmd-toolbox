@@ -6,6 +6,7 @@ cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(
 正しく橋渡しすることを検証する。pipeline.run 自体はモックし、実音声処理は行わない。
 """
 
+import builtins
 import json
 import os
 import sys
@@ -772,7 +773,7 @@ def test_write_failure_machine_mode_emits_write_failed_error(tmp_path, monkeypat
 
 class _SpyProgressReporter:
     """ProgressReporter の差し替え。close/summary の呼び出しを、共有の calls リストへ記録する
-    (下記 spy_progress フィクスチャが標準エラー出力の print 呼び出しも同じリストへ記録するため、
+    (下記 spy_progress フィクスチャが標準エラーへの print 呼び出しも同じリストへ記録するため、
     close とエラー行表示の相対順序を1本のタイムラインで検証できる)。"""
 
     calls = None  # クラス変数: monkeypatch 先のコンストラクタから書けるよう、テストごとにリセットする
@@ -803,7 +804,9 @@ def spy_progress(monkeypatch):
             calls.append(("stderr_print", args[0]))
         real_print(*args, **kwargs)
 
-    monkeypatch.setattr(cli, "print", spy_print, raising=False)
+    # 警告行は CLI 本体が、エラー行は共有基盤の失敗報告ヘルパが書くため、モジュール単位でなく
+    # 組み込みの print を差し替えて両方を1本のタイムラインへ載せる。
+    monkeypatch.setattr(builtins, "print", spy_print)
 
     # --dry-run の人間向けレポート生成呼び出しも同じタイムラインへ記録し、close との
     # 相対順序(ライブ行を消してからレポートを書く)を検証できるようにする。

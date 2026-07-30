@@ -15,8 +15,6 @@ emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と
 import json
 import sys
 
-import pytest
-
 from song2vmd import cli
 
 
@@ -169,7 +167,6 @@ class _UnwritableStdout:
         self.buffer = self._Buffer()
 
 
-@pytest.mark.xfail(reason="impl pending: cli_events の失敗報告ヘルパ emit_failure が未実装")
 def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
                                                                        capsys):
     # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ
