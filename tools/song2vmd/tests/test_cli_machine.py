@@ -15,6 +15,8 @@ emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と
 import json
 import sys
 
+import pytest
+
 from song2vmd import cli
 
 
@@ -196,3 +198,13 @@ def test_machine_error_output_is_directory(tmp_path, capsysbinary):
         e = machine_error(capsysbinary)
         assert e["code"] == "output_is_directory" and e["field"] == "--output"
         assert e["exit_code"] == 2 and e["path"] == str(outdir)
+
+
+@pytest.mark.xfail(reason="impl pending: 非機械モードの使用法エラーをエラー行1行へ揃える処理が未実装")
+def test_non_machine_usage_error_is_single_error_line(capsys):
+    # 非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。
+    rc = cli.main(["in.wav", "--bogus"])
+    assert rc == 2
+    # 標準エラー全体との完全一致で、物理的に1行であること・書式・argparse 生成の本文をそのまま
+    # 載せていることを同時に固定する(用法の行が混じればここで落ちる)。
+    assert capsys.readouterr().err == "error: unrecognized arguments: --bogus\n"
