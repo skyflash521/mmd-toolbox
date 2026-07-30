@@ -1,12 +1,14 @@
 """shakevmd CLI 移植性のテスト。
 
 機械モード標準出力の UTF-8・改行 LF 固定、非ASCIIパスの受理と生成、人間向け標準エラーの
-符号化安全性(ロケール符号化で表せない文字でもプロセスを落とさない)を検証する。
-テストは決定論的・外部依存なしで行う。
+符号化安全性(ロケール符号化で表せない文字でもプロセスを落とさない)、標準出力へ書けない場合に
+例外を漏らさないことを検証する。テストは決定論的・外部依存なしで行う。
 """
 
 import io
 import sys
+
+import pytest
 
 from shakevmd import bake as bake_mod
 from shakevmd import cli
@@ -129,3 +131,33 @@ def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--no-smooth"])
     assert rc == 0
+
+
+# --- 標準出力へ書けない場合 ---------------------------------------
+
+
+class _UnwritableStdout:
+    """buffer への書き込みが常に失敗する標準出力(呼び出し側がパイプを先に閉じた状況)。"""
+
+    class _Buffer:
+        def write(self, _data):
+            raise OSError("broken pipe")
+
+    def __init__(self):
+        self.buffer = self._Buffer()
+
+
+@pytest.mark.xfail(reason="impl pending: cli_events の失敗報告ヘルパ emit_failure が未実装")
+def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
+                                                                       capsys):
+    # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ
+    # 理由1行だけを出し、その時点で確定している失敗の終了コードで終える。
+    # 差し替えは CLI 呼び出しの区間だけに限り、標準エラーを読み出す前に元へ戻す。
+    with monkeypatch.context() as m:
+        m.setattr(sys, "stdout", _UnwritableStdout())
+        rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
+    assert rc == 1  # 入力不在の終了コード(標準出力へ書けないことで変わらない)
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
+    # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
+    assert err[0].startswith("error: ") and "入力を VMD として読めない" in err[0]

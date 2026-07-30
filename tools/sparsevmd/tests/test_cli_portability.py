@@ -1,13 +1,15 @@
 """sparsevmd CLI 移植性・既定挙動回帰のテスト。
 
 非ASCIIパスの受理・生成、人間向け標準エラーの符号化安全性(ロケール符号化で表せない文字でもプロセスを
-落とさない)、機械モードが出力VMDを変えない(--machine の有無で出力バイト一致)ことを検証する。テスト
-は決定論的に実行し、外部依存を使わない。
+落とさない)、標準出力へ書けない場合に例外を漏らさないこと、機械モードが出力VMDを変えない
+(--machine の有無で出力バイト一致)ことを検証する。テストは決定論的に実行し、外部依存を使わない。
 """
 
 import io
 import sys
 import types
+
+import pytest
 
 from sparsevmd import cli
 from vmd import io as vmd_io
@@ -117,3 +119,33 @@ def test_machine_output_equals_non_machine_output(tmp_path):
     assert cli.main([str(src), "-o", str(out_h), "--curve-mode", "linear"]) == 0
     assert cli.main([str(src), "-o", str(out_m), "--curve-mode", "linear", "--machine"]) == 0
     assert out_h.read_bytes() == out_m.read_bytes()
+
+
+# --- 標準出力へ書けない場合 ---------------------------------------
+
+
+class _UnwritableStdout:
+    """buffer への書き込みが常に失敗する標準出力(呼び出し側がパイプを先に閉じた状況)。"""
+
+    class _Buffer:
+        def write(self, _data):
+            raise OSError("broken pipe")
+
+    def __init__(self):
+        self.buffer = self._Buffer()
+
+
+@pytest.mark.xfail(reason="impl pending: cli_events の失敗報告ヘルパ emit_failure が未実装")
+def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
+                                                                       capsys):
+    # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ
+    # 理由1行だけを出し、その時点で確定している失敗の終了コードで終える。
+    # 差し替えは CLI 呼び出しの区間だけに限り、標準エラーを読み出す前に元へ戻す。
+    with monkeypatch.context() as m:
+        m.setattr(sys, "stdout", _UnwritableStdout())
+        rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
+    assert rc == 1  # 入力不在の終了コード(標準出力へ書けないことで変わらない)
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
+    # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
+    assert err[0].startswith("error: ") and "入力が存在しないか通常ファイルでない" in err[0]

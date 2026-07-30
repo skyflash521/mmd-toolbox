@@ -13,6 +13,9 @@ emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と
 """
 
 import json
+import sys
+
+import pytest
 
 from song2vmd import cli
 
@@ -150,3 +153,35 @@ def test_non_machine_overwrite_guard_prints_reason_to_stderr(tmp_path, capsys):
     cap = capsys.readouterr()
     assert "error:" in cap.err.lower()
     assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
+
+
+# --- 標準出力へ書けない場合 ---------------------------------------
+
+
+class _UnwritableStdout:
+    """buffer への書き込みが常に失敗する標準出力(呼び出し側がパイプを先に閉じた状況)。"""
+
+    class _Buffer:
+        def write(self, _data):
+            raise OSError("broken pipe")
+
+    def __init__(self):
+        self.buffer = self._Buffer()
+
+
+@pytest.mark.xfail(reason="impl pending: cli_events の失敗報告ヘルパ emit_failure が未実装")
+def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
+                                                                       capsys):
+    # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ
+    # 理由1行だけを出し、その時点で確定している失敗の終了コードで終える。上書きガードで失敗する経路を
+    # 使い、音声処理パイプラインへ進めずに失敗報告だけを突く。
+    src = _touch(tmp_path / "in.wav")
+    # 差し替えは CLI 呼び出しの区間だけに限り、標準エラーを読み出す前に元へ戻す。
+    with monkeypatch.context() as m:
+        m.setattr(sys, "stdout", _UnwritableStdout())
+        rc = cli.main([src, "-o", src, "--machine"])
+    assert rc == 2  # 上書きガードの終了コード(標準出力へ書けないことで変わらない)
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
+    # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
+    assert err[0].startswith("error: ") and "出力先に既存ファイルがあります" in err[0]
