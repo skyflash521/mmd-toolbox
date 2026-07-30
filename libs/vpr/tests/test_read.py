@@ -646,3 +646,48 @@ def test_controller_event_missing_value_is_format_error():
     controllers = [{"name": "dynamics", "events": [{"pos": 0}]}]
     with pytest.raises(VprFormatError):
         read(_make_vpr(_sequence([_singing_track_with_controllers([], controllers)])))
+
+
+# --- テンポマップの条件(read が返す VprProject の条件)---
+
+
+@pytest.mark.xfail(reason="impl pending: read のテンポマップ条件の検証が未実装")
+def test_read_raises_format_error_on_empty_tempo_events():
+    from vpr import VprFormatError, read
+
+    # テンポマップが空だと tick を時刻へ写せない。ロケータでイベント配列そのものを指す。
+    seq = _sequence([_singing_track([])], tempo_events=[])
+    with pytest.raises(VprFormatError) as exc:
+        read(_make_vpr(seq))
+    e = exc.value
+    assert e.path == "masterTrack.tempo.events"
+    assert e.key == "events"
+    assert e.value == []
+
+
+@pytest.mark.xfail(reason="impl pending: read のテンポマップ条件の検証が未実装")
+@pytest.mark.parametrize("raw", [0, -12000, float("nan"), float("inf"), float("-inf")])
+def test_read_raises_format_error_on_non_positive_finite_bpm(raw):
+    # BPM が正の有限値でない(0・負・非有限)。非有限値は型不正ではなく本条件の違反として報告する。
+    from vpr import VprFormatError, read
+
+    seq = _sequence([_singing_track([])],
+                    tempo_events=[{"pos": 0, "value": 12000}, {"pos": 960, "value": raw}])
+    with pytest.raises(VprFormatError) as exc:
+        read(_make_vpr(seq))
+    e = exc.value
+    assert e.path == "masterTrack.tempo.events[1]"  # 該当イベントを添字で一意に指す
+    assert e.key == "value"
+    if raw == raw:  # NaN は自身と等しくないので値の比較は有限値のときだけ行う
+        assert e.value == raw
+    else:
+        assert e.value != e.value
+
+
+def test_read_accepts_fractional_tempo_value():
+    # 生の値の型検査は数値までで、形式仕様が整数と定めることを理由に小数を型不正としない。
+    from vpr import read
+
+    seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0, "value": 12050.5}])
+    project, _ = read(_make_vpr(seq))
+    assert project.tempos[0].bpm == 120.505
