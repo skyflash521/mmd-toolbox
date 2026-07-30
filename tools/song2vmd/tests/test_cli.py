@@ -8,6 +8,8 @@
 上書きガード等) / 3 出力書き込み失敗 / 4 音声前段の外部依存の失敗 / 130 協調的な中断。
 """
 
+import re
+
 import pytest
 
 from song2vmd import cli
@@ -260,6 +262,26 @@ def test_float_option_non_numeric_is_arg_error(tmp_path, opt):
 def test_int_option_non_numeric_is_arg_error(tmp_path, opt):
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, opt, "abc", "--dry-run"]) == 2
+
+
+@pytest.mark.parametrize("opt, value", [
+    ("--open-max", "abc"), ("--open-max", "nan"), ("--open-max", "2"),
+    ("--coarticulation", "abc"), ("--coarticulation", "1.5"), ("--coarticulation", "-1"),
+    ("--vowel-gain", "a:1:1:1:1"), ("--vowel-gain", "1:1:1:1"), ("--vowel-gain", "-1:1:1:1:1"),
+    ("--silence-threshold", "a:0.5"), ("--silence-threshold", "1.5:0.5"),
+    ("--silence-threshold", "0.9:0.1"),
+])
+def test_option_value_error_states_the_reason_in_japanese(tmp_path, opt, value, capsys):
+    # 引数エラーの理由は利用者に伝わる日本語で出す。検証子の実体がそのまま文字列化されると、
+    # 実行ごとに変わるアドレスが理由の代わりに出て何も伝わらない。
+    src = _touch(tmp_path / "in.wav")
+    # 負数の書式に当てはまらない負の値(コロン区切りの複合値)は、単独で置くと argparse が
+    # オプション名と解釈するので、等号で1トークンにして渡す。
+    given = [f"{opt}={value}"] if value.startswith("-") else [opt, value]
+    assert cli.main([src, *given, "--dry-run"]) == 2
+    line = capsys.readouterr().err
+    assert re.search(r"[぀-ヿ一-鿿]", line)
+    assert "0x" not in line and " object at " not in line
 
 
 @pytest.mark.parametrize("opt", ["--coarticulation", "--anticipation", "--min-hold"])

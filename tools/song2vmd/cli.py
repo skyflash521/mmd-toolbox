@@ -103,89 +103,110 @@ def _model_name(text: str) -> str:
     return text
 
 
-def _finite_float(text: str) -> float:
-    """有限な float へ変換する(inf/nan を弾く)。範囲チェックは呼び出し側の検証関数で行う。"""
-    v = float(text)  # 非数値は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
-    if not math.isfinite(v):
-        raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
-    return v
+class _RangeValidator:
+    """範囲付きの数値引数の検証子。argparse の type と --describe の constraint を1つの範囲から導く。
 
-
-def _unit_float(text: str) -> float:
-    """0.0〜1.0 の有限 float(--open-max)。開き量は lipsync の開き量上限(0〜1)に対応する。"""
-    v = _finite_float(text)
-    if not 0.0 <= v <= 1.0:
-        raise argparse.ArgumentTypeError(f"0.0〜1.0 の範囲が必要: {text!r}")
-    return v
-
-
-def _positive_float(text: str) -> float:
-    """正の有限 float(--intensity-curve・--sofa-timeout)。累乗指数もタイムアウト秒数も 0 以下は無意味。"""
-    v = _finite_float(text)
-    if v <= 0.0:
-        raise argparse.ArgumentTypeError(f"正の数値が必要: {text!r}")
-    return v
-
-
-def _nonneg_float(text: str) -> float:
-    """0 以上の有限 float(--max-duration)。0 は長尺分割の無効化。"""
-    v = _finite_float(text)
-    if v < 0.0:
-        raise argparse.ArgumentTypeError(f"0 以上の数値が必要: {text!r}")
-    return v
-
-
-def _nonneg_int(text: str) -> int:
-    """0 以上の整数(--coarticulation・--anticipation・--min-hold)。"""
-    v = int(text)  # 非整数は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
-    if v < 0:
-        raise argparse.ArgumentTypeError(f"0 以上の整数が必要: {text!r}")
-    return v
-
-
-def _vowel_gain(text: str) -> tuple:
-    """--vowel-gain の `a:i:u:e:o` を5要素 float タプルへ解析する。
-
-    各要素はプリセットの母音別倍率へ乗算する微調整倍率なので非負の有限値を要求する。
-    撥音はプリセット値のままで本引数の対象外。
+    受理判定はこの範囲そのもので行うので、公開する制約と実際に通る値が別管理にならない。
+    解析できない値も自分で日本語の理由へ変換する(argparse は型が関数でないと理由の代わりに
+    オブジェクトの repr を出すため、そのままでは実行ごとに変わる文字列が報告に載る)。
     """
-    parts = text.split(":")
-    if len(parts) != 5:
-        raise argparse.ArgumentTypeError(f"--vowel-gain は a:i:u:e:o の5要素: {text!r}")
-    try:
-        vals = tuple(float(p) for p in parts)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"--vowel-gain は数値5要素: {text!r}") from None
-    if not all(math.isfinite(v) for v in vals):
-        raise argparse.ArgumentTypeError(f"--vowel-gain は有限値: {text!r}")
-    if any(v < 0.0 for v in vals):
-        raise argparse.ArgumentTypeError(f"--vowel-gain は非負(倍率): {text!r}")
-    return vals
+
+    def __init__(self, *, value_type, minimum=None, maximum=None, exclusive_min=False):
+        self.value_type = value_type  # "int" | "float"
+        self.constraint = {"min": minimum, "max": maximum, "exclusive_min": exclusive_min}
+
+    def __call__(self, text):
+        try:
+            value = int(text) if self.value_type == "int" else float(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"{self._unit()}が必要: {text!r}") from None
+        if self.value_type == "float" and not math.isfinite(value):
+            # 無限大・非数は大小比較をすり抜けるので、範囲判定の前に弾く。
+            raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
+        minimum, maximum = self.constraint["min"], self.constraint["max"]
+        too_small = minimum is not None and (
+            value <= minimum if self.constraint["exclusive_min"] else value < minimum)
+        if too_small or (maximum is not None and value > maximum):
+            raise argparse.ArgumentTypeError(f"{self._range_text()}が必要: {text!r}")
+        return value
+
+    def _unit(self):
+        return "整数" if self.value_type == "int" else "数値"
+
+    def _range_text(self):
+        minimum, maximum = self.constraint["min"], self.constraint["max"]
+        unit = self._unit()
+        if minimum is not None and maximum is not None:
+            return f"{minimum}〜{maximum} の範囲の{unit}"
+        if minimum is not None:
+            if self.constraint["exclusive_min"]:
+                return f"{minimum} より大きい{unit}"
+            return f"{minimum} 以上の{unit}"
+        return f"{maximum} 以下の{unit}"
 
 
-def _silence_threshold(text: str) -> tuple:
-    """--silence-threshold の `ON:OFF` を (on, off) へ解析する。
+class _CompoundValidator:
+    """複合値の引数の検証子。要素検証子の列と書式から --describe の constraint を導く。
 
-    正規化RMSのヒステリシスしきい値で、いずれも 0.0〜1.0。無音/継続の判定に使う下降側(ON)は
-    上昇側(OFF)より小さくなければならない(下降側 < 上昇側。無音ヒステリシスの意味上の制約)。
-    上昇側(OFF)は無音状態からの母音復帰自体の判定には使わない。
+    要素間の関係の制約(--silence-threshold の ON<OFF)は constraint の形に載る場所が無いため、
+    ここでは検証だけ行い公開はしない(利用者へは help 文で示す)。文言に引数名は入れない
+    (argparse が理由の前へ引数名を付けるので、入れると二重になる)。
     """
-    parts = text.split(":")
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError(f"--silence-threshold は ON:OFF の2要素: {text!r}")
-    try:
-        on, off = float(parts[0]), float(parts[1])
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"--silence-threshold は数値2要素: {text!r}") from None
-    if not (math.isfinite(on) and math.isfinite(off)):
-        raise argparse.ArgumentTypeError(f"--silence-threshold は有限値: {text!r}")
-    if not (0.0 <= on <= 1.0 and 0.0 <= off <= 1.0):
-        raise argparse.ArgumentTypeError(f"--silence-threshold は 0.0〜1.0 の範囲: {text!r}")
-    if not on < off:
-        raise argparse.ArgumentTypeError(
-            f"--silence-threshold は ON<OFF(下降側<上昇側)が必要: {text!r}"
-        )
-    return (on, off)
+
+    def __init__(self, *, format, elements, relation=None):
+        self.format = format
+        self.elements = elements  # [(要素名, _RangeValidator), ...]
+        self.relation = relation  # (説明, 判定関数) または None
+
+    @property
+    def constraint(self):
+        return {
+            "format": self.format,
+            "fields": [{"name": name, "type": element.value_type, **element.constraint}
+                       for name, element in self.elements],
+        }
+
+    def __call__(self, text):
+        parts = text.split(":")
+        if len(parts) != len(self.elements):
+            raise argparse.ArgumentTypeError(
+                f"{self.format} の{len(self.elements)}要素が必要: {text!r}")
+        values = []
+        for part, (name, element) in zip(parts, self.elements, strict=True):
+            try:
+                values.append(element(part))
+            except argparse.ArgumentTypeError as e:
+                raise argparse.ArgumentTypeError(f"{name} は {e}") from None
+        if self.relation is not None:
+            description, holds = self.relation
+            if not holds(values):
+                raise argparse.ArgumentTypeError(f"{description}: {text!r}")
+        return tuple(values)
+
+
+# 開き量は lipsync の開き量上限(0〜1)に対応する。検証子は状態を持たないので使い回してよい。
+_unit_float = _RangeValidator(value_type="float", minimum=0, maximum=1)
+# 累乗指数もタイムアウト秒数も 0 以下は無意味。
+_positive_float = _RangeValidator(value_type="float", minimum=0, exclusive_min=True)
+# --max-duration の 0 は長尺分割の無効化。
+_nonneg_float = _RangeValidator(value_type="float", minimum=0)
+_nonneg_int = _RangeValidator(value_type="int", minimum=0)
+
+
+# --vowel-gain の各要素はプリセットの母音別倍率へ乗算する微調整倍率なので非負の有限値を要求する。
+# 撥音はプリセット値のままで本引数の対象外。
+_vowel_gain = _CompoundValidator(
+    format="a:i:u:e:o",
+    elements=[(name, _RangeValidator(value_type="float", minimum=0))
+              for name in ("a", "i", "u", "e", "o")])
+
+# --silence-threshold は正規化RMSのヒステリシスしきい値で、いずれも 0〜1。無音/継続の判定に使う
+# 下降側(ON)は上昇側(OFF)より小さくなければならない(無音ヒステリシスの意味上の制約)。
+# 上昇側(OFF)は無音状態からの母音復帰自体の判定には使わない。
+_silence_threshold = _CompoundValidator(
+    format="ON:OFF",
+    elements=[("ON", _unit_float), ("OFF", _unit_float)],
+    relation=("ON<OFF(下降側<上昇側)が必要", lambda values: values[0] < values[1]))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -286,24 +307,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-# --describe の型/制約表。dest → (type, constraint)。help/default は parser の各 action から取る。
-_D_UNIT = {"min": 0, "max": 1, "exclusive_min": False}             # 0〜1(開き量)
-_D_NONNEG_INT = {"min": 0, "max": None, "exclusive_min": False}    # 0以上の整数
-_D_POS_FLOAT = {"min": 0, "max": None, "exclusive_min": True}      # 正の数値(強弱指数)
-_D_NONNEG_FLOAT = {"min": 0, "max": None, "exclusive_min": False}  # 0以上の数値(長尺分割境界)
-
-
-def _cfield(name, mn, mx, ex):
-    return {"name": name, "type": "float", "min": mn, "max": mx, "exclusive_min": ex}
-
-
-_D_COMPOUND = {
-    "vowel_gain": {"format": "a:i:u:e:o",
-                   "fields": [_cfield(n, 0, None, False) for n in ("a", "i", "u", "e", "o")]},
-    "silence_threshold": {"format": "ON:OFF",
-                          "fields": [_cfield("ON", 0, 1, False), _cfield("OFF", 0, 1, False)]},
-}
-
+# --describe の型表。dest → (type, constraint)。検証子を持つ引数は型も制約もそこから取るので
+# ここでは None を置く。help/default は parser の各 action から取る。
 _D_TYPE = {
     "input": ("str", None),
     "output": ("str", None),
@@ -321,16 +326,16 @@ _D_TYPE = {
     "sofa_python": ("str", None),
     "sofa_root": ("str", None),
     "checkpoint_path": ("str", None),
-    "sofa_timeout": ("float", _D_POS_FLOAT),
+    "sofa_timeout": (None, None),
     "n_morph": ("flag", None),
-    "vowel_gain": ("compound", _D_COMPOUND["vowel_gain"]),
-    "open_max": ("float", _D_UNIT),
-    "coarticulation": ("int", _D_NONNEG_INT),
-    "anticipation": ("int", _D_NONNEG_INT),
-    "min_hold": ("int", _D_NONNEG_INT),
-    "intensity_curve": ("float", _D_POS_FLOAT),
-    "silence_threshold": ("compound", _D_COMPOUND["silence_threshold"]),
-    "max_duration": ("float", _D_NONNEG_FLOAT),
+    "vowel_gain": (None, None),
+    "open_max": (None, None),
+    "coarticulation": (None, None),
+    "anticipation": (None, None),
+    "min_hold": (None, None),
+    "intensity_curve": (None, None),
+    "silence_threshold": (None, None),
+    "max_duration": (None, None),
     "dry_run": ("flag", None),
     "keep_intermediate": ("flag", None),
     "verbose": ("flag", None),
@@ -351,6 +356,12 @@ def _describe_options(parser):
         if dest not in _D_TYPE:
             continue
         type_, constraint = _D_TYPE[dest]
+        if type_ is None:
+            # 検証子を持つ引数は、型も範囲もその検証子が持つものをそのまま公開する
+            # (手書きの複製を置かない)。
+            validator = action.type
+            type_ = "compound" if isinstance(validator, _CompoundValidator) else validator.value_type
+            constraint = validator.constraint
         if dest == "input":
             name = "input"
         else:

@@ -27,7 +27,7 @@ def _ffield(name, mn, mx, ex):
     return {"name": name, "type": "float", "min": mn, "max": mx, "exclusive_min": ex}
 
 
-# --describe が返す options 全29要素。name → (type, constraint, default)。
+# --describe が返す options 全30要素。name → (type, constraint, default)。
 EXPECTED = {
     "input": ("str", None, None),
     "--output": ("str", None, None),
@@ -291,8 +291,6 @@ def test_compound_field_constraint_agrees_with_argument_validation(name):
         assert not _rejects(validator, value_with(index, fields[index][bound]))
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: 範囲を持つ検証子と、そこからの constraint 導出が未実装")
 @pytest.mark.parametrize("name", _NUMERIC_NAMES)
 def test_numeric_constraint_is_derived_from_the_validator(name):
     # 手書きの複製だと検証側だけを直したときに黙って食い違うので、同じ範囲から両方を導く。
@@ -302,8 +300,6 @@ def test_numeric_constraint_is_derived_from_the_validator(name):
     assert _options_by_name(parser)[name]["constraint"] == validator.constraint
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: 範囲を持つ検証子と、そこからの constraint 導出が未実装")
 @pytest.mark.parametrize("name", _COMPOUND_NAMES)
 def test_compound_constraint_is_derived_from_the_element_validators(name):
     # 複合値も、書式と要素の範囲を検証子自身から取る(要素の検証も同じ範囲で行う)。
@@ -321,8 +317,6 @@ def test_compound_constraint_is_derived_from_the_element_validators(name):
         _assert_accepts_exactly(element, element.constraint, is_int=False)
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: 範囲を持つ検証子と、そこからの constraint 導出が未実装")
 @pytest.mark.parametrize("minimum, maximum, exclusive_min", [
     (0, 1, False), (0, None, True), (-2.5, 2.5, False), (0, None, False),
 ])
