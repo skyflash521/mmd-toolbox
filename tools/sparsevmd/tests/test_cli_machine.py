@@ -363,3 +363,30 @@ def test_non_machine_missing_input_is_arg_error(capsys):
 # --quiet が TTY でもライブ進捗表示を抑制することは、進捗表示の有効化フラグをコンストラクタ引数
 # から直接記録する CLI 統合テストがタイミング非依存で厳密に検証する(実際の描画結果はハートビートの
 # 再描画間隔に依存し非決定的になるため、ここでは検証しない)。
+
+
+@pytest.mark.xfail(reason="impl pending: 出力先が既存ディレクトリのときの output_is_directory が未実装")
+def test_machine_error_output_is_directory(tmp_path, capsysbinary):
+    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
+    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
+    src = tmp_path / "in.vmd"
+    ramp_camera(src)
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    for extra in ([], ["--overwrite"]):
+        rc = cli.main([str(src), "-o", str(outdir), "--machine", *extra])
+        assert rc == 2
+        e = machine_error(capsysbinary)
+        assert e["code"] == "output_is_directory" and e["field"] == "--output"
+        assert e["exit_code"] == 2 and e["path"] == str(outdir)
+
+
+def test_machine_list_bones_ignores_output_is_directory(tmp_path, capsysbinary):
+    # --list-bones は出力を書かないので、出力先がディレクトリでも一覧を返す(検査の対象外)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc(), bone=[bone("センター", 0)])
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    rc = cli.main([str(src), "-o", str(outdir), "--machine", "--list-bones"])
+    assert rc == 0
+    assert machine_events(capsysbinary)[-1]["mode"] == "list_bones"

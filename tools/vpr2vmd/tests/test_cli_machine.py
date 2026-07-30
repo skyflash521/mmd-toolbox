@@ -11,6 +11,8 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 
 import json
 
+import pytest
+
 from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
 from vpr2vmd import __version__, cli
 
@@ -380,3 +382,18 @@ def test_describe_type_table_covers_non_meta_args():
     meta = {"help", "version", "machine", "describe"}
     non_meta = {a.dest for a in parser._actions if a.dest not in meta}
     assert non_meta <= set(cli._D_TYPE)
+
+
+@pytest.mark.xfail(reason="impl pending: 出力先が既存ディレクトリのときの output_is_directory が未実装")
+def test_machine_error_output_is_directory(tmp_path, capsysbinary):
+    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
+    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
+    src = _touch(tmp_path / "in.vpr")
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    for extra in ([], ["--overwrite"]):
+        rc = cli.main([src, "-o", str(outdir), "--machine", *extra])
+        assert rc == 2
+        e = _machine_error(capsysbinary)
+        assert e["code"] == "output_is_directory" and e["field"] == "--output"
+        assert e["exit_code"] == 2 and e["path"] == str(outdir)

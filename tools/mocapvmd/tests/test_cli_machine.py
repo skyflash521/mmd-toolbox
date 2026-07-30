@@ -617,3 +617,30 @@ def test_describe_mode_arg_error_is_error_event(capsysbinary):
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["field"] == "--clean-strength" and e["exit_code"] == 2
+
+
+@pytest.mark.xfail(reason="impl pending: 出力先が既存ディレクトリのときの output_is_directory が未実装")
+def test_machine_error_output_is_directory(tmp_path, capsysbinary):
+    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
+    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
+    src = tmp_path / "in.vmd"
+    _ramp_doc(src)
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    for extra in ([], ["--overwrite"]):
+        rc = cli.main([str(src), "-o", str(outdir), "--machine", *extra])
+        assert rc == 2
+        e = machine_error(capsysbinary)
+        assert e["code"] == "output_is_directory" and e["field"] == "--output"
+        assert e["exit_code"] == 2 and e["path"] == str(outdir)
+
+
+def test_machine_list_bones_ignores_output_is_directory(tmp_path, capsysbinary):
+    # --list-bones は出力を書かないので、出力先がディレクトリでも一覧を返す(検査の対象外)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", 0)])
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    rc = cli.main([str(src), "-o", str(outdir), "--machine", "--list-bones"])
+    assert rc == 0
+    assert machine_events(capsysbinary)[-1]["mode"] == "list_bones"

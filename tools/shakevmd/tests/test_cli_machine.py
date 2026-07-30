@@ -11,6 +11,8 @@
 
 import json
 
+import pytest
+
 from shakevmd import bake as bake_mod
 from shakevmd import cli, presets
 from vmd import io
@@ -552,3 +554,18 @@ def test_non_machine_cancelled_on_keyboard_interrupt(tmp_path, capsys, monkeypat
     assert "error:" in cap.err.lower()
     assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
     assert not out.exists()
+
+
+@pytest.mark.xfail(reason="impl pending: 出力先が既存ディレクトリのときの output_is_directory が未実装")
+def test_machine_error_output_is_directory(tmp_path, capsysbinary):
+    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
+    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
+    inp = write_input(tmp_path / "in.vmd")
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    for extra in ([], ["--overwrite"]):
+        rc = cli.main([inp, "-o", str(outdir), "--machine", *extra])
+        assert rc == 2
+        e = machine_error(capsysbinary)
+        assert e["code"] == "output_is_directory" and e["field"] == "--output"
+        assert e["exit_code"] == 2 and e["path"] == str(outdir)

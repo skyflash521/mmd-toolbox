@@ -15,6 +15,8 @@ emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と
 import json
 import sys
 
+import pytest
+
 from song2vmd import cli
 
 
@@ -182,3 +184,18 @@ def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path
     assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
     # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
     assert err[0].startswith("error: ") and "出力先に既存ファイルがあります" in err[0]
+
+
+@pytest.mark.xfail(reason="impl pending: 出力先が既存ディレクトリのときの output_is_directory が未実装")
+def test_machine_error_output_is_directory(tmp_path, capsysbinary):
+    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
+    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
+    src = _touch(tmp_path / "in.wav")
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    for extra in ([], ["--overwrite"]):
+        rc = cli.main([src, "-o", str(outdir), "--machine", *extra])
+        assert rc == 2
+        e = machine_error(capsysbinary)
+        assert e["code"] == "output_is_directory" and e["field"] == "--output"
+        assert e["exit_code"] == 2 and e["path"] == str(outdir)
