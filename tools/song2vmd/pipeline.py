@@ -32,6 +32,7 @@ from vocal_analysis import separator as _va_separator
 from vocal_analysis.types import AudioPcm
 
 from . import chunking, events, morphs, report
+from . import progress as _progress
 
 _CHUNK_OVERLAP_SEC = 1.0  # 初期値。
 
@@ -50,6 +51,51 @@ class IntermediateReadError(Exception):
     def __init__(self, message, *, path):
         super().__init__(message)
         self.path = path
+
+
+class StageExecutionError(Exception):
+    """外部推論(分離・認識)の呼び出しから漏れた、分類の定まっていない例外。
+
+    どの工程で失敗したかを stage に持ち、CLI が工程失敗として報告できるようにする。
+    """
+
+    def __init__(self, message, *, stage):
+        super().__init__(message)
+        self.stage = stage
+
+
+# 呼び出し元で分類が定まっている例外。工程失敗へ写像すると、それぞれの終了コードの分岐を
+# 上書きしてしまうのでそのまま送出させる。KeyboardInterrupt は Exception の派生でないため
+# ここに挙げなくても通る。
+_CLASSIFIED_STAGE_EXCEPTIONS = (
+    _va_separator.SeparationError,
+    _va_recognizer.RecognitionError,
+    _va_io.AudioLoadError,
+    IntermediateReadError,
+    IntermediateWriteError,
+    _progress.ProgressEmitError,
+)
+
+
+def _run_inference(stage, func, *args, map_failures=True, **kwargs):
+    """外部推論の呼び出しを1回だけ包み、分類の定まっていない例外を工程失敗へ写像する。
+
+    包むのは呼び出しそのものに限る。前後の処理(音量解析・内部生成ファイルの読み直し等)まで
+    含めると、それらの失敗が工程の失敗に化ける。map_failures が偽なら写像せずそのまま呼ぶ
+    (その呼び出しが実際には外部推論を行わない場合に使う)。
+    """
+    if not map_failures:
+        return func(*args, **kwargs)
+    try:
+        return func(*args, **kwargs)
+    except _CLASSIFIED_STAGE_EXCEPTIONS:
+        raise
+    except Exception as e:
+        # 取得・実行のどちらで失敗したかは、分類されずに漏れてきた例外からは判別できないので
+        # 名乗らない(判別できる失敗は vocal_analysis 側が専用例外の文言で示す)。
+        raise StageExecutionError(
+            f"{_progress.stage_label(stage)}に失敗しました: {type(e).__name__}: {e}",
+            stage=stage) from e
 
 
 def _read_intermediate(path, reader):
@@ -239,12 +285,15 @@ def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
                 forced_aligner, sofa_aligner, english_katakana_method, progress):
     """長尺分割なしの単一実行(通常経路)。"""
     _report_stage(progress, "separate")
-    vocal_path = _va_separator.separate(
-        pcm, separate_vocals,
+    vocal_path = _run_inference(
+        "separate", _va_separator.separate, pcm, separate_vocals,
+        # 分離しない指定では委譲先が外部推論を一切行わないので、その呼び出しの失敗は工程失敗でない。
+        map_failures=separate_vocals != "never",
         on_progress=_model_download_progress(progress, "separate", done=0, total=None))
     _report_stage(progress, "recognize")
-    segments = _va_recognizer.recognize(
-        vocal_path, content_recognizer_model=content_recognizer_model,
+    segments = _run_inference(
+        "recognize", _va_recognizer.recognize, vocal_path,
+        content_recognizer_model=content_recognizer_model,
         retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
         english_katakana_method=english_katakana_method,
         on_progress=_model_download_progress(progress, "recognize", done=0, total=None))
@@ -279,13 +328,15 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
         # done は「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
         # 1個目のチャンクを始める時点(i=0)ではまだ0個も完了していない。
         _report_stage(progress, "separate", done=i, total=n)
-        vocal_path = _va_separator.separate(
-            chunk_pcm, separate_vocals,
+        vocal_path = _run_inference(
+            "separate", _va_separator.separate, chunk_pcm, separate_vocals,
+            map_failures=separate_vocals != "never",
             on_progress=_model_download_progress(progress, "separate", done=i, total=n))
         _report_stage(progress, "recognize", done=i, total=n)
         chunk_segments_list.append(
-            _va_recognizer.recognize(
-                vocal_path, content_recognizer_model=content_recognizer_model,
+            _run_inference(
+                "recognize", _va_recognizer.recognize, vocal_path,
+                content_recognizer_model=content_recognizer_model,
                 retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
                 english_katakana_method=english_katakana_method,
                 on_progress=_model_download_progress(progress, "recognize", done=i, total=n)))

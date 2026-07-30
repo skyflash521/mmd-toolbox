@@ -210,7 +210,6 @@ class _CustomEmitError(Exception):
     """入出力の例外を継承しない、送出先が独自に定義しうる例外を模した型。"""
 
 
-@pytest.mark.xfail(reason="impl pending: 進捗送出の失敗を包む専用例外が未実装")
 @pytest.mark.parametrize("error_type", [OSError, BrokenPipeError, ValueError, _CustomEmitError])
 def test_machine_progress_emit_failure_raises_dedicated_error(error_type):
     # 工程の失敗と区別できるよう、進捗送出の失敗は専用例外で送出する。

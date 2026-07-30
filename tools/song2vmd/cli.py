@@ -637,6 +637,9 @@ def _run(args, emitter, fail) -> int:
             progress_reporter.close()
             exit_code = 4 if e.reason == "decoder_missing" else 1
             return fail(e.reason, str(e), exit_code, field="input")
+        except _pipeline.StageExecutionError as e:
+            progress_reporter.close()
+            return fail("stage_failed", str(e), 4, stage=e.stage)
         except SeparationError as e:
             progress_reporter.close()
             return fail("stage_failed", str(e), 4, stage="separate")

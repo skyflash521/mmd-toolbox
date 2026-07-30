@@ -867,9 +867,7 @@ def test_low_dynamics_warning_closes_progress_before_stderr_print(tmp_path, monk
     lambda: AudioLoadError("no ffmpeg", reason="decoder_missing"),
     lambda: SeparationError("sep failed"),
     lambda: RecognitionError("rec failed"),
-    pytest.param(
-        lambda: _pipeline.StageExecutionError("ボーカル分離に失敗しました", stage="separate"),
-        marks=pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")),
+    lambda: _pipeline.StageExecutionError("ボーカル分離に失敗しました", stage="separate"),
 ])
 def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress, make_exc):
     src = _touch(tmp_path / "in.wav")
@@ -1063,7 +1061,6 @@ def _raise_from_pipeline(monkeypatch, error):
         cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(error))
 
 
-@pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")
 @pytest.mark.parametrize("stage", ["separate", "recognize"])
 def test_stage_execution_error_maps_to_stage_failed(tmp_path, monkeypatch, capsysbinary, stage):
     src = _touch(tmp_path / "in.wav")
@@ -1085,7 +1082,6 @@ def test_stage_execution_error_maps_to_stage_failed(tmp_path, monkeypatch, capsy
     assert set(events[-1]) == {"type", "code", "exit_code", "field", "path", "message", "stage"}
 
 
-@pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")
 @pytest.mark.parametrize("stage, stage_label", [("separate", "ボーカル分離"), ("recognize", "音素認識")])
 def test_stage_execution_error_reports_single_line_without_machine(
         tmp_path, monkeypatch, capsys, stage, stage_label):
@@ -1107,7 +1103,6 @@ def test_stage_execution_error_reports_single_line_without_machine(
     assert "Traceback" not in captured.err
 
 
-@pytest.mark.xfail(reason="impl pending: 進捗送出の失敗を包む専用例外が未実装")
 def test_progress_emit_error_is_not_reported_as_stage_failed(tmp_path, monkeypatch, capsysbinary):
     # 進捗送出の失敗は工程の失敗ではないので、終了コードは内部エラーの1のままにする。
     src = _touch(tmp_path / "in.wav")

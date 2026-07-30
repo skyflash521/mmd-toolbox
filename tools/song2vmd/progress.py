@@ -28,6 +28,19 @@ _STAGE_LABELS = {
 }
 
 
+def stage_label(stage_id):
+    """stage id に対応する日本語の工程名。未知の id はそのまま返す。"""
+    return _STAGE_LABELS.get(stage_id, stage_id)
+
+
+class ProgressEmitError(Exception):
+    """機械モードの progress イベント送出の失敗。
+
+    送出は外部推論の進捗コールバックからも呼ばれるため、素の例外のまま返すと呼び出し元が工程の
+    失敗と区別できない。工程の失敗でないことを型で示し、想定外例外の経路(内部エラー)へ落とす。
+    """
+
+
 class ProgressReporter:
     """song2vmd 進捗表示の出し分けを1箇所にまとめる。
 
@@ -55,11 +68,16 @@ class ProgressReporter:
         モードはこのメソッド内で表示の出し分けを完結させる(呼び出し側は machine/non-machine を
         意識しない)。"""
         if self._machine:
-            self._emitter.progress(stage=stage_id, done=done, total=total, note=note, elapsed=elapsed)
+            try:
+                self._emitter.progress(
+                    stage=stage_id, done=done, total=total, note=note, elapsed=elapsed)
+            except Exception as e:
+                # 失敗理由は専用例外の文字列だけが報告に出るので、元例外の型名と文言をそこへ残す。
+                raise ProgressEmitError(f"{type(e).__name__}: {e}") from e
             return
         if stage_id != self._current_stage:
             self._current_stage = stage_id
-            self._display.stage(_STAGE_LABELS.get(stage_id, stage_id))
+            self._display.stage(stage_label(stage_id))
         self._display.update(done, total, note)
 
     def close(self):

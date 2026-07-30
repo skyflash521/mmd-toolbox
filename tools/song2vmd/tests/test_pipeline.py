@@ -1124,7 +1124,6 @@ class _UnlistedError(Exception):
     """除外一覧に無い、推論器が独自に定義しうる例外を模した型。"""
 
 
-@pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")
 @pytest.mark.parametrize("chunked", [False, True])
 @pytest.mark.parametrize("failing_stage, stage_label", [
     ("separate", "ボーカル分離"), ("recognize", "音素認識")])
@@ -1141,7 +1140,7 @@ def test_bare_exception_from_inference_carries_failing_stage(
     assert exc.value.stage == failing_stage
     # 原因を追えるよう、元の例外の型名と文言を message に残す。stage キーを持たない非機械モードでも
     # どの工程が失敗したか分かるよう、工程名も message に入れる。
-    assert stage_label in str(exc.value)
+    assert f"{stage_label}に失敗しました" in str(exc.value)
     assert error_type.__name__ in str(exc.value)
     assert "推論の失敗" in str(exc.value)
 
@@ -1182,6 +1181,19 @@ def test_keyboard_interrupt_from_inference_passes_through_unchanged(
 
 
 @pytest.mark.parametrize("chunked", [False, True])
+def test_bare_exception_is_not_mapped_when_separation_is_skipped(tmp_path, monkeypatch, chunked):
+    # 分離しない指定では外部推論を呼ばないので、この呼び出しの失敗を工程失敗として報告しない。
+    error = RuntimeError("一時ファイルを書けません")
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, failing_stage="separate", error=error, chunked=chunked)
+    kwargs["separate_vocals"] = "never"
+
+    with pytest.raises(RuntimeError) as exc:
+        pipeline.run(input_path, **kwargs)
+    assert exc.value is error
+
+
+@pytest.mark.parametrize("chunked", [False, True])
 def test_bare_exception_outside_inference_is_not_mapped_to_stage(tmp_path, monkeypatch, chunked):
     # 写像するのは外部推論の呼び出しだけで、その外側(音量解析等)の失敗はそのまま通す。
     error = RuntimeError("rms failed")
@@ -1211,7 +1223,6 @@ def test_bare_exception_right_after_inference_is_not_mapped_to_stage(
     assert exc.value is error
 
 
-@pytest.mark.xfail(reason="impl pending: 進捗送出の失敗を包む専用例外が未実装")
 @pytest.mark.parametrize("chunked", [False, True])
 @pytest.mark.parametrize("failing_stage", ["separate", "recognize"])
 def test_progress_emit_failure_from_inference_passes_through_unchanged(
