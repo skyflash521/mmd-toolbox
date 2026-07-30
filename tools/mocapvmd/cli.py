@@ -477,8 +477,13 @@ def _run(args, machine, emitter, fail):
             print(_list_bones_text(doc.bone))
         return 0
 
-    # 出力先・上書きガード。出力先に既存ファイルがあれば --overwrite が必要。
+    # 出力先・上書きガード。既存ディレクトリは --overwrite でも書けないので、上書きの許可を促さず
+    # 専用コードで先に拒否する。既存ファイルなら --overwrite が必要。
     output = args.output if args.output is not None else _default_output(args.input)
+    if os.path.isdir(output):
+        return fail("output_is_directory",
+                    f"出力先がディレクトリです(ファイルパスを指定): {output}",
+                    2, field="--output", path=output)
     if not args.overwrite and os.path.exists(output):
         return fail("output_exists",
                     f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}",

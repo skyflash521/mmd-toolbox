@@ -619,7 +619,6 @@ def test_describe_mode_arg_error_is_error_event(capsysbinary):
     assert e["code"] == "bad_argument" and e["field"] == "--clean-strength" and e["exit_code"] == 2
 
 
-@pytest.mark.xfail(reason="impl pending: 出力先が既存ディレクトリのときの output_is_directory が未実装")
 def test_machine_error_output_is_directory(tmp_path, capsysbinary):
     # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
     # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。

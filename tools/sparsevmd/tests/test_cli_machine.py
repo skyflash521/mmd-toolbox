@@ -365,7 +365,6 @@ def test_non_machine_missing_input_is_arg_error(capsys):
 # 再描画間隔に依存し非決定的になるため、ここでは検証しない)。
 
 
-@pytest.mark.xfail(reason="impl pending: 出力先が既存ディレクトリのときの output_is_directory が未実装")
 def test_machine_error_output_is_directory(tmp_path, capsysbinary):
     # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
     # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。

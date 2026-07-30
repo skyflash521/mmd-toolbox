@@ -564,8 +564,14 @@ def _run(args, emitter, fail):
         return fail("target_selection_conflict",
                     "--target camera とボーン選択オプションは同時指定できない", 2)
 
-    # 出力先・上書きガード。list-bones は出力しないので不要。出力先に既存ファイルがあれば --overwrite 必須。
+    # 出力先の検査・上書きガード。list-bones は出力しないのでどちらも不要。既存ディレクトリは
+    # --overwrite でも書けないので、上書きの許可を促さず専用コードで先に拒否する。出力先に既存
+    # ファイルがあれば --overwrite 必須。
     output = args.output if args.output is not None else _default_output(args.input)
+    if not args.list_bones and os.path.isdir(output):
+        return fail("output_is_directory",
+                    f"出力先がディレクトリです(ファイルパスを指定): {output}",
+                    2, field="--output", path=output)
     if not args.list_bones and not args.overwrite and os.path.exists(output):
         return fail("output_exists",
                     f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}", 2, field="--output")

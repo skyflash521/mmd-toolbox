@@ -479,6 +479,13 @@ def _run(args, machine, emitter, fail) -> int:
     """引数解析済みの本体処理(ベイク→スムージング→書き込み)。失敗は fail() 経由で終了コードを返す。"""
     output = args.output if args.output is not None else _default_output(args.input)
 
+    # 出力先の検査: 既存ディレクトリは --overwrite でも書けないので、上書きの許可を促さず専用コードで
+    # 先に拒否する。
+    if os.path.isdir(output):
+        return fail("output_is_directory",
+                    f"出力先がディレクトリです(ファイルパスを指定): {output}",
+                    2, field="--output", path=output)
+
     # 上書きガード: 出力先に既存ファイルがあれば --overwrite 必須。未許可なら書かずにエラー。
     if not args.overwrite and os.path.exists(output):
         return fail(
