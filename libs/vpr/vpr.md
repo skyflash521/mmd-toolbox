@@ -107,7 +107,8 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
     `code` は英小文字の `snake_case`(例: `overlapping_notes`)。
   - `VprFormatError` は原因特定のため `message: str`、`path: str | None`、`key: str | None`、
     `value: object | None` を持つ。`path` は ZIP エントリ名または JSON パス(例 `tracks[2].parts[0].notes[4].pos`)、
-    `key` は欠落・型不一致の対象キー、`value` は問題になった実値。詳細な範囲は [§3](#3-読み込みread)。
+    `key` は問題になったキー(欠落・型不一致・値の意味不正のいずれも指す)、`value` は問題になった実値。
+    詳細な範囲は [§3](#3-読み込みread)。
 - **公開関数**(`vmd.io` に倣う):
   - `read(src: str | Path | bytes) -> tuple[VprProject, list[VprWarning]]`(読み)。
   - `write(project: VprProject) -> bytes` / `write_file(project: VprProject, path: str | Path) -> None`
@@ -143,10 +144,21 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
   `tick` 昇順に整列。声量に限らず全コントローラを生値で公開する(選別・正規化は利用先)。
 - 休符は専用型を持たず、[§2.1](#21-公開する具体型と関数) のとおり発音区間の和集合の補集合として導出する。
 
+`read` が返す `VprProject` は、上の写像に加えて次のテンポマップの条件を満たす。テンポマップは tick が
+指す時刻を決める前提であり、これを欠くと利用先が tick を時刻へ写せないため、条件を満たさない入力は
+[§3.1](#31-構造異常vprformaterror) のとおり `VprFormatError` で弾く。
+
+- `tempos` が 1 件以上ある。
+- 各 `TempoEvent.bpm` が正の有限値である。
+
+この 2 条件は `read` の結果に対する条件で、`VprProject`・`TempoEvent` の型の不変条件ではない
+(公開型は空の集合フィールドを既定とする素直な器で、合成した部分的な `VprProject` を組む利用も許す)。
+
 ### 3.1 構造異常(`VprFormatError`)
 
-`read` は、vpr コンテナまたは `Project/sequence.json` の必須構造を読み取れず公開データモデル([§2](#2-データモデルvpr-が公開する抽象))へ写像できない
-入力を `VprFormatError` で報告する。続行可能な事象(警告)と異なり、正しい `VprProject` を構築できないため例外で返す。
+`read` は、vpr コンテナまたは `Project/sequence.json` の必須構造を読み取れず公開データモデル([§2](#2-データモデルvpr-が公開する抽象))へ
+写像できない入力と、写像自体はできるが [§3](#3-読み込みread) が定める `read` の結果の条件を満たさない入力を
+`VprFormatError` で報告する。続行可能な事象(警告)と異なり、正しい `VprProject` を返せないため例外で返す。
 
 - **`VprFormatError` とする入力**:
   - 入力が ZIP アーカイブでない、または ZIP として破損している。
@@ -155,6 +167,15 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
   - トップレベル必須キー `masterTrack` または `tracks` が存在しない。
   - `masterTrack.tempo.events[]` / `masterTrack.timeSig.events[]` から `TempoEvent` / `TimeSignature` を構築するための
     必須キーまたは型が不正である。
+  - `masterTrack.tempo.events[]` が 0 件である([§3](#3-読み込みread) のテンポマップの条件)。ロケータは
+    `path` = `masterTrack.tempo.events`、`key` = `events`、`value` = 空リスト。
+  - `TempoEvent.bpm`(= `value` / 100)が正の有限値でない(0 以下、または `NaN` / 無限)。ロケータは
+    `path` = `masterTrack.tempo.events[<添字>]`(該当イベントのオブジェクト)、`key` = `value`、
+    `value` = 生値。有限値の判定が要るのは、Python の `json` が既定で `NaN` / `Infinity` の字面を受理する
+    ため実際に到達し得ることから。生の `value` の型検査は数値(整数・小数のいずれも可)であることまでを
+    見て、形式仕様([VPR_file_format.md の masterTrack 定義](../../docs/specs/vpr/VPR_file_format.md#mastertrack))が整数と定めることを理由に小数を型不正としない
+    (読み込みは実ファイルを通す側に寄せる)。したがって `NaN` / `Infinity` は型不正ではなく本項の
+    条件違反として報告する。
   - 歌唱トラック・パート・音符の公開モデル対象フィールドが欠落・型不正である。音符は `pos`・`duration`・`number`・
     `lyric`・`phoneme`・`velocity` の6フィールドを必須とする([VPR_file_format.md の音符フィールド定義](../../docs/specs/vpr/VPR_file_format.md#notes))。
 - **`VprFormatError` としない入力(許容)**:
