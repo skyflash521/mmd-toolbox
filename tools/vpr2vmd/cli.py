@@ -76,7 +76,7 @@ def _open_amount(text: str) -> float:
     開き量は lipsync の口形開き量(0〜1)・開き量上限(open_cap, 0〜1)に対応する量なので、
     範囲外(負値・1 超)・inf/nan は引数エラーにする。
     """
-    v = float(text)  # 非数値は ValueError → argparse が exit 2 にする
+    v = float(text)  # 非数値は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
     if not math.isfinite(v):
         raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
     if not 0.0 <= v <= 1.0:
@@ -86,7 +86,7 @@ def _open_amount(text: str) -> float:
 
 def _finite_float(text: str) -> float:
     """有限な float へ変換する(inf/nan を弾く)。範囲チェックは呼び出し側の検証関数で行う。"""
-    v = float(text)  # 非数値は ValueError → argparse が exit 2 にする
+    v = float(text)  # 非数値は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
     if not math.isfinite(v):
         raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
     return v
@@ -126,7 +126,7 @@ def _scale_min(text: str) -> float:
 
 def _nonneg_int(text: str) -> int:
     """0 以上の整数(--anticipation)。0 は先行準備を無効化する。"""
-    v = int(text)  # 非整数は ValueError → argparse が exit 2 にする
+    v = int(text)  # 非整数は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
     if v < 0:
         raise argparse.ArgumentTypeError(f"0 以上の整数が必要: {text!r}")
     return v
@@ -140,14 +140,14 @@ def _positive_int(text: str) -> int:
     return v
 
 
-def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
-    # 構造化出力モード(--machine / --describe)は使用法エラーを error イベントへ振り替えるため、
-    # SystemExit の代わりに ArgumentParseError を送出する MachineArgumentParser を使う(--help/--version は
-    # error() を経由しないので影響を受けず、従来どおり SystemExit で短絡する)。
+def _build_parser() -> argparse.ArgumentParser:
+    # 使用法エラーは全経路で CLI 本体が引き取るため、SystemExit の代わりに ArgumentParseError を
+    # 送出する MachineArgumentParser を使う(構造化出力モードは error イベントへ、それ以外は人間向けの
+    # エラー行へ振り替える)。--help/--version は error() を経由しないので影響を受けず、SystemExit で
+    # 短絡する。
     # allow_abbrev=False: 仕様外の前置き省略形を受理しない(未知/省略形は exit 2)。
     # help= は各オプションの人間向け説明。
-    cls = MachineArgumentParser if machine else argparse.ArgumentParser
-    p = cls(prog="vpr2vmd", allow_abbrev=False)
+    p = MachineArgumentParser(prog="vpr2vmd", allow_abbrev=False)
     # input は nargs="?"(--describe を入力無しで成立させるため)。describe 以外の実行では main() が欠落を検査する。
     p.add_argument("input", nargs="?", help="入力 vpr ファイル")
     p.add_argument("-o", "--output", help="出力 VMD(既定: <入力名>.vmd)")
@@ -577,9 +577,9 @@ def main(argv=None) -> int:
             argv = sys.argv[1:]
 
         # 構造化出力モード判定。解析前に argv で先取り(引数エラー時も出力チャネルを決めるため)。
-        # --describe は --machine を要さない独立メタ操作。どちらかがあれば emitter を用意し、
-        # MachineArgumentParser で使用法エラーも error イベントへ振り替える。emitter はバイナリ stdout へ
-        # UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None(従来の人間向け経路)。
+        # --describe は --machine を要さない独立メタ操作。どちらかがあれば emitter を用意する。
+        # emitter はバイナリ stdout へ UTF-8 で書く(ロケール符号化非依存)。どちらも無ければ None で、
+        # 失敗は人間向けのエラー行へ出る。
         machine = "--machine" in argv
         describe = "--describe" in argv
         emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
@@ -597,15 +597,16 @@ def main(argv=None) -> int:
                 pass
         # ArgumentParseError/SystemExit の捕捉は引数解析だけに閉じる(_run() 以下が送出しうる
         # SystemExit まで飲み込んで exit 0/2 に押し込めないため)。
-        parser = _build_parser(machine or describe)
+        parser = _build_parser()
         try:
             args = parser.parse_args(argv)
         except ArgumentParseError as e:
-            # 構造化出力モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
+            # MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。fail() が
+            # 構造化出力モードでは error イベント、それ以外では人間向けのエラー行1行へ振り替える。
             return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
         except SystemExit as e:
-            # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
-            # (メタ操作・code 0)。例外を握って終了コードへ変換する。
+            # 両モードの --help/--version(メタ操作・code 0)。使用法エラーは上の
+            # ArgumentParseError で引き取るのでここには来ない。例外を握って終了コードへ変換する。
             code = e.code
             return code if isinstance(code, int) else (0 if code is None else 2)
 

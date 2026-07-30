@@ -1,8 +1,9 @@
-"""argparse のエラーを機械モードの error イベントへ橋渡しする。
+"""argparse の使用法エラーを CLI 側へ橋渡しする。
 
-argparse は既定で使用法エラーを標準エラーへ出して終了する。機械モードではこの経路を error
-イベントへ振り替えるため、エラー時に終了する代わりに例外を送出する ArgumentParser と、その例外を
-error イベントへ変換するヘルパを提供する。
+argparse は既定で使用法エラーを用法込みで標準エラーへ出して終了する。各 CLI はこの経路を自分で
+引き取る(構造化出力モードでは error イベント、それ以外では人間向けのエラー行1行)ため、エラー時に
+終了する代わりに例外を送出する ArgumentParser と、その例外を error イベントへ変換するヘルパを
+提供する。
 """
 
 import argparse
@@ -21,9 +22,9 @@ class ArgumentParseError(Exception):
 class MachineArgumentParser(argparse.ArgumentParser):
     """エラー時に標準エラーへ出して終了する代わりに ArgumentParseError を送出する ArgumentParser。
 
-    機械モードで argparse の使用法エラーを error イベントへ変換できるようにする。
-    --help/--version などのメタ操作は ArgumentParser の既定どおり(error() を経由しないため、
-    本クラスの影響を受けない)。
+    使用法エラーの報告先(構造化出力モードの error イベント / 人間向けのエラー行)を呼び出し側が
+    決められるようにする。構造化出力モードに限らず全経路で使う。--help/--version などのメタ操作は
+    ArgumentParser の既定どおり(error() を経由しないため、本クラスの影響を受けない)。
     """
 
     def error(self, message):

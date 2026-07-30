@@ -99,8 +99,8 @@ def _cp932_stderr(monkeypatch):
 
 
 def test_stderr_safe_argparse_usage_error(monkeypatch):
-    # (a) argparse 使用法エラー経路: 表せない文字を含む不正引数値。argparse が標準エラーへ書く
-    # 使用法エラーが符号化に失敗せず、引数エラー(2)で終える(例外を漏らさない)。
+    # (a) argparse 使用法エラー経路: 表せない文字を含む不正引数値。argparse の文言を載せたエラー行が
+    # 符号化に失敗せず、引数エラー(2)で終える(例外を漏らさない)。
     _cp932_stderr(monkeypatch)
     rc = cli.main(["in.vmd", "--seed", UNREP])
     assert rc == 2

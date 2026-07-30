@@ -2,16 +2,14 @@
 
 機械モード(--machine)を検証する: stdout を JSON Lines のイベント専用にし、result/warning/progress
 イベントを出す。ストリームは result または error のちょうど 1 つで終端する(本モジュールは成功=result
-終端を対象にし、error イベントは構造化エラーのテストで扱う)。非機械モードの既定挙動が不変であること
-(後方互換)も併せて検証する。
+終端を対象にし、error イベントは構造化エラーのテストで扱う)。非機械モードの出力ファイル・終了コードが
+機械モードと同じであることも併せて検証する。
 
 機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。
 テストは決定論的・外部依存なしで行う。
 """
 
 import json
-
-import pytest
 
 from shakevmd import bake as bake_mod
 from shakevmd import cli, presets
@@ -570,7 +568,6 @@ def test_machine_error_output_is_directory(tmp_path, capsysbinary):
         assert e["exit_code"] == 2 and e["path"] == str(outdir)
 
 
-@pytest.mark.xfail(reason="impl pending: 非機械モードの使用法エラーをエラー行1行へ揃える処理が未実装")
 def test_non_machine_usage_error_is_single_error_line(capsys):
     # 非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。
     rc = cli.main(["in.vmd", "--bogus"])

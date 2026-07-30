@@ -1,11 +1,11 @@
 """sparsevmd CLI 機械モード骨格・構造化エラーのテスト。
 
 機械モードは stdout を JSON Lines のイベント専用にし、失敗は確定 code/field/exit_code の error
-イベントで終端する。非機械モードは失敗理由を標準エラーへ 1 行出す。既定(非機械)挙動が不変である
-こと(後方互換)も併せて検証する。
+イベントで終端する。非機械モードは失敗理由を標準エラーへ 1 行出す。非機械モードの出力ファイル・
+終了コードが機械モードと同じであることも併せて検証する。
 
 本モジュールは骨格(--version / --machine / --describe / --quiet / --cut-detect フラグ・
-MachineArgumentParser 切替・emitter・fail() 単一失敗経路・stderr の backslashreplace 再構成・
+emitter・fail() 単一失敗経路・stderr の backslashreplace 再構成・
 help= 付与・input の nargs="?" 化)と構造化エラーの全経路を対象にする。成功経路のイベント
 (progress / warning / result)・自己記述 result・中断は本モジュールの対象外とする。
 
@@ -391,7 +391,6 @@ def test_machine_list_bones_ignores_output_is_directory(tmp_path, capsysbinary):
     assert machine_events(capsysbinary)[-1]["mode"] == "list_bones"
 
 
-@pytest.mark.xfail(reason="impl pending: 非機械モードの使用法エラーをエラー行1行へ揃える処理が未実装")
 def test_non_machine_usage_error_is_single_error_line(capsys):
     # 非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。
     rc = cli.main(["in.vmd", "--bogus"])

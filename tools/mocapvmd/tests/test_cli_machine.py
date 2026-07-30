@@ -2,8 +2,8 @@
 
 機械モードは stdout を JSON Lines のイベント専用にし、progress / warning / result / error を出す。
 ストリームは result または error のちょうど 1 つで終端する。構造化エラーは確定 code/field/exit_code の
-error イベントで終端し、非機械モードは理由を標準エラーへ 1 行出す。既定(非機械)挙動が不変であること
-(後方互換)も併せて検証する。
+error イベントで終端し、非機械モードは理由を標準エラーへ 1 行出す。非機械モードの出力ファイル・
+終了コードが機械モードと同じであることも併せて検証する。
 
 機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テストは
 決定論的に実行し、外部依存を使わない。--describe は独立メタ操作として別ステップで
@@ -645,7 +645,6 @@ def test_machine_list_bones_ignores_output_is_directory(tmp_path, capsysbinary):
     assert machine_events(capsysbinary)[-1]["mode"] == "list_bones"
 
 
-@pytest.mark.xfail(reason="impl pending: 非機械モードの使用法エラーをエラー行1行へ揃える処理が未実装")
 def test_non_machine_usage_error_is_single_error_line(capsys):
     # 非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。
     rc = cli.main(["in.vmd", "--bogus"])

@@ -406,7 +406,7 @@ def test_missing_input_reports_reason(tmp_path, capsys):
 def test_missing_positional_reports_reason(capsys):
     """input 欠落は理由 1 行 + 終了コード 2(bad_argument)。
 
-    非機械では argparse 自身が使用法エラーを標準エラーへ出す(理由 1 行を満たす)。
+    input は nargs=? なので argparse は通し、CLI 本体の検査が失敗報告経路へ流す。
     """
     rc = cli.main([])
     assert rc == 2
@@ -558,7 +558,6 @@ def test_no_adopted_notes_warning_line_uses_common_format(tmp_path, capsys, monk
     assert "警告:" not in err
 
 
-@pytest.mark.xfail(reason="impl pending: 非機械モードの使用法エラーをエラー行1行へ揃える処理が未実装")
 def test_non_machine_usage_error_is_single_error_line(capsys):
     """非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。"""
     rc = cli.main(["in.vpr", "--bogus"])

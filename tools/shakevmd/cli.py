@@ -49,7 +49,7 @@ _SMOOTH_MAX_SEG = 5
 
 def _finite_float(text):
     """有限な float に変換する。inf/nan は引数エラー(下流の OverflowError 等を防ぐ)。"""
-    v = float(text)  # 非数値は ValueError → argparse が exit 2 にする
+    v = float(text)  # 非数値は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
     if not math.isfinite(v):
         raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
     return v
@@ -149,14 +149,14 @@ def _parse_impulse(text):
     return (f, s, d)
 
 
-def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
+def _build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: 仕様外の前置き省略形(--over→--overwrite 等)を受理しない。
     # 未知/省略形は exit 2(非公開・繰延フラグ拒否とも整合)。
-    # 機械モードは使用法エラーを error イベントへ振り替えるため、SystemExit の代わりに
-    # ArgumentParseError を送出する MachineArgumentParser を使う(--help/--version は error() を
-    # 経由しないので影響を受けず、従来どおり SystemExit で短絡する)。
-    cls = MachineArgumentParser if machine else argparse.ArgumentParser
-    p = cls(prog="shakevmd", allow_abbrev=False)
+    # 使用法エラーは全経路で CLI 本体が引き取るため、SystemExit の代わりに ArgumentParseError を
+    # 送出する MachineArgumentParser を使う(構造化出力モードは error イベントへ、それ以外は人間向けの
+    # エラー行へ振り替える)。--help/--version は error() を経由しないので影響を受けず、SystemExit で
+    # 短絡する。
+    p = MachineArgumentParser(prog="shakevmd", allow_abbrev=False)
     p.add_argument("--version", action="version", version=f"shakevmd {__version__}",
                    help="バージョンを表示して終了する")
     # 機械モード。出力を JSON Lines のイベントストリームにし、stdout をイベント専用へ固定する。
@@ -194,7 +194,7 @@ def _build_parser(machine: bool = False) -> argparse.ArgumentParser:
                    metavar="F:S:D",
                    help="フレーム F に強さ S・減衰 D 秒の衝撃を加算(複数指定可)")
     # 運用/プリセット系。
-    p.add_argument("--preset", choices=presets.PRESET_NAMES,   # 未知名は argparse が exit 2
+    p.add_argument("--preset", choices=presets.PRESET_NAMES,   # 未知名も同じ経路で引数エラー
                    help="公開引数を一括設定するプリセット(個別引数の明示指定が優先)")
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="出力せず統計を表示する(引数検証は実施する)")
@@ -438,19 +438,18 @@ def main(argv=None) -> int:
                 sys.stderr.reconfigure(errors="backslashreplace")
             except Exception:
                 pass
-        # 構造化出力モード(--machine・--describe)は使用法エラーも error イベントへ振り替えるため
-        # MachineArgumentParser を使う。どちらでもなければ従来の argparse(SystemExit→終了コード)。
         # ArgumentParseError/SystemExit の捕捉は引数解析だけに閉じる(_run() 以下が送出しうる
         # SystemExit まで飲み込んで exit 0/2 に押し込めないため)。
-        parser = _build_parser(machine or describe)
+        parser = _build_parser()
         try:
             args = parser.parse_args(argv)
         except ArgumentParseError as e:
-            # 機械モードの MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。
+            # MachineArgumentParser は使用法エラーで例外を送出する(SystemExit の代わり)。fail() が
+            # 構造化出力モードでは error イベント、それ以外では人間向けのエラー行1行へ振り替える。
             return fail("bad_argument", e.message, 2, field=_argparse_field(e.message))
         except SystemExit as e:
-            # 非機械の使用法エラー(argparse が stderr へ出力済み・code 2)と、両モードの --help/--version
-            # (メタ操作・code 0)。例外を握って終了コードへ変換する。
+            # 両モードの --help/--version(メタ操作・code 0)。使用法エラーは上の
+            # ArgumentParseError で引き取るのでここには来ない。例外を握って終了コードへ変換する。
             code = e.code
             return code if isinstance(code, int) else (0 if code is None else 2)
 

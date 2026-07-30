@@ -1,10 +1,10 @@
 """song2vmd CLI 機械モード骨格・構造化エラーのテスト。
 
 機械モードは stdout を JSON Lines のイベント専用にし、失敗は確定 code/field/exit_code の error
-イベントで終端する。非機械モードは失敗理由を標準エラーへ1行出す。既定(非機械)挙動が不変であること
-(後方互換)も併せて検証する。
+イベントで終端する。非機械モードは失敗理由を標準エラーへ1行出す。非機械モードの出力ファイル・
+終了コードが機械モードと同じであることも併せて検証する。
 
-本モジュールは骨格(--version/--machine/--describe/--quiet フラグ・MachineArgumentParser 切替・
+本モジュールは骨格(--version/--machine/--describe/--quiet フラグ・
 emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と、CLI 引数解析段の構造化エラー
 経路(bad_argument・output_exists)を対象にする。音声読み込み以降の成功経路のイベント
 (progress/warning/result mode:"run"/"inspect")・中断は音声処理パイプラインの実装後に検証する。
@@ -14,8 +14,6 @@ emitter・fail() 単一失敗経路・help= 付与・input の nargs="?" 化)と
 
 import json
 import sys
-
-import pytest
 
 from song2vmd import cli
 
@@ -200,7 +198,6 @@ def test_machine_error_output_is_directory(tmp_path, capsysbinary):
         assert e["exit_code"] == 2 and e["path"] == str(outdir)
 
 
-@pytest.mark.xfail(reason="impl pending: 非機械モードの使用法エラーをエラー行1行へ揃える処理が未実装")
 def test_non_machine_usage_error_is_single_error_line(capsys):
     # 非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。
     rc = cli.main(["in.wav", "--bogus"])
