@@ -385,3 +385,11 @@ def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys
     assert rc == 0
     assert out.exists()
     assert "warning: no_adopted_notes: " in capsys.readouterr().err
+
+
+def test_dry_run_non_event_symbols_keep_length_mark(monkeypatch, tmp_path, capsys):
+    # 診断は正規化前の生の記号で記録する(正規化後へ丸めると vpr に実際にあった記号を追えない)。
+    project = _project([_note(0, 480, ["k:", "a"])])
+    rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
+    assert rc == 0
+    assert "k:(1)" in out

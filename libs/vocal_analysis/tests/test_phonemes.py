@@ -71,3 +71,48 @@ def test_xsampa_vowel_letter_non_vowel_is_none(symbol):
 
     # 母音記号テーブルに無ければ None(子音・継続記号等、母音でないことを示す)。
     assert xsampa_vowel_letter(symbol) is None
+
+
+# --- X-SAMPA の長音記号の正規化 ---
+
+
+@pytest.mark.xfail(reason="impl pending: xsampa_base_symbol と正規化経由の母音判定が未実装")
+@pytest.mark.parametrize(
+    "symbol,expected",
+    [
+        ("a", "a"),
+        ("i:", "i"),
+        ("i::", "i"),
+        # 母音以外の基底にも同じ規則が及ぶ(この関数は基底を返すだけで分類はしない)。
+        ("N\\:", "N\\"),
+        (":", ""),
+        ("", ""),
+        # 除去は末尾だけに効く(記号内の「:」を落とす実装だと分類が広がる)。
+        (":a", ":a"),
+        ("a:b", "a:b"),
+    ],
+)
+def test_xsampa_base_symbol_strips_trailing_length_marks(symbol, expected):
+    from vocal_analysis.phonemes import xsampa_base_symbol
+
+    assert xsampa_base_symbol(symbol) == expected
+
+
+@pytest.mark.xfail(reason="impl pending: xsampa_base_symbol と正規化経由の母音判定が未実装")
+@pytest.mark.parametrize(
+    "symbol,expected", [("a:", "a"), ("M:", "u"), ("e:", "e"), ("o::", "o")]
+)
+def test_xsampa_vowel_letter_normalizes_length_marks(symbol, expected):
+    from vocal_analysis.phonemes import xsampa_vowel_letter
+
+    # 長音記号付きは基底の記号と同じ母音へ写す(個別登録に頼らない一般規則)。
+    assert xsampa_vowel_letter(symbol) == expected
+
+
+@pytest.mark.parametrize("symbol", ["k:", "N\\:", "-:", ":", ":a", "a:b"])
+def test_xsampa_vowel_letter_non_vowel_base_stays_none(symbol):
+    from vocal_analysis.phonemes import xsampa_vowel_letter
+
+    # 正規化しても基底の記号が母音でなければ母音にはしない(長音記号の除去は分類を広げない)。
+    # 末尾以外の「:」を落とす実装だと ":a"・"a:b" が母音になってしまうので、ここで弾く。
+    assert xsampa_vowel_letter(symbol) is None

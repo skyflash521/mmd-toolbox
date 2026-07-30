@@ -6,6 +6,8 @@ VOCALOID 日本語の音素(X-SAMPA)を、口形イベント確定で使うカ�
 標準で確定したもの。
 """
 
+import pytest
+
 from lipsync import ApertureClass, ConsonantClass, MouthShape
 from vpr2vmd import phonemes
 
@@ -108,3 +110,54 @@ def test_none_class_consonants_and_unknown_mapped_to_none_aperture():
     # p\・w・h は判定表の NONE(残り)行に列挙され、ApertureClass.NONE(開口減衰なし)。未知記号も同様。
     for sym in ["p\\", "w", "h", "zzz"]:
         assert phonemes.aperture_class(sym) is ApertureClass.NONE
+
+
+# --- 長音記号付きの記号の分類(基底の記号へ正規化してから表を引く)---
+
+
+@pytest.mark.xfail(reason="impl pending: 記号分類の入口での長音記号の正規化が未実装")
+def test_length_marked_symbols_classify_as_base_symbol():
+    # 母音以外の基底にも長音記号が付きうる。カテゴリは基底の記号で決まる。
+    assert phonemes.categorize("N\\:") is Cat.MORAIC_NASAL
+    assert phonemes.categorize("N\\::") is Cat.MORAIC_NASAL
+    assert phonemes.categorize("m:") is Cat.BILABIAL
+    assert phonemes.categorize("Q:") is Cat.GEMINATE_STOP
+    assert phonemes.categorize("-:") is Cat.CONTINUATION
+    assert phonemes.categorize("a:") is Cat.VOWEL
+    assert phonemes.categorize("e:") is Cat.VOWEL
+    assert phonemes.categorize("k:") is Cat.OTHER
+
+
+@pytest.mark.xfail(reason="impl pending: 記号分類の入口での長音記号の正規化が未実装")
+def test_length_marked_vowel_shape_uses_base_symbol():
+    assert phonemes.vowel_shape("a:") is MouthShape.A
+    assert phonemes.vowel_shape("M:") is MouthShape.U
+    assert phonemes.vowel_shape("e:") is MouthShape.E
+    assert phonemes.vowel_shape("o::") is MouthShape.O
+    assert phonemes.vowel_shape("k:") is None
+
+
+@pytest.mark.xfail(reason="impl pending: 記号分類の入口での長音記号の正規化が未実装")
+def test_length_marked_consonant_and_aperture_use_base_symbol():
+    # 唇の方向と開口減衰も別々の完全一致表なので、両方とも正規化を通す。
+    assert phonemes.consonant_class("S:") is ConsonantClass.SPREAD
+    assert phonemes.consonant_class("S::") is ConsonantClass.SPREAD
+    assert phonemes.aperture_class("S:") is ApertureClass.NARROW_CHANNEL
+    assert phonemes.aperture_class("S::") is ApertureClass.NARROW_CHANNEL
+    assert phonemes.consonant_class("w:") is ConsonantClass.ROUNDED
+    assert phonemes.aperture_class("t:") is ApertureClass.FIRM_CLOSURE
+    assert phonemes.aperture_class("t::") is ApertureClass.FIRM_CLOSURE
+    assert phonemes.aperture_class("k:") is ApertureClass.SLIGHT_CLOSURE
+
+
+def test_entries_strip_length_marks_only_at_end():
+    # 末尾以外の「:」まで落とす独自実装は分類を広げてしまうので、4入口すべてで基底が変わらない
+    # ことを固定する(共有の正規化を経由しない別実装をここで弾く)。
+    assert phonemes.categorize(":a") is Cat.OTHER
+    assert phonemes.vowel_shape(":a") is None
+    assert phonemes.categorize("a:b") is Cat.OTHER
+    assert phonemes.vowel_shape("a:b") is None
+    assert phonemes.consonant_class(":S") is ConsonantClass.NEUTRAL
+    assert phonemes.aperture_class(":S") is ApertureClass.NONE
+    assert phonemes.consonant_class("d:Z") is ConsonantClass.NEUTRAL
+    assert phonemes.aperture_class("d:Z") is ApertureClass.NONE
