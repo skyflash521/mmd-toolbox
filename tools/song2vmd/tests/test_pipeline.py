@@ -1000,3 +1000,91 @@ def test_concat_pcm_joins_slices_in_order():
     joined = pipeline._concat_pcm([pcm_a, pcm_b])
     np.testing.assert_array_equal(joined.samples[:, 0], np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
     assert joined.sample_rate == 10
+
+
+# --- 内部生成ファイルの読み直し失敗(利用者入力の読み込み失敗と区別する)---
+
+
+@pytest.mark.xfail(reason="impl pending: 内部生成ファイルの読み直し失敗の専用例外が未実装")
+def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
+    # 音量解析段の分離後ボーカルの読み直し失敗は、利用者入力の読み込み失敗と混ざらないよう
+    # 専用例外へ包み、対象パスを保持する。
+    from vocal_analysis.io import AudioLoadError
+
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+
+    real_load_audio = pipeline._va_io.load_audio
+
+    def fail_on_vocal(path):
+        if str(path) == str(vocal_path):
+            raise AudioLoadError("broken vocal wav", reason="not_audio")
+        return real_load_audio(path)
+
+    monkeypatch.setattr(pipeline._va_io, "load_audio", fail_on_vocal)
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kw: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, **kw: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    openness, style_gen = presets.resolve("pop")
+    with pytest.raises(pipeline.IntermediateReadError) as exc:
+        pipeline.run(input_path, progress=_RecordingProgress(), **_common_kwargs(
+            openness=openness, intensity_curve=0.7, silence_on=0.05, use_n_morph=False))
+    assert str(exc.value.path) == str(vocal_path)
+
+
+@pytest.mark.xfail(reason="impl pending: 内部生成ファイルの読み直し失敗の専用例外が未実装")
+def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
+    # 長尺分割の経路は各チャンクのボーカルWAVを別実装で読むが、内部生成ファイルの読み直しである点は
+    # 同じなので同じ専用例外へ包む。
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(
+        pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+    monkeypatch.setattr(
+        pipeline.chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+    monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kw: vocal_path)
+    monkeypatch.setattr(
+        pipeline._va_recognizer, "recognize",
+        lambda path, **kw: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    # soundfile は入力の読み込みでも使うので、失敗させるのは分離後ボーカルの読み直しだけに限る。
+    real_read = pipeline.sf.read
+
+    def fail_on_vocal(path, *a, **kw):
+        if str(path) == str(vocal_path):
+            raise RuntimeError("broken vocal wav")
+        return real_read(path, *a, **kw)
+
+    monkeypatch.setattr(pipeline.sf, "read", fail_on_vocal)
+
+    with pytest.raises(pipeline.IntermediateReadError) as exc:
+        pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+    assert str(exc.value.path) == str(vocal_path)
+
+
+def test_input_read_failure_is_not_wrapped_in_dedicated_error(tmp_path, monkeypatch):
+    # 利用者入力の読み込み失敗は音声読み込みの例外のまま送出する(専用例外へ包まない)。
+    # 派生関係で通り抜けないよう、型そのものを固定する。
+    from vocal_analysis.io import AudioLoadError
+
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+
+    def always_fail(path):
+        raise AudioLoadError("broken input", reason="not_audio")
+
+    monkeypatch.setattr(pipeline._va_io, "load_audio", always_fail)
+
+    openness, style_gen = presets.resolve("pop")
+    with pytest.raises(AudioLoadError) as exc:
+        pipeline.run(input_path, progress=_RecordingProgress(), **_common_kwargs(
+            openness=openness, intensity_curve=0.7, silence_on=0.05, use_n_morph=False))
+    assert type(exc.value) is AudioLoadError

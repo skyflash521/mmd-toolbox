@@ -1026,3 +1026,27 @@ def test_torch_gpu_warning_reports_cpu_only_build_even_with_visible_devices(monk
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # 復元はフィクスチャが行う
 
     assert cli._torch_gpu_warning("auto")[0] == "cpu_only_torch"
+
+
+@pytest.mark.xfail(reason="impl pending: 内部生成ファイルの読み直し失敗の専用例外が未実装")
+def test_intermediate_read_error_reports_path_without_input_field(tmp_path, monkeypatch,
+                                                                  capsysbinary):
+    # 内部生成ファイルの読み直し失敗は利用者入力を指さない(field は null、path に対象ファイル)。
+    src = _touch(tmp_path / "in.wav")
+    # 分離器が返すのと同じ Path を渡す(イベントは JSON なので、載せる前に文字列へ落とす必要がある)。
+    vocal = tmp_path / "vocal.wav"
+    monkeypatch.setattr(
+        cli._pipeline, "run",
+        lambda *a, **k: (_ for _ in ()).throw(
+            cli._pipeline.IntermediateReadError("broken vocal wav", path=vocal)))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 1
+    events = _events_of(capsysbinary)
+    assert events[-1]["type"] == "error"
+    assert events[-1]["code"] == "not_audio"
+    assert events[-1]["field"] is None
+    assert events[-1]["path"] == str(vocal)
+    assert events[-1]["exit_code"] == 1
+    # stage を載せるのは stage_failed のときだけなので、キー集合そのものを固定する。
+    assert set(events[-1]) == {"type", "code", "exit_code", "field", "path", "message"}
