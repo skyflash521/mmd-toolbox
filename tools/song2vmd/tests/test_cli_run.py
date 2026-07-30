@@ -17,6 +17,7 @@ from song2vmd import __version__, cli
 from song2vmd import events as _events
 from song2vmd import pipeline as _pipeline
 from song2vmd import presets as _presets
+from song2vmd import progress as _progress
 from song2vmd import report as _report
 from vmd import VmdDocument
 from vmd import read as vmd_read
@@ -866,6 +867,9 @@ def test_low_dynamics_warning_closes_progress_before_stderr_print(tmp_path, monk
     lambda: AudioLoadError("no ffmpeg", reason="decoder_missing"),
     lambda: SeparationError("sep failed"),
     lambda: RecognitionError("rec failed"),
+    pytest.param(
+        lambda: _pipeline.StageExecutionError("ボーカル分離に失敗しました", stage="separate"),
+        marks=pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")),
 ])
 def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress, make_exc):
     src = _touch(tmp_path / "in.wav")
@@ -1049,3 +1053,102 @@ def test_intermediate_read_error_reports_path_without_input_field(tmp_path, monk
     assert events[-1]["exit_code"] == 1
     # stage を載せるのは stage_failed のときだけなので、キー集合そのものを固定する。
     assert set(events[-1]) == {"type", "code", "exit_code", "field", "path", "message"}
+
+
+# --- 外部推論から漏れた例外・想定外例外の報告 ----------------------------------
+
+
+def _raise_from_pipeline(monkeypatch, error):
+    monkeypatch.setattr(
+        cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(error))
+
+
+@pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")
+@pytest.mark.parametrize("stage", ["separate", "recognize"])
+def test_stage_execution_error_maps_to_stage_failed(tmp_path, monkeypatch, capsysbinary, stage):
+    src = _touch(tmp_path / "in.wav")
+    _raise_from_pipeline(
+        monkeypatch,
+        _pipeline.StageExecutionError("RuntimeError: CUDA out of memory", stage=stage))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 4
+    events = _events_of(capsysbinary)
+    assert events[-1]["type"] == "error"
+    assert events[-1]["code"] == "stage_failed"
+    assert events[-1]["stage"] == stage
+    assert events[-1]["field"] is None
+    assert events[-1]["path"] is None
+    assert events[-1]["exit_code"] == 4
+    assert "CUDA out of memory" in events[-1]["message"]
+    # stage を追加で持つのは stage_failed だけなので、キー集合そのものを固定する。
+    assert set(events[-1]) == {"type", "code", "exit_code", "field", "path", "message", "stage"}
+
+
+@pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")
+@pytest.mark.parametrize("stage, stage_label", [("separate", "ボーカル分離"), ("recognize", "音素認識")])
+def test_stage_execution_error_reports_single_line_without_machine(
+        tmp_path, monkeypatch, capsys, stage, stage_label):
+    # 非機械モードには stage キーが無いので、どの工程で失敗したかは1行のエラー文言で示す。
+    src = _touch(tmp_path / "in.wav")
+    _raise_from_pipeline(
+        monkeypatch, _pipeline.StageExecutionError(
+            f"{stage_label}に失敗しました: RuntimeError: CUDA out of memory", stage=stage))
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 4
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    lines = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert lines[0].startswith("error: ")
+    assert stage_label in lines[0]
+    assert "CUDA out of memory" in lines[0]
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.xfail(reason="impl pending: 進捗送出の失敗を包む専用例外が未実装")
+def test_progress_emit_error_is_not_reported_as_stage_failed(tmp_path, monkeypatch, capsysbinary):
+    # 進捗送出の失敗は工程の失敗ではないので、終了コードは内部エラーの1のままにする。
+    src = _touch(tmp_path / "in.wav")
+    _raise_from_pipeline(monkeypatch, _progress.ProgressEmitError("stdout is closed"))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 1
+    events = _events_of(capsysbinary)
+    assert events[-1]["code"] == "internal_error"
+
+
+def test_unexpected_exception_reports_internal_error(tmp_path, monkeypatch, capsysbinary):
+    # 想定外例外はトレースバックを漏らさず internal_error の終端イベントで終える。
+    src = _touch(tmp_path / "in.wav")
+    _raise_from_pipeline(monkeypatch, RuntimeError("unexpected"))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 1
+    captured = capsysbinary.readouterr()
+    events = [json.loads(ln) for ln in captured.out.decode("utf-8").splitlines() if ln]
+    assert events[-1]["type"] == "error"
+    assert events[-1]["code"] == "internal_error"
+    assert events[-1]["field"] is None
+    assert events[-1]["path"] is None
+    assert events[-1]["exit_code"] == 1
+    assert "RuntimeError" in events[-1]["message"]
+    assert "unexpected" in events[-1]["message"]
+    assert "Traceback" not in captured.err.decode("utf-8")
+
+
+def test_unexpected_exception_reports_single_line_without_machine(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    _raise_from_pipeline(monkeypatch, RuntimeError("unexpected"))
+
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    lines = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert lines[0].startswith("error: ")
+    assert "RuntimeError" in lines[0]
+    assert "unexpected" in lines[0]
+    assert "Traceback" not in captured.err

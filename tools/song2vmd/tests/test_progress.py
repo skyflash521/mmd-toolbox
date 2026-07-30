@@ -191,3 +191,45 @@ def test_summary_delegates_message_to_display_summary_exactly_once(spy_display):
     reporter = ProgressReporter(machine=False, quiet=False, emitter=None, stream=_TTYStream())
     reporter.summary("完了 out.vmd")
     display.summary.assert_called_once_with("完了 out.vmd")
+
+
+# --- 機械モードの送出失敗 ------------------------------------------------------
+
+
+class _BrokenEmitter:
+    """progress の送出が標準出力の書き込み失敗で落ちる emitter。"""
+
+    def __init__(self, error):
+        self._error = error
+
+    def progress(self, **fields):
+        raise self._error
+
+
+class _CustomEmitError(Exception):
+    """入出力の例外を継承しない、送出先が独自に定義しうる例外を模した型。"""
+
+
+@pytest.mark.xfail(reason="impl pending: 進捗送出の失敗を包む専用例外が未実装")
+@pytest.mark.parametrize("error_type", [OSError, BrokenPipeError, ValueError, _CustomEmitError])
+def test_machine_progress_emit_failure_raises_dedicated_error(error_type):
+    # 工程の失敗と区別できるよう、進捗送出の失敗は専用例外で送出する。
+    error = error_type("標準出力へ書けません")
+    reporter = ProgressReporter(
+        machine=True, quiet=False, emitter=_BrokenEmitter(error), stream=_NonTTYStream())
+    with pytest.raises(progress.ProgressEmitError) as exc:
+        reporter.stage("separate", note="分離中: 10%")
+    assert exc.value.__cause__ is error
+    # CLI は専用例外の文字列だけを失敗理由の1行に出すので、元例外の要旨をそこへ残す。
+    assert error_type.__name__ in str(exc.value)
+    assert "標準出力へ書けません" in str(exc.value)
+
+
+def test_machine_progress_emit_does_not_wrap_keyboard_interrupt():
+    # 進捗送出中に届いた中断は送出の失敗ではないので包まず、中断の経路へそのまま届ける。
+    error = KeyboardInterrupt()
+    reporter = ProgressReporter(
+        machine=True, quiet=False, emitter=_BrokenEmitter(error), stream=_NonTTYStream())
+    with pytest.raises(KeyboardInterrupt) as exc:
+        reporter.stage("separate", note="分離中: 10%")
+    assert exc.value is error

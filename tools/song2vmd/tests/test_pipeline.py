@@ -15,7 +15,11 @@ import soundfile as sf
 
 from lipsync import MouthEvent, MouthShape
 from song2vmd import pipeline, presets
+from song2vmd import progress as progress_module
 from vocal_analysis import ContentRecognizerModel, RmsEnvelope, Segment
+from vocal_analysis.io import AudioLoadError
+from vocal_analysis.recognizer import RecognitionError
+from vocal_analysis.separator import SeparationError
 from vocal_analysis.types import AudioPcm
 
 _TEST_MODEL = ContentRecognizerModel(model_id="test-content-recognizer")
@@ -1008,8 +1012,6 @@ def test_concat_pcm_joins_slices_in_order():
 def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
     # 音量解析段の分離後ボーカルの読み直し失敗は、利用者入力の読み込み失敗と混ざらないよう
     # 専用例外へ包み、対象パスを保持する。
-    from vocal_analysis.io import AudioLoadError
-
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -1072,8 +1074,6 @@ def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path,
 def test_input_read_failure_is_not_wrapped_in_dedicated_error(tmp_path, monkeypatch):
     # 利用者入力の読み込み失敗は音声読み込みの例外のまま送出する(専用例外へ包まない)。
     # 派生関係で通り抜けないよう、型そのものを固定する。
-    from vocal_analysis.io import AudioLoadError
-
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
 
@@ -1087,3 +1087,140 @@ def test_input_read_failure_is_not_wrapped_in_dedicated_error(tmp_path, monkeypa
         pipeline.run(input_path, progress=_RecordingProgress(), **_common_kwargs(
             openness=openness, intensity_curve=0.7, silence_on=0.05, use_n_morph=False))
     assert type(exc.value) is AudioLoadError
+
+
+# --- 外部推論から漏れた例外のステージ写像 --------------------------------------
+
+
+def _stage_failure_kwargs(tmp_path, monkeypatch, *, failing_stage, error, chunked=False):
+    """分離または認識だけを失敗させたパイプライン実行の材料を組み立てる。"""
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0 if chunked else 1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0 if chunked else 1.0, amplitude=0.8)
+
+    def separate(pcm, mode, **kw):
+        if failing_stage == "separate":
+            raise error
+        return vocal_path
+
+    def recognize(path, **kw):
+        if failing_stage == "recognize":
+            raise error
+        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(pipeline._va_separator, "separate", separate)
+    monkeypatch.setattr(pipeline._va_recognizer, "recognize", recognize)
+    if chunked:
+        monkeypatch.setattr(
+            pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+        monkeypatch.setattr(
+            pipeline.chunking, "merge_chunk_segments",
+            lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+    return input_path, _common_kwargs(max_duration_sec=3.0 if chunked else 300.0)
+
+
+class _UnlistedError(Exception):
+    """除外一覧に無い、推論器が独自に定義しうる例外を模した型。"""
+
+
+@pytest.mark.xfail(reason="impl pending: 外部推論から漏れた例外のステージ写像が未実装")
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("failing_stage, stage_label", [
+    ("separate", "ボーカル分離"), ("recognize", "音素認識")])
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError, MemoryError, OSError, _UnlistedError])
+def test_bare_exception_from_inference_carries_failing_stage(
+        tmp_path, monkeypatch, failing_stage, stage_label, error_type, chunked):
+    # 除外対象以外の例外は、型を問わず、どの工程で失敗したかを持つ例外へ写像する。
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, failing_stage=failing_stage,
+        error=error_type("推論の失敗"), chunked=chunked)
+
+    with pytest.raises(pipeline.StageExecutionError) as exc:
+        pipeline.run(input_path, **kwargs)
+    assert exc.value.stage == failing_stage
+    # 原因を追えるよう、元の例外の型名と文言を message に残す。stage キーを持たない非機械モードでも
+    # どの工程が失敗したか分かるよう、工程名も message に入れる。
+    assert stage_label in str(exc.value)
+    assert error_type.__name__ in str(exc.value)
+    assert "推論の失敗" in str(exc.value)
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("failing_stage", ["separate", "recognize"])
+@pytest.mark.parametrize("error_factory", [
+    lambda: SeparationError("separator failed"),
+    lambda: RecognitionError("recognizer failed"),
+    lambda: AudioLoadError("broken wav", reason="not_audio"),
+    lambda: pipeline.IntermediateReadError("broken vocal wav", path="vocal.wav"),
+    lambda: pipeline.IntermediateWriteError("disk full"),
+])
+def test_classified_exceptions_from_inference_pass_through_unchanged(
+        tmp_path, monkeypatch, failing_stage, error_factory, chunked):
+    # 既に分類が定まっている例外は写像せず、型そのままで送出する(終了コードの分岐を保つため)。
+    error = error_factory()
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, failing_stage=failing_stage, error=error, chunked=chunked)
+
+    with pytest.raises(type(error)) as exc:
+        pipeline.run(input_path, **kwargs)
+    assert exc.value is error
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("failing_stage", ["separate", "recognize"])
+def test_keyboard_interrupt_from_inference_passes_through_unchanged(
+        tmp_path, monkeypatch, failing_stage, chunked):
+    # 中断は工程の失敗ではないので、中断の経路へそのまま届ける。
+    error = KeyboardInterrupt()
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, failing_stage=failing_stage, error=error, chunked=chunked)
+
+    with pytest.raises(KeyboardInterrupt) as exc:
+        pipeline.run(input_path, **kwargs)
+    assert exc.value is error
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_bare_exception_outside_inference_is_not_mapped_to_stage(tmp_path, monkeypatch, chunked):
+    # 写像するのは外部推論の呼び出しだけで、その外側(音量解析等)の失敗はそのまま通す。
+    error = RuntimeError("rms failed")
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, failing_stage=None, error=error, chunked=chunked)
+    monkeypatch.setattr(
+        pipeline._va_rms, "compute_rms", lambda *a, **k: (_ for _ in ()).throw(error))
+
+    with pytest.raises(RuntimeError) as exc:
+        pipeline.run(input_path, **kwargs)
+    assert exc.value is error
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_bare_exception_right_after_inference_is_not_mapped_to_stage(
+        tmp_path, monkeypatch, chunked):
+    # 推論呼び出しの直後に続く処理(内部生成ファイルの読み直し)まで写像範囲へ巻き込まないことを固定する。
+    # 長尺分割では推論と読み直しが同じ繰り返しの中にあるため、範囲が広いと工程失敗へ化ける。
+    error = RuntimeError("read failed")
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, failing_stage=None, error=error, chunked=chunked)
+    monkeypatch.setattr(
+        pipeline, "_read_intermediate", lambda *a, **k: (_ for _ in ()).throw(error))
+
+    with pytest.raises(RuntimeError) as exc:
+        pipeline.run(input_path, **kwargs)
+    assert exc.value is error
+
+
+@pytest.mark.xfail(reason="impl pending: 進捗送出の失敗を包む専用例外が未実装")
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("failing_stage", ["separate", "recognize"])
+def test_progress_emit_failure_from_inference_passes_through_unchanged(
+        tmp_path, monkeypatch, failing_stage, chunked):
+    # 推論中の進捗送出の失敗は工程の失敗ではないので写像せず、想定外例外の経路へ落とす。
+    error = progress_module.ProgressEmitError("stdout is closed")
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, failing_stage=failing_stage, error=error, chunked=chunked)
+
+    with pytest.raises(progress_module.ProgressEmitError) as exc:
+        pipeline.run(input_path, **kwargs)
+    assert exc.value is error
