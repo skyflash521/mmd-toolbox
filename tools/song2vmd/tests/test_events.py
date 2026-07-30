@@ -760,8 +760,6 @@ def test_three_adjacent_same_vowel_segments_merge_with_merged_count_two():
     assert diag.merged_morae == 2  # 3区間→1イベントで2回統合
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: gap 継続の断片との統合を merged_morae から除いていない")
 def test_gap_continuation_fragment_does_not_count_as_merged_mora():
     # gapが直前母音の発声継続になった断片は、1つの発声を時間で切った断片でモーラではないので、
     # 直前区間へまとまっても併合したモーラ数には数えない。末尾のgapはRMSに依らず閉口するので、
@@ -777,8 +775,6 @@ def test_gap_continuation_fragment_does_not_count_as_merged_mora():
     assert diag.merged_morae == 0
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: gap 継続の断片との統合を merged_morae から除いていない")
 def test_gap_continuation_between_same_vowels_counts_only_the_real_mora():
     # 実モーラ2つの間にgap継続の断片が挟まって1イベントにまとまる場合、数えるのは実モーラの統合だけ。
     segments = [
@@ -804,8 +800,6 @@ def test_adjacent_moraic_nasal_segments_merge_with_merged_count_one():
     assert diag.merged_morae == 1
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: gap 継続の断片との統合を merged_morae から除いていない")
 def test_gap_continuation_fragment_of_moraic_nasal_does_not_count():
     # 撥音の区間を継続したgapの断片も同じ扱いにする(母音側だけの除外にしない)。
     segments = [

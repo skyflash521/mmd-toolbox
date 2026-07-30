@@ -112,6 +112,9 @@ class _Unit:
     aperture_ipas: tuple[str, ...] = ()
     content_start_sec: float | None = None
     content_end_sec: float | None = None
+    # gap の発声継続として作った区間か。継続はモーラでなく1つの発声を時間で切った断片なので、
+    # 統合しても併合モーラ数に数えない(口形・母音文字は直前の区間と同じで区別が付かないため印を持つ)。
+    from_gap_continuation: bool = False
 
     def content_span(self):
         start = self.content_start_sec if self.content_start_sec is not None else self.start_sec
@@ -258,7 +261,8 @@ def _gap_close_time(rms, start_sec, end_sec, silence_on):
     達した連続にはその先の発声再開が無いため適用しない)。しきい値以下の連続が無ければ None
     (gap全体で発声が継続)。gap内の最初のフレームから始まる連続は start_sec を返す(そのフレームの
     RMS窓はgap開始時刻を覆っており、gap先頭から無音として全体閉口に倒す。フレーム中心時刻を返すと
-    幅十数msの継続断片が生じ、直前母音への併合がモーラ併合の診断値を実体なく水増しするため)。
+    直前母音の終端がRMSのホップ1つ分に満たない幅だけgap側へ延び、無音の開始が実際の発声終了より
+    後ろへずれるため)。
     """
     times, values = rms.times_sec, rms.values
     lo = int(np.searchsorted(times, start_sec, side="left"))
@@ -299,12 +303,14 @@ def _resolve_silence(units, rms, silence_on, low_dynamics):
             close_at = None if low_dynamics else _gap_close_time(rms, u.start_sec, u.end_sec, silence_on)
             kind, letter = open_kind
             if close_at is None:
-                result.append(_Unit(kind, u.start_sec, u.end_sec, letter=letter))
+                result.append(_Unit(kind, u.start_sec, u.end_sec, letter=letter,
+                                    from_gap_continuation=True))
             elif close_at <= u.start_sec:
                 result.append(_Unit("silence", u.start_sec, u.end_sec))
                 open_kind = None
             else:
-                result.append(_Unit(kind, u.start_sec, close_at, letter=letter))
+                result.append(_Unit(kind, u.start_sec, close_at, letter=letter,
+                                    from_gap_continuation=True))
                 result.append(_Unit("silence", close_at, u.end_sec))
                 open_kind = None
         elif u.kind == "vowel":
@@ -333,7 +339,8 @@ def _merge_adjacent(units):
     末尾ユニットの終了までへ広げる(同一口形が続く区間はすべて母音的内容とみなす)。
 
     戻り値は (統合後のユニット列, 統合回数)。統合回数は母音/「ん」区間の統合
-    (merged_morae)だけを数え、閉口・無音区間の統合は含めない。
+    (merged_morae)だけを数え、閉口・無音区間の統合と、gap の発声継続として作った区間の統合は
+    含めない。
     """
     merged = []
     merged_morae = 0
@@ -347,7 +354,7 @@ def _merge_adjacent(units):
         )
         if can_merge:
             prev = merged[-1]
-            if u.kind in _MORA_KINDS:
+            if u.kind in _MORA_KINDS and not u.from_gap_continuation:
                 merged_morae += 1
             prev_content_start, _ = prev.content_span()
             _, u_content_end = u.content_span()
