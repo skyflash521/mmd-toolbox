@@ -159,8 +159,6 @@ def test_render_report_text_includes_backends_style_params_and_stats():
     assert indices == sorted(indices)  # 仕様6.7の列挙順どおりに単調増加
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: 人間向けレポートに英語カタカナ化のバックエンドが未掲載")
 def test_render_report_text_includes_english_katakana_method_backend():
     # 機械モードの result が返すバックエンドと同じ集合を人間向けにも出す(採用構成が読み取れないと
     # 診断に使えない)。並びは他のバックエンドに続けて style の前。
