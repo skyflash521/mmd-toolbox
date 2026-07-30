@@ -302,8 +302,8 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
   (規約 [§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール))。
 - 人間向け標準エラーは、ロケール符号化で表せない文字を置換して出し、符号化失敗でプロセスを
   落とさない(規約 [§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール)。機械モードに限らず常に適用する)。
-- ストリームは result または error のちょうど 1 つで終端する。終端は CLI 本体の単一経路で送出し、
-  終端後の送出は拒否される。
+- ストリームは result または error のちょうど 1 つで終端する(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める終端保証の
+  例外を除く)。終端は CLI 本体の単一経路で送出し、終端後の送出は拒否される。
 - `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベント
   ストリームには載せない(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動) のメタ操作の例外)。
 - イベント契約の進化は規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換) に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
@@ -414,5 +414,5 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
   で終える(`vpr2vmd` は単一プロセスで走り、子プロセスは持たない)。
 - **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
   扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
-- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) の終端保証の
-  唯一の例外。規約 [§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性))。出力の原子性により中途半端な出力ファイルは残らない。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める
+  終端保証の例外の 1 つ。規約 [§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性))。出力の原子性により中途半端な出力ファイルは残らない。
