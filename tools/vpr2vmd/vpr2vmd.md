@@ -249,9 +249,12 @@ CLI 上書き**で、`--ref-bpm`/`--tempo-scale-min` はテンポ補正の入力
 
 - **`--dry-run`(標準出力)**: 出力VMDを書かず、処理計画(解決した入力・出力・対象トラック・スタイル・
   調整パラメータの表示)に続けて診断要約を標準出力へ出す。
-  項目は次のとおり: 採用音符数・口形イベント数・モーフキー数・開き量統計(最小/最大/平均)・母音未確定
-  (母音が得られない音符)の件数・重複音符の除外件数および後続開始への切り詰め件数・自前の口形イベントを
-  作らない記号(その他子音・未知記号)の記号種と件数。
+  項目は次のとおり: 採用音符数・口形イベント数・モーフキー数・開き量の決定経路・開き量統計(最小/最大/平均)・
+  母音未確定(母音が得られない音符)の件数・重複音符の除外件数および後続開始への切り詰め件数・自前の口形
+  イベントを作らない記号(その他子音・未知記号)の記号種と件数。
+  開き量の決定経路は [§3](#3-処理パイプライン) の優先順のどれで決めたかを示し、声量コントローラ曲線なら `dynamics`、
+  ベロシティなら `velocity`、ベロシティが一様で既定開き量を用いたなら `default` とする。採用音符が0件の
+  ときは開き量を1件も決めていないので、いずれにも当たらないものとして扱う。
 - **`--verbose`(標準出力)**: 通常実行(出力VMDを書く)でも、上の `--dry-run` と同じ処理計画・診断要約を
   標準出力へ出す。出力VMDの内容は `--verbose` の有無で変わらない。
 - **警告(標準エラー)**: 次を標準エラーへ出す(いずれもエラーではなく正常終了。コード0、[§4.3](#43-終了コード))。
@@ -334,12 +337,14 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
     (0F 中立登録・正規化後)、`adopted_notes` は採用音符数、`mouth_events` は口形イベント数。
   - `mode:"inspect"`(入力検査 `--machine --dry-run`): vpr を読み変換を行うが VMD を書かず
     `{type:"result", mode:"inspect", output:null, input_kind:"vpr", track_index, track_name, style,
-    n_morph, model_name, params, adopted_notes, mouth_events, morph_keys, open_amounts,
+    n_morph, model_name, params, adopted_notes, mouth_events, morph_keys, open_source, open_amounts,
     vowel_undetermined, overlap_excluded, overlap_truncated, non_event_symbols}` を出す。
     `params` は解決済みの最終値(スタイルプリセット解決 → テンポ補正 → CLI 上書き適用後)の
     `{open_max, default_open, legato_max, valley_shallow, valley_deep, valley_slope, coartic_overlap,
     anticipation, ref_bpm, tempo_scale_min, representative_bpm}`(`representative_bpm` は採用音符列と
-    テンポマップから求めた代表 BPM)。`open_amounts` は採用音符別開き量の `{min, max, mean}`
+    テンポマップから求めた代表 BPM)。`open_source` は開き量の決定経路で
+    `"dynamics"`/`"velocity"`/`"default"` のいずれか(採用 0 件なら `null`。[§4.4](#44-診断と警告))。
+    `open_amounts` は採用音符別開き量の `{min, max, mean}`
     (採用 0 件なら `null`)。`vowel_undetermined` は母音未確定件数、`overlap_excluded`/
     `overlap_truncated` は重複音符の除外・切り詰め件数、`non_event_symbols` は自前の口形イベントを
     作らない記号の `{記号: 件数}` オブジェクト([§4.4](#44-診断と警告) の診断と同じ素データ)。
