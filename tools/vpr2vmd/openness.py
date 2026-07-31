@@ -27,6 +27,15 @@ def velocity_to_open(
     return min(value, open_max)  # --open-max を上限とする
 
 
+def uses_default_open(velocities: list[int]) -> bool:
+    """ベロシティ列が一様で、開き量が既定開き量に退化するか。
+
+    退化の条件は open_amounts の分岐そのもの。決定経路を呼び出し側が知るための問い合わせ口で、
+    同じ条件を呼び出し側へ書き写さないために置く。
+    """
+    return bool(velocities) and min(velocities) == max(velocities)
+
+
 def open_amounts(
     velocities: list[int],
     *,
@@ -45,7 +54,7 @@ def open_amounts(
     """
     if not velocities:
         return []
-    if min(velocities) == max(velocities):
+    if uses_default_open(velocities):
         return [default_open] * len(velocities)
     return [
         velocity_to_open(v, lo=lo, hi=hi, open_max=open_max, gamma=gamma)

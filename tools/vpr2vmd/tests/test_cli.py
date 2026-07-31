@@ -99,8 +99,9 @@ def test_dry_run_plan_shows_resolved_values(tmp_path, capsys, monkeypatch):
     assert float(plan["representative-bpm"]) == pytest.approx(150.0)
 
 
-@pytest.mark.xfail(strict=True, reason="impl pending: 開き量の決定経路を診断へ出していない")
-@pytest.mark.parametrize("velocities, expected", [((64, 64), "default"), ((40, 100), "velocity")])
+@pytest.mark.parametrize("velocities, expected", [
+    ((64, 64), "default"), ((40, 100), "velocity"), ((), "なし"),
+])
 def test_dry_run_diagnostics_show_open_source(tmp_path, capsys, monkeypatch,
                                               velocities, expected):
     # 開き量が一定に見えるとき、それが声量曲線由来か既定値かを人間向けの診断でも判別できるようにする。

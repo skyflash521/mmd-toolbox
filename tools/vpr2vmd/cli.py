@@ -341,6 +341,7 @@ class _Diagnostics:
     adopted: int  # 採用音符数
     events: int  # 口形イベント数
     morph_keys: int  # モーフキー数
+    open_source: str | None  # 開き量の決定経路(採用音符0件なら None)
     open_amounts: list[float]  # 採用音符別の開き量(最小/最大/平均の素材)
     overlap: OverlapDiagnostics  # 重複音符の除外・切り詰め件数
     event: EventDiagnostics  # 母音未確定件数・自前イベントを作らない記号
@@ -410,7 +411,11 @@ def _build(args, emitter, fail):
         open_max=openness_params.open_max,
         gamma=openness_params.gamma,
     )
-    if open_by_note is None:
+    if open_by_note is not None:
+        open_source = "dynamics"
+    else:
+        open_source = "default" if openness.uses_default_open(
+            [note.velocity for note in adopted]) else "velocity"
         open_by_note = openness.open_amounts(
             [note.velocity for note in adopted],
             lo=openness_params.lo,
@@ -443,6 +448,8 @@ def _build(args, emitter, fail):
         events=len(mouth_events),
         # 実際に書き込まれるキー数(0F 中立登録・normalize 後)を数える。
         morph_keys=len(document.morph),
+        # 採用音符が0件なら開き量を1件も決めていないので、どの経路にも当たらない。
+        open_source=open_source if adopted else None,
         open_amounts=list(open_by_note),
         overlap=overlap_diag,
         event=event_diag,
@@ -469,6 +476,8 @@ def _print_diagnostics(diag: _Diagnostics) -> None:
     print(f"採用音符数: {diag.adopted}")
     print(f"口形イベント数: {diag.events}")
     print(f"モーフキー数: {diag.morph_keys}")
+    # 採用音符が0件なら経路に当たらない。人間向けには内部表現でなく「なし」と出す。
+    print(f"開き量の決定経路: {diag.open_source if diag.open_source is not None else 'なし'}")
     if diag.open_amounts:
         lo = min(diag.open_amounts)
         hi = max(diag.open_amounts)
@@ -504,6 +513,7 @@ def _build_inspect(args, built: _Built) -> dict:
         "adopted_notes": diag.adopted,
         "mouth_events": diag.events,
         "morph_keys": diag.morph_keys,
+        "open_source": diag.open_source,
         "open_amounts": _open_amounts_stats(diag.open_amounts),
         "vowel_undetermined": diag.event.vowel_undetermined,
         "overlap_excluded": diag.overlap.excluded,

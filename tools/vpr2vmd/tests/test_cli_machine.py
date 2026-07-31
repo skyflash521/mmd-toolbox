@@ -221,7 +221,6 @@ def _project_with_dynamics(notes, points):
     return VprProject(resolution=480, tempos=[TempoEvent(0, 120.0)], tracks=[track])
 
 
-@pytest.mark.xfail(strict=True, reason="impl pending: 開き量の決定経路を診断へ出していない")
 @pytest.mark.parametrize("project_factory, expected", [
     (lambda: _project_with_dynamics([_note(0, 480, ["a"]), _note(480, 480, ["i"])],
                                     [(0, 30), (480, 100)]), "dynamics"),
