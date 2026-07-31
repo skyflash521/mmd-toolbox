@@ -921,8 +921,6 @@ _ONE_FRAME_SEC = 1.0 / FRAME_RATE
 # 直前へ置いて母音どうしの間隔の制約を避ける。
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
 def test_onset_keeps_one_frame_for_the_preceding_unit():
     # 立ち上がりが直前区間の開始側にあっても、直前区間を1フレームより短くしない。
     segments = [
@@ -938,8 +936,6 @@ def test_onset_keeps_one_frame_for_the_preceding_unit():
     assert bilabial.end - bilabial.start == pytest.approx(_ONE_FRAME_SEC * FRAME_RATE)
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
 def test_onset_keeps_one_frame_for_the_corrected_vowel():
     # 立ち上がりが当該母音の終了側にあっても、その母音を1フレームより短くしない。
     segments = [
@@ -954,8 +950,6 @@ def test_onset_keeps_one_frame_for_the_corrected_vowel():
     assert a_event.end - a_event.start == pytest.approx(_ONE_FRAME_SEC * FRAME_RATE)
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
 def test_onset_lower_bound_follows_the_corrected_start_of_the_preceding_vowel():
     # 直前が母音でその開始も補正で動く場合、下限は動いた後の開始を基準にする(補正前の開始を
     # 基準にすると、直前の母音が1フレームより短くなる)。
@@ -970,8 +964,6 @@ def test_onset_lower_bound_follows_the_corrected_start_of_the_preceding_vowel():
     assert a_event.end - a_event.start == pytest.approx(_ONE_FRAME_SEC * FRAME_RATE)
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
 def test_onset_is_not_applied_when_the_allowed_range_is_empty():
     # 直前区間にも当該母音にも1フレームを残せないときは補正せず、トークン境界をそのまま使う。
     segments = [

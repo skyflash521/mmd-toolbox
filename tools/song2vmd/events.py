@@ -50,6 +50,7 @@ _MORA_CENTER_FRACTION = 0.6  # 代表RMSの中央60%窓の比率(母音核・モ
 _ONSET_WINDOW_SEC = 0.06  # 母音境界のRMSオンセット補正窓(初期値)。
 _ONSET_SLOPE_PER_10MS = 0.15  # オンセット判定の傾きしきい値(初期値)。
 _ONSET_SMOOTH_WINDOW_SEC = 0.03  # オンセット検出前の平滑化窓(初期値)。
+_ONSET_MIN_SPAN_SEC = 1.0 / FRAME_RATE  # オンセット補正で残す、前後の区間それぞれの最小長。
 _WEAK_CONFIDENCE_THRESHOLD = 0.5  # 低信頼判定のしきい値(初期値)。
 _WEAK_RMS_WITH_CONFIDENCE = 0.3
 _WEAK_RMS_WITHOUT_CONFIDENCE = 0.2
@@ -408,8 +409,10 @@ def _find_onset(times, smoothed, center_sec):
 def _refine_onsets(units, rms):
     """段階(4): 母音境界のRMSオンセット補正。
 
-    見つかった立ち上がり時刻は、直前ユニット自身の開始と当該母音区間の終了の範囲へクランプし、
-    負長イベントを作らない(lipsync.types.MouthEvent の隙間なし・非重複契約)。
+    見つかった立ち上がり時刻は、直前ユニットの開始から1フレーム後と当該母音区間の終了から1フレーム前の
+    範囲へクランプする。前後のどちらも1フレームより短くしないので、長さが出力上の意味を持たない区間を
+    作らない(lipsync.types.MouthEvent は長さゼロを扱わない)。範囲が空になる(前後を合わせて2フレームに
+    満たない)ときはその母音の補正を行わず、トークン境界をそのまま使う。
     """
     times, smoothed = _smoothed_rms(rms)
     result = list(units)
@@ -419,8 +422,12 @@ def _refine_onsets(units, rms):
         onset = _find_onset(times, smoothed, u.start_sec)
         if onset is None:
             continue
-        lower_bound = result[i - 1].start_sec if i > 0 else float("-inf")
-        onset = min(max(onset, lower_bound), u.end_sec)
+        # 直前ユニットの開始は先に補正された結果を見る(時間順に確定させる)。
+        lower_bound = result[i - 1].start_sec + _ONSET_MIN_SPAN_SEC if i > 0 else float("-inf")
+        upper_bound = u.end_sec - _ONSET_MIN_SPAN_SEC
+        if lower_bound > upper_bound:
+            continue
+        onset = min(max(onset, lower_bound), upper_bound)
         if onset == u.start_sec:
             continue
         if i > 0:
