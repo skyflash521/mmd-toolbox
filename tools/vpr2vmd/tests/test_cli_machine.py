@@ -244,6 +244,20 @@ def test_machine_dry_run_inspect_reports_open_source(
     assert _terminal_events(capsysbinary)[-1]["open_source"] == expected
 
 
+@pytest.mark.xfail(strict=True, reason="impl pending: 一様経路の既定開き量を open_max で頭打ちしない")
+def test_machine_dry_run_inspect_caps_open_amounts_but_keeps_resolved_default_open(
+    tmp_path, capsysbinary, monkeypatch
+):
+    # 既定開き量の頭打ちは開き量を決める時点で行い、解決済みパラメータの報告値は頭打ち前のまま。
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"]), _note(480, 480, ["i"])]))
+    assert cli.main([src, "--open-max", "0.4", "--machine", "--dry-run"]) == 0
+    res = _terminal_events(capsysbinary)[-1]
+    assert res["open_source"] == "default"
+    assert res["params"]["default_open"] > res["params"]["open_max"]  # 報告値は頭打ち前
+    assert res["open_amounts"]["max"] == pytest.approx(res["params"]["open_max"])
+
+
 # --- 通常実行(convert result)--------------------------------------------------
 
 
