@@ -905,6 +905,87 @@ def test_vowel_onset_keeps_token_boundary_when_no_rise_nearby():
     assert a_event.start == pytest.approx(0.30 * FRAME_RATE)
 
 
+def step_rms(duration_sec, rise_sec, low=0.2, high=0.9, hop_sec=0.010):
+    """rise_sec 以降だけ音量が上がる包絡。平滑化の窓ぶん、立ち上がり近傍の数フレームが候補になる。"""
+    n = max(2, round(duration_sec / hop_sec) + 1)
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop_sec for i in range(n)]
+    values = [high if t >= rise_sec else low for t in times]
+    return rms_env(times, values)
+
+
+_ONE_FRAME_SEC = 1.0 / FRAME_RATE
+
+
+# 補正されるのは母音区間の開始だけなので、検証したい境界以外の母音の開始は、立ち上がりから
+# 補正窓(±60ms)より遠ざけて波及を断つ。直前区間の長さを詰めたい場合は、補正対象外の両唇閉鎖を
+# 直前へ置いて母音どうしの間隔の制約を避ける。
+
+
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
+def test_onset_keeps_one_frame_for_the_preceding_unit():
+    # 立ち上がりが直前区間の開始側にあっても、直前区間を1フレームより短くしない。
+    segments = [
+        seg("vowel", 0.0, 0.25, phoneme="a", confidence=0.9),
+        seg("consonant", 0.25, 0.28, phoneme="m"),
+        seg("vowel", 0.28, 0.60, phoneme="i", confidence=0.9),
+    ]
+    mouth_events, _diag = confirm(segments, step_rms(0.60, 0.24))
+    bilabial = next(e for e in mouth_events if e.shape == MouthShape.BILABIAL)
+    i_event = next(e for e in mouth_events if e.shape == MouthShape.I)
+    assert bilabial.end == pytest.approx((0.25 + _ONE_FRAME_SEC) * FRAME_RATE)
+    assert i_event.start == bilabial.end
+    assert bilabial.end - bilabial.start == pytest.approx(_ONE_FRAME_SEC * FRAME_RATE)
+
+
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
+def test_onset_keeps_one_frame_for_the_corrected_vowel():
+    # 立ち上がりが当該母音の終了側にあっても、その母音を1フレームより短くしない。
+    segments = [
+        seg("gap", 0.0, 0.30),
+        seg("vowel", 0.30, 0.32, phoneme="a", confidence=0.9),
+        seg("consonant", 0.32, 0.45, phoneme="m"),
+        seg("vowel", 0.45, 0.60, phoneme="i", confidence=0.9),
+    ]
+    mouth_events, _diag = confirm(segments, step_rms(0.60, 0.34))
+    a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
+    assert a_event.start == pytest.approx((0.32 - _ONE_FRAME_SEC) * FRAME_RATE)
+    assert a_event.end - a_event.start == pytest.approx(_ONE_FRAME_SEC * FRAME_RATE)
+
+
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
+def test_onset_lower_bound_follows_the_corrected_start_of_the_preceding_vowel():
+    # 直前が母音でその開始も補正で動く場合、下限は動いた後の開始を基準にする(補正前の開始を
+    # 基準にすると、直前の母音が1フレームより短くなる)。
+    segments = [
+        seg("vowel", 0.20, 0.30, phoneme="a", confidence=0.9),
+        seg("vowel", 0.30, 0.60, phoneme="i", confidence=0.9),
+    ]
+    mouth_events, _diag = confirm(segments, step_rms(0.60, 0.24))
+    a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
+    i_event = next(e for e in mouth_events if e.shape == MouthShape.I)
+    assert i_event.start == a_event.end
+    assert a_event.end - a_event.start == pytest.approx(_ONE_FRAME_SEC * FRAME_RATE)
+
+
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: オンセット補正の可動範囲を両側1フレームで挟んでいない")
+def test_onset_is_not_applied_when_the_allowed_range_is_empty():
+    # 直前区間にも当該母音にも1フレームを残せないときは補正せず、トークン境界をそのまま使う。
+    segments = [
+        seg("vowel", 0.0, 0.25, phoneme="a", confidence=0.9),
+        seg("consonant", 0.25, 0.28, phoneme="m"),
+        seg("vowel", 0.28, 0.29, phoneme="i", confidence=0.9),
+        seg("consonant", 0.29, 0.33, phoneme="m"),
+        seg("vowel", 0.33, 0.60, phoneme="e̞", confidence=0.9),
+    ]
+    mouth_events, _diag = confirm(segments, step_rms(0.60, 0.24))
+    i_event = next(e for e in mouth_events if e.shape == MouthShape.I)
+    assert i_event.start == pytest.approx(0.28 * FRAME_RATE)
+
+
 # --- 低信頼・無声母音判定 -----------------------------------------------------
 
 
