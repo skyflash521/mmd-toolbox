@@ -5,6 +5,8 @@ vpr の読み込みは形式I/Oモジュール `vpr` に委譲し、本モジュ
 重なり解決・時刻⇔フレーム変換・口形写像は口形イベント確定で扱う。
 """
 
+import re
+
 from vpr import Note, Track, VprProject
 
 
@@ -12,10 +14,13 @@ class TrackSelectionError(Exception):
     """`--track` が対象トラックを一意に選べない(範囲外・不一致・複数一致・トラック無し)。"""
 
 
+_INDEX_PATTERN = re.compile(r"[0-9]+")  # INDEX と解釈する指定(半角数字だけ・符号なし)
+
+
 def select_track(project: VprProject, track: str | None) -> Track:
     """対象の歌唱トラックを選ぶ。
 
-    `track` が None なら先頭トラック。整数として解釈できれば 0-based の INDEX、そうでなければ
+    `track` が None なら先頭トラック。半角数字だけからなる指定は 0-based の INDEX、それ以外は
     `Track.name` と解釈する。名前の複数一致・不一致・INDEX 範囲外・トラック無しは
     `TrackSelectionError`。
     """
@@ -24,11 +29,10 @@ def select_track(project: VprProject, track: str | None) -> Track:
         raise TrackSelectionError("対象トラックがありません")
     if track is None:
         return tracks[0]
-    try:
+    # int() は全角数字・前後空白・符号も受理するので、それらを INDEX と解釈しないよう
+    # 半角数字だけの指定に絞る(全角数字だけの名前を持つトラックを名前で選べるようにする)。
+    if _INDEX_PATTERN.fullmatch(track):
         index = int(track)
-    except ValueError:
-        index = None
-    if index is not None:
         if not 0 <= index < len(tracks):
             raise TrackSelectionError(f"トラック INDEX が範囲外: {track!r}")
         return tracks[index]

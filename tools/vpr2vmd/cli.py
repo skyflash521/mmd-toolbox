@@ -153,11 +153,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", help="出力 VMD(既定: <入力名>.vmd)")
     p.add_argument("--overwrite", action="store_true",
                    help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
-    # --track は整数なら 0-based INDEX、非整数なら Track.name。解釈・解決は
+    # --track は半角数字だけなら 0-based INDEX、それ以外は Track.name。解釈・解決は
     # io.select_track が行うため、ここでは生文字列のまま保持する(type=str)。
     p.add_argument("--track",
-                   help="リップモーション対象の歌唱トラック。整数は 0-based の INDEX、非整数は Track 名"
-                        "(既定: 先頭トラック)")
+                   help="リップモーション対象の歌唱トラック。半角数字だけの指定は 0-based の INDEX、"
+                        "それ以外は Track 名(既定: 先頭トラック)")
     p.add_argument("--model-name", dest="model_name", type=_model_name,
                    default=f"vpr2vmd {__version__}",
                    help="VMD に格納するモデル名(最大 20 バイト・Shift-JIS)")

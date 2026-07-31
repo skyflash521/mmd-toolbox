@@ -141,7 +141,7 @@ def test_report_json_is_now_unknown_option(tmp_path):
 
 
 def test_track_accepts_non_integer_name(tmp_path):
-    """--track は整数 INDEX だけでなく非整数の Track 名も受理する。"""
+    """--track は半角数字だけの INDEX 指定に限らず Track 名も受理する。"""
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--track", "Vocal", "--dry-run"]) == 0
 
