@@ -64,6 +64,43 @@ def test_parses_full_option_set_in_dry_run(tmp_path):
     assert rc == 0
 
 
+@pytest.mark.xfail(strict=True,
+                   reason="impl pending: 処理計画が未指定項目を解決前の代替表示で出す")
+def test_dry_run_plan_shows_resolved_values(tmp_path, capsys, monkeypatch):
+    # 処理計画は解決した値を示す(機械モードの入力検査と同じ解決結果)。未指定を代替表示で
+    # 済ませると、利用者はどの値で動くのかを読み取れない。
+    # 代表テンポは基準テンポの既定(120)と紛れないよう、入力側を別の値にして見分ける。
+    project = VprProject(
+        resolution=480,
+        tempos=[TempoEvent(0, 150.0)],
+        tracks=[Track(name="Vocal", parts=[Part(
+            name="p", start_tick=0,
+            notes=[Note(start_tick=0, duration_tick=480, pitch=60,
+                        lyric="x", velocity=64, phonemes=["a"])],
+        )])],
+    )
+    monkeypatch.setattr(cli, "read", lambda _src: (project, []))
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--dry-run"]) == 0
+    # 診断要約は別の表示なので、処理計画の行だけを対象にする。
+    plan_text = capsys.readouterr().out.split("--- 診断 ---")[0]
+    plan = {ln.split(":", 1)[0]: ln.split(":", 1)[1].strip()
+            for ln in plan_text.splitlines() if ":" in ln}
+
+    # 解決した対象トラックの番号と名前。
+    assert "0" in plan["track"] and "Vocal" in plan["track"]
+    # 調整パラメータは代替表示でなく数値(複合表示は区切りで分けて全要素を見る)。
+    numeric = ["open-max", "default-open", "legato-max", "coartic-overlap", "anticipation"]
+    compound = ["valley(shallow/deep/slope)", "tempo(ref-bpm/scale-min)"]
+    for key in numeric:
+        float(plan[key])
+    for key in compound:
+        for value in plan[key].split("/"):
+            float(value)
+    # 解決の前提になる代表テンポも示す(スタイル解決のテンポ補正がこの値で決まる)。
+    assert float(plan["representative-bpm"]) == pytest.approx(150.0)
+
+
 def test_dry_run_writes_no_output(tmp_path):
     """--dry-run は出力 VMD を書かない。"""
     src = _touch(tmp_path / "in.vpr")
