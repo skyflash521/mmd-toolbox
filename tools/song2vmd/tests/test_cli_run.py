@@ -983,6 +983,27 @@ def test_torch_gpu_warning_silent_when_cpu_requested(monkeypatch):
     assert cli._torch_gpu_warning("cpu") is None
 
 
+@pytest.mark.parametrize("error", [
+    ImportError("no module"),
+    pytest.param(OSError("DLL load failed"), marks=pytest.mark.xfail(
+        strict=True, reason="impl pending: torch の取り込み失敗で OSError を捕捉していない")),
+])
+def test_torch_gpu_warning_silent_when_torch_cannot_be_imported(monkeypatch, error):
+    # torch を読み込めない環境では GPU 構成を判定できないので、判定を飛ばして処理を続ける。
+    # 取り込みは導入の破損で入出力の例外になることもあり、そこで処理前に落ちてはならない。
+    _with_nvidia_smi(monkeypatch, True)
+    real_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "torch":
+            raise error
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+
+    assert cli._torch_gpu_warning("auto") is None
+
+
 def test_run_emits_cpu_only_torch_warning_before_pipeline(tmp_path, monkeypatch, capsysbinary):
     # 数分かかる処理を終えてから伝えても手遅れなので、パイプライン起動より前に出す。判定の呼び出し
     # 順ではなく、イベントストリーム上で警告が処理開始の progress より前に現れることで固定する
