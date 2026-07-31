@@ -76,7 +76,7 @@ def _project(tracks, *, tempos=None):
     )
 
 
-# --- 対象トラック選択(整数=0-based INDEX / 非整数=Track.name) ---
+# --- 対象トラック選択(半角数字だけ=0-based INDEX / それ以外=Track.name) ---
 
 def test_select_track_defaults_to_first():
     project = _project([_track([], name="a"), _track([], name="b")])
@@ -86,6 +86,21 @@ def test_select_track_defaults_to_first():
 def test_select_track_by_index():
     project = _project([_track([], name="a"), _track([], name="b")])
     assert vio.select_track(project, "1").name == "b"
+
+
+@pytest.mark.xfail(strict=True, reason="impl pending: 全角数字の指定を INDEX と解釈してしまう")
+def test_select_track_full_width_digit_selects_by_name():
+    # 全角数字だけの名前を持つトラックは、その名前で選べる(INDEX と解釈しない)。
+    project = _project([_track([], name="１"), _track([], name="b")])
+    assert vio.select_track(project, "１").name == "１"
+
+
+@pytest.mark.xfail(strict=True, reason="impl pending: 空白付きの数字を INDEX と解釈してしまう")
+def test_select_track_spaced_digit_is_treated_as_name():
+    # 空白を含む指定は数字だけではないので名前として扱う(一致しなければエラー)。
+    project = _project([_track([], name="a"), _track([], name="b")])
+    with pytest.raises(vio.TrackSelectionError):
+        vio.select_track(project, " 1")
 
 
 def test_select_track_index_out_of_range_errors():
