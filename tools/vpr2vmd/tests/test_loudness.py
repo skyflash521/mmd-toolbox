@@ -1,6 +1,6 @@
 """声量(ダイナミクス)コントローラ→開き量の写像のテスト。
 
-声量コントローラの選別(dynamics 優先・無ければ s5Expression・どちらも無ければ None)、モーラ区間の
+声量コントローラの選別(採用するのは dynamics のみ。無ければ None)、モーラ区間の
 階段平均、コントローラ値域での 0〜1 正規化と開き量写像を検証する。
 """
 
@@ -25,13 +25,13 @@ def _note(start, dur):
 
 
 def test_choose_dynamics_ignoring_non_loudness_controllers():
-    # 採用するのは確定名 dynamics のみ。s5Expression・音色等が同居しても dynamics を選ぶ。
+    # 採用するのは dynamics だけ。s5Expression・音色等が同居しても dynamics を選ぶ。
     parts = [_part([_curve("s5Expression", [(0, 30)]), _curve("dynamics", [(0, 64)])])]
     assert loudness.choose_loudness_controller(parts) == "dynamics"
 
 
-def test_choose_none_when_only_s5expression_deferred():
-    # s5Expression は中立値・被覆の扱いが未確定なので初期実装では声量として採用しない(None=フォールバック)。
+def test_choose_none_when_only_s5expression():
+    # s5Expression は中立値・被覆の扱いが未確定なので声量として採用しない(None=フォールバック)。
     parts = [_part([_curve("s5Expression", [(0, 30)])])]
     assert loudness.choose_loudness_controller(parts) is None
 

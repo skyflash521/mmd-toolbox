@@ -172,8 +172,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--open-max", dest="open_max", type=_open_amount,
                    help="口の開き量の上限(0.0〜1.0。既定: プリセット値)")
     p.add_argument("--default-open", dest="default_open", type=_open_amount,
-                   help="ベロシティが一様なときの既定開き量(0.0〜1.0。既定: 開き量レンジ中央。"
-                        "開き量へ用いるときに --open-max で頭打ちする)")
+                   help="声量コントローラ曲線が無く、ベロシティが一様なときの既定開き量"
+                        "(0.0〜1.0。既定: 開き量レンジ中央。開き量へ用いるときに --open-max で頭打ちする)")
     # 視覚で詰める調整パラメータ(未指定 None はプリセット/既定値を使う)。プリセット解決とテンポ補正の
     # 後に最終値として上書きする。各パラメータの意味は lipsync 側が定める。
     p.add_argument("--legato-max", dest="legato_max", type=_positive_float,
@@ -402,7 +402,7 @@ def _build(args, emitter, fail):
         overrides["legato_valley_slope"] = args.valley_slope
     if overrides:
         gen_params = replace(gen_params, **overrides)
-    # 開き量(強弱): 声量コントローラ曲線(dynamics/s5Expression)があればモーラ区間平均から写し、
+    # 開き量(強弱): 声量コントローラ曲線(dynamics)があればモーラ区間平均から写し、
     # 無ければ velocity 由来へフォールバックする。
     open_by_note = loudness.open_amounts_from_loudness(
         track.parts,
