@@ -76,10 +76,9 @@ def test_open_amounts_single_note_is_uniform_default():
     ) == [pytest.approx(_DEFAULT)]
 
 
-@pytest.mark.xfail(strict=True, reason="impl pending: 一様経路の既定開き量を open_max で頭打ちしない")
 def test_open_amounts_default_is_capped_by_open_max():
-    # 一様経路の既定開き量も open_max で頭打ちする(診断・入力検査が示す開き量を、最終出力の
-    # 抑制済みの値と一致させる)。
+    # 一様経路の既定開き量も open_max で頭打ちする(開き量の決め方によらず同じ上限を効かせる。
+    # 揃えないと、ベロシティが一様かどうかだけで開き量が上限を跨いで不連続になる)。
     result = openness.open_amounts(
         [70, 70], lo=_LO, hi=_HI, open_max=0.50, default_open=0.80
     )

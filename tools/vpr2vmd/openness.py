@@ -48,14 +48,16 @@ def open_amounts(
     """ベロシティ列を各要素の開き量へ写像する。
 
     全ベロシティが一様(強弱差 0)のときは写像式が定数に退化するため、全要素へ既定開き量
-    `default_open` を用いる(`open_max` での頭打ちはしない。既定開き量の最終上限は lipsync の
-    `open_cap` が担う)。強弱差があれば各ベロシティを `velocity_to_open` で個別に写像する。空入力は
-    空列。
+    `default_open` を用いる。既定開き量にも `open_max` を掛けるので、診断・入力検査が上限を超えた
+    開き量を示すことはない(lipsync は保持値へさらに母音別倍率を掛けてから `open_cap` で
+    クランプするため、最終出力の重みがこの開き量と同じ値になるとは限らない)。写像式のレンジ上限
+    `hi` は既定開き量に掛けない。既定開き量はレンジの内側に取る値ではなく、強弱差が無いときの
+    アンカーだから。強弱差があれば各ベロシティを `velocity_to_open` で個別に写像する。空入力は空列。
     """
     if not velocities:
         return []
     if uses_default_open(velocities):
-        return [default_open] * len(velocities)
+        return [min(default_open, open_max)] * len(velocities)
     return [
         velocity_to_open(v, lo=lo, hi=hi, open_max=open_max, gamma=gamma)
         for v in velocities

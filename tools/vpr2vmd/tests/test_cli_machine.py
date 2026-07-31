@@ -244,7 +244,6 @@ def test_machine_dry_run_inspect_reports_open_source(
     assert _terminal_events(capsysbinary)[-1]["open_source"] == expected
 
 
-@pytest.mark.xfail(strict=True, reason="impl pending: 一様経路の既定開き量を open_max で頭打ちしない")
 def test_machine_dry_run_inspect_caps_open_amounts_but_keeps_resolved_default_open(
     tmp_path, capsysbinary, monkeypatch
 ):
