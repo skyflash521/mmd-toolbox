@@ -99,6 +99,31 @@ def test_dry_run_plan_shows_resolved_values(tmp_path, capsys, monkeypatch):
     assert float(plan["representative-bpm"]) == pytest.approx(150.0)
 
 
+@pytest.mark.xfail(strict=True, reason="impl pending: 開き量の決定経路を診断へ出していない")
+@pytest.mark.parametrize("velocities, expected", [((64, 64), "default"), ((40, 100), "velocity")])
+def test_dry_run_diagnostics_show_open_source(tmp_path, capsys, monkeypatch,
+                                              velocities, expected):
+    # 開き量が一定に見えるとき、それが声量曲線由来か既定値かを人間向けの診断でも判別できるようにする。
+    # 表示が経路に連動することを見るため、一様と非一様の両方を通す。
+    project = VprProject(
+        resolution=480,
+        tempos=[TempoEvent(0, 120.0)],
+        tracks=[Track(name="Vocal", parts=[Part(
+            name="p", start_tick=0,
+            notes=[Note(start_tick=480 * i, duration_tick=480, pitch=60, lyric="x",
+                        velocity=v, phonemes=["a"])
+                   for i, v in enumerate(velocities)],
+        )])],
+    )
+    monkeypatch.setattr(cli, "read", lambda _src: (project, []))
+    src = _touch(tmp_path / "in.vpr")
+    assert cli.main([src, "--dry-run"]) == 0
+    diagnostics = capsys.readouterr().out.split("--- 診断 ---")[1]
+    shown = {ln.split(":", 1)[0]: ln.split(":", 1)[1].strip()
+             for ln in diagnostics.splitlines() if ":" in ln}
+    assert shown["開き量の決定経路"] == expected
+
+
 def test_dry_run_writes_no_output(tmp_path):
     """--dry-run は出力 VMD を書かない。"""
     src = _touch(tmp_path / "in.vpr")

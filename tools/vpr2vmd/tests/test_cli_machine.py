@@ -11,7 +11,19 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 
 import json
 
-from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
+import pytest
+
+from vpr import (
+    ControllerCurve,
+    ControllerEvent,
+    Note,
+    Part,
+    TempoEvent,
+    Track,
+    VprFormatError,
+    VprProject,
+    VprWarning,
+)
 from vpr2vmd import __version__, cli
 
 
@@ -195,6 +207,42 @@ def test_machine_dry_run_no_adopted_warns_then_inspect(tmp_path, capsysbinary, m
     events = _terminal_events(capsysbinary)
     assert any(e["type"] == "warning" and e["code"] == "no_adopted_notes" for e in events)
     assert events[-1]["mode"] == "inspect" and events[-1]["open_amounts"] is None
+
+
+# --- 開き量の決定経路(open_source)----------------------------------------------
+
+
+def _project_with_dynamics(notes, points):
+    track = Track(name="Vocal", parts=[Part(
+        name="p", start_tick=0, notes=notes,
+        controllers=[ControllerCurve(name="dynamics",
+                                     events=[ControllerEvent(t, v) for t, v in points])],
+    )])
+    return VprProject(resolution=480, tempos=[TempoEvent(0, 120.0)], tracks=[track])
+
+
+@pytest.mark.xfail(strict=True, reason="impl pending: 開き量の決定経路を診断へ出していない")
+@pytest.mark.parametrize("project_factory, expected", [
+    (lambda: _project_with_dynamics([_note(0, 480, ["a"]), _note(480, 480, ["i"])],
+                                    [(0, 30), (480, 100)]), "dynamics"),
+    # 曲線が平坦で開き量が一定になっても、決めたのは声量曲線である(結果の一様さで経路を決めない)。
+    (lambda: _project_with_dynamics([_note(0, 480, ["a"]), _note(480, 480, ["i"])],
+                                    [(0, 64)]), "dynamics"),
+    (lambda: _project([_note(0, 480, ["a"], velocity=40),
+                       _note(480, 480, ["i"], velocity=100)]), "velocity"),
+    (lambda: _project([_note(0, 480, ["a"], velocity=64),
+                       _note(480, 480, ["i"], velocity=64)]), "default"),
+    # 採用0件は、声量曲線があっても開き量を1件も決めていないので経路に当たらない。
+    (lambda: _project_with_dynamics([], [(0, 64)]), None),
+])
+def test_machine_dry_run_inspect_reports_open_source(
+    tmp_path, capsysbinary, monkeypatch, project_factory, expected
+):
+    # 開き量が一定に見えるとき、それが声量曲線由来か既定値かを利用者が判別できるようにする。
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, project_factory())
+    assert cli.main([src, "--machine", "--dry-run"]) == 0
+    assert _terminal_events(capsysbinary)[-1]["open_source"] == expected
 
 
 # --- 通常実行(convert result)--------------------------------------------------
