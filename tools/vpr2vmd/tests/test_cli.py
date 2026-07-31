@@ -64,8 +64,6 @@ def test_parses_full_option_set_in_dry_run(tmp_path):
     assert rc == 0
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="impl pending: 処理計画が未指定項目を解決前の代替表示で出す")
 def test_dry_run_plan_shows_resolved_values(tmp_path, capsys, monkeypatch):
     # 処理計画は解決した値を示す(機械モードの入力検査と同じ解決結果)。未指定を代替表示で
     # 済ませると、利用者はどの値で動くのかを読み取れない。

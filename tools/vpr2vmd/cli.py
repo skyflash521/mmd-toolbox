@@ -306,32 +306,32 @@ def _describe_presets():
     return out
 
 
-def _print_plan(args, output: str) -> None:
-    """--dry-run の処理計画表示(出力は書かない)。"""
+def _print_plan(args, output: str, built: "_Built") -> None:
+    """--dry-run の処理計画表示(出力は書かない)。
+
+    表示する値は、機械モードの入力検査と同じ解決結果(_build の成果)から取る。利用者が指定した
+    かどうかに依らず、実際に使う値をそのまま示す。
+    """
+    resolved = built.resolved
     print(f"input: {args.input}")
     print(f"output: {output}")
-    print(f"track: {args.track if args.track is not None else '(先頭トラック)'}")
+    print(f"track: {built.track_index} {built.track_name}")
     print(f"style: {args.style}")
     # 既定は撥音を閉口へ倒す(off)。--n-morph 指定時のみ「ん」モーフを使う(on)。
     print(f"n-morph: {'on (撥音→ん)' if args.n_morph else 'off (撥音→無音)'}")
     print(f"model-name: {args.model_name!r}")
-    print(f"open-max: {args.open_max if args.open_max is not None else '(プリセット値)'}")
-    print(
-        f"default-open: "
-        f"{args.default_open if args.default_open is not None else '(プリセット値)'}"
-    )
-    # 調整パラメータ(未指定はプリセット/既定値を使う)。
-    def shown(v):
-        return v if v is not None else "(既定)"
-
-    print(f"legato-max: {shown(args.legato_max)}")
+    print(f"open-max: {resolved['open_max']}")
+    print(f"default-open: {resolved['default_open']}")
+    print(f"legato-max: {resolved['legato_max']}")
     print(
         f"valley(shallow/deep/slope): "
-        f"{shown(args.valley_shallow)}/{shown(args.valley_deep)}/{shown(args.valley_slope)}"
+        f"{resolved['valley_shallow']}/{resolved['valley_deep']}/{resolved['valley_slope']}"
     )
-    print(f"coartic-overlap: {shown(args.coartic_overlap)}")
-    print(f"anticipation: {shown(args.anticipation)}")
-    print(f"tempo(ref-bpm/scale-min): {shown(args.ref_bpm)}/{shown(args.tempo_scale_min)}")
+    print(f"coartic-overlap: {resolved['coartic_overlap']}")
+    print(f"anticipation: {resolved['anticipation']}")
+    print(f"tempo(ref-bpm/scale-min): {resolved['ref_bpm']}/{resolved['tempo_scale_min']}")
+    # 保持・アタック・リリースへのテンポ補正はこの代表テンポで決まるので、解決結果と併せて示す。
+    print(f"representative-bpm: {resolved['representative_bpm']}")
 
 
 @dataclass
@@ -671,7 +671,7 @@ def _run(args, emitter, fail) -> int:
     # --dry-run / --verbose は処理計画と診断を標準出力へ出す。機械モードは標準出力をイベント専用に保つ
     # ため人間向け表示は出さない。
     if (args.dry_run or args.verbose) and emitter is None:
-        _print_plan(args, output)
+        _print_plan(args, output, built)
         _print_diagnostics(diag)
 
     # --dry-run は出力を書かずに終える。機械モードは入力検査(inspect)の result で終端する。
