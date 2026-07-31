@@ -190,7 +190,7 @@ vpr2vmd INPUT [options]
 | `INPUT` | 必須 | 入力 vpr ファイル |
 | `-o, --output PATH` | `<入力名>.vmd` | 出力VMD |
 | `--overwrite` | off | 出力先に既存ファイルがあるときの上書きを許可する(入力と同一パスかどうかは問わない) |
-| `--track NAME\|INDEX` | 先頭トラック(`tracks[0]`) | リップモーション対象の歌唱トラック。整数は 0-based の INDEX、非整数は `Track.name`。名前が複数一致・不一致・INDEX 範囲外はエラー |
+| `--track NAME\|INDEX` | 先頭トラック(`tracks[0]`) | リップモーション対象の歌唱トラック。半角数字だけからなる指定は 0-based の INDEX、それ以外は `Track.name`(符号・空白・全角数字を含む指定は名前として扱う)。名前が複数一致・不一致・INDEX 範囲外はエラー |
 | `--model-name NAME` | `vpr2vmd <実行中のツールバージョン>`(例: `vpr2vmd 1.2.3`) | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
 | `--style NAME` | `pop` | リップモーションスタイルプリセット。`lipsync` の生成パラメータ(開き量レンジ・タイミング・誇張)を切り替える |
 | `--n-morph` | off | 撥音に「ん」モーフ(`MouthShape.N`)を使う(既定 off)。`--no-n-morph` の対の明示形 |
