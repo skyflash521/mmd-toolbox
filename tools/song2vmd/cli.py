@@ -555,7 +555,9 @@ def _torch_gpu_warning(device_mode):
         return None
     try:
         import torch
-    except ImportError:
+    except (ImportError, OSError):
+        # 未導入だけでなく、導入が壊れて共有ライブラリを開けない場合も判定できない
+        # (どちらもこの警告のためだけに処理を止める理由にはならない)。
         return None
     version = torch.__version__
     if torch.version.cuda is None:

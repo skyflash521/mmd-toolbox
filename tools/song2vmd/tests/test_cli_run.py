@@ -985,8 +985,7 @@ def test_torch_gpu_warning_silent_when_cpu_requested(monkeypatch):
 
 @pytest.mark.parametrize("error", [
     ImportError("no module"),
-    pytest.param(OSError("DLL load failed"), marks=pytest.mark.xfail(
-        strict=True, reason="impl pending: torch の取り込み失敗で OSError を捕捉していない")),
+    OSError("DLL load failed"),
 ])
 def test_torch_gpu_warning_silent_when_torch_cannot_be_imported(monkeypatch, error):
     # torch を読み込めない環境では GPU 構成を判定できないので、判定を飛ばして処理を続ける。
