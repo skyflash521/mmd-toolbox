@@ -318,6 +318,18 @@ def test_machine_warning_normalize_carries_vmd_section(tmp_path, capsysbinary, m
     assert events[-1]["mode"] == "convert"
 
 
+@pytest.mark.parametrize("flag", ["--verbose", "--dry-run"])
+def test_machine_suppresses_human_plan_and_diagnostics(tmp_path, capsysbinary, monkeypatch, flag):
+    # 機械モードは標準出力をイベント専用に保つため、処理計画・診断の人間向け表示は出さない。
+    # 出力は JSON Lines だけで、人間向けの見出し行が混じらないこと。
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"])]))
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", flag])
+    assert rc == 0
+    events = _terminal_events(capsysbinary)  # 全行が JSON として解析できることを含む
+    assert all(e["type"] in ("warning", "result") for e in events)
+
+
 def test_machine_error_unreadable_input(tmp_path, capsysbinary, monkeypatch):
     # 開けない入力(権限不足等)は internal_error でなく not_vpr(入力不正)へ寄せる。
     src = _touch(tmp_path / "in.vpr")
