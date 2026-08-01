@@ -654,7 +654,9 @@ song2vmd内の定数として持つ([モーラ代表RMSの声量レンジ再正�
 - 選択した各バックエンドと主要パラメータ。
 - 分離の有無、認識音素数、検出モーラ数、音素認識の被覆率。
 - モーラごとの口形(母音・「ん」)・保持値・保持長、併合/間引きしたモーラ数。
-- 閉口区間、最大開き量、生成キー数。
+- 低信頼/無声と判定して開き量を弱めたモーラ数([低信頼区間](#低信頼区間))。開き量が小さいときの原因を
+  利用者が切り分けられるようにするため、実際に弱めた件数を出す。
+- 閉口区間、最大開き量、生成キー数、入力音声の尺。
 
 **併合/間引きしたモーラ数の数え方**: 併合/間引きしたモーラ数は、口形イベント確定([§6.3](#63-口形イベント列の確定入口))で隣接する
 同一の母音的口形(同じ母音どうし・「ん」どうし)の区間が1つにまとまったとき、直前の区間へ吸収された
@@ -981,11 +983,12 @@ GPU を使えない構成の2警告([§6.9](#69-gpu-を使えない構成の警�
 正常終了の終端イベント。`mode` で形が決まる:
 
 - `mode:"run"`(通常実行): `{type:"result", mode:"run", output, keys, backends, style, separated,
-  phonemes, morae, merged_morae, coverage, closed_ranges, max_opening, duration_sec}`。
+  phonemes, morae, merged_morae, weak_vowels, coverage, closed_ranges, max_opening, duration_sec}`。
   `output` は書き出しパス(文字列)、`keys` は出力 VMD のモーフキー数、`backends` は採用バックエンド
   (`{separator, recognizer, forced_aligner, english_katakana_method}`)、`style` はプリセット名、
   `separated` は分離を実施したか(bool)、
   `phonemes` は認識音素数、`morae` は検出モーラ数、`merged_morae` は併合/間引きしたモーラ数、
+  `weak_vowels` は低信頼/無声と判定して開き量を弱めたモーラ数([低信頼区間](#低信頼区間))、
   `coverage` は音素認識の被覆率(0〜1)、`closed_ranges` は閉口区間数、`max_opening` は最大開き量(0〜1)、
   `duration_sec` は入力音声の尺(秒)。[§6.7](#67-レポートと診断) の診断の構造化。
 - `mode:"inspect"`(入力検査 `--machine --dry-run`): `mode:"run"` と同じ診断統計キーに加えて

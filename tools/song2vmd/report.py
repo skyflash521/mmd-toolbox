@@ -16,7 +16,7 @@ _CLOSED_SHAPES = frozenset({MouthShape.BILABIAL, MouthShape.SILENCE})
 # input_kind/sample_rate/channels を加える(result_inspect_fields)。
 _RUN_FIELD_ORDER = (
     "output", "keys", "backends", "style", "separated", "phonemes", "morae", "merged_morae",
-    "coverage", "closed_ranges", "max_opening", "duration_sec",
+    "weak_vowels", "coverage", "closed_ranges", "max_opening", "duration_sec",
 )
 
 
@@ -43,6 +43,7 @@ class Diagnostics:
     phonemes: int
     morae: int
     merged_morae: int
+    weak_vowels: int
     coverage: float
     closed_ranges: int
     max_opening: float
@@ -90,7 +91,8 @@ def build_diagnostics(*, segments, mouth_events, event_diagnostics, mora_event_g
     )
     return Diagnostics(
         backends=dict(backends), style=style, separated=separated, phonemes=phonemes, morae=morae,
-        merged_morae=event_diagnostics.merged_morae, coverage=coverage, closed_ranges=closed_ranges,
+        merged_morae=event_diagnostics.merged_morae, weak_vowels=event_diagnostics.weak_vowels,
+        coverage=coverage, closed_ranges=closed_ranges,
         max_opening=max_opening, duration_sec=duration_sec, keys=keys, mora_details=mora_details,
         low_dynamics=event_diagnostics.low_dynamics, forced_split=forced_split,
     )
@@ -117,6 +119,7 @@ def render_report_text(diag: Diagnostics, params: dict) -> str:
             f"hold_frames={mora.hold_frames:.2f}"
         )
     lines.append(f"merged_morae: {diag.merged_morae}")
+    lines.append(f"weak_vowels: {diag.weak_vowels}")
     lines.append(f"closed_ranges: {diag.closed_ranges}")
     lines.append(f"max_opening: {diag.max_opening:.4f}")
     lines.append(f"keys: {diag.keys}")
@@ -129,7 +132,8 @@ def result_run_fields(diag: Diagnostics, output) -> dict:
     values = {
         "output": output, "keys": diag.keys, "backends": dict(diag.backends), "style": diag.style,
         "separated": diag.separated, "phonemes": diag.phonemes, "morae": diag.morae,
-        "merged_morae": diag.merged_morae, "coverage": diag.coverage,
+        "merged_morae": diag.merged_morae, "weak_vowels": diag.weak_vowels,
+        "coverage": diag.coverage,
         "closed_ranges": diag.closed_ranges, "max_opening": diag.max_opening,
         "duration_sec": diag.duration_sec,
     }

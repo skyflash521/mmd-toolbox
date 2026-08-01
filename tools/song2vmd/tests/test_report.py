@@ -93,6 +93,11 @@ def test_merged_morae_comes_from_event_diagnostics():
     assert diag.merged_morae == 7
 
 
+def test_weak_vowels_comes_from_event_diagnostics():
+    diag = diag_of(event_diagnostics=events.EventDiagnostics(weak_vowels=5, low_dynamics=False, merged_morae=0))
+    assert diag.weak_vowels == 5
+
+
 def test_low_dynamics_comes_from_event_diagnostics():
     # low_dynamicsは機械モードのresultペイロードには載せない(呼び出し側のwarningイベント判定専用)
     # ため、result_run_fields/result_inspect_fieldsのキー集合検証とは別に
@@ -141,7 +146,7 @@ def test_render_report_text_includes_backends_style_params_and_stats():
     )
     text = report.render_report_text(diag, {"open_lo": 0.2, "open_hi": 0.55})
     # 定めた列挙順(バックエンド・style・params → 分離有無・音素数・モーラ数・被覆率 →
-    # モーラごとの明細・併合数 → 閉口区間数・最大開き量・生成キー数・尺)どおりであることを、
+    # モーラごとの明細・併合数・減衰数 → 閉口区間数・最大開き量・生成キー数・尺)どおりであることを、
     # 各行の出現順(部分文字列の存在でなく行インデックス)で確認する。
     lines = text.splitlines()
 
@@ -152,7 +157,8 @@ def test_render_report_text_includes_backends_style_params_and_stats():
         "separator: sep-x", "recognizer: rec-y", "forced_aligner: aligner-z", "style: ballad",
         "open_lo: 0.2", "open_hi: 0.55",
         "separated: True", "phonemes: 1", "morae: 1", "coverage: 1.0000",
-        "mora[1]: shape=a open_amount=0.6000 hold_frames=15.00", "merged_morae: 2", "closed_ranges: 0",
+        "mora[1]: shape=a open_amount=0.6000 hold_frames=15.00", "merged_morae: 2", "weak_vowels: 1",
+        "closed_ranges: 0",
         "max_opening: 0.6000", "keys: 4", "duration_sec: 0.500",
     ]
     indices = [index_of(s) for s in order]
@@ -192,7 +198,7 @@ def test_result_run_fields_has_exactly_the_12_1_keys_with_diag_values_transcribe
     fields = report.result_run_fields(diag, output="out.vmd")
     assert set(fields) == {
         "output", "keys", "backends", "style", "separated", "phonemes", "morae", "merged_morae",
-        "coverage", "closed_ranges", "max_opening", "duration_sec",
+        "weak_vowels", "coverage", "closed_ranges", "max_opening", "duration_sec",
     }
     assert fields["output"] == "out.vmd"
     assert fields["keys"] == diag.keys == 4
@@ -202,6 +208,7 @@ def test_result_run_fields_has_exactly_the_12_1_keys_with_diag_values_transcribe
     assert fields["phonemes"] == diag.phonemes == 1
     assert fields["morae"] == diag.morae == 1
     assert fields["merged_morae"] == diag.merged_morae == 3
+    assert fields["weak_vowels"] == diag.weak_vowels == 0
     assert fields["coverage"] == diag.coverage == pytest.approx(5.0 / 6.0)
     assert fields["closed_ranges"] == diag.closed_ranges == 1
     assert fields["max_opening"] == diag.max_opening == pytest.approx(0.6)
@@ -218,7 +225,8 @@ def test_result_inspect_fields_adds_input_metadata_and_null_output_with_diag_val
     fields = report.result_inspect_fields(diag, input_kind="audio", sample_rate=44100, channels=2)
     assert set(fields) == {
         "output", "keys", "backends", "style", "separated", "phonemes", "morae", "merged_morae",
-        "coverage", "closed_ranges", "max_opening", "duration_sec", "input_kind", "sample_rate", "channels",
+        "weak_vowels", "coverage", "closed_ranges", "max_opening", "duration_sec",
+        "input_kind", "sample_rate", "channels",
     }
     assert fields["output"] is None
     assert fields["input_kind"] == "audio"
@@ -231,6 +239,7 @@ def test_result_inspect_fields_adds_input_metadata_and_null_output_with_diag_val
     assert fields["phonemes"] == diag.phonemes == 1
     assert fields["morae"] == diag.morae == 1
     assert fields["merged_morae"] == diag.merged_morae == 1
+    assert fields["weak_vowels"] == diag.weak_vowels == 0
     assert fields["coverage"] == diag.coverage == pytest.approx(1.0)
     assert fields["closed_ranges"] == diag.closed_ranges == 0
     assert fields["max_opening"] == diag.max_opening == pytest.approx(0.4)
