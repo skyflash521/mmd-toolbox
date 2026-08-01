@@ -9,6 +9,8 @@ vpr が公開する連続コントローラ曲線のうち声量に相当する�
 持つ最近の値(始端より前は始端値、終端より後は終端値)を保持する。
 """
 
+import bisect
+
 from vpr import Part
 
 # 声量コントローラのインベントリ(優先順・値域。中立値・被覆の扱いが確定している名前のみ採用する)。
@@ -52,34 +54,48 @@ def _merged_events(parts: list[Part], name: str) -> list[tuple[int, int]]:
     return events
 
 
-def _value_at(events: list[tuple[int, int]], t: int, default: int) -> int:
-    """時刻 t 以前の最後の値(階段状曲線の t での値)。t より前に点が無ければ default。"""
-    result = default
-    for tick, value in events:
-        if tick <= t:
-            result = value
-        else:
-            break
-    return result
+class _StepCurve:
+    """階段状(次の制御点まで値を保持)のコントローラ曲線。区間平均を累積積分の差分で求める。
 
+    音符ごとに曲線を走り直すと採用音符数×制御点数に比例した走査になり、制御点の密な曲線で効く。
+    制御点までの積分を一度だけ作れば、各音符は二分探索と引き算で済む。tick も値も整数なので積分も
+    整数で厳密に持て、走査で足し込む場合と同じ値になる。
+    """
 
-def _step_average(events: list[tuple[int, int]], start: int, end: int, default: int) -> float:
-    """階段状(次イベントまで値を保持)曲線を区間 [start, end) で時間平均する。end<=start は始端値。"""
-    if end <= start:
-        return float(_value_at(events, start, default))
-    value = _value_at(events, start, default)
-    cursor = start
-    acc = 0.0
-    for tick, next_value in events:
-        if tick <= start:
-            continue
-        if tick >= end:
-            break
-        acc += value * (tick - cursor)
-        value = next_value
-        cursor = tick
-    acc += value * (end - cursor)
-    return acc / (end - start)
+    def __init__(self, events: list[tuple[int, int]], default: int) -> None:
+        """events は tick 昇順の (tick, 値) 列(空でないこと)。default は曲線の始端より前の値。
+
+        同一 tick に複数の点があるときは、後に現れた点の値を採る(events の並び順が決める)。
+        """
+        self._ticks = [tick for tick, _ in events]
+        self._values = [value for _, value in events]
+        self._default = default
+        integral = [0]
+        for i in range(len(events) - 1):
+            integral.append(integral[i] + self._values[i] * (self._ticks[i + 1] - self._ticks[i]))
+        self._integral = integral  # 始端 ticks[0] から各制御点までの積分
+
+    def _index_at(self, t: int) -> int:
+        """時刻 t 以前(t ちょうどを含む)の最後の制御点の索引。無ければ -1。"""
+        return bisect.bisect_right(self._ticks, t) - 1
+
+    def value_at(self, t: int) -> int:
+        """時刻 t での値。t 以前に制御点が無ければ default。"""
+        i = self._index_at(t)
+        return self._default if i < 0 else self._values[i]
+
+    def _integral_to(self, t: int) -> int:
+        """始端 ticks[0] から t までの積分(t が始端より前なら負になる)。"""
+        i = self._index_at(t)
+        if i < 0:
+            return self._default * (t - self._ticks[0])
+        return self._integral[i] + self._values[i] * (t - self._ticks[i])
+
+    def average(self, start: int, end: int) -> float:
+        """区間 [start, end) の時間平均。end<=start は start 時点の値。"""
+        if end <= start:
+            return float(self.value_at(start))
+        return (self._integral_to(end) - self._integral_to(start)) / (end - start)
 
 
 def open_amounts_from_loudness(
@@ -98,19 +114,15 @@ def open_amounts_from_loudness(
     `notes` は採用音符列(`start_tick`/`duration_tick` を持つ)。返り値は `notes` と同長。
     """
     name = choose_loudness_controller(parts)
-    if name is None:
-        return None
-    events = _merged_events(parts, name)
+    events = _merged_events(parts, name) if name is not None else []
     if not events:
         return None
     spec = _LOUDNESS_CONTROLLERS[name]
     value_min, value_max = spec["min"], spec["max"]
-    default_value = events[0][1]  # 曲線始端より前は始端値を保持
+    curve = _StepCurve(events, default=events[0][1])  # 曲線始端より前は始端値を保持
     amounts: list[float] = []
     for note in notes:
-        average = _step_average(
-            events, note.start_tick, note.start_tick + note.duration_tick, default_value
-        )
+        average = curve.average(note.start_tick, note.start_tick + note.duration_tick)
         n = (average - value_min) / (value_max - value_min) if value_max > value_min else 0.0
         n = min(max(n, 0.0), 1.0)
         value = lo + (hi - lo) * (n ** gamma)
