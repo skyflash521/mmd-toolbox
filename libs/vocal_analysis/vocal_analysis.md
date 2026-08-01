@@ -135,11 +135,13 @@
       pcm: AudioPcm,
       mode: Literal["always", "never"],
       *,
+      separator: SeparatorId = DEFAULT_SEPARATOR,
       on_progress: Callable[[str], None] | None = None,
   ) -> Path: ...
   ```
 
-  (`vocal_analysis.separator`)。`on_progress`(進捗通知。既定`None`)は Recognizer の同名引数と
+  (`vocal_analysis.separator`)。`separator`(分離に使うアダプタの安定 id。[§8.2](#82-アダプタの登録と選択))は登録の無い id を
+  `SeparationError` で弾く。`on_progress`(進捗通知。既定`None`)は Recognizer の同名引数と
   同じ契約(実際にネットワークダウンロードを要した区間だけ進捗文言を渡して呼ぶ)に加え、分離処理
   (Demucs推論)が実際に進行している区間も文言を渡して呼ぶ([§8.1](#81-アダプタinterface))。
   ライブラリ未導入時は `SeparationError` で失敗する。
@@ -895,9 +897,12 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
 
 ### 8.1 アダプタinterface
 
-- **Separator**: `separate(vocal_source, mode, *, on_progress) -> vocal_wav_path`(内部でライブラリ/
+- **Separator**: `separate(vocal_source, mode, *, separator, on_progress) -> vocal_wav_path`(内部でライブラリ/
   サブプロセスを呼ぶ)。出力は「ボーカルWAVのパス」だけを約束し、内部のライブラリ・モデル・分離
   トラック構成・一時ファイルは各実装に閉じる。`mode`(`always`/`never`)もこの抽象が解釈する。
+  `separator`(分離に使うアダプタの安定 id。`SeparatorId`。既定`audio-separator-htdemucs-ft`。[§8.2](#82-アダプタの登録と選択))は
+  キーワード専用の省略可能引数で、登録の無い id は`SeparationError`にする(既定のアダプタへ黙って
+  倒さない)。`mode="never"`(分離しない指定)でも id は検証する。
   `on_progress`(進捗通知)はキーワード専用の省略可能引数(既定`None`)で、Recognizer の同名引数と
   基本契約(実際にネットワークダウンロードを要した区間だけ進捗文言を渡して呼ぶ)は同じだが、
   文言の内訳は委譲先ライブラリの取得単位に従う: Recognizer 側はモデル1件ぶんの取得を単一の割合で
@@ -950,10 +955,14 @@ SOFA実行環境(専用Python実行ファイル・SOFAリポジトリのルー�
   (小文字・ハイフン区切り)を持つ。現行の id は [§8.3](#83-採用ツールと代替候補) の表のとおり(S1 `audio-separator-htdemucs-ft`・
   S2 `wav2vec2-ctc-forcedalign`・`sofa-forcedalign`)。S2 の内容認識モデルは id ではなく
   `content_recognizer_model` 引数(`ContentRecognizerModel`。[§5.2](#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化))で選ぶ。
-- 同一ステージに複数のアダプタがあるときは、引数で適用ツールを選択可能にする(選択肢の公開は利用先
-  CLIが行う)。アダプタと id の追加・変更は本書([§8.3](#83-採用ツールと代替候補))を先に更新する。**S2は複数アダプタを持つステージで
-  あり(`forced_aligner`引数。[§8.1](#81-アダプタinterface))、S1の分離モード(`always`/`never`。[§4](#4-ボーカル抽出s1))とは異なり、同一ステージ
-  内で複数の実装(強制アライメント手法)から選ぶパターンにあたる。**
+- 各ステージは、登録アダプタが1つだけでも引数で適用ツールを選択できるようにする(選択肢の公開は利用先
+  CLIが行う)。登録が1つのうちは選べる値も1つだが、引数と実装の対応をあらかじめ持たせておくことで、
+  2つ目を足したときに引数だけが増えて実装は既定のまま動く(選んだつもりで選べていない)状態を防ぐ。
+  登録の無い id はそのステージのエラー(`SeparationError`/`RecognitionError`)で弾き、既定の実装へ
+  黙って倒さない。アダプタと id の追加・変更は本書([§8.3](#83-採用ツールと代替候補))を先に更新する。**S1のアダプタ選択
+  (`separator`引数)とS2の強制アライメント段の選択(`forced_aligner`引数)がこれにあたる([§8.1](#81-アダプタinterface))。
+  どちらもS1の分離モード(`always`/`never`。[§4](#4-ボーカル抽出s1))とは別で、分離モードが「分離するかどうか」を
+  決めるのに対し、アダプタ選択は「どの実装で行うか」を決める。**
 
 ### 8.3 採用ツールと代替候補
 

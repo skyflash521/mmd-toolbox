@@ -59,6 +59,31 @@ def test_separate_invalid_mode_raises_value_error():
         separate(_make_pcm(), mode="bogus")
 
 
+def test_separate_unknown_separator_id_raises_separation_error():
+    from vocal_analysis.separator import SeparationError, separate
+
+    with pytest.raises(SeparationError):
+        separate(_make_pcm(), mode="always", separator="bogus-separator")
+
+
+def test_separate_unknown_separator_id_raises_even_when_not_separating():
+    from vocal_analysis.separator import SeparationError, separate
+
+    # 分離しない指定でも id は検証する。通してしまうと、同じ id のまま分離する指定へ切り替えた
+    # ときに初めて失敗する。
+    with pytest.raises(SeparationError):
+        separate(_make_pcm(), mode="never", separator="bogus-separator")
+
+
+def test_published_separator_ids_all_have_implementations():
+    from vocal_analysis import SEPARATOR_IDS
+    from vocal_analysis import separator as separator_module
+
+    # 公開する安定 id と分離の実装は1対1。id だけが増えると、利用先が選んだ値と実際に動く
+    # 分離器が食い違う。
+    assert set(SEPARATOR_IDS) == set(separator_module._SEPARATOR_IMPLS)
+
+
 class _FakeSeparator:
     def __init__(self, calls):
         self._calls = calls
@@ -90,6 +115,21 @@ def test_separate_always_mode_calls_separator_factory(monkeypatch):
 
     # 出力は「ボーカルWAVのパス」を約束するため、返るパスが実在することも検証する。
     assert result == Path(calls["audio_file_path"]).parent / "vocals_output.wav"
+    assert result.exists()
+    assert calls["model_filename"] == "htdemucs_ft.yaml"
+
+
+def test_separate_dispatches_registered_separator_id(monkeypatch):
+    from vocal_analysis import DEFAULT_SEPARATOR
+    from vocal_analysis import separator as separator_module
+
+    calls = {}
+
+    monkeypatch.setattr(
+        separator_module, "_build_separator", lambda output_dir: _FakeSeparator(calls))
+
+    result = separator_module.separate(_make_pcm(), mode="always", separator=DEFAULT_SEPARATOR)
+
     assert result.exists()
     assert calls["model_filename"] == "htdemucs_ft.yaml"
 

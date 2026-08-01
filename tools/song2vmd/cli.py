@@ -34,6 +34,8 @@ from vocal_analysis import (
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
     DEFAULT_ENGLISH_KATAKANA_METHOD,
     DEFAULT_FORCED_ALIGNER,
+    DEFAULT_SEPARATOR,
+    SEPARATOR_IDS,
     ContentRecognizerModel,
     SofaAlignerConfig,
 )
@@ -66,11 +68,11 @@ STYLE_NAMES = _presets.STYLE_NAMES
 # --separate-vocals の実施方針。
 SEPARATE_VOCALS_MODES = ("always", "never")
 
-# S1 の登録アダプタの安定 id。選択肢の公開は利用先 CLI の責務なので、現行の採用アダプタ id を
-# ここで公開する(vocal_analysis 側の採用アダプタの追加・変更にこの一覧を追随させる)。
+# S1 の登録アダプタの安定 id。選択肢を利用者へ公開するのは CLI の責務だが、一覧そのものは
+# vocal_analysis の登録から取る(手書きで複製すると登録の追加・変更へ追随しない)。
 # S2内容認識モデルは安定idでなく
 # `--recognizer-model-id`/`--recognizer-model-revision`(ContentRecognizerModel)で選ぶ。
-SEPARATOR_NAMES = ("audio-separator-htdemucs-ft",)
+SEPARATOR_NAMES = SEPARATOR_IDS
 
 # S2強制アライメント段の登録アダプタの安定id。既定は
 # DEFAULT_FORCED_ALIGNER(wav2vec2-ctc-forcedalign)で、SOFA選択時のみ--sofa-*系が必須になる。
@@ -228,7 +230,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="歌い方スタイルプリセット(開き量レンジ・タイミングを切り替える)")
     p.add_argument("--separate-vocals", dest="separate_vocals", choices=SEPARATE_VOCALS_MODES,
                    default="always", help="ボーカル分離の実施方針(always/never)")
-    p.add_argument("--separator", choices=SEPARATOR_NAMES, default=SEPARATOR_NAMES[0],
+    p.add_argument("--separator", choices=SEPARATOR_NAMES, default=DEFAULT_SEPARATOR,
                    help="S1ボーカル分離バックエンドの選択(vocal_analysisの登録アダプタ安定id)")
     p.add_argument("--recognizer-model-id", dest="recognizer_model_id", default=None,
                    help=f"S2内容認識モデルの指定。未指定時は vocal_analysis の既定モデル"

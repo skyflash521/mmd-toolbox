@@ -231,6 +231,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         keep_intermediate_dir=None, progress=None):
     """song2vmd の音声→VMDパイプラインを実行する。
 
+    separator_name は vocal_analysis.separator.separate が受け取るS1分離アダプタの安定 id。
     content_recognizer_model は vocal_analysis.recognizer.recognize が受け取る内容認識モデル
     (ContentRecognizerModel)。retry は同じ recognize が受け取るトリガ式リトライ(エコー幻覚・
     反復幻覚)の有効/無効。forced_aligner・sofa_aligner は同じ recognize が受け取るS2強制
@@ -245,12 +246,12 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
 
     if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
         segments, rms_envelope, vocal_pcm = _run_single(
-            pcm, separate_vocals, content_recognizer_model, retry,
+            pcm, separate_vocals, separator_name, content_recognizer_model, retry,
             forced_aligner, sofa_aligner, english_katakana_method, progress)
         forced_split = False
     else:
         segments, rms_envelope, vocal_pcm, forced_split = _run_chunked(
-            pcm, duration_sec, separate_vocals, content_recognizer_model,
+            pcm, duration_sec, separate_vocals, separator_name, content_recognizer_model,
             retry, max_duration_sec, forced_aligner, sofa_aligner,
             english_katakana_method, progress)
 
@@ -281,12 +282,13 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         channels=pcm.samples.shape[1])
 
 
-def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
+def _run_single(pcm, separate_vocals, separator_name, content_recognizer_model, retry,
                 forced_aligner, sofa_aligner, english_katakana_method, progress):
     """長尺分割なしの単一実行(通常経路)。"""
     _report_stage(progress, "separate")
     vocal_path = _run_inference(
         "separate", _va_separator.separate, pcm, separate_vocals,
+        separator=separator_name,
         # 分離しない指定では委譲先が外部推論を一切行わないので、その呼び出しの失敗は工程失敗でない。
         map_failures=separate_vocals != "never",
         on_progress=_model_download_progress(progress, "separate", done=0, total=None))
@@ -303,7 +305,7 @@ def _run_single(pcm, separate_vocals, content_recognizer_model, retry,
     return segments, rms_envelope, vocal_pcm
 
 
-def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
+def _run_chunked(pcm, duration_sec, separate_vocals, separator_name, content_recognizer_model,
                  retry, max_duration_sec, forced_aligner, sofa_aligner,
                  english_katakana_method, progress):
     """長尺分割ありの実行。境界決定は分離前の生音声RMSを使う。"""
@@ -330,6 +332,7 @@ def _run_chunked(pcm, duration_sec, separate_vocals, content_recognizer_model,
         _report_stage(progress, "separate", done=i, total=n)
         vocal_path = _run_inference(
             "separate", _va_separator.separate, chunk_pcm, separate_vocals,
+            separator=separator_name,
             map_failures=separate_vocals != "never",
             on_progress=_model_download_progress(progress, "separate", done=i, total=n))
         _report_stage(progress, "recognize", done=i, total=n)

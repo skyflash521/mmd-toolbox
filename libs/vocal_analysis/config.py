@@ -12,7 +12,7 @@ S2 アダプタの変換/推論の実装内部で確定する(採用ライブラ
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 
 @dataclass(frozen=True)
@@ -80,6 +80,11 @@ class SeparatorConfig:
     output_single_stem: str = "vocals"  # ボーカルstem以外を書き出させない
     shifts: int = 0  # shift 平均(複数回の追加フォワードパスを伴う)を無効化し既定の分離処理を軽くする
 
+
+SeparatorId = Literal["audio-separator-htdemucs-ft"]
+# 利用先 CLI が選択肢の公開に使う登録アダプタの安定 id。Literal から導出し、語彙を二重に持たない。
+SEPARATOR_IDS: tuple[SeparatorId, ...] = get_args(SeparatorId)
+DEFAULT_SEPARATOR: SeparatorId = "audio-separator-htdemucs-ft"
 
 ForcedAlignerId = Literal["wav2vec2-ctc-forcedalign", "sofa-forcedalign"]
 DEFAULT_FORCED_ALIGNER: ForcedAlignerId = "wav2vec2-ctc-forcedalign"

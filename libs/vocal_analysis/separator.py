@@ -1,8 +1,8 @@
 """S1 ボーカル抽出。
 
 S0 の出力(入力レベル正規化済み。ステレオ・元サンプルレート)からボーカルを分離し、ボーカルWAVを得る。
-分離は audio-separator 経由で Demucs v4 htdemucs_ft を in-process 実行する。mode(always/never)は
-この抽象が解釈する。
+どのアダプタで分離するかは `separator`(登録アダプタの安定 id)で選ぶ。現行の登録は audio-separator
+経由で Demucs v4 htdemucs_ft を in-process 実行するもの1つ。mode(always/never)はこの抽象が解釈する。
 """
 
 import atexit
@@ -16,7 +16,7 @@ from typing import Literal
 
 import soundfile as sf
 
-from .config import SEPARATOR_CONFIG
+from .config import DEFAULT_SEPARATOR, SEPARATOR_CONFIG, SeparatorId
 from .quiet import silence_third_party_output
 from .types import AudioPcm
 
@@ -27,10 +27,14 @@ class SeparationError(Exception):
 
 def separate(
     pcm: AudioPcm, mode: Literal["always", "never"], *,
+    separator: SeparatorId = DEFAULT_SEPARATOR,
     on_progress: Callable[[str], None] | None = None,
 ) -> Path:
     """S0出力からボーカルWAVのパスを得る。
 
+    separator は分離に使う登録アダプタの安定 id で、登録の無い id は `SeparationError`
+    (既定のアダプタへ黙って倒さない)。mode="never" でも id は検証する(実際に分離しない指定でも、
+    渡された id が無効であることに変わりはないため)。
     戻り値のWAVを格納する作業ディレクトリは呼び出し元に公開せず、プロセスの正常終了時に
     削除を試みる(強制終了時や削除失敗時は残置を許容する)。呼び出し元が削除
     タイミングを制御する手段は無い。on_progress はモデルの初回取得が実際にネットワーク
@@ -41,6 +45,9 @@ def separate(
     """
     if mode not in ("always", "never"):
         raise ValueError(f"未知の mode です: {mode!r}(always/never のいずれかを指定してください)")
+    impl = _SEPARATOR_IMPLS.get(separator)
+    if impl is None:
+        raise SeparationError(f"未知の separator です: {separator!r}")
 
     work_dir = Path(tempfile.mkdtemp(prefix="vocal_analysis_s1_"))
     atexit.register(shutil.rmtree, work_dir, ignore_errors=True)
@@ -49,25 +56,29 @@ def separate(
 
     if mode == "never":
         return input_wav
+    return impl(work_dir, input_wav, on_progress)
 
+
+def _separate_audio_separator_htdemucs_ft(work_dir: Path, input_wav: Path, on_progress) -> Path:
+    """audio-separator 経由の Demucs v4 htdemucs_ft でボーカルを分離する(安定 id の実装本体)。"""
     try:
-        separator = _build_separator(work_dir)
+        separator_obj = _build_separator(work_dir)
     except ImportError as e:
         raise SeparationError(
             "audio-separator が見つかりません。導入してください(pip install audio-separator onnxruntime)。"
         ) from e
-    downloaded = _load_model_with_progress(separator, on_progress)
+    downloaded = _load_model_with_progress(separator_obj, on_progress)
     if downloaded:
         # ロード完了時点で通知を終える(ダウンロードが実際に発生した場合のみ)。以降の実際の
         # 分離処理(separator.separate)はダウンロードと無関係なので、ここで先にクリアする
         # (分離処理の完了まで「ダウンロード中」の補足を残すと、分離が進んでいるだけなのに
         # まだダウンロード中であるかのように誤認させる)。
         on_progress("")
-    output_files = _separate_with_progress(separator, input_wav, on_progress)
+    output_files = _separate_with_progress(separator_obj, input_wav, on_progress)
     output_path = Path(output_files[0])
     # S1のGPUメモリをS2(内容認識・音素モデル)のロード前に返す。保持したままだと、後続の
     # 内容認識パイプラインのロード・推論時にVRAMが逼迫し、処理時間が大きく悪化する。
-    del separator
+    del separator_obj
     try:
         import torch
 
@@ -78,6 +89,14 @@ def separate(
     # audio-separator は output_dir 相対のファイル名だけを返すことがある(絶対パスの
     # 保証はない)。相対パスの場合は分離器の output_dir(work_dir)を基準に解決する。
     return output_path if output_path.is_absolute() else work_dir / output_path
+
+
+# 安定 id → 分離の実装。アダプタを増やすときは SeparatorId へ id を足すのと同時にここへ実装を
+# 登録する。登録の無い id は separate() が弾くので、id だけが増えて分離器が既定のまま動く
+# (選んだつもりで選べていない)状態にはならない。
+_SEPARATOR_IMPLS = {
+    "audio-separator-htdemucs-ft": _separate_audio_separator_htdemucs_ft,
+}
 
 
 def _load_model_with_progress(separator_obj, on_progress) -> bool:
