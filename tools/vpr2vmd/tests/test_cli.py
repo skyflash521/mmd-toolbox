@@ -487,6 +487,56 @@ def test_not_vpr_reports_reason(tmp_path, capsys, monkeypatch):
     _assert_error_line(capsys.readouterr().err)
 
 
+def test_unreadable_input_reports_reason(tmp_path, capsys, monkeypatch):
+    """存在する入力が開けない(権限不足・排他ロック等)場合も入力不正へ寄せる(not_vpr・1)。
+
+    内部エラー(コード 1 だが code が internal_error)に落ちると、機械利用側が入力の問題と
+    区別できなくなる。
+    """
+    src = _touch(tmp_path / "in.vpr")
+
+    def _raise(_src):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(cli, "read", _raise)
+    rc = cli.main([src])
+    assert rc == 1
+    _assert_error_line(capsys.readouterr().err)
+
+
+def _stub_normalize_warnings(monkeypatch, *injected):
+    """正規化の戻り値へ警告を足す(実際の重複・並べ替えを作らずに surface 経路だけを見る)。"""
+    original = cli.normalize
+
+    def _with_warnings(document, sections=None):
+        doc, warnings = original(document, sections=sections)
+        return doc, [*warnings, *injected]
+
+    monkeypatch.setattr(cli, "normalize", _with_warnings)
+
+
+def test_normalize_duplicate_warning_is_surfaced(tmp_path, capsys, monkeypatch):
+    """重複キーの破棄は標準エラーへ出す(生成キーが出力へ入らなかったことを示す)。"""
+    from vmd import VmdWarning
+
+    src = _touch(tmp_path / "in.vpr")
+    _stub_normalize_warnings(monkeypatch, VmdWarning(
+        code="normalize-duplicate", message="同一キーの重複", section="morph"))
+    assert cli.main([src, "-o", str(tmp_path / "out.vmd")]) == 0
+    assert "warning: normalize-duplicate:" in capsys.readouterr().err
+
+
+def test_normalize_sorted_warning_is_not_surfaced(tmp_path, capsys, monkeypatch):
+    """並べ替えは出力ポリシーが意図した結果なので出さない(通常実行のたびに起きる)。"""
+    from vmd import VmdWarning
+
+    src = _touch(tmp_path / "in.vpr")
+    _stub_normalize_warnings(monkeypatch, VmdWarning(
+        code="normalize-sorted", message="キーを並べ替えた", section="morph"))
+    assert cli.main([src, "-o", str(tmp_path / "out.vmd")]) == 0
+    assert "normalize-sorted" not in capsys.readouterr().err
+
+
 def test_no_tracks_reports_reason(tmp_path, capsys, monkeypatch):
     """トラックが 1 件も無い入力は理由 1 行 + 終了コード 1(no_tracks)。"""
     src = _touch(tmp_path / "in.vpr")

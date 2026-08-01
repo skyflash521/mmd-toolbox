@@ -293,6 +293,45 @@ def test_machine_warning_overlapping_notes_passthrough(tmp_path, capsysbinary, m
     assert events[-1]["mode"] == "convert"
 
 
+def test_machine_warning_normalize_carries_vmd_section(tmp_path, capsysbinary, monkeypatch):
+    # 出力前の正規化が返す警告は、対象の VMD セクションを載せ、vpr 内の位置キーは持たない。
+    from vmd import VmdWarning
+
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"])]))
+    original = cli.normalize
+
+    def _with_warning(document, sections=None):
+        doc, warnings = original(document, sections=sections)
+        return doc, [*warnings, VmdWarning(
+            code="normalize-duplicate", message="同一キーの重複", section="morph")]
+
+    monkeypatch.setattr(cli, "normalize", _with_warning)
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine"])
+    assert rc == 0
+    events = _terminal_events(capsysbinary)
+    warns = [e for e in events if e["type"] == "warning"]
+    assert len(warns) == 1
+    wa = warns[0]
+    assert wa["code"] == "normalize-duplicate" and wa["section"] == "morph"
+    assert wa["track_index"] is None and wa["tick"] is None
+    assert events[-1]["mode"] == "convert"
+
+
+def test_machine_error_unreadable_input(tmp_path, capsysbinary, monkeypatch):
+    # 開けない入力(権限不足等)は internal_error でなく not_vpr(入力不正)へ寄せる。
+    src = _touch(tmp_path / "in.vpr")
+
+    def _raise(_src):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(cli, "read", _raise)
+    rc = cli.main([src, "--machine"])
+    assert rc == 1
+    e = _machine_error(capsysbinary)
+    assert e["code"] == "not_vpr" and e["field"] == "input" and e["exit_code"] == 1
+
+
 # --- 構造化エラー全経路 --------------------------------------------------------
 
 

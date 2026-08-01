@@ -274,6 +274,12 @@ CLI 上書き**で、`--ref-bpm`/`--tempo-scale-min` はテンポ補正の入力
     1行に集約する。
   - 対象トラックに有効な発音が無い(採用音符列が空)場合の警告。`--dry-run` の有無に依らず出す
     (通常実行では空のモーフキー VMD を出力し、`--dry-run` では [§4.2](#42-主なオプション) のとおり出力VMDを書かない)。
+  - 出力前の正規化([§5](#5-入出力要件) の `normalize`)が返す構造化警告のうち、同一モーフ・同一フレームの
+    重複キーを破棄したもの。生成したキーが出力へ入らなかったことを示すため出す。同一(コード・
+    セクション・メッセージ)の組は 1 行に集約する。正規化が同時に報告するキーの並べ替えは出さない
+    (時間順に生成したキーを正規化が定める順序へ整列し直すこと自体が [§5](#5-入出力要件) の出力ポリシーの
+    意図した結果で、通常の変換でも起き、出力の中身も変わらない。常に出る警告は本当の異常を
+    埋没させる)。
 
 自前の口形イベントを作らない記号([§3](#3-処理パイプライン) の「その他子音」と「未知音素」)は、各音素記号がどのカテゴリに
 属するかの確定が実 vpr のインベントリ確定に依る([§3](#3-処理パイプライン) 末尾)。インベントリが未確定の間は両者を区別せず、
@@ -335,13 +341,16 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 ### 7.2 イベントペイロード
 
 - **warning**: `{type:"warning", code, message, section, track_index, part_index, note_index,
-  related_note_index, tick}`。`section` は VMD セクション概念が vpr 入力に無いため常に `null`。
-  後半 5 キーは vpr 内の位置(該当が無ければ `null`)。割り当て:
+  related_note_index, tick}`。`section` は対象の VMD セクション名で、vpr 入力について述べる警告は
+  対応する概念が無いため `null`。後半 5 キーは vpr 内の位置(該当が無ければ `null`)。割り当て:
   - `vpr` 読み込みの警告は `VprWarning` の `code`(現行値 `overlapping_notes`)・`message`・位置
     (`track_index`/`part_index`/`note_index`/`related_note_index`/`tick`)をそのまま透過する。機械
     モードは 1 警告 1 イベント、非機械は code・message の同一組を 1 行に集約して標準エラーへ出す。
   - 採用音符列が空(対象トラックに有効な発音が無い): `no_adopted_notes`、位置キーは全て `null`。
     エラーにせず正常終了する(通常実行は空のモーフキー VMD を出力する)。
+  - 出力前の正規化が返す警告([§4.4](#44-診断と警告) が出すと定めたものだけ)は `VmdWarning` の
+    `code`・`message`・`section` を透過し、位置キーは全て `null`。機械モードは 1 警告 1 イベント、
+    非機械は code・section・message の同一組を 1 行に集約して標準エラーへ出す。
 - **result**: 正常終了の終端イベント。`mode` で形が決まる:
   - `mode:"convert"`(通常実行): `{type:"result", mode:"convert", output, track_index, track_name,
     morph_keys, adopted_notes, mouth_events}`。`output` は書き出しパス(文字列)、`track_index`/
@@ -419,13 +428,15 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 | 解決後の谷係数が下限>上限(プリセット既定と CLI 上書きの組み合わせ) | `valley_bounds_inverted` | `null`(2 オプションとプリセットにまたがる。値は `message` に載る) | 2 |
 | `--track` の INDEX 範囲外・NAME 不一致・NAME 複数一致 | `bad_track` | `"--track"` | 2 |
 | 入力パスが不在・通常ファイルでない | `input_not_found` | `"input"` | 1 |
-| 読み込み・形式検証の失敗(非 vpr。`VprFormatError`) | `not_vpr` | `"input"` | 1 |
+| 入力の読み込み・形式検証の失敗(非 vpr、および存在する入力を開けない・読み取れない) | `not_vpr` | `"input"` | 1 |
 | 入力 vpr にトラックが 1 件も無い | `no_tracks` | `"input"` | 1 |
 | 出力書き込み失敗(`OSError`) | `write_failed` | `"--output"`(+ `path`) | 3 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
 
-- `not_vpr` は例外の文言を `message` に載せる。
+- `not_vpr` は例外の型名と文言を `message` に載せる。読み込みで起きた失敗はすべてこの分類に入れ、
+  内部エラーへは回さない(パスの存在も読み込み可否も入力の問題であり、規約
+  [§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) が入力不正と定めている)。
 - 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は
   [cli_events.md §4](../../libs/cli_events/cli_events.md#4-argparse-エラー変換ヘルパ) が正。
 - `internal_error` は CLI 本体の全体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで

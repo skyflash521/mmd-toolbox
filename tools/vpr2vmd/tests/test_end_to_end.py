@@ -59,3 +59,33 @@ def test_converts_vpr_file_to_readable_morph_vmd(tmp_path):
 
     doc, _ = vmd_read(str(out))
     assert len(doc.morph) > 0
+
+
+def test_normal_conversion_writes_nothing_to_stderr(tmp_path, capsys):
+    # 正常な変換は標準エラーへ何も出さない。出力ポリシー(0F 中立登録→正規化)の副作用である
+    # キーの並べ替えが警告として毎回漏れ出すと、本当の異常が埋没する。
+    src = tmp_path / "in.vpr"
+    out = tmp_path / "out.vmd"
+    _write_vpr(src, [
+        _note(0, 480, "あ", "a"),
+        _note(480, 480, "い", "i"),
+        _note(960, 480, "う", "u"),
+        _note(1440, 480, "ま", "m a"),
+    ])
+
+    assert cli.main([str(src), "-o", str(out)]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_non_vpr_bytes_report_input_error(tmp_path, capsys):
+    # 非 vpr の実バイト列を実 read へ通す経路。他の異常系テストは read を差し替えるため、
+    # CLI と実 read を繋いだ失敗の分類はここでしか見られない。
+    src = tmp_path / "in.vpr"
+    src.write_bytes(b"this is not a zip archive")
+    out = tmp_path / "out.vmd"
+
+    assert cli.main([str(src), "-o", str(out)]) == 1
+
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "Traceback" not in err
+    assert not out.exists()

@@ -29,7 +29,7 @@ from cli_events import (
 )
 from lipsync import generate_morph_keys
 from vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
-from vpr import VprFormatError, read
+from vpr import read
 
 from . import __version__, loudness, openness, presets, timing
 from .events import (
@@ -368,8 +368,10 @@ def _build(args, emitter, fail):
     """
     try:
         project, warnings = read(args.input)
-    except VprFormatError as e:
-        return fail("not_vpr", f"入力を vpr として読めません: {e}", 1, field="input")
+    except Exception as e:
+        # 形式不一致(VprFormatError)に限らず、開けない・読み取れない(権限不足・排他ロック等)も
+        # 入力不正へ寄せる。パスの存在と読み込み可否はいずれも入力の問題で、内部エラーではない。
+        return fail("not_vpr", f"入力を vpr として読めません: {type(e).__name__}: {e}", 1, field="input")
     _surface_warnings(warnings, emitter)  # 重なり音符などの構造化警告を surface する
     if not project.tracks:
         return fail("no_tracks", "入力 vpr にトラックがありません", 1, field="input")
@@ -443,7 +445,8 @@ def _build(args, emitter, fail):
     )
     # 使用モーフを 0F に中立登録してから(編集・MMD互換規約)フレーム順へ正規化する。
     document = ensure_frame0_neutral_keys(document, sections=("morph",))
-    document, _warnings = normalize(document, sections=["morph"])
+    document, normalize_warnings = normalize(document, sections=["morph"])
+    _surface_normalize_warnings(normalize_warnings, emitter)
     diagnostics = _Diagnostics(
         adopted=len(adopted),
         events=len(mouth_events),
@@ -557,6 +560,37 @@ def _surface_warnings(warnings, emitter) -> None:
             continue
         seen.add(key)
         print(f"warning: {w.code}: {w.message}", file=sys.stderr)
+
+
+# 正規化の警告のうち surface するもの。並べ替えは、時間順に生成したキーを正規化が定める順序へ
+# 整列し直すこと自体の結果で、通常の変換でも起きるうえ出力の中身を変えない(0F 中立登録の末尾
+# 追加もこの整列に吸収される)。出すのは生成したキーが出力へ入らなかったことを示す破棄だけに
+# する(常時出る警告は本当の異常を埋没させる)。
+_SURFACED_NORMALIZE_CODES = frozenset({"normalize-duplicate"})
+
+
+def _surface_normalize_warnings(warnings, emitter) -> None:
+    """VMD 正規化が返す構造化警告のうち、出力の中身が変わったものを surface する。
+
+    機械モードは 1 警告 1 イベント(section は VMD セクション名、vpr 内の位置キーは対応が無いので
+    null)、非機械は code・section・message の同一組を 1 行に集約して標準エラーへ出す。
+    """
+    warnings = [w for w in warnings if w.code in _SURFACED_NORMALIZE_CODES]
+    if emitter is not None:
+        for w in warnings:
+            emitter.warning(
+                code=w.code, message=w.message, section=w.section,
+                track_index=None, part_index=None, note_index=None,
+                related_note_index=None, tick=None,
+            )
+        return
+    seen = set()
+    for w in warnings:
+        key = (w.code, w.section, w.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"warning: {w.code}: {w.message}({w.section})", file=sys.stderr)
 
 
 def _fail(emitter, code, message, exit_code, *, field=None, path=None):
