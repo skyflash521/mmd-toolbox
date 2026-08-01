@@ -13,6 +13,7 @@
 | [0x24a/vpr-parser](https://github.com/0x24a/vpr-parser) | リバースエンジニアリング実装(Pydantic パーサー) | フィールド名・構造の裏取り |
 | [TheerapakG/vocaloid5tools](https://github.com/TheerapakG/vocaloid5tools) | リバースエンジニアリング実装(vpr→MIDI 変換) | 分解能 480・テンポ(value/100)・note の絶対化(`note.pos + part.pos`)の裏取り |
 | [3c1u/vsqx](https://github.com/3c1u/vsqx) | リバースエンジニアリング実装(.vpr/.vsqx シリアライザ) | 参考 |
+| [VOCALOID6 6.3 アップデートノート](https://www.vocaloid.com/en/learn/ln6212/) | 公式ドキュメント | `aiExp.vibratoLeadingDepth`/`vibratoFollowingDepth` が Vibrato Tool の「Leading Depth」「Following Depth」であることの裏取り |
 
 > **注:** パーサー実装は仕様が不明確な箇所を実装で補っている場合があるため、断定の根拠としては実ファイルとの
 > 整合を優先し、実装は裏取りに用いる。
@@ -89,11 +90,36 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `lyric` | str | 表示歌詞 |
 | `phoneme` | str | 音素列。**空白区切り**(例 `"k o"`、`"t th e l"`)。`phoneme.split()` で音素の並びになる |
 | `velocity` | int | ベロシティ(0〜127) |
-| `exp` / `aiExp` / `vibrato` / `singingSkill` | dict(**省略可**) | 表現パラメータ(ダイナミクス曲線等)。音符・サブフィールドにより有無が異なる |
+| `vibrato` | dict(**省略可**) | 音符ビブラート。構造は下記の [notes[] の vibrato](#notes-の-vibrato) |
+| `aiExp` | dict(**省略可**) | VOCALOID:AI の表現パラメータ。ビブラート深さの `vibratoLeadingDepth`/`vibratoFollowingDepth`(実数。観測値は約 0.2〜1.0 で、上端 1.0 は直接観測、下端 0 は未観測)を含む。それ以外のキー(`pitchFine`・`pitchDriftStart`/`End`・`pitchScalingCenter`/`Origin`・`pitchTransitionStart`/`End`・`amplitudeWhole`/`Start`/`End`)は名前以外を解析していない |
+| `isAiVibratoEnabled` | bool(**省略可**) | 音符直下の真偽値(`aiExp` の内側ではない)。観測した音符はすべて `true` で、`false` の例は未観測。意味は未確定 |
+| `exp` / `singingSkill` | dict(**省略可**) | 表現パラメータ。内部構造は解析していない |
 | `phonemePositions[]` | list(**省略可**) | 音符内の音素別タイミング。音符により存在しない(実サンプルでは一部の音符のみ)。未設定値は `-2147483648`(INT_MIN) |
 
-実サンプルの全音符に存在するフィールドは `pos`・`duration`・`number`・`lyric`・`phoneme`・`velocity` の6つ。
-`exp`/`aiExp`/`vibrato`/`singingSkill`/`phonemePositions` は音符により有無が異なる(省略可)。
+読み手が全音符での存在を当てにしてよいのは `pos`・`duration`・`number`・`lyric`・`phoneme`・`velocity` の
+6つで、`exp`/`aiExp`/`vibrato`/`isAiVibratoEnabled`/`singingSkill`/`phonemePositions` は省略可として扱う
+(欠落する音符がある前提で読む)。解析に用いた実ファイルでは、このうち `phonemePositions` だけが一部の音符に
+しか無く、残りは全音符に存在した。
+
+#### notes[] の vibrato
+
+音符ごとのビブラート設定。VOCALOID エディタの Vibrato Tool が書き出す値にあたる。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `type` | int | ビブラートの種別。**`0` 以外は未観測** |
+| `duration` | int | ビブラート区間長(tick)。**`0` はビブラート無し** |
+| `depths[]` | list(**省略可**) | 深さの自動化曲線。各要素 `{pos: int, value: int}` |
+| `rates[]` | list(**省略可**) | 速さの自動化曲線。各要素 `{pos: int, value: int}` |
+
+- `depths`/`rates` は**キー自体が存在しない音符がある**(明示的な JSON `null` ではない)。`duration > 0` でも
+  両方とも欠落する音符、`rates` だけが欠落する音符のいずれも実ファイルで確認した。
+- `depths`/`rates` の `value` の観測値域は **0〜127**(上下端とも実ファイルで直接観測)。最頻値はどちらも
+  `64` で、`dynamics` と同じく値域中央に集中する。
+- `depths`/`rates` の `pos` は **`0` の単一点しか観測されない**(実質は音符ごとの定数)。複数の制御点を持つ
+  曲線は未観測のため、`pos` の原点(音符始端かビブラート区間始端か)は実ファイルから区別できない。
+- `duration` は音符の `duration` 以下(違反は未観測)。区間が音符の**末尾側**に付くという解釈については
+  下記の [確証の状況](#確証の状況) を参照。
 
 ### parts[] の controllers[]
 
@@ -130,6 +156,16 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
   絶対の最終区別は非ゼロ `part.pos` の実ファイル待ち(上の note `pos` と同じ状況)。コントローラの基本レイアウト
   (`name`・events の `pos`/`value`)は解析済みだが、観測したコントローラ名の網羅・各名前が表す意味・被覆外の値の
   解釈は確定していない。
-- **未解析の領域:** `exp`/`aiExp`/`vibrato` 等の音符単位の表現パラメータの内部構造、オーディオトラックの
-  詳細、`Project/sequence.json` 以外の ZIP エントリ(`Project/Audio/*.wav` 等)は、本書で詳細レイアウトを
-  解析していない(確証が低い領域)。実ファイルで確定でき次第、本書を更新する。
+- **`vibrato` の区間位置:** `vibrato.duration` は音符の `duration` 以下で、区間が音符の**末尾側**
+  (`note.duration − vibrato.duration` から音符終端まで)に付くと解釈する。区間の開始位置を明示する
+  オフセットフィールドは存在せず、この解釈は「観測した全音符が矛盾なく収まる」という間接証拠と、
+  ビブラートが音符の後半に自動で付く VOCALOID の UI 挙動に基づく。直接の裏取りは取れていない。
+- **`vibratoLeadingDepth`/`vibratoFollowingDepth` の意味:** VOCALOID 公式の 6.3 アップデートノートが、
+  Vibrato Tool へ追加した「Leading Depth」「Following Depth」として説明している(音の終わりに向けて
+  ビブラートを顕著にする表現)。実ファイルでの観測値は約 0.2〜1.0 に散り、`0.5` が多数派。上端 `1.0` は
+  直接観測したが下端 `0` は未観測で、値域が 0〜1 であることと、`0.5` が「変化なし」の中立値であることは、
+  いずれも公式文書に明記が無く観測パターンからの推定にとどまる。
+- **未解析の領域:** `exp`/`singingSkill` および `aiExp` のビブラート深さ2キー以外の内部構造、
+  `isAiVibratoEnabled` の意味、オーディオトラックの詳細、`Project/sequence.json` 以外の ZIP エントリ
+  (`Project/Audio/*.wav` 等)は、本書で詳細レイアウトを解析していない(確証が低い領域)。実ファイルで
+  確定でき次第、本書を更新する。
