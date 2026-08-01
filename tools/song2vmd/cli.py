@@ -48,9 +48,10 @@ from . import resource_watch as _resource_watch
 
 # 追加依存(vocal-analysis extra)を要する取り込みだけをここへ集める。コンソールスクリプトは追加依存
 # なしの導入でも登録されるため、依存が揃わない環境から起動されうる。取り込み失敗を例外のまま保持して
-# モジュール自体の取り込みは成立させ、main() が理由1行へ畳めるようにする(失敗時に未定義になる名前は、
-# main() が引数解析より前に終了するため参照されない)。追加依存を要しない配布物内のモジュール(共有
-# ライブラリ・自身のモジュール)は、導入の破損と区別するため取り込み文をここへ入れない。
+# モジュール自体の取り込みは成立させ、main() が理由1行へ畳めるようにする(失敗時に未定義になる名前は
+# 処理経路でしか参照しないため、main() が処理の開始前に終了すれば参照されない)。追加依存を要しない
+# 配布物内のモジュール(共有ライブラリ・自身のモジュール)は、導入の破損と区別するため取り込み文を
+# ここへ入れない。
 try:
     from vocal_analysis.io import AudioLoadError
     from vocal_analysis.recognizer import RecognitionError
@@ -457,12 +458,6 @@ def main(argv=None) -> int:
                 sys.stderr.reconfigure(errors="backslashreplace")
             except Exception:
                 pass
-        # 追加依存が未導入なら本体はどの経路も実行できないため、引数解析より前にここで畳む
-        # (--version/--help/--describe を含む全経路が対象)。emitter 構築後に置くことで、
-        # 構造化出力モードでは error イベント、それ以外では標準エラーへの1行になる。
-        if _MISSING_DEPENDENCY is not None:
-            return fail("missing_dependency", _missing_dependency_message(_MISSING_DEPENDENCY), 4)
-
         # ArgumentParseError/SystemExit の捕捉は引数解析だけに閉じる(_run() 以下が送出しうる
         # SystemExit まで飲み込んで exit 0/2 に押し込めないため)。
         parser = _build_parser()
@@ -606,6 +601,14 @@ def _run(args, emitter, fail) -> int:
         return fail("bad_argument",
                     "--recognizer-model-revision は --recognizer-model-id と組で指定する",
                     2, field="--recognizer-model-revision")
+
+    # 追加依存が未導入なら以降はどれも実行できないため、引数の検証をすべて終えた後・処理を開始する
+    # 直前のここで畳む。メタ操作(--help/--version/--describe)と引数エラーはここより前で完結し、追加
+    # 依存の有無に依らずそれぞれの終了コードで終わる(オプションの定義・検証・自己記述のペイロードは
+    # 追加依存を要さない取り込みだけで組み立てられる)。fail() 経由なので、構造化出力モードでは error
+    # イベント、それ以外では標準エラーへの1行になる。
+    if _MISSING_DEPENDENCY is not None:
+        return fail("missing_dependency", _missing_dependency_message(_MISSING_DEPENDENCY), 4)
 
     content_recognizer_model = _resolve_content_recognizer_model(args)
     openness, style_gen = _presets.resolve(
