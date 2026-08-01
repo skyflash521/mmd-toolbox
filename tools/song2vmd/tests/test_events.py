@@ -1097,11 +1097,21 @@ def test_n_mora_open_amount_is_derived_from_rms():
 # --- モーラ代表RMSの声量レンジ再正規化そのもの -------------------------------
 
 
+def _renormalized(values):
+    """曲全体のモーラ代表RMS集合を、confirm_mouth_events と同じ手順で p10/p90 正規化する。
+
+    実経路は境界の算出(_percentile_bounds)と1件ごとの正規化(_normalize_with_bounds)を
+    別々に呼ぶため、集合単位の性質を検証するここでも同じ2段で組む。
+    """
+    p_lo, p_hi = events._percentile_bounds(values)
+    return [events._normalize_with_bounds(v, p_lo, p_hi) for v in values]
+
+
 def test_renormalize_open_rms_stretches_skewed_distribution():
     # 曲全体のモーラ代表RMSが高い側に偏っていても、パーセンタイル(p10/p90)線形正規化で
     # 0〜1のレンジへ引き伸ばされる。
     values = [0.70, 0.75, 0.80, 0.81, 0.85, 0.89, 0.90, 0.95, 0.98, 1.00]
-    result = events._renormalize_open_rms(values)
+    result = _renormalized(values)
     arr = np.array(values)
     p10 = np.percentile(arr, 10, method="linear")
     p90 = np.percentile(arr, 90, method="linear")
@@ -1116,11 +1126,11 @@ def test_renormalize_open_rms_stretches_skewed_distribution():
 def test_renormalize_open_rms_single_value_is_degenerate_midpoint():
     # モーラが1件だけの曲はp90==p10で縮退し、無音側(0.0)でなく開閉の中間値0.5に倒す
     # (無音判定用の正規化とは異なり、開き量という用途では無音側に倒すと不自然なため)。
-    assert events._renormalize_open_rms([0.42]) == [0.5]
+    assert _renormalized([0.42]) == [0.5]
 
 
 def test_renormalize_open_rms_all_identical_values_are_degenerate_midpoint():
-    assert events._renormalize_open_rms([0.6, 0.6, 0.6, 0.6]) == [0.5, 0.5, 0.5, 0.5]
+    assert _renormalized([0.6, 0.6, 0.6, 0.6]) == [0.5, 0.5, 0.5, 0.5]
 
 
 def test_renormalize_open_rms_tiny_positive_range_is_not_degenerate():
@@ -1129,7 +1139,7 @@ def test_renormalize_open_rms_tiny_positive_range_is_not_degenerate():
     # 正規化(0〜1へ大きく引き伸ばす)を適用する(完全一致のみを縮退とする方針の実装が
     # np.isclose等の許容誤差判定へ後退していないかを検出する)。
     values = [0.500000, 0.500000, 0.5000005, 0.500001]
-    result = events._renormalize_open_rms(values)
+    result = _renormalized(values)
     arr = np.array(values)
     p10 = np.percentile(arr, 10, method="linear")
     p90 = np.percentile(arr, 90, method="linear")
@@ -1141,15 +1151,15 @@ def test_renormalize_open_rms_tiny_positive_range_is_not_degenerate():
 
 
 def test_renormalize_open_rms_empty_list_returns_empty():
-    assert events._renormalize_open_rms([]) == []
+    assert _renormalized([]) == []
 
 
 def test_renormalize_open_rms_is_invariant_to_uniform_gain():
     # パーセンタイル比の相対計算であるため、入力ゲイン(一様なスケール)に不変。
     values = [0.10, 0.35, 0.62, 0.77, 0.91]
     scaled = [v * 0.4 for v in values]  # 一様なゲイン(同じ相対分布・絶対値だけ異なる)
-    assert events._renormalize_open_rms(values) == pytest.approx(
-        events._renormalize_open_rms(scaled))
+    assert _renormalized(values) == pytest.approx(
+        _renormalized(scaled))
 
 
 def test_confirm_mouth_events_output_is_invariant_to_uniform_audio_gain():

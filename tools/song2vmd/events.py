@@ -481,18 +481,6 @@ def _normalize_with_bounds(value, p_lo, p_hi):
     return float(np.clip((value - p_lo) / (p_hi - p_lo), 0.0, 1.0))
 
 
-def _renormalize_open_rms(values):
-    """開き量決定にだけ使う、曲全体モーラ代表RMS集合のパーセンタイル線形正規化。
-
-    p10→0・p90→1、範囲外はクリップ。p90とp10が完全一致する場合(縮退。モーラ1件・全モーラ
-    同値を含む)は、無音側でなく開閉の中間値0.5へ一律に倒す。
-    """
-    if not values:
-        return []
-    p_lo, p_hi = _percentile_bounds(values)
-    return [_normalize_with_bounds(v, p_lo, p_hi) for v in values]
-
-
 def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity_curve, silence_on,
                           use_n_morph=False):
     """音素セグメント列とRMSから口形イベント列(MouthEvent)と開き量を確定する。

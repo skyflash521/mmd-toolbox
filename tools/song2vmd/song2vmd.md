@@ -1002,7 +1002,10 @@ GPU を使えない構成の2警告([§6.9](#69-gpu-を使えない構成の警�
 `--help`/`--machine` を除く全引数)。各要素は `{name, type, constraint, default, help}`(キーは常に5つ、
 該当しない値は `null`):
 
-- `name`: 長形式フラグ文字列(例 `"--style"`)。positional は `"input"`。
+- `name`: 長形式フラグ文字列(例 `"--style"`)。positional は `"input"`。真偽を対で受け取るフラグ
+  (`--x`/`--no-x`)は肯定形の長形式で1件だけ載せ、否定形は別要素として載せない(既定が on か off かは
+  `default` が示すため、両形を並べても機械利用側が得る情報は増えない)。[§5.2](#52-オプション) が否定形を行名にしている
+  `--no-recognizer-retry` も、`options` には肯定形 `--recognizer-retry` として現れる。
 - `type`: 固定語彙 `"float"` / `"int"` / `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)/ `"compound"`
   (複合トークン)。
 - `constraint`: 数値(`float`/`int`)は `{min, max, exclusive_min}`、`enum` は `{choices:[...]}`
