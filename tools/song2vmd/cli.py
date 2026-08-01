@@ -285,7 +285,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--intensity-curve", dest="intensity_curve", type=_positive_float, default=0.6,
                    help="強弱→開き量の非線形指数(累乗則)")
     p.add_argument("--silence-threshold", dest="silence_threshold", type=_silence_threshold,
-                   default=(0.06, 0.10), help="無音判定のヒステリシス開始/終了しきい値(ON:OFF)")
+                   default=(0.06, 0.10),
+                   help="無音判定のヒステリシス開始/終了しきい値(ON:OFF。ON は OFF より小さい値)")
     p.add_argument("--max-duration", dest="max_duration", type=_nonneg_float, default=300.0,
                    help="長尺の自動分割境界(秒。0で無効)")
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
