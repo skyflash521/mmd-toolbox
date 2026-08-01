@@ -29,7 +29,10 @@
   [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する。
 - **vpr の書き出し**は共有の形式I/Oモジュール [vpr](../../libs/vpr/vpr.md) に委譲する。`song2vpr` は vpr の
   バイナリ/直列化構造を直接扱わない。
-- **`song2vpr` 固有**: F0ピッチ推定(ボーカルWAV→F0→音高)、音符分割、歌詞/音素対応付け、CLI引数。
+- **`song2vpr` 固有**: F0ピッチ推定(ボーカルWAV→F0→音高)、音符分割、歌詞/音素対応付け、ツール固有のCLI引数。
+- **引数の値の範囲・書式の検証**と、自己記述で公開する制約をひとつの定義から導く仕組みは共有モジュール
+  `cli_options` に委譲する([cli_options.md](../../libs/cli_options/cli_options.md))。どの引数を公開するか・
+  その意味・既定値・型以外の意味制約は `song2vpr` 側に残る。
 
 ### 1.3 独立ツールとする理由
 
@@ -299,14 +302,15 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 ### 9.2 `--describe` の中身
 
 `options` は**処理を駆動する引数**の配列([§4.2](#42-オプション)が定める引数のうち、メタ/モード操作 `--describe`/`--version`/
-`--help`/`--machine` を除く全引数)。各要素は `{name, type, constraint, default, help}`(キーは常に5つ、
-該当しない値は `null`):
+`--help`/`--machine` を除く全引数)。**配列の要素が持つキー・名前の採り方・掲載対象・検証子からの型と制約の
+導出は共有側が定める**([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。本書は
+`song2vpr` の引数がそこで何を持つかだけを述べる。
 
-- `name`: 長形式フラグ文字列(例 `"--tempo"`)。positional は `"input"`。
-- `type`: 固定語彙 `"float"` / `"int"` / `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)。
-- `constraint`: 数値(`float`/`int`)は `{min, max, exclusive_min}`、`enum` は `{choices:[...]}`
-  (`--separate-vocals` は `always`/`never`、`--recognizer` は vocal_analysis の登録アダプタの
-  安定 id)、`flag` と制約なしは `null`。制約値は CLI 実装の引数検証から機械導出し、手書きで複製しない。
+- `type`: `song2vpr` が型表で与えるのは `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)で、検証子を持つ引数の
+  型名は共有側が導く。
+- `constraint`: `enum` は `{choices:[...]}`(`--separate-vocals` は `always`/`never`、`--recognizer` は
+  vocal_analysis の登録アダプタの安定 id)、`flag` と制約なしは `null`。数値引数の制約は、その形も値も
+  共有側の検証子から機械導出し、手書きで複製しない。
 - `default`: 解決後の既定値(例 `--tempo` は `120`)。入力名由来の `--output` は単一リテラルで表せないため
   `null`(算出規則は `help` に記す)。未指定が既定の `--lyrics` も `null`。
 - `help`: その引数の役割を人間向けに述べた文字列。

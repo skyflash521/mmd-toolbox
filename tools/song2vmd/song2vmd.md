@@ -40,6 +40,9 @@
 - `song2vmd` 入口の判断(vocal_analysis の出力から口形イベント列を確定する処理＝IPA→母音写像の適用・両唇閉鎖
   判定・先頭子音種別(ConsonantClass)・開口減衰種別(ApertureClass)の判定・無音/閉口判定・境界補正、声の
   強弱→開き量の写像、CLI引数、プリセットの具体値)は `song2vmd` 側に置く。
+- 引数の値の範囲・書式の検証と、自己記述で公開する制約をひとつの定義から導く仕組みは共有モジュール
+  `cli_options` に委譲する([cli_options.md](../../libs/cli_options/cli_options.md))。どの引数を公開するか・
+  その意味・既定値・型以外の意味制約は `song2vmd` 側に残る。
 
 ### 1.3 直経路の採用(vpr を中間に挟まない)
 
@@ -200,6 +203,8 @@ song2vmd INPUT [options]
 音声前段の外部ツールは vocal_analysis が内部で呼ぶ([§7](#7-外部ツール連携vocal_analysis-への委譲))。モデル等の細かな呼び出し設定は vocal_analysis が
 保持し([vocal_analysis.md §5.1](../../libs/vocal_analysis/vocal_analysis.md#51-母音子音の判定基準とフレーム時間rms不要)・[§8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))、CLIにはバックエンドの「選択」・実行デバイスの指定(`--device`)と、
 リップモーションの「効かせ方」のみを置く。
+上表のうち範囲付きの数値引数と複合トークンの引数は、受理範囲を1か所で定義し、そこから argparse の型検証と
+自己記述の制約公開の双方を導く([cli_options.md](../../libs/cli_options/cli_options.md))。
 挙動パラメータの取り回しは[CLI インターフェース規約 §9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し) に従う。
 
 ### 5.3 入出力要件
@@ -1006,21 +1011,18 @@ GPU を使えない構成の2警告([§6.9](#69-gpu-を使えない構成の警�
 ### 12.2 `--describe` の中身
 
 `options` は**処理を駆動する引数**の配列([§5.2](#52-オプション)が挙げる引数のうち、メタ/モード操作 `--describe`/`--version`/
-`--help`/`--machine` を除く全引数)。各要素は `{name, type, constraint, default, help}`(キーは常に5つ、
-該当しない値は `null`):
+`--help`/`--machine` を除く全引数)。**配列の要素が持つキー・名前の採り方・掲載対象・検証子からの型と制約の
+導出は共有側が定める**([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。本書は
+`song2vmd` の引数がそこで何を持つかだけを述べる。
 
-- `name`: 長形式フラグ文字列(例 `"--style"`)。positional は `"input"`。真偽を対で受け取るフラグ
-  (`--x`/`--no-x`)は肯定形の長形式で1件だけ載せ、否定形は別要素として載せない(既定が on か off かは
-  `default` が示すため、両形を並べても機械利用側が得る情報は増えない)。[§5.2](#52-オプション) が否定形を行名にしている
-  `--no-recognizer-retry` も、`options` には肯定形 `--recognizer-retry` として現れる。
-- `type`: 固定語彙 `"float"` / `"int"` / `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)/ `"compound"`
-  (複合トークン)。
-- `constraint`: 数値(`float`/`int`)は `{min, max, exclusive_min}`、`enum` は `{choices:[...]}`
-  (`--style` は [§8.1](#81-歌い方スタイルプリセット) のプリセット名、`--separate-vocals` は `always`/`never`、`--separator` は
-  vocal_analysis の登録アダプタの安定 id)、`compound`
-  (`--vowel-gain`=`"a:i:u:e:o"`・`--silence-threshold`=`"ON:OFF"`)は `{format, fields}`(`format` は
-  トークン文法の文字列、`fields` は各トークンの数値制約の配列)、`flag` と制約なしは `null`。制約値は CLI
-  実装の引数検証から機械導出し、手書きで複製しない。
+- `name`: 真偽を対で受け取るフラグは肯定形の長形式で1件だけ載るため、[§5.2](#52-オプション) が否定形を行名にしている
+  `--no-recognizer-retry` は `options` に `--recognizer-retry` として現れる。
+- `type`: `song2vmd` が型表で与えるのは `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)の3つで、検証子を
+  持つ引数の型名(`"float"` / `"int"` / `"compound"`)は共有側が導く。
+- `constraint`: `enum` は `{choices:[...]}`(`--style` は [§8.1](#81-歌い方スタイルプリセット) のプリセット名、`--separate-vocals` は
+  `always`/`never`、`--separator` は vocal_analysis の登録アダプタの安定 id)、`flag` と制約なしは `null`。
+  数値(`--sofa-timeout`・`--open-max` ほか)と複合トークン(`--vowel-gain`=`"a:i:u:e:o"`・
+  `--silence-threshold`=`"ON:OFF"`)の制約は、その形も値も共有側の検証子から機械導出し、手書きで複製しない。
 - `default`: 解決後の既定値。プリセット由来の既定(`--open-max`/`--coarticulation`/`--anticipation`/
   `--min-hold`)と入力名由来の `--output` は単一リテラルで表せないため `null`(算出規則は `help` に記す。
   プリセット由来の値は `presets` 側に載る)。`--recognizer-model-id`/`--recognizer-model-revision`も
