@@ -677,7 +677,5 @@ camera_distance_tol, camera_fov_tol}`([§2.4](#24-許容誤差) の表の値)。
   で終える(sparsevmd の削減は単一プロセスで走り、子プロセスは持たない)。
 - **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
   扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
-- 進捗のライブ表示は中断・例外経路でも行を閉じてから終える(try/finally で保証する)。
-  機械モードではライブ表示自体を無効化する。
 - 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める
   終端保証の例外の 1 つ。規約 [§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性))。出力の原子性により中途半端な出力ファイルは残らない。
