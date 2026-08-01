@@ -55,8 +55,8 @@ def test_pop_generation_params():
 
 
 def test_nonpop_presets_keep_default_continuity_params():
-    # pop 以外は連続感パラメータ(三角形下限・伸び表現・レガート谷)を lipsync 既定のまま据え置く。
-    # presets が明示フィールドへ移行しても既定挙動が保たれることを固定する。
+    # pop 以外は連続感パラメータ(三角形下限・伸び表現・レガート谷・モーラ境界の谷)を lipsync 既定の
+    # まま据え置く。presets が明示フィールドへ移行しても既定挙動が保たれることを固定する。
     default = GenerationParams()
     for style in ("ballad", "powerful", "whisper", "rap"):
         _, gen = presets.resolve(style)
@@ -68,6 +68,8 @@ def test_nonpop_presets_keep_default_continuity_params():
         assert gen.legato_valley_shallow == pytest.approx(default.legato_valley_shallow)
         assert gen.legato_valley_deep == pytest.approx(default.legato_valley_deep)
         assert gen.legato_valley_slope == pytest.approx(default.legato_valley_slope)
+        assert gen.mora_valley_frames == pytest.approx(default.mora_valley_frames)
+        assert gen.mora_valley_min_gap_frames == pytest.approx(default.mora_valley_min_gap_frames)
 
 
 def test_ballad_values():
