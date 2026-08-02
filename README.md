@@ -220,6 +220,7 @@ song2vmd <入力ファイル名>.wav
 | `libs/pmx/` | PMX 読み取り・ボーン階層・FK 評価のライブラリ |
 | `libs/vmd/` | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
 | `libs/vocal_analysis/` | 音声解析の共有ドメインライブラリ |
+| `libs/vocal_analysis_cli/` | 音声前段の共通CLI引数の定義・検証・設定解決の共有ドメインライブラリ |
 | `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
 | `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は [pyproject.toml](pyproject.toml)、おもなツールの使い方は冒頭の [ツール](#ツール) 一覧 |
 

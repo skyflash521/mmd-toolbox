@@ -42,10 +42,13 @@
   `lipsync` に委譲する([lipsync.md](../../libs/lipsync/lipsync.md)。[§3](#3-アニメ的リップモーションの定義品質基準)・[§6.5](#65-開き量の決定とモーフ生成への受け渡し))。
 - `song2vmd` 入口の判断(vocal_analysis の出力から口形イベント列を確定する処理＝IPA→母音写像の適用・両唇閉鎖
   判定・先頭子音種別(ConsonantClass)・開口減衰種別(ApertureClass)の判定・無音/閉口判定・境界補正、声の
-  強弱→開き量の写像、CLI引数、プリセットの具体値)は `song2vmd` 側に置く。
+  強弱→開き量の写像、ツール固有のCLI引数、プリセットの具体値)は `song2vmd` 側に置く。
+- 音声前段を駆動する**共通引数群**の名前・意味・既定・検証と設定への解決は共有モジュール
+  `vocal_analysis_cli` に委譲する([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))。
+  `song2vmd` 側に残るのは、この共通引数群を公開するという判断と、本書が示す利用者向けの公開契約である。
 - 引数の値の範囲・書式の検証と、自己記述で公開する制約をひとつの定義から導く仕組みは共有モジュール
-  `cli_options` に委譲する([cli_options.md](../../libs/cli_options/cli_options.md))。どの引数を公開するか・
-  その意味・既定値・型以外の意味制約は `song2vmd` 側に残る。
+  `cli_options` に委譲する([cli_options.md](../../libs/cli_options/cli_options.md))。ツール固有引数について、
+  どれを公開するか・その意味・既定値・型以外の意味制約は `song2vmd` 側に残る。
 - 進捗の報告先の振り分け(機械モードのイベント送出と人間向けライブ表示の切り替え)は共有モジュール
   `cli_progress_router` に委譲する([cli_progress_router.md](../../libs/cli_progress_router/cli_progress_router.md))。
   段 id の集合と、それに対応する利用者向けの工程名は `song2vmd` 側に残る([§5.4](#54-進捗表示))。
@@ -181,18 +184,7 @@ song2vmd INPUT [options]
 | `--overwrite` | off | 出力先の既存ファイルへの上書きを許可する(上書きガードの解除。[§5.3](#53-入出力要件)) |
 | `--model-name NAME` | `song2vmd <実行中のツールバージョン>`(例: `song2vmd 1.2.3`) | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
 | `--style NAME` | `pop` | 歌い方スタイルプリセット([§8.1](#81-歌い方スタイルプリセット))。開き量レンジ・タイミングを切り替える |
-| `--separate-vocals MODE` | `always` | ボーカル分離 `always` / `never` |
-| `--separator NAME` | vocal_analysis の既定アダプタ | S1ボーカル分離バックエンドの選択([§7](#7-外部ツール連携vocal_analysis-への委譲))。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う([vocal_analysis.md §8.2](../../libs/vocal_analysis/vocal_analysis.md#82-アダプタの登録と選択)〜[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補)) |
-| `--recognizer-model-id ID` | vocal_analysis の既定内容認識モデル(`ContentRecognizerModel.model_id`) | S2内容認識モデルの指定([vocal_analysis.md §5.2](../../libs/vocal_analysis/vocal_analysis.md#52-wav2vec2-ctc経路-複合構成内容認識g2p強制アライメントの区間化)・[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補))。未指定時は vocal_analysis の既定モデルを使う |
-| `--recognizer-model-revision REV` | 既定モデルのリビジョン(`--recognizer-model-id` 未指定時)。`--recognizer-model-id` 指定時は未指定なら最新リビジョン | S2内容認識モデルのリビジョン指定(`ContentRecognizerModel.model_revision`)。`--recognizer-model-id` と組で使う。`--recognizer-model-id` を指定せず本引数だけを指定するのは対象が無く無意味なため引数エラー([§11](#11-終了コード)・[§12.3](#123-構造化エラー)) |
-| `--no-recognizer-retry` | off(既定でリトライ有効) | S2内容認識のトリガ式リトライ(エコー幻覚・反復幻覚。主モデル自身をプロンプト無しで再認識する。[vocal_analysis.md の内容認識のリトライ](../../libs/vocal_analysis/vocal_analysis.md#内容認識のリトライトリガ式区間あたり1回))を無効にする。既定onの明示形 `--recognizer-retry` も受理する |
-| `--forced-aligner NAME` | `wav2vec2-ctc-forcedalign` | S2強制アライメント段のバックエンド選択([vocal_analysis.md §5.3](../../libs/vocal_analysis/vocal_analysis.md#53-sofa経路-単語単位アライメント)・[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補))。値・選択肢は vocal_analysis の登録アダプタの安定id。既定のままなら以下の `--sofa-*` 系は一切不要で追加設定無しに現行どおり動く |
-| `--sofa-python PATH` | 無し(必須) | SOFA専用venvのPython実行ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定(`wav2vec2-ctc-forcedalign`)時は指定しても未使用 |
-| `--sofa-root PATH` | 無し(必須) | SOFAリポジトリのルートパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
-| `--sofa-checkpoint PATH` | 無し(必須) | SOFAチェックポイント(`.ckpt`)ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。既定時は指定しても未使用 |
-| `--sofa-timeout SEC` | `300` | SOFAサブプロセス1回あたりのタイムアウト秒数(正の数値のみ) |
-| `--english-katakana-method NAME` | `arpakana` | S2 G2Pの英語カタカナ化フォールバック([vocal_analysis.md §5.2.4](../../libs/vocal_analysis/vocal_analysis.md#524-g2p))の変換方式選択。`arpakana`(ルールベース。生成モデル・GPU不要)または `tinyllama-katakana-converter`(生成モデル) |
-| `--device MODE` | `auto` | 実行デバイスの選択(`auto` / `cpu`)。`auto` は環境から自動選択(GPU(CUDA)が利用可能ならGPU)。`cpu` はGPUを使わずCPUで実行する(音声前段の全モデルと、環境を継承するSOFAサブプロセスを含む)。GPUはあるがVRAMが不足する環境の回避手段 |
+| 音声前段の共通引数群 | 共有側の既定 | ボーカル分離の実施方針・分離バックエンド・内容認識モデルとそのリビジョン・内容認識のリトライ・強制アライメント段・SOFA 設定・英語カタカナ化フォールバックの方式・実行デバイス・長尺の自動分割の目標長を選ぶ共通引数群を**全件公開する**。個々の引数名・型・既定・意味と組み合わせ検証は [vocal_analysis_cli.md §2](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#2-共通引数群)・[§3](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#3-組み合わせ検証) が定める |
 | `--n-morph` | off(既定は閉口) | 撥音(音節末の鼻音)に「ん」モーフ(`MouthShape.N`)を使う(既定off。[§6.3](#63-口形イベント列の確定入口))。既定offの明示形 `--no-n-morph` も受理する |
 | `--vowel-gain a:i:u:e:o` | `1:1:1:1:1` | 母音別(あ/い/う/え/お)の開き量微調整倍率。プリセットの母音別倍率([§8.1](#81-歌い方スタイルプリセット))へ要素ごとに乗算する(既定はプリセット値そのまま。プリセット非依存の共通既定)。「ん」はプリセット値のままで本引数の対象外([§8.2](#82-母音口形母音合成プロファイルは-lipsync-が確定)) |
 | `--open-max V` | プリセット値([§8.1](#81-歌い方スタイルプリセット)) | 口の開き量の上限(開けすぎ防止) |
@@ -201,7 +193,6 @@ song2vmd INPUT [options]
 | `--min-hold FRAMES` | プリセット値([§8.1](#81-歌い方スタイルプリセット)) | 最小保持フレーム。これより短いモーラは併合/間引き |
 | `--intensity-curve P` | `0.6` | 強弱→開き量の非線形指数(累乗則。プリセット非依存の共通既定。[§8.1](#81-歌い方スタイルプリセット)) |
 | `--silence-threshold ON:OFF` | `0.06:0.10` | 無音(閉口)判定のヒステリシス開始/終了しきい値(ON は OFF より小さい値。プリセット非依存の共通既定。[§8.1](#81-歌い方スタイルプリセット)) |
-| `--max-duration SEC` | `300` | 長尺の自動分割境界(処理資源対策。0で無効。[§6.6](#66-長尺の分割)) |
 | `--dry-run` | off | 出力せず処理計画と診断を表示([§6.7](#67-レポートと診断))。引数検証(上書きガード等)は dry-run でも実施する |
 | `--keep-intermediate` | off | 中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)を残す(診断用) |
 | `-v, --verbose` | off | 通常実行でも `--dry-run` と同じ診断レポート([§6.7](#67-レポートと診断))を標準出力へ表示する(出力VMDは書く) |
@@ -211,10 +202,12 @@ song2vmd INPUT [options]
 | `--describe` | — | オプション定義とプリセット一覧を構造化して出力し終了する([§5.5](#55-機械モードとメタ操作機械可読インターフェース)・[§12](#12-機械モード機械可読インターフェース)) |
 
 音声前段の外部ツールは vocal_analysis が内部で呼ぶ([§7](#7-外部ツール連携vocal_analysis-への委譲))。モデル等の細かな呼び出し設定は vocal_analysis が
-保持し([vocal_analysis.md §5.1](../../libs/vocal_analysis/vocal_analysis.md#51-母音子音の判定基準とフレーム時間rms不要)・[§8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))、CLIにはバックエンドの「選択」・実行デバイスの指定(`--device`)と、
-リップモーションの「効かせ方」のみを置く。
-上表のうち範囲付きの数値引数と複合トークンの引数は、受理範囲を1か所で定義し、そこから argparse の型検証と
-自己記述の制約公開の双方を導く([cli_options.md](../../libs/cli_options/cli_options.md))。
+保持し([vocal_analysis.md §5.1](../../libs/vocal_analysis/vocal_analysis.md#51-母音子音の判定基準とフレーム時間rms不要)・[§8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))、CLIにはバックエンドの「選択」・実行デバイスの指定と、
+リップモーションの「効かせ方」のみを置く。前者は共通引数群として共有側が定義し
+([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))、`song2vmd` はそれを全件公開する
+という判断だけを持つ([§1.2](#12-設計境界))。
+上表のうち `song2vmd` 固有の範囲付き数値引数と複合トークン引数は、受理範囲を1か所で定義し、そこから
+argparse の型検証と自己記述の制約公開の双方を導く([cli_options.md](../../libs/cli_options/cli_options.md))。
 挙動パラメータの取り回しは[CLI インターフェース規約 §9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し) に従う。
 
 ### 5.3 入出力要件
@@ -286,11 +279,12 @@ song2vmd INPUT [options]
 
 - 追加依存の取り込みに失敗した場合は、理由(取り込めなかったモジュール名と導入コマンド)を
   `missing_dependency`・終了コード4で返す([§11](#11-終了コード))。非機械モードは標準エラーへの1行、機械モードは
-  error イベント([§12.3](#123-構造化エラー))で、他の失敗と同じ経路に載せる。トレースバックは出さない。
-- 未導入かどうかは取り込み時点で確定するが、それを終了へ反映するのは、引数の解析と検証をすべて終えて
-  処理を開始する直前とする。したがってメタ操作(`--help`/`--version`/`--describe`。[§5.5](#55-機械モードとメタ操作機械可読インターフェース))と
-  引数エラーは追加依存の有無に依らず成立し、それぞれ規約が定める終了コード(メタ操作は0、引数エラーは2)で終わる。
-  オプションの定義・検証・自己記述のペイロードは追加依存を要さない取り込みだけで組み立てられるため、
+  error イベント([§12.3](#123-構造化エラー))で、他の失敗と同じ経路に載せる。トレースバックは出さない。理由1行の
+  組み立てと、ガードをどの時点で評価するかは共有側
+  ([vocal_analysis_cli.md §5](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#5-追加依存の未導入))が定める。
+  どの取り込みが追加依存を要するかの宣言と、ガードの評価そのものは `song2vmd` が持つ。
+- 上の評価位置の帰結として、メタ操作(`--help`/`--version`/`--describe`。[§5.5](#55-機械モードとメタ操作機械可読インターフェース))と引数エラーは
+  追加依存の有無に依らず成立し、それぞれ規約が定める終了コード(メタ操作は0、引数エラーは2)で終わる。
   未導入の環境でも対話利用者は `--help` で使い方を、機械利用側は `--describe` でオプション定義を得られる。
 - 切り分けは取り込みの単位で行う。追加依存を要しない配布物内のモジュール(共有ライブラリ・ツール自身の
   モジュール)を直接取り込む経路は本判定の対象に含めない。導入自体の破損であり、追加依存の導入案内は
@@ -317,10 +311,9 @@ song2vmd INPUT [options]
 [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する([vocal_analysis.md §4](../../libs/vocal_analysis/vocal_analysis.md#4-ボーカル抽出s1)〜[§6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3))。`song2vmd` は共有
 出力(ボーカルWAV・音素セグメント列・RMS)を消費する。
 
-- **ボーカル抽出(S1)**: [vocal_analysis.md §4](../../libs/vocal_analysis/vocal_analysis.md#4-ボーカル抽出s1)。分離の挙動 `always`/`never` の選択は `song2vmd` の CLI
-  (`--separate-vocals`、[§5.2](#52-オプション))で公開する。
+- **ボーカル抽出(S1)**: [vocal_analysis.md §4](../../libs/vocal_analysis/vocal_analysis.md#4-ボーカル抽出s1)。分離の実施方針は共通引数群として CLI で公開する([§5.2](#52-オプション))。
 - **音素/母音認識(S2)**: [vocal_analysis.md §5](../../libs/vocal_analysis/vocal_analysis.md#5-音素母音認識s2)。母音/子音/gap の全被覆セグメント列＋IPAラベル(任意の信頼度)を
-  得る。内容認識モデルの選択は CLI(`--recognizer-model-id`・`--recognizer-model-revision`、[§5.2](#52-オプション))で公開する。
+  得る。内容認識モデルの選択も共通引数群として CLI で公開する([§5.2](#52-オプション))。
 - **強弱RMS算出(S3)**: [vocal_analysis.md §6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3)。相対正規化したRMSを得る。RMS を使う判断(無音/閉口・開き量)は
   `song2vmd` 入口([§6.3](#63-口形イベント列の確定入口)・[§6.4](#64-強弱rmsに基づく入口処理s3の消費))。
 
@@ -649,9 +642,8 @@ song2vmd内の定数として持つ([モーラ代表RMSの声量レンジ再正�
 [vocal_analysis.md §11.1](../../libs/vocal_analysis/vocal_analysis.md#111-長尺の自動分割) が定める。
 
 - 分割はフレーム数上限対策ではなく資源対策である(VMDのフレーム番号は u32 で十分大きい)。
-- `song2vmd` はチャンクの目標長を選ぶ共通引数を公開し([§5.2](#52-オプション))、そこから解決した実行ポリシーを前段実行
-  エンジンへ渡す。分割を無効にする指定も同じ引数で表す。探索窓の幅とオーバーラップ長は利用者へ公開せず、
-  共有側の値を使う。
+- `song2vmd` は分割の指定を共通引数群として公開し([§5.2](#52-オプション))、そこから解決した実行ポリシーを前段実行
+  エンジンへ渡す。
 - 無音が見つからず目標境界そのもので強制分割した境界が1つでもあった場合は `forced_split` の警告を出す
   ([§12.1](#121-イベントペイロード))。
 - キー生成は、継ぎ目を結合した曲全体のセグメント列に対して1回行う(チャンク単位でキーを生成して
@@ -738,11 +730,9 @@ interface(Separator / Recognizer)、正規化中間形式、アダプタの登�
   ([vocal_analysis.md §11](../../libs/vocal_analysis/vocal_analysis.md#11-前段実行エンジン))。`song2vmd` は解決した設定・
   長尺分割の実行ポリシー・中間生成物の保存先・進捗コールバックを渡し、共有出力と入力PCM・分離後ボーカルの
   PCM・尺・強制分割の有無を受け取る。返る例外は[§12.3](#123-構造化エラー)の分類へ写す。
-- バックエンドの選択(`--separator` / `--recognizer-model-id` / `--recognizer-model-revision` /
-  `--no-recognizer-retry` /
-  `--separate-vocals` / `--forced-aligner` / `--sofa-python` / `--sofa-root` / `--sofa-checkpoint` /
-  `--sofa-timeout` / `--english-katakana-method`)は `song2vmd` の CLI で公開する([§5.2](#52-オプション))。アダプタの追加・切り替えや内容認識
-  モデルの既定値・リトライ既定の変更は vocal_analysis 側で行い、`song2vmd` はその選択肢を引数として見せる。
+- バックエンドの選択は共通引数群として `song2vmd` の CLI で全件公開する([§5.2](#52-オプション))。引数の名前・意味・
+  検証は共有側([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))が定め、アダプタの
+  追加・切り替えや内容認識モデルの既定値・リトライ既定の変更は vocal_analysis 側で行う。
 - 音声前段の重い依存(分離・認識のライブラリやモデル取得)は `vocal_analysis` 側に閉じ、本リポジトリ本体の
   必須依存は `numpy/scipy` のまま保つ。
 
@@ -988,25 +978,21 @@ GPU を使えない構成の2警告 `cpu_only_torch`・`cuda_unavailable`([§6.9
 
 ### 12.2 `--describe` の中身
 
-`options` は**処理を駆動する引数**の配列([§5.2](#52-オプション)が挙げる引数のうち、メタ/モード操作 `--describe`/`--version`/
-`--help`/`--machine` を除く全引数)。**配列の要素が持つキー・名前の採り方・掲載対象・検証子からの型と制約の
-導出は共有側が定める**([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。本書は
-`song2vmd` の引数がそこで何を持つかだけを述べる。
+`options` は**処理を駆動する引数**の配列(本書 [§5.2](#52-オプション)が挙げる `song2vmd` 固有引数と、そこで公開すると
+宣言した共通引数群([vocal_analysis_cli.md §2](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#2-共通引数群))の全引数の
+うち、メタ/モード操作 `--describe`/`--version`/`--help`/`--machine` を除く全引数)。**配列の要素が持つキー・
+名前の採り方・掲載対象・検証子からの型と制約の導出は共有側が定める**
+([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。本書は `song2vmd` 固有引数が
+そこで何を持つかだけを述べる(共通引数群の分は共有側の型情報が与える)。
 
-- `name`: 真偽を対で受け取るフラグは肯定形の長形式で1件だけ載るため、[§5.2](#52-オプション) が否定形を行名にしている
-  `--no-recognizer-retry` は `options` に `--recognizer-retry` として現れる。
 - `type`: `song2vmd` が型表で与えるのは `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)の3つで、検証子を
   持つ引数の型名(`"float"` / `"int"` / `"compound"`)は共有側が導く。
-- `constraint`: `enum` は `{choices:[...]}`(`--style` は [§8.1](#81-歌い方スタイルプリセット) のプリセット名、`--separate-vocals` は
-  `always`/`never`、`--separator` は vocal_analysis の登録アダプタの安定 id)、`flag` と制約なしは `null`。
-  数値(`--sofa-timeout`・`--open-max` ほか)と複合トークン(`--vowel-gain`=`"a:i:u:e:o"`・
+- `constraint`: `enum` は `{choices:[...]}`(`--style` は [§8.1](#81-歌い方スタイルプリセット) のプリセット名)、`flag` と制約なしは
+  `null`。数値(`--open-max` ほか)と複合トークン(`--vowel-gain`=`"a:i:u:e:o"`・
   `--silence-threshold`=`"ON:OFF"`)の制約は、その形も値も共有側の検証子から機械導出し、手書きで複製しない。
 - `default`: 解決後の既定値。プリセット由来の既定(`--open-max`/`--coarticulation`/`--anticipation`/
   `--min-hold`)と入力名由来の `--output` は単一リテラルで表せないため `null`(算出規則は `help` に記す。
-  プリセット由来の値は `presets` 側に載る)。`--recognizer-model-id`/`--recognizer-model-revision`も
-  同様に `null`(実際の既定値は vocal_analysis の既定内容認識モデルが持つ
-  `model_id`/`model_revision` の組であり、revision の実質的な既定は id の指定有無に
-  依存するため、単一リテラルで表せない。算出規則は `help` に記す)。プリセットに依らない共通既定を持つ
+  プリセット由来の値は `presets` 側に載る)。プリセットに依らない共通既定を持つ
   `--vowel-gain`/`--intensity-curve`/`--silence-threshold` は、その既定([§8.1](#81-歌い方スタイルプリセット))をリテラルで載せる。
 - `help`: 人間向け説明([§5.2](#52-オプション))。
 
@@ -1023,7 +1009,7 @@ GPU を使えない構成の2警告 `cpu_only_torch`・`cuda_unavailable`([§6.9
 |---|---|---|---|
 | 入力ファイルが存在しない、または音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
 | 内部生成ファイル(分離後ボーカルWAV)の読み直しに失敗した | `not_audio` | `null`(+ `path` に対象ファイル) | 1 |
-| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。組み合わせ検証([§5.2](#52-オプション))も含む: `--recognizer-model-id` を指定せず `--recognizer-model-revision` だけを指定した場合、`--forced-aligner sofa-forcedalign` 選択時に `--sofa-python`/`--sofa-root`/`--sofa-checkpoint` のいずれかが欠落した場合 | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は対象引数の長形式フラグ名(SOFA必須検証は `--sofa-python`→`--sofa-root`→`--sofa-checkpoint` の順で最初に見つかった欠落1件のみ) | 2 |
+| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。共通引数群の組み合わせ検証([vocal_analysis_cli.md §3](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#3-組み合わせ検証))も含む | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は共有側が返す対象引数の長形式フラグ名 | 2 |
 | 出力先が既存のディレクトリ(`--overwrite` の有無に依らない。[§5.3](#53-入出力要件)) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定([§5.3](#53-入出力要件)) | `output_exists` | `"--output"` | 2 |
 | 出力書き込み失敗、または `--keep-intermediate` 指定時の中間生成物書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"` または `"--keep-intermediate"`(+ `path`) | 3 |

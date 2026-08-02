@@ -30,9 +30,12 @@
 - **vpr の書き出し**は共有の形式I/Oモジュール [vpr](../../libs/vpr/vpr.md) に委譲する。`song2vpr` は vpr の
   バイナリ/直列化構造を直接扱わない。
 - **`song2vpr` 固有**: F0ピッチ推定(ボーカルWAV→F0→音高)、音符分割、歌詞/音素対応付け、ツール固有のCLI引数。
+- **音声前段を駆動する共通引数群**の名前・意味・既定・検証と設定への解決は共有モジュール
+  `vocal_analysis_cli` に委譲する([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))。
+  `song2vpr` 側に残るのは、この共通引数群を公開するという判断と、本書が示す利用者向けの公開契約である。
 - **引数の値の範囲・書式の検証**と、自己記述で公開する制約をひとつの定義から導く仕組みは共有モジュール
-  `cli_options` に委譲する([cli_options.md](../../libs/cli_options/cli_options.md))。どの引数を公開するか・
-  その意味・既定値・型以外の意味制約は `song2vpr` 側に残る。
+  `cli_options` に委譲する([cli_options.md](../../libs/cli_options/cli_options.md))。ツール固有引数について、
+  どれを公開するか・その意味・既定値・型以外の意味制約は `song2vpr` 側に残る。
 - **進捗の報告先の振り分け**(機械モードのイベント送出と人間向けライブ表示の切り替え)は共有モジュール
   `cli_progress_router` に委譲する([cli_progress_router.md](../../libs/cli_progress_router/cli_progress_router.md))。
   段 id の集合と、それに対応する利用者向けの工程名は `song2vpr` 側に残る([§4.3](#43-進捗表示))。
@@ -105,8 +108,7 @@ song2vpr INPUT [options]
 | `INPUT` | 必須 | 入力音声ファイル |
 | `-o, --output PATH` | `<入力名>.vpr` | 出力 vpr |
 | `--overwrite` | off | 出力先の既存ファイルへの上書きを許可する(上書きガードの解除。[§5](#5-入出力要件)) |
-| `--separate-vocals MODE` | `always` | ボーカル分離 `always` / `never`(vocal_analysis へ渡す) |
-| `--recognizer NAME` | vocal_analysis の既定アダプタ | 音素認識バックエンドの選択(vocal_analysis へ渡す)。値・選択肢・既定は vocal_analysis の登録アダプタの安定 id に従う([vocal_analysis.md §8.2](../../libs/vocal_analysis/vocal_analysis.md#82-アダプタの登録と選択)〜[§8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補)。採用構成の確定も [vocal_analysis.md §8.3](../../libs/vocal_analysis/vocal_analysis.md#83-採用ツールと代替候補) が正本) |
+| 音声前段の共通引数群 | 共有側の既定 | ボーカル分離の実施方針・分離バックエンド・内容認識モデルとそのリビジョン・内容認識のリトライ・強制アライメント段・SOFA 設定・英語カタカナ化フォールバックの方式・実行デバイス・長尺の自動分割の目標長を選ぶ共通引数群を**全件公開する**。個々の引数名・型・既定・意味と組み合わせ検証は [vocal_analysis_cli.md §2](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#2-共通引数群)・[§3](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#3-組み合わせ検証) が定める |
 | `--tempo BPM` | `120` | テンポ(BPM)。未指定時は既定 120 で仮置きし警告を出す(自動推定は将来。[§7.3](#73-テンポと秒tick-変換)) |
 | `--lyrics PATH` | なし | 任意の歌詞テキスト(かな表記前提。モーラ単位で音符へ対応。漢字の読み変換は将来。[§7.2](#72-歌詞音素強弱の付与)) |
 | `--dry-run` | off | 出力せず処理計画と診断を表示。引数検証(上書きガード等)は dry-run でも実施する |
@@ -116,8 +118,9 @@ song2vpr INPUT [options]
 | `--machine` | off | 機械モード。標準出力を JSON Lines のイベントストリームにする([§4.4](#44-機械モードとメタ操作機械可読インターフェース)・[§9](#9-機械モード機械可読インターフェース)) |
 | `--describe` | — | オプション定義を構造化して出力し終了する([§4.4](#44-機械モードとメタ操作機械可読インターフェース)・[§9](#9-機械モード機械可読インターフェース)) |
 
-音声前段のバックエンド選択(`--separate-vocals` / `--recognizer`)は `vocal_analysis` のアダプタを CLI で公開する
-(選択肢の追加・切り替えは vocal_analysis 側。[vocal_analysis.md §8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))。挙動パラメータの取り回しは
+音声前段のバックエンド選択は共通引数群として CLI で全件公開する。引数の名前・意味・検証は共有側
+([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))が定め、選択肢の追加・切り替えは
+`vocal_analysis` 側で行う([vocal_analysis.md §8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))。挙動パラメータの取り回しは
 [CLI インターフェース規約 §9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し) に従う。
 
 ### 4.3 進捗表示
@@ -244,7 +247,7 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 | 1 | 入力不正(存在しない・音声として読めない・破損・非対応形式、`--lyrics` ファイルの読み込み不可を含む) |
 | 2 | 引数エラー(範囲・書式・上書きガード・未知オプション など) |
 | 3 | 出力書き込み失敗 |
-| 4 | 音声前段の外部依存の失敗(復号器未検出・分離/認識のモデル取得・実行失敗。失敗ステージを明示する) |
+| 4 | 音声前段の外部依存の失敗(復号器未検出・分離/認識のモデル取得・実行失敗。失敗ステージを明示する)、および追加依存の未導入([§9.3](#93-構造化エラー)) |
 | 130 | 協調的な中断(Ctrl-C 等。[§9.4](#94-中断)) |
 
 - `0`〜`3` は[CLI インターフェース規約 §5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の基底と同じ意味。
@@ -308,16 +311,16 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 
 ### 9.2 `--describe` の中身
 
-`options` は**処理を駆動する引数**の配列([§4.2](#42-オプション)が定める引数のうち、メタ/モード操作 `--describe`/`--version`/
-`--help`/`--machine` を除く全引数)。**配列の要素が持つキー・名前の採り方・掲載対象・検証子からの型と制約の
-導出は共有側が定める**([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。本書は
-`song2vpr` の引数がそこで何を持つかだけを述べる。
+`options` は**処理を駆動する引数**の配列(本書 [§4.2](#42-オプション)が定める `song2vpr` 固有引数と、そこで公開すると
+宣言した共通引数群([vocal_analysis_cli.md §2](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#2-共通引数群))の全引数の
+うち、メタ/モード操作 `--describe`/`--version`/`--help`/`--machine` を除く全引数)。**配列の要素が持つキー・
+名前の採り方・掲載対象・検証子からの型と制約の導出は共有側が定める**
+([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。本書は `song2vpr` 固有引数が
+そこで何を持つかだけを述べる(共通引数群の分は共有側の型情報が与える)。
 
-- `type`: `song2vpr` が型表で与えるのは `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)で、検証子を持つ引数の
-  型名は共有側が導く。
-- `constraint`: `enum` は `{choices:[...]}`(`--separate-vocals` は `always`/`never`、`--recognizer` は
-  vocal_analysis の登録アダプタの安定 id)、`flag` と制約なしは `null`。数値引数の制約は、その形も値も
-  共有側の検証子から機械導出し、手書きで複製しない。
+- `type`: `song2vpr` が型表で与えるのは `"str"` / `"flag"`(真偽)で、検証子を持つ引数の型名は共有側が導く。
+- `constraint`: `flag` と制約なしは `null`。数値引数の制約は、その形も値も共有側の検証子から機械導出し、
+  手書きで複製しない。
 - `default`: 解決後の既定値(例 `--tempo` は `120`)。入力名由来の `--output` は単一リテラルで表せないため
   `null`(算出規則は `help` に記す)。未指定が既定の `--lyrics` も `null`。
 - `help`: その引数の役割を人間向けに述べた文字列。
@@ -333,12 +336,13 @@ F0推定の手法・有声/無声判定の具体は実装時に代表歌唱サ�
 | 事象 | `code` | `field` | `exit_code` |
 |---|---|---|---|
 | 入力ファイルが存在しない、または音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
-| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出) | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`) | 2 |
+| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。共通引数群の組み合わせ検証([vocal_analysis_cli.md §3](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#3-組み合わせ検証))も含む | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は共有側が返す対象引数の長形式フラグ名 | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定([§5](#5-入出力要件)) | `output_exists` | `"--output"` | 2 |
 | `--lyrics` のファイルを読めない | `lyrics_unreadable` | `"--lyrics"`(+ `path`) | 1 |
 | 出力書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"`(+ `path`) | 3 |
 | 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない([vocal_analysis.md §3](../../libs/vocal_analysis/vocal_analysis.md#3-入力読み込みs0)) | `decoder_missing` | `"input"` | 4 |
 | 分離・認識のモデル取得/実行失敗 | `stage_failed`(+ `stage`) | `null` | 4 |
+| 音声前段の追加依存が未導入で取り込めない(理由1行は[vocal_analysis_cli.md §5](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#5-追加依存の未導入)が組み立てる) | `missing_dependency` | `null` | 4 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
 
