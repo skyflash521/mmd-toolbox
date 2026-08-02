@@ -13,6 +13,7 @@ import json
 
 import pytest
 
+from cli_options import RangeValidator
 from vpr import (
     ControllerCurve,
     ControllerEvent,
@@ -144,6 +145,21 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
             "open_max", "default_open", "valley_shallow", "valley_deep",
             "valley_slope", "coartic_overlap", "anticipation",
         }
+
+
+def test_numeric_constraints_are_derived_from_the_validators():
+    # 手書きの複製だと検証側だけを直したときに黙って食い違うので、公開する制約は検証子から取る。
+    parser = cli._build_parser()
+    options = {o["name"]: o for o in cli._describe_options(parser)}
+    checked = 0
+    for action in parser._actions:
+        if not isinstance(action.type, RangeValidator):
+            continue
+        name = next(s for s in action.option_strings if s.startswith("--"))
+        assert options[name]["type"] == action.type.value_type
+        assert options[name]["constraint"] == action.type.constraint
+        checked += 1
+    assert checked == 10  # 範囲付き数値のオプション全件
 
 
 def test_describe_model_name_default_is_tool_and_version(capsysbinary):

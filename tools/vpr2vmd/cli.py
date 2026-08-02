@@ -14,7 +14,6 @@ _build() が束ねる。--dry-run は出力VMDを書かず、処理計画と診�
 
 import argparse
 import inspect
-import math
 import os
 import sys
 from dataclasses import dataclass, replace
@@ -27,6 +26,7 @@ from cli_events import (
     emit_failure,
     install_sigbreak_handler,
 )
+from cli_options import RangeValidator, describe_options
 from lipsync import generate_morph_keys
 from vmd import VmdDocument, ensure_frame0_neutral_keys, normalize, write_file
 from vpr import read
@@ -70,74 +70,18 @@ def _model_name(text: str) -> str:
     return text
 
 
-def _open_amount(text: str) -> float:
-    """開き量(--open-max / --default-open)を検証する。0.0〜1.0 の有限 float。
-
-    開き量は lipsync の口形開き量(0〜1)・開き量上限(open_cap, 0〜1)に対応する量なので、
-    範囲外(負値・1 超)・inf/nan は引数エラーにする。
-    """
-    v = float(text)  # 非数値は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
-    if not math.isfinite(v):
-        raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
-    if not 0.0 <= v <= 1.0:
-        raise argparse.ArgumentTypeError(f"開き量は 0.0〜1.0 の範囲: {text!r}")
-    return v
-
-
-def _finite_float(text: str) -> float:
-    """有限な float へ変換する(inf/nan を弾く)。範囲チェックは呼び出し側の検証関数で行う。"""
-    v = float(text)  # 非数値は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
-    if not math.isfinite(v):
-        raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
-    return v
-
-
-def _positive_float(text: str) -> float:
-    """正の有限 float(--legato-max・--ref-bpm)。フレーム数・BPM は 0 以下になり得ない。"""
-    v = _finite_float(text)
-    if v <= 0.0:
-        raise argparse.ArgumentTypeError(f"正の数値が必要: {text!r}")
-    return v
-
-
-def _unit_float(text: str) -> float:
-    """0.0〜1.0 の有限 float(--valley-shallow・--valley-deep)。谷係数は母音高さに対する割合。"""
-    v = _finite_float(text)
-    if not 0.0 <= v <= 1.0:
-        raise argparse.ArgumentTypeError(f"0.0〜1.0 の範囲が必要: {text!r}")
-    return v
-
-
-def _nonneg_float(text: str) -> float:
-    """0 以上の有限 float(--valley-slope)。間隙長あたりの谷係数の減少量は負にならない。"""
-    v = _finite_float(text)
-    if v < 0.0:
-        raise argparse.ArgumentTypeError(f"0 以上の数値が必要: {text!r}")
-    return v
-
-
-def _scale_min(text: str) -> float:
-    """テンポ補正の下げ止まり係数(--tempo-scale-min)。0 超〜1.0 の有限 float。"""
-    v = _finite_float(text)
-    if not 0.0 < v <= 1.0:
-        raise argparse.ArgumentTypeError(f"0 超〜1.0 の範囲が必要: {text!r}")
-    return v
-
-
-def _nonneg_int(text: str) -> int:
-    """0 以上の整数(--anticipation)。0 は先行準備を無効化する。"""
-    v = int(text)  # 非整数は ValueError → argparse が使用法エラーへ変換し、CLI 本体が引数エラー(コード2)で報告する
-    if v < 0:
-        raise argparse.ArgumentTypeError(f"0 以上の整数が必要: {text!r}")
-    return v
-
-
-def _positive_int(text: str) -> int:
-    """1 以上の整数(--coartic-overlap)。協調調音の重なり=基準長は 1 フレーム以上。"""
-    v = int(text)
-    if v < 1:
-        raise argparse.ArgumentTypeError(f"1 以上の整数が必要: {text!r}")
-    return v
+# 開き量は lipsync の口形開き量(0〜1)・開き量上限(open_cap, 0〜1)に対応する量。谷係数も母音高さに
+# 対する割合なので同じ範囲を使う。検証子は状態を持たないので使い回してよい。
+_unit_float = RangeValidator(value_type="float", minimum=0, maximum=1)
+# フレーム数・BPM は 0 以下になり得ない。
+_positive_float = RangeValidator(value_type="float", minimum=0, exclusive_min=True)
+# 間隙長あたりの谷係数の減少量は負にならない。
+_nonneg_float = RangeValidator(value_type="float", minimum=0)
+# テンポ補正の下げ止まり係数は 0 超〜1。
+_scale_min = RangeValidator(value_type="float", minimum=0, maximum=1, exclusive_min=True)
+# 先行準備は 0 で無効化する。協調調音の重なり=基準長は 1 フレーム以上。
+_nonneg_int = RangeValidator(value_type="int", minimum=0)
+_positive_int = RangeValidator(value_type="int", minimum=1)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -169,9 +113,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
                    help="撥音に「ん」モーフを使わず無音(閉口)に倒す(既定)。--n-morph の対")
     # 既定はプリセット値。未指定センチネル(None)は presets.resolve がプリセットから解決する。
-    p.add_argument("--open-max", dest="open_max", type=_open_amount,
+    p.add_argument("--open-max", dest="open_max", type=_unit_float,
                    help="口の開き量の上限(0.0〜1.0。既定: プリセット値)")
-    p.add_argument("--default-open", dest="default_open", type=_open_amount,
+    p.add_argument("--default-open", dest="default_open", type=_unit_float,
                    help="声量コントローラ曲線が無く、ベロシティが一様なときの既定開き量"
                         "(0.0〜1.0。既定: 開き量レンジ中央。開き量へ用いるときに --open-max で頭打ちする)")
     # 視覚で詰める調整パラメータ(未指定 None はプリセット/既定値を使う)。プリセット解決とテンポ補正の
@@ -213,15 +157,9 @@ def _default_output(input_path: str) -> str:
     return base + ".vmd"
 
 
-# --describe の型/制約表。dest → (type, constraint)。help/default は parser の各 action から取り、
-# 固定既定(legato_max/ref_bpm/tempo_scale_min)だけ _DESCRIBE_DEFAULT で上書きする。メタ/モード操作
-# (describe/version/help/machine)は _D_TYPE に無いので options から除外される。
-_D_UNIT = {"min": 0, "max": 1, "exclusive_min": False}       # 0〜1(開き量・谷係数)
-_D_POS = {"min": 0, "max": None, "exclusive_min": True}      # 0 超(--legato-max・--ref-bpm)
-_D_NONNEG = {"min": 0, "max": None, "exclusive_min": False}  # 0 以上(--valley-slope・--anticipation)
-_D_INT1 = {"min": 1, "max": None, "exclusive_min": False}    # 1 以上(--coartic-overlap)
-_D_UNIT_EXCL = {"min": 0, "max": 1, "exclusive_min": True}   # 0 超〜1(--tempo-scale-min)
-
+# --describe の型/制約表。dest → (type, constraint)。数値引数は対を空にして、型も範囲も引数の検証子から
+# 取る(手書きの複製を置かない)。メタ/モード操作(describe/version/help/machine)は表に無いので
+# options から除外される。
 _D_TYPE = {
     "input": ("str", None),
     "output": ("str", None),
@@ -230,56 +168,39 @@ _D_TYPE = {
     "model_name": ("str", None),
     "style": ("enum", {"choices": list(STYLE_NAMES)}),
     "n_morph": ("flag", None),
-    "open_max": ("float", _D_UNIT),
-    "default_open": ("float", _D_UNIT),
-    "legato_max": ("float", _D_POS),
-    "valley_shallow": ("float", _D_UNIT),
-    "valley_deep": ("float", _D_UNIT),
-    "valley_slope": ("float", _D_NONNEG),
-    "coartic_overlap": ("int", _D_INT1),
-    "anticipation": ("int", _D_NONNEG),
-    "ref_bpm": ("float", _D_POS),
-    "tempo_scale_min": ("float", _D_UNIT_EXCL),
+    "open_max": (None, None),
+    "default_open": (None, None),
+    "legato_max": (None, None),
+    "valley_shallow": (None, None),
+    "valley_deep": (None, None),
+    "valley_slope": (None, None),
+    "coartic_overlap": (None, None),
+    "anticipation": (None, None),
+    "ref_bpm": (None, None),
+    "tempo_scale_min": (None, None),
     "dry_run": ("flag", None),
     "verbose": ("flag", None),
 }
 
 # 固定既定を持つオプションの default(argparse は None センチネルなので、実効既定を呼び出し先から取る)。
 _DESCRIBE_DEFAULT = {
-    "legato_max": _DEFAULT_LEGATO_MAX,
-    "ref_bpm": _DEFAULT_REF_BPM,
-    "tempo_scale_min": _DEFAULT_TEMPO_SCALE_MIN,
+    "--legato-max": _DEFAULT_LEGATO_MAX,
+    "--ref-bpm": _DEFAULT_REF_BPM,
+    "--tempo-scale-min": _DEFAULT_TEMPO_SCALE_MIN,
 }
 
 
 def _describe_options(parser):
-    """--describe の options を parser 定義から機械導出する。順序は add_argument 順。
+    """--describe の options を組み立てる。配列の形と導出は共有側が定める。
 
-    各要素は {name, type, constraint, default, help}(キー 5 つ)。メタ/モード操作(--describe/--version/
-    --help/--machine)は _D_TYPE に無いので除外。真偽フラグの否定形(--no-n-morph)は肯定形の長形式で
-    既に載るのでスキップする。default は固定既定を持つものは _DESCRIBE_DEFAULT、それ以外は action.default。
+    固定の実効既定を持つオプションだけ、公開する既定をその値へ差し替える(呼び出し先が持つ値で
+    argparse の登録には現れないため、共有側の導出では取れない)。プリセットから解く既定は
+    スタイルごとに変わるので差し替えず、未指定のまま公開する。
     """
-    options = []
-    for action in parser._actions:
-        dest = action.dest
-        if dest not in _D_TYPE:
-            continue
-        type_, constraint = _D_TYPE[dest]
-        if dest == "input":
-            name = "input"
-        else:
-            # 肯定形の長形式を採る。--no-* だけの否定形 action はスキップ(肯定形で既に載る)。
-            pos = [s for s in action.option_strings if s.startswith("--") and not s.startswith("--no-")]
-            if not pos:
-                continue
-            name = pos[0]
-        options.append({
-            "name": name,
-            "type": type_,
-            "constraint": constraint,
-            "default": _DESCRIBE_DEFAULT.get(dest, action.default),
-            "help": action.help,
-        })
+    options = describe_options(parser, _D_TYPE)
+    for option in options:
+        if option["name"] in _DESCRIBE_DEFAULT:
+            option["default"] = _DESCRIBE_DEFAULT[option["name"]]
     return options
 
 

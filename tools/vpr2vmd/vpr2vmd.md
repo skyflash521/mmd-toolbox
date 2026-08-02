@@ -29,6 +29,9 @@ VOCALOID プロジェクトファイル(vpr)から、あ・い・う・え・お
   直列化構造を直接扱わない。
 - **アニメ的リップモーションのキーフレーム生成**は共有ドメインモジュール [lipsync](../../libs/lipsync/lipsync.md) に委譲する
   (品質基準・母音合成・保持・協調調音・疎キー配置等)。
+- **引数の値の範囲の検証と、自己記述で公開する制約をひとつの定義から導く仕組み**は共有モジュール
+  [cli_options](../../libs/cli_options/cli_options.md) に委譲する。どの引数を公開するか・その意味・既定値・範囲の値そのものは
+  `vpr2vmd` 側に残る。
 - **`vpr2vmd` 固有**: vpr の音符・音素・休符から口形イベント列を確定すること、vpr の声量コントローラ曲線
   またはベロシティ(0–127)から開き量を決めること、CLI引数・プリセットの具体値。
 
@@ -377,8 +380,9 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 ### 7.3 `--describe` の中身
 
 `options` は処理を駆動する引数の配列(メタ/モード操作 `--describe`/`--version`/`--help`/`--machine` は
-含めない)。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、該当しない値は
-`null`)。`type` は固定語彙 `"float"`/`"int"`/`"str"`/`"flag"`/`"enum"`。数値の `constraint` は
+含めない)。**配列の要素が持つキー・名前の採り方・掲載対象・検証子からの型と制約の導出は共有側が定める**
+([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、
+該当しない値は `null`)。`type` は固定語彙 `"float"`/`"int"`/`"str"`/`"flag"`/`"enum"`。数値の `constraint` は
 `{min, max, exclusive_min}` の 3 キー常設(上限が無ければ `max:null`)、`enum` は `{choices:[...]}`、
 `flag`/`str` は `null`(`--model-name` の cp932・20 バイト制約と `--track` の INDEX/NAME 二義は
 文字列制約のため `help` に記す)。`help` は [§4.2](#42-主なオプション) のヘルプ文言。真偽フラグの対
