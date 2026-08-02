@@ -15,7 +15,6 @@ cli_events を用いる。既定(非機械)の表示・終了コードは変え�
 """
 
 import argparse
-import math
 import os
 import shutil
 import sys
@@ -29,6 +28,7 @@ from cli_events import (
     emit_failure,
     install_sigbreak_handler,
 )
+from cli_options import CompoundValidator, RangeValidator, describe_options
 from vmd import write_file as _vmd_write_file
 from vocal_analysis import (
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
@@ -106,107 +106,26 @@ def _model_name(text: str) -> str:
     return text
 
 
-class _RangeValidator:
-    """範囲付きの数値引数の検証子。argparse の type と --describe の constraint を1つの範囲から導く。
-
-    受理判定はこの範囲そのもので行うので、公開する制約と実際に通る値が別管理にならない。
-    解析できない値も自分で日本語の理由へ変換する(argparse は型が関数でないと理由の代わりに
-    オブジェクトの repr を出すため、そのままでは実行ごとに変わる文字列が報告に載る)。
-    """
-
-    def __init__(self, *, value_type, minimum=None, maximum=None, exclusive_min=False):
-        self.value_type = value_type  # "int" | "float"
-        self.constraint = {"min": minimum, "max": maximum, "exclusive_min": exclusive_min}
-
-    def __call__(self, text):
-        try:
-            value = int(text) if self.value_type == "int" else float(text)
-        except ValueError:
-            raise argparse.ArgumentTypeError(f"{self._unit()}が必要: {text!r}") from None
-        if self.value_type == "float" and not math.isfinite(value):
-            # 無限大・非数は大小比較をすり抜けるので、範囲判定の前に弾く。
-            raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
-        minimum, maximum = self.constraint["min"], self.constraint["max"]
-        too_small = minimum is not None and (
-            value <= minimum if self.constraint["exclusive_min"] else value < minimum)
-        if too_small or (maximum is not None and value > maximum):
-            raise argparse.ArgumentTypeError(f"{self._range_text()}が必要: {text!r}")
-        return value
-
-    def _unit(self):
-        return "整数" if self.value_type == "int" else "数値"
-
-    def _range_text(self):
-        minimum, maximum = self.constraint["min"], self.constraint["max"]
-        unit = self._unit()
-        if minimum is not None and maximum is not None:
-            return f"{minimum}〜{maximum} の範囲の{unit}"
-        if minimum is not None:
-            if self.constraint["exclusive_min"]:
-                return f"{minimum} より大きい{unit}"
-            return f"{minimum} 以上の{unit}"
-        return f"{maximum} 以下の{unit}"
-
-
-class _CompoundValidator:
-    """複合値の引数の検証子。要素検証子の列と書式から --describe の constraint を導く。
-
-    要素間の関係の制約(--silence-threshold の ON<OFF)は constraint の形に載る場所が無いため、
-    ここでは検証だけ行い公開はしない(利用者へは help 文で示す)。文言に引数名は入れない
-    (argparse が理由の前へ引数名を付けるので、入れると二重になる)。
-    """
-
-    def __init__(self, *, format, elements, relation=None):
-        self.format = format
-        self.elements = elements  # [(要素名, _RangeValidator), ...]
-        self.relation = relation  # (説明, 判定関数) または None
-
-    @property
-    def constraint(self):
-        return {
-            "format": self.format,
-            "fields": [{"name": name, "type": element.value_type, **element.constraint}
-                       for name, element in self.elements],
-        }
-
-    def __call__(self, text):
-        parts = text.split(":")
-        if len(parts) != len(self.elements):
-            raise argparse.ArgumentTypeError(
-                f"{self.format} の{len(self.elements)}要素が必要: {text!r}")
-        values = []
-        for part, (name, element) in zip(parts, self.elements, strict=True):
-            try:
-                values.append(element(part))
-            except argparse.ArgumentTypeError as e:
-                raise argparse.ArgumentTypeError(f"{name} は {e}") from None
-        if self.relation is not None:
-            description, holds = self.relation
-            if not holds(values):
-                raise argparse.ArgumentTypeError(f"{description}: {text!r}")
-        return tuple(values)
-
-
 # 開き量は lipsync の開き量上限(0〜1)に対応する。検証子は状態を持たないので使い回してよい。
-_unit_float = _RangeValidator(value_type="float", minimum=0, maximum=1)
+_unit_float = RangeValidator(value_type="float", minimum=0, maximum=1)
 # 累乗指数もタイムアウト秒数も 0 以下は無意味。
-_positive_float = _RangeValidator(value_type="float", minimum=0, exclusive_min=True)
+_positive_float = RangeValidator(value_type="float", minimum=0, exclusive_min=True)
 # --max-duration の 0 は長尺分割の無効化。
-_nonneg_float = _RangeValidator(value_type="float", minimum=0)
-_nonneg_int = _RangeValidator(value_type="int", minimum=0)
+_nonneg_float = RangeValidator(value_type="float", minimum=0)
+_nonneg_int = RangeValidator(value_type="int", minimum=0)
 
 
 # --vowel-gain の各要素はプリセットの母音別倍率へ乗算する微調整倍率なので非負の有限値を要求する。
 # 撥音はプリセット値のままで本引数の対象外。
-_vowel_gain = _CompoundValidator(
+_vowel_gain = CompoundValidator(
     format="a:i:u:e:o",
-    elements=[(name, _RangeValidator(value_type="float", minimum=0))
+    elements=[(name, RangeValidator(value_type="float", minimum=0))
               for name in ("a", "i", "u", "e", "o")])
 
 # --silence-threshold は正規化RMSのヒステリシスしきい値で、いずれも 0〜1。無音/継続の判定に使う
 # 下降側(ON)は上昇側(OFF)より小さくなければならない(無音ヒステリシスの意味上の制約)。
 # 上昇側(OFF)は無音状態からの母音復帰自体の判定には使わない。
-_silence_threshold = _CompoundValidator(
+_silence_threshold = CompoundValidator(
     format="ON:OFF",
     elements=[("ON", _unit_float), ("OFF", _unit_float)],
     relation=("ON<OFF(下降側<上昇側)が必要", lambda values: values[0] < values[1]))
@@ -347,43 +266,6 @@ _D_TYPE = {
 }
 
 
-def _describe_options(parser):
-    """--describe の options を parser 定義から機械導出する。順序は add_argument 順。
-
-    各要素は {name, type, constraint, default, help}(キー5つ)。メタ/モード操作(--describe/--version/
-    --help/--machine)は _D_TYPE に無いので除外。真偽フラグの否定形(--no-n-morph)は肯定形の長形式で
-    既に載るのでスキップする。
-    """
-    options = []
-    for action in parser._actions:
-        dest = action.dest
-        if dest not in _D_TYPE:
-            continue
-        type_, constraint = _D_TYPE[dest]
-        if type_ is None:
-            # 検証子を持つ引数は、型も範囲もその検証子が持つものをそのまま公開する
-            # (手書きの複製を置かない)。
-            validator = action.type
-            type_ = "compound" if isinstance(validator, _CompoundValidator) else validator.value_type
-            constraint = validator.constraint
-        if dest == "input":
-            name = "input"
-        else:
-            # 肯定形の長形式を採る。--no-* だけの否定形 action はスキップ(肯定形で既に載る)。
-            pos = [s for s in action.option_strings if s.startswith("--") and not s.startswith("--no-")]
-            if not pos:
-                continue
-            name = pos[0]
-        options.append({
-            "name": name,
-            "type": type_,
-            "constraint": constraint,
-            "default": action.default,
-            "help": action.help,
-        })
-    return options
-
-
 def _describe_presets():
     """--describe の presets を歌い方スタイルプリセットから導出する。
 
@@ -475,7 +357,7 @@ def main(argv=None) -> int:
 
         # 自己記述。音声を読まず options/presets の result を出して終了する独立メタ操作。
         if args.describe:
-            emitter.result(mode="describe", options=_describe_options(parser),
+            emitter.result(mode="describe", options=describe_options(parser, _D_TYPE),
                            presets=_describe_presets())
             return 0
         # input は nargs="?"(--describe を入力無しで成立させるため)。describe 以外の実行では必須。

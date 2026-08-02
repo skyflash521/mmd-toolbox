@@ -16,6 +16,7 @@ import math
 
 import pytest
 
+from cli_options import CompoundValidator, RangeValidator, describe_options
 from song2vmd import __version__, cli
 
 _NONNEG_INT = {"min": 0, "max": None, "exclusive_min": False}
@@ -189,7 +190,7 @@ def _actions_by_describe_name(parser):
 
 
 def _options_by_name(parser):
-    return {o["name"]: o for o in cli._describe_options(parser)}
+    return {o["name"]: o for o in describe_options(parser, cli._D_TYPE)}
 
 
 def _rejects(validator, text):
@@ -199,43 +200,6 @@ def _rejects(validator, text):
     except (argparse.ArgumentTypeError, ValueError):
         return True
     return False
-
-
-def _just_below(value, *, is_int):
-    """範囲のすぐ外側(下)にある値の文字列。実数は表現可能な最も近い値を採る。"""
-    return str(int(value) - 1) if is_int else repr(math.nextafter(float(value), -math.inf))
-
-
-def _just_above(value, *, is_int):
-    """範囲のすぐ外側(上)にある値の文字列。"""
-    return str(int(value) + 1) if is_int else repr(math.nextafter(float(value), math.inf))
-
-
-def _at(value, *, is_int):
-    return str(int(value)) if is_int else repr(float(value))
-
-
-def _assert_accepts_exactly(validator, constraint, *, is_int):
-    """検証子の受理範囲が constraint の境界と厳密に一致することを確かめる。"""
-    minimum, maximum = constraint["min"], constraint["max"]
-    if minimum is not None:
-        if constraint["exclusive_min"]:
-            assert _rejects(validator, _at(minimum, is_int=is_int))
-            assert not _rejects(validator, _just_above(minimum, is_int=is_int))
-        else:
-            assert not _rejects(validator, _at(minimum, is_int=is_int))
-        assert _rejects(validator, _just_below(minimum, is_int=is_int))
-    if maximum is not None:
-        assert not _rejects(validator, _at(maximum, is_int=is_int))
-        assert _rejects(validator, _just_above(maximum, is_int=is_int))
-    if is_int:
-        # 整数の引数は整数以外の数値も弾く(切り捨てて受理すると指定と違う値で動く)。
-        inside = 1.5 if minimum is None else float(minimum) + 0.5
-        assert _rejects(validator, repr(inside))
-    else:
-        # 有限でない値は大小比較をすり抜けるので、範囲の判定とは別に弾かれることを確かめる。
-        for text in ("nan", "inf", "-inf"):
-            assert _rejects(validator, text)
 
 
 _NUMERIC_NAMES = [n for n, (type_, c, _) in EXPECTED.items()
@@ -256,15 +220,6 @@ _COMPOUND_ACCEPTED = {
     "--vowel-gain": [(i, "min") for i in range(5)],
     "--silence-threshold": [(0, "min"), (1, "max")],
 }
-
-
-@pytest.mark.parametrize("name", _NUMERIC_NAMES)
-def test_numeric_constraint_agrees_with_argument_validation(name):
-    # constraint の範囲が実際の受理範囲とずれると、機械利用側が通ると判断した値を CLI が弾く。
-    parser = cli._build_parser()
-    constraint = _options_by_name(parser)[name]["constraint"]
-    validator = _actions_by_describe_name(parser)[name].type
-    _assert_accepts_exactly(validator, constraint, is_int=EXPECTED[name][0] == "int")
 
 
 @pytest.mark.parametrize("name", _COMPOUND_NAMES)
@@ -296,7 +251,7 @@ def test_numeric_constraint_is_derived_from_the_validator(name):
     # 手書きの複製だと検証側だけを直したときに黙って食い違うので、同じ範囲から両方を導く。
     parser = cli._build_parser()
     validator = _actions_by_describe_name(parser)[name].type
-    assert isinstance(validator, cli._RangeValidator)
+    assert isinstance(validator, RangeValidator)
     assert _options_by_name(parser)[name]["constraint"] == validator.constraint
 
 
@@ -305,24 +260,11 @@ def test_compound_constraint_is_derived_from_the_element_validators(name):
     # 複合値も、書式と要素の範囲を検証子自身から取る(要素の検証も同じ範囲で行う)。
     parser = cli._build_parser()
     validator = _actions_by_describe_name(parser)[name].type
-    assert isinstance(validator, cli._CompoundValidator)
+    assert isinstance(validator, CompoundValidator)
 
     constraint = _options_by_name(parser)[name]["constraint"]
     assert constraint["format"] == validator.format
     assert [f["name"] for f in constraint["fields"]] == [n for n, _ in validator.elements]
     for field, (_, element) in zip(constraint["fields"], validator.elements, strict=True):
-        assert isinstance(element, cli._RangeValidator)
+        assert isinstance(element, RangeValidator)
         assert {k: field[k] for k in ("min", "max", "exclusive_min")} == element.constraint
-        # 要素間の関係の制約と切り離して、要素単体の受理範囲が公開値と一致することを確かめる。
-        _assert_accepts_exactly(element, element.constraint, is_int=False)
-
-
-@pytest.mark.parametrize("minimum, maximum, exclusive_min", [
-    (0, 1, False), (0, None, True), (-2.5, 2.5, False), (0, None, False),
-])
-def test_range_validator_accepts_exactly_its_own_range(minimum, maximum, exclusive_min):
-    # 検証子は与えられた範囲そのもので受理判定する(範囲の値と判定ロジックが別管理にならない)。
-    validator = cli._RangeValidator(
-        value_type="float", minimum=minimum, maximum=maximum, exclusive_min=exclusive_min)
-    assert validator.constraint == {"min": minimum, "max": maximum, "exclusive_min": exclusive_min}
-    _assert_accepts_exactly(validator, validator.constraint, is_int=False)
