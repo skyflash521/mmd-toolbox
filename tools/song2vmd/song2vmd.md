@@ -43,6 +43,9 @@
 - 引数の値の範囲・書式の検証と、自己記述で公開する制約をひとつの定義から導く仕組みは共有モジュール
   `cli_options` に委譲する([cli_options.md](../../libs/cli_options/cli_options.md))。どの引数を公開するか・
   その意味・既定値・型以外の意味制約は `song2vmd` 側に残る。
+- 進捗の報告先の振り分け(機械モードのイベント送出と人間向けライブ表示の切り替え)は共有モジュール
+  `cli_progress_router` に委譲する([cli_progress_router.md](../../libs/cli_progress_router/cli_progress_router.md))。
+  段 id の集合と、それに対応する利用者向けの工程名は `song2vmd` 側に残る([§5.4](#54-進捗表示))。
 
 ### 1.3 直経路の採用(vpr を中間に挟まない)
 
@@ -237,6 +240,11 @@ song2vmd INPUT [options]
 表記・停滞回避・副作用専用等の一般契約は[CLIインターフェース規約
 §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性)が正。
 
+**報告先の振り分け**(機械モードのイベント送出と人間向けライブ表示の切り替え・TTY判定と `--quiet` の
+反映・同一段での進行更新・送出失敗の区別)は共有モジュール
+[cli_progress_router](../../libs/cli_progress_router/cli_progress_router.md) が定める。`song2vmd` は上記7段の
+段 id と、それに対応する利用者向けの工程名(上のかっこ書き)を渡す。
+
 `separate` 段(分離モデル)・`recognize` 段(内容認識モデル・音素モデル・
 `--english-katakana-method tinyllama-katakana-converter`選択時はカタカナ生成モデルも)では、
 それぞれのモデルの初回取得が実際にネットワークダウンロードを要した区間だけ、その進捗(取得済み割合)を
@@ -246,8 +254,8 @@ song2vmd INPUT [options]
 `separate` 段は分離処理(Demucs推論)の進捗、`recognize` 段は書き起こし・強制アライメントが処理中の
 区間の時刻範囲を段の補足へ都度反映する([progress](#progress))。
 
-共有表示器(cli_progress)の構築時、標準エラーへの書き込みを `vocal_analysis.quiet.STDERR_WRITE_LOCK`
-で排他する(pyopenjtalk のネイティブ拡張呼び出し中の fd 差し替えと競合しないようにするため)。
+人間向けライブ表示の構築時、標準エラーへの書き込みは音声前段が公開する排他ロックで排他する
+(pyopenjtalk のネイティブ拡張呼び出し中の fd 差し替えと競合しないようにするため)。
 
 ### 5.5 機械モードとメタ操作(機械可読インターフェース)
 
