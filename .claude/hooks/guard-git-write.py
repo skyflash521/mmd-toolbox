@@ -9,6 +9,7 @@ Only these forms pass silently:
 The commit subject (first line of the message) must hold at least one Hiragana/Katakana/Kanji:
 the repo's commit subjects are Japanese by convention, so an English-only (ASCII-only) subject is
 denied here and the worker redrafts in Japanese.
+The message's line structure is checked too -- see _message_format_problem.
 
 Every recognized add/commit form other than these is denied, so the agent retries with the
 regular form instead of asking the user for permission. A form this hook does not recognize as
@@ -38,6 +39,11 @@ GLOB_CHARS = "*?[]{}"
 # alone does not qualify -- an English subject with a stray full-width comma should still be denied.
 JAPANESE_CHAR = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
 TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
+# The newline escape. Inside the single-quoted -m argument a backslash is literal, so this is what a
+# line break that never reached git looks like. Only this escape is rejected -- it is the one that
+# stands in for the message's line structure -- and it is rejected wherever it appears.
+ESCAPE_NEWLINE = "\\n"
+TRAILER_PREFIX = "co-authored-by:"
 # Process wrappers that run the FOLLOWING command. Claude Code strips a documented set of these
 # before matching a command against the allow list, so e.g. `time git commit --amend` would
 # otherwise become `git commit --amend`, match `Bash(git commit *)`, and auto-run. This set MUST
@@ -282,6 +288,45 @@ def _safe_commit(args):
     return len(args) == 2 and args[0] == "-m" and bool(args[1].strip())
 
 
+def _message_format_problem(message):
+    """Return a deny reason when the message's LINE STRUCTURE breaks the repo convention, else None.
+
+    A newline escape anywhere in the message, and a Co-Authored-By trailer that is not the final
+    line below a subject, both mean the message does not have the line structure that was drafted.
+    The escape is read as a lost line break wherever it appears rather than only in a message with
+    no real line break at all: a partly flattened message (escapes between subject and body, one
+    real break before the trailer) is the same defect, and the narrower rule would have let it
+    through. Prose that means to name the escape rather than break a line is caught by the same
+    blanket rule, and spells the sequence out in words instead.
+
+    A message with no trailer at all is denied too, so that deleting the trailer never becomes the
+    way past the other two.
+    """
+    if ESCAPE_NEWLINE in message:
+        return (
+            "Commit message contains escape notation (backslash n). Inside the single-quoted -m "
+            "argument a backslash is literal, so those two characters are committed as text "
+            "instead of breaking the line. Re-issue the SAME message with real line breaks; do not "
+            "shorten it or drop the body or the Co-Authored-By trailer to get past this. To "
+            "describe the escape sequence in the prose itself, spell it out in words."
+        )
+    lines = [line for line in message.split("\n") if line.strip()]
+    if len(lines) >= 2 and lines[-1].lower().startswith(TRAILER_PREFIX):
+        return None
+    if TRAILER_PREFIX in message.lower():
+        return (
+            "The Co-Authored-By trailer must be the last non-empty line, must start that line, and "
+            "must sit below the subject. Here it does not: either the drafted line breaks were "
+            "lost, or the trailer is not at the end. Re-issue the SAME message with real line "
+            "breaks and the trailer as its final line."
+        )
+    return (
+        "Commit message must end with a `Co-Authored-By: Claude <model name> "
+        "<noreply@anthropic.com>` trailer on its own line. Add it -- dropping it is not a way past "
+        "another denial."
+    )
+
+
 def classify(command, root=None):
     """Return ("deny", reason) or ("pass", None)."""
     if not isinstance(command, str) or not command.strip():
@@ -324,6 +369,16 @@ def classify(command, root=None):
             return "deny", "Use plain git add/commit from the repository cwd"
         return "pass", None
     if _has_shell_syntax(command):
+        # ANSI-C quoting is the near miss that turns into a flattened message: `$'...\n...'` is
+        # denied here for its `$`, and dropping the `$` leaves the escapes as literal text inside
+        # plain single quotes. Name the correct fix instead of letting the generic reason stand.
+        if "$'" in command:
+            return "deny", (
+                "ANSI-C quoting ($'...') is not allowed: the $ makes this an expansion. Pass the "
+                "message in a plain single-quoted -m argument holding real line breaks. Do NOT fix "
+                "this by deleting the $ and keeping the \\n escapes inside the quotes -- that "
+                "commits the two characters as text."
+            )
         return "deny", "Do not combine or expand git add/commit commands"
 
     args = tokens[2:]
@@ -337,6 +392,9 @@ def classify(command, root=None):
                 "Commit subject must be Japanese (repo convention): the first line has no "
                 "Japanese character. Redraft the subject in Japanese and retry."
             )
+        problem = _message_format_problem(args[1])
+        if problem:
+            return "deny", problem
         return "pass", None
     if _safe_add(args, root):
         return "pass", None
@@ -365,6 +423,7 @@ def main():
 
 
 def selftest():
+    TRAILER = "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     cases = [
         ("git add -- .claude/hooks/guard-git-write.py", "pass"),
         ("git add .claude/hooks/guard-git-write.py", "deny"),
@@ -372,12 +431,27 @@ def selftest():
         ("git add -- ../outside.py", "deny"),
         ("git add -- C:/outside.py", "deny"),
         ("git add -- missing-file.py", "deny"),
-        ("git commit -m '件名\n\n本文 $5 `literal` > text'", "pass"),
-        ("git commit -m 'it'\\''s 修正済み'", "pass"),
-        ("git commit -m 'ガード追加\n\nadd english body'", "pass"),
-        ("git commit -m 'Add CHANGELOG validation'", "deny"),
-        ("git commit -m 'English subject\n\n日本語本文'", "deny"),
-        ("git commit -m 'v0.2.0'", "deny"),
+        (f"git commit -m '件名\n\n本文 $5 `literal` > text\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'it'\\''s 修正済み\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'ガード追加\n\nadd english body\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'Add CHANGELOG validation\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'English subject\n\n日本語本文\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'v0.2.0\n\n{TRAILER}'", "deny"),
+        # A drafted message re-typed with escapes so it fits on one line, and the partly flattened
+        # form that keeps a real break only where the earlier no-real-break rule looked.
+        (f"git commit -m '件名\\n\\n本文\\n\\n{TRAILER}'", "deny"),
+        (f"git commit -m '件名\\n\\n本文\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '件名\n\n本文\\n\\n{TRAILER}'", "deny"),
+        (f"git commit -m '件名 {TRAILER}'", "deny"),
+        ("git commit -m '件名'", "deny"),
+        (f"git commit -m '件名\n\n本文\n {TRAILER}'", "deny"),
+        (f"git commit -m '件名\n\n{TRAILER}\n\n追記'", "deny"),
+        (f"git commit -m '{TRAILER} 件名'", "deny"),
+        # Only the newline escape stands in for the line structure; other escapes are prose. Prose
+        # naming the newline escape is denied all the same -- it spells the sequence out in words.
+        (f"git commit -m '区切りは \\t 文字\n\n{TRAILER}'", "pass"),
+        (f"git commit -m '改行を \\n で表す\n\n{TRAILER}'", "deny"),
+        (f"git commit -m $'件名\\n\\n本文\\n\\n{TRAILER}'", "deny"),
         ("git add", "deny"),
         ("git add .", "deny"),
         ("git add -A", "deny"),
