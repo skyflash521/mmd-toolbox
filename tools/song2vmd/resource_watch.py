@@ -130,7 +130,7 @@ class ResourceWatch:
 
 
 class ProgressWithResourceCheck:
-    """ProgressReporter への委譲ラッパー。段の切り替わり(stage id の変化)時に ResourceWatch.check を
+    """進捗の報告先への委譲ラッパー。段の切り替わり(stage id の変化)時に ResourceWatch.check を
     表示より先に走らせる(人間向け警告の発行側がライブ行を消してから書けるようにするための順序)。
     同一段内の進行更新(ダウンロード進捗等)では判定しない。
     """

@@ -496,7 +496,7 @@ def _run(args, emitter, fail) -> int:
     openness, style_gen = _presets.resolve(
         args.style, open_max=args.open_max, coarticulation=args.coarticulation,
         anticipation=args.anticipation, min_hold=args.min_hold, vowel_gain=args.vowel_gain)
-    progress_reporter = _progress.ProgressReporter(
+    progress_reporter = _progress.build_router(
         machine=emitter is not None, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
 
     def _emit_warning(code, message, human_text, fields):

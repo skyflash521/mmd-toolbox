@@ -13,11 +13,11 @@ import sys
 
 import pytest
 
+from cli_progress_router import ProgressEmitError
 from song2vmd import __version__, cli
 from song2vmd import events as _events
 from song2vmd import pipeline as _pipeline
 from song2vmd import presets as _presets
-from song2vmd import progress as _progress
 from song2vmd import report as _report
 from vmd import VmdDocument
 from vmd import read as vmd_read
@@ -290,9 +290,6 @@ def test_resource_warning_closes_live_line_before_stderr_write(tmp_path, monkeyp
     order = []
 
     class _OrderReporter:
-        def __init__(self, **kwargs):
-            self.enabled = False
-
         def stage(self, stage_id, **kwargs):
             pass
 
@@ -310,7 +307,7 @@ def test_resource_warning_closes_live_line_before_stderr_write(tmp_path, monkeyp
         def flush(self):
             pass
 
-    monkeypatch.setattr(cli._progress, "ProgressReporter", _OrderReporter)
+    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _OrderReporter())
     monkeypatch.setattr(cli.sys, "stderr", _OrderStderr())
 
     rc = cli.main([src, "--dry-run"])
@@ -772,8 +769,8 @@ def test_write_failure_machine_mode_emits_write_failed_error(tmp_path, monkeypat
 # --- 進捗ライブ表示の終端処理(全終了経路で close、正常終了時のみ完了行) -------------------
 
 
-class _SpyProgressReporter:
-    """ProgressReporter の差し替え。close/summary の呼び出しを、共有の calls リストへ記録する
+class _SpyProgressRouter:
+    """進捗の振り分けの差し替え。close/summary の呼び出しを、共有の calls リストへ記録する
     (下記 spy_progress フィクスチャが標準エラーへの print 呼び出しも同じリストへ記録するため、
     close とエラー行表示の相対順序を1本のタイムラインで検証できる)。"""
 
@@ -786,17 +783,17 @@ class _SpyProgressReporter:
         pass
 
     def close(self):
-        _SpyProgressReporter.calls.append("close")
+        _SpyProgressRouter.calls.append("close")
 
     def summary(self, message):
-        _SpyProgressReporter.calls.append(("summary", message))
+        _SpyProgressRouter.calls.append(("summary", message))
 
 
 @pytest.fixture
 def spy_progress(monkeypatch):
     calls = []
-    _SpyProgressReporter.calls = calls
-    monkeypatch.setattr(cli._progress, "ProgressReporter", _SpyProgressReporter)
+    _SpyProgressRouter.calls = calls
+    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _SpyProgressRouter())
 
     real_print = print
 
@@ -1126,7 +1123,7 @@ def test_stage_execution_error_reports_single_line_without_machine(
 def test_progress_emit_error_is_not_reported_as_stage_failed(tmp_path, monkeypatch, capsysbinary):
     # 進捗送出の失敗は工程の失敗ではないので、終了コードは内部エラーの1のままにする。
     src = _touch(tmp_path / "in.wav")
-    _raise_from_pipeline(monkeypatch, _progress.ProgressEmitError("stdout is closed"))
+    _raise_from_pipeline(monkeypatch, ProgressEmitError("stdout is closed"))
 
     rc = cli.main([src, "--machine", "--dry-run"])
     assert rc == 1

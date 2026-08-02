@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from cli_progress_router import ProgressEmitError
 from lipsync import GenerationParams
 from vocal_analysis import DEFAULT_ENGLISH_KATAKANA_METHOD as _DEFAULT_ENGLISH_KATAKANA_METHOD
 from vocal_analysis import io as _va_io
@@ -73,7 +74,7 @@ _CLASSIFIED_STAGE_EXCEPTIONS = (
     _va_io.AudioLoadError,
     IntermediateReadError,
     IntermediateWriteError,
-    _progress.ProgressEmitError,
+    ProgressEmitError,
 )
 
 

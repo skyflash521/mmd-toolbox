@@ -13,9 +13,9 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from cli_progress_router import ProgressEmitError
 from lipsync import MouthEvent, MouthShape
 from song2vmd import pipeline, presets
-from song2vmd import progress as progress_module
 from vocal_analysis import ContentRecognizerModel, RmsEnvelope, Segment
 from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
@@ -714,7 +714,7 @@ def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_reco
 # --- 音素認識のモデルダウンロード進捗の中継 --------------------------------------
 #
 # vocal_analysis.recognizer.recognize() の on_progress 引数(モデル初回取得が実際にダウンロードを
-# 要した区間だけ進捗文言を渡すコールバック)へ、song2vmd 側の ProgressReporter を橋渡しする。
+# 要した区間だけ進捗文言を渡すコールバック)へ、進捗の報告先を橋渡しする。
 # 橋渡しの要点: (1) recognize() へ on_progress を渡す、(2) on_progress が呼ばれたら
 # progress.stage("recognize", note=<文言>) へ反映する、(3) その際の done/total は呼び出し時点の
 # 進捗(分割時はチャンク進捗)をそのまま保つ(0/None へ巻き戻さない)。
@@ -1256,10 +1256,10 @@ def test_bare_exception_right_after_inference_is_not_mapped_to_stage(
 def test_progress_emit_failure_from_inference_passes_through_unchanged(
         tmp_path, monkeypatch, failing_stage, chunked):
     # 推論中の進捗送出の失敗は工程の失敗ではないので写像せず、想定外例外の経路へ落とす。
-    error = progress_module.ProgressEmitError("stdout is closed")
+    error = ProgressEmitError("stdout is closed")
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, failing_stage=failing_stage, error=error, chunked=chunked)
 
-    with pytest.raises(progress_module.ProgressEmitError) as exc:
+    with pytest.raises(ProgressEmitError) as exc:
         pipeline.run(input_path, **kwargs)
     assert exc.value is error

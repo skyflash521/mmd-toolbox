@@ -37,7 +37,7 @@
 
 ## 2. 公開API
 
-`ProgressRouter(*, machine, quiet, emitter, stream, labels, write_lock=None, now=None, interval=0.15)`
+`ProgressRouter(*, machine, quiet, emitter, stream, labels, write_lock=None, now=None, interval=None)`
 
 - `machine`: 機械モードかどうか。真ならイベント送出、偽ならライブ表示になる。
 - `quiet`: 静音指定。非機械モードのライブ表示だけを無効にする。
@@ -46,7 +46,8 @@
 - `labels`: 段 id から利用者向け工程名への対応表。表に無い id は id をそのまま表示に使う。
 - `write_lock`: ライブ表示へ渡す排他ロック([cli_progress の write_lock 契約](../cli_progress/cli_progress.md#2-write_lock-契約))。
   同じ標準エラーへ fd レベルの操作を行う呼び出し元が注入する。
-- `now` / `interval`: ライブ表示の時刻関数と再描画間隔。既定はライブ表示側の既定に従う。
+- `now` / `interval`: ライブ表示の時刻関数と再描画間隔。**どちらも未指定ならライブ表示側の既定に委ね、
+  本モジュールは既定値を持たない**(既定値を持つと、ライブ表示側が既定を変えても追随しない別管理の値になる)。
 
 ### メソッド
 
