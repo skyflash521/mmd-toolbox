@@ -14,11 +14,14 @@ import sys
 import pytest
 
 from cli_progress_router import ProgressEmitError
+from cli_resource_watch import torch_config as _torch_config
+from cli_resource_watch import watch as _watch_module
 from song2vmd import __version__, cli
 from song2vmd import events as _events
 from song2vmd import pipeline as _pipeline
 from song2vmd import presets as _presets
 from song2vmd import report as _report
+from song2vmd.resource_watch import warning_texts
 from vmd import VmdDocument
 from vmd import read as vmd_read
 from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL, ContentRecognizerModel
@@ -44,7 +47,7 @@ def _isolate_gpu_environment(monkeypatch):
     (CUDA のデバイス集合はプロセス内の最初の照会以降固定されるので、パイプライン起動前に設定する
     必要がある)ぶんも、この退避と復元で片付く。
     """
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    monkeypatch.setattr(_torch_config.shutil, "which", lambda name: None)
     saved = os.environ.pop("CUDA_VISIBLE_DEVICES", None)
     yield
     if saved is None:
@@ -234,9 +237,9 @@ def _force_gpu_oversubscription(monkeypatch):
     """資源逼迫のGPU probe を、2回目の判定で超過が成立する系列(バイト値)に差し替える。"""
     mib = 2**20
     seq = iter([(4000 * mib, 8192 * mib, 0), (4000 * mib, 8192 * mib, 5600 * mib)])
-    monkeypatch.setattr(cli._resource_watch, "_default_gpu_probe",
+    monkeypatch.setattr(_watch_module, "_default_gpu_probe",
                         lambda: next(seq, (4000 * mib, 8192 * mib, 5600 * mib)))
-    monkeypatch.setattr(cli._resource_watch, "_default_ram_probe", lambda: (0, 0, 0))
+    monkeypatch.setattr(_watch_module, "_default_ram_probe", lambda: (0, 0, 0))
 
 
 def _fake_run_with_stages(monkeypatch):
@@ -913,101 +916,14 @@ def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypa
 # --- GPU を使えない構成の警告 ---------------------------------------------------
 
 
-def _fake_torch(monkeypatch, *, version, cuda_build, available):
-    """_torch_gpu_warning が読む torch の属性を差し替える。"""
-    torch = pytest.importorskip("torch")
-    monkeypatch.setattr(torch, "__version__", version)
-    monkeypatch.setattr(torch.version, "cuda", cuda_build)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
-
-
-def _with_nvidia_smi(monkeypatch, present):
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "nvidia-smi" if present else None)
-
-
-def test_torch_gpu_warning_reports_cpu_only_build(monkeypatch):
-    # CPU 専用版の torch では NVIDIA GPU があっても使えない。利用者が導入手順を踏み損ねた
-    # (または別の環境へ入れた)状態で、無警告のまま CPU で処理されるのを防ぐ。
-    _with_nvidia_smi(monkeypatch, True)
-    _fake_torch(monkeypatch, version="2.13.0", cuda_build=None, available=False)
-
-    code, message, human_text, fields = cli._torch_gpu_warning("auto")
-
-    assert code == "cpu_only_torch"
-    assert message == "導入されている torch では GPU を扱えません"
-    assert human_text == "導入されている torch では GPU を扱えません(torch 2.13.0 は CPU 専用版)。CPU で処理します"
-    assert fields == {"torch_version": "2.13.0"}
-
-
-def test_torch_gpu_warning_reports_unusable_cuda_build(monkeypatch):
-    # CUDA 版が入っているのに CUDA を使えない状態。torch の入れ替えでは直らず、CUDA の
-    # バージョン選択をやり直す必要がある。
-    _with_nvidia_smi(monkeypatch, True)
-    _fake_torch(monkeypatch, version="2.13.0+cu126", cuda_build="12.6", available=False)
-
-    code, message, human_text, fields = cli._torch_gpu_warning("auto")
-
-    assert code == "cuda_unavailable"
-    assert message == "この GPU で使えない CUDA 版の torch が入っています"
-    assert human_text == (
-        "この GPU で使えない CUDA 版の torch が入っています(torch 2.13.0+cu126)。"
-        "別の CUDA のバージョンで入れ直してください")
-    assert fields == {"torch_version": "2.13.0+cu126"}
-
-
-def test_torch_gpu_warning_silent_when_gpu_is_usable(monkeypatch):
-    _with_nvidia_smi(monkeypatch, True)
-    _fake_torch(monkeypatch, version="2.13.0+cu126", cuda_build="12.6", available=True)
-
-    assert cli._torch_gpu_warning("auto") is None
-
-
-def test_torch_gpu_warning_silent_without_nvidia_driver(monkeypatch):
-    # nvidia-smi が無い環境(GPU 非搭載機・macOS)では、CPU 専用版が正しい構成なので出さない。
-    _with_nvidia_smi(monkeypatch, False)
-    _fake_torch(monkeypatch, version="2.13.0", cuda_build=None, available=False)
-
-    assert cli._torch_gpu_warning("auto") is None
-
-
-def test_torch_gpu_warning_silent_when_cpu_requested(monkeypatch):
-    # --device cpu は利用者が CPU 実行を選んだ状態なので、構成の指摘にはならない。
-    def _fail(name):
-        raise AssertionError("--device cpu では GPU の有無を調べてはならない")
-
-    monkeypatch.setattr(cli.shutil, "which", _fail)
-
-    assert cli._torch_gpu_warning("cpu") is None
-
-
-@pytest.mark.parametrize("error", [
-    ImportError("no module"),
-    OSError("DLL load failed"),
-])
-def test_torch_gpu_warning_silent_when_torch_cannot_be_imported(monkeypatch, error):
-    # torch を読み込めない環境では GPU 構成を判定できないので、判定を飛ばして処理を続ける。
-    # 取り込みは導入の破損で入出力の例外になることもあり、そこで処理前に落ちてはならない。
-    _with_nvidia_smi(monkeypatch, True)
-    real_import = builtins.__import__
-
-    def failing_import(name, *args, **kwargs):
-        if name == "torch":
-            raise error
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", failing_import)
-
-    assert cli._torch_gpu_warning("auto") is None
-
-
 def test_run_emits_cpu_only_torch_warning_before_pipeline(tmp_path, monkeypatch, capsysbinary):
     # 数分かかる処理を終えてから伝えても手遅れなので、パイプライン起動より前に出す。判定の呼び出し
     # 順ではなく、イベントストリーム上で警告が処理開始の progress より前に現れることで固定する
     # (判定だけ先に行い送出を後ろへ動かす実装を通さないため)。
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
-        cli, "_torch_gpu_warning",
-        lambda device: ("cpu_only_torch", "見出し", "本文", {"torch_version": "2.13.0"}))
+        cli, "torch_gpu_warning",
+        lambda device: ("cpu_only_torch", {"torch_version": "2.13.0"}))
 
     def fake_run(input_path, **kwargs):
         kwargs["progress"].stage("load")
@@ -1024,50 +940,9 @@ def test_run_emits_cpu_only_torch_warning_before_pipeline(tmp_path, monkeypatch,
     assert types.index(("warning", "cpu_only_torch")) < next(
         i for i, (kind, _) in enumerate(types) if kind == "progress")
     warning = next(e for e in events if e.get("type") == "warning")
-    assert warning["message"] == "見出し"
+    # 本文は song2vmd 側の組み立てが与える(判定は安定コードと観測値だけを返す)。
+    assert warning["message"] == warning_texts("cpu_only_torch", {"torch_version": "2.13.0"})[0]
     assert warning["torch_version"] == "2.13.0"
-
-
-def test_torch_gpu_warning_silent_when_visible_devices_restricted(monkeypatch):
-    # CUDA_VISIBLE_DEVICES を利用者が渡している場合、CUDA を使えないのは版の不一致とは限らず、
-    # 「別のバージョンで入れ直す」は効かない対処になる。
-    _with_nvidia_smi(monkeypatch, True)
-    _fake_torch(monkeypatch, version="2.13.0+cu126", cuda_build="12.6", available=False)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # 復元はフィクスチャが行う
-
-    assert cli._torch_gpu_warning("auto") is None
-
-
-def test_torch_gpu_warning_reports_cpu_only_build_even_with_visible_devices(monkeypatch):
-    # CPU 専用版はビルド種別の問題なので、GPU の見せ方を絞っていても指摘は成り立つ。
-    _with_nvidia_smi(monkeypatch, True)
-    _fake_torch(monkeypatch, version="2.13.0", cuda_build=None, available=False)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # 復元はフィクスチャが行う
-
-    assert cli._torch_gpu_warning("auto")[0] == "cpu_only_torch"
-
-
-def test_intermediate_read_error_reports_path_without_input_field(tmp_path, monkeypatch,
-                                                                  capsysbinary):
-    # 内部生成ファイルの読み直し失敗は利用者入力を指さない(field は null、path に対象ファイル)。
-    src = _touch(tmp_path / "in.wav")
-    # 分離器が返すのと同じ Path を渡す(イベントは JSON なので、載せる前に文字列へ落とす必要がある)。
-    vocal = tmp_path / "vocal.wav"
-    monkeypatch.setattr(
-        cli._pipeline, "run",
-        lambda *a, **k: (_ for _ in ()).throw(
-            cli._pipeline.IntermediateReadError("broken vocal wav", path=vocal)))
-
-    rc = cli.main([src, "--machine", "--dry-run"])
-    assert rc == 1
-    events = _events_of(capsysbinary)
-    assert events[-1]["type"] == "error"
-    assert events[-1]["code"] == "not_audio"
-    assert events[-1]["field"] is None
-    assert events[-1]["path"] == str(vocal)
-    assert events[-1]["exit_code"] == 1
-    # stage を載せるのは stage_failed のときだけなので、キー集合そのものを固定する。
-    assert set(events[-1]) == {"type", "code", "exit_code", "field", "path", "message"}
 
 
 # --- 外部推論から漏れた例外・想定外例外の報告 ----------------------------------

@@ -59,8 +59,8 @@ vpr2vmd = "vpr2vmd.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["libs", "tools"]
-include = ["cli_events*", "cli_options*", "cli_progress*", "cli_progress_router*", "lipsync*", "pmx*", "vmd*",
-           "vocal_analysis*", "vpr*",
+include = ["cli_events*", "cli_options*", "cli_progress*", "cli_progress_router*",
+           "cli_resource_watch*", "lipsync*", "pmx*", "vmd*", "vocal_analysis*", "vpr*",
            "mocapvmd*", "shakevmd*", "song2vmd*", "sparsevmd*", "vpr2vmd*"]
 
 [tool.ruff]
@@ -104,7 +104,7 @@ front-matter-title-pattern = "^(title|header|name):"
 
 [tool.pytest.ini_options]
 testpaths = ["libs/cli_events", "libs/cli_options", "libs/cli_progress",
-             "libs/cli_progress_router", "libs/lipsync", "libs/pmx", "libs/vmd",
+             "libs/cli_progress_router", "libs/cli_resource_watch", "libs/lipsync", "libs/pmx", "libs/vmd",
              "libs/vocal_analysis", "libs/vpr", "tools/mocapvmd", "tools/shakevmd", "tools/song2vmd",
              "tools/sparsevmd", "tools/vpr2vmd"]
 pythonpath = ["libs", "tools"]
