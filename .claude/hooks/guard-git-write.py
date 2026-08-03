@@ -8,8 +8,10 @@ Only these forms pass silently:
 
 The commit subject (first line of the message) must hold at least one Hiragana/Katakana/Kanji:
 the repo's commit subjects are Japanese by convention, so an English-only (ASCII-only) subject is
-denied here and the worker redrafts in Japanese.
-The message's line structure is checked too -- see _message_format_problem.
+denied here and the worker redrafts in Japanese. Two more subjects are denied because neither can
+be the message that was drafted: a placeholder (see _probe_subject_problem) and one opening with
+the commit command itself (see LEAKED_COMMAND_PREFIX). The message's line structure is checked too
+-- see _message_format_problem.
 
 Every recognized add/commit form other than these is denied, so the agent retries with the
 regular form instead of asking the user for permission. A form this hook does not recognize as
@@ -44,6 +46,25 @@ TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
 # stands in for the message's line structure -- and it is rejected wherever it appears.
 ESCAPE_NEWLINE = "\\n"
 TRAILER_PREFIX = "co-authored-by:"
+# Placeholder subjects. A commit issued to try out the command form rather than to record the
+# drafted message puts the staged work into history under a throwaway subject, and neither --amend
+# nor git reset is available to repair it. The subject is what gives such a commit away: a
+# throwaway word, optionally followed by a noun it attaches to and a number ("テスト行1"). Purely ASCII
+# placeholders (test, wip, foo) need no entry -- an ASCII-only subject is already denied by the
+# Japanese-subject rule, which runs first.
+PLACEHOLDER_SUBJECT = re.compile(
+    r"(?:テスト|てすと|ﾃｽﾄ|試験|試行|試し|動作確認|ダミー|だみー|サンプル|仮|あ+)"
+    r"(?:行|番|目|文|コミット|メッセージ)?"
+)
+# Digits, whitespace and punctuation are stripped from the subject before matching, so the counter
+# in "テスト行1" does not defeat the match. \w covers Japanese, so \W leaves only punctuation.
+SUBJECT_FILLER = re.compile(r"[\s\d\W_]+")
+# The front of the commit command itself, leaking into the -m argument while the command is
+# assembled ("git試行コミットの禁止を追加"). A drafted subject never opens with the command that
+# carries it, and the commit that results cannot be repaired, so this is denied rather than left to
+# the after-the-fact check. `git` followed by a space is left alone -- 「git のフックを見直す」 is a
+# subject about git, not a leak.
+LEAKED_COMMAND_PREFIX = re.compile(r"^(?:git\s*commit\b|git(?=[^\x00-\x7f])|-m\b)", re.IGNORECASE)
 # Process wrappers that run the FOLLOWING command. Claude Code strips a documented set of these
 # before matching a command against the allow list, so e.g. `time git commit --amend` would
 # otherwise become `git commit --amend`, match `Bash(git commit *)`, and auto-run. This set MUST
@@ -288,6 +309,27 @@ def _safe_commit(args):
     return len(args) == 2 and args[0] == "-m" and bool(args[1].strip())
 
 
+def _probe_subject_problem(subject):
+    """Return a deny reason when the subject is nothing but a placeholder, else None.
+
+    Matching is anchored at both ends of the subject with its digits, spaces and punctuation
+    removed, so only a subject that says nothing beyond the placeholder is caught: a real subject
+    that merely holds one of these words (「テストを追加」「テスト分割を見直す」) still passes.
+    The rule is lexical, so a probe under some other invented wording is not caught here -- the
+    prohibition itself lives in the worker definition; this only closes the plainest spelling.
+    """
+    core = SUBJECT_FILLER.sub("", subject)
+    if not core or not PLACEHOLDER_SUBJECT.fullmatch(core):
+        return None
+    return (
+        "Commit subject is a placeholder, so this reads as a commit issued to try out the command "
+        "form rather than to record the drafted message. With changes staged, every git commit is "
+        "a real commit, and neither --amend nor git reset can repair the history it leaves. Do not "
+        "probe with a commit: re-issue the message drafted from the diff, or stop and report the "
+        "deny reason you cannot get past."
+    )
+
+
 def _message_format_problem(message):
     """Return a deny reason when the message's LINE STRUCTURE breaks the repo convention, else None.
 
@@ -392,6 +434,16 @@ def classify(command, root=None):
                 "Commit subject must be Japanese (repo convention): the first line has no "
                 "Japanese character. Redraft the subject in Japanese and retry."
             )
+        problem = _probe_subject_problem(subject)
+        if problem:
+            return "deny", problem
+        if LEAKED_COMMAND_PREFIX.match(subject):
+            return "deny", (
+                "Commit subject opens with the commit command itself, so the -m argument picked up "
+                "the front of the command while it was assembled. Re-issue the subject you "
+                "drafted, without the command text. Compare the argument against the draft BEFORE "
+                "running it -- once the commit exists neither --amend nor git reset can repair it."
+            )
         problem = _message_format_problem(args[1])
         if problem:
             return "deny", problem
@@ -442,6 +494,24 @@ def selftest():
         (f"git commit -m '件名\\n\\n本文\\n\\n{TRAILER}'", "deny"),
         (f"git commit -m '件名\\n\\n本文\n\n{TRAILER}'", "deny"),
         (f"git commit -m '件名\n\n本文\\n\\n{TRAILER}'", "deny"),
+        # A commit issued to try out the command form: the staged work would land under a
+        # throwaway subject. A subject that merely holds one of these words is left alone.
+        (f"git commit -m 'テスト行1\n\nテスト行2\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'テスト\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'ダミー2\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'あああ\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '仮\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'テストコミット\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '試行\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'テストを追加\n\n{TRAILER}'", "pass"),
+        (f"git commit -m '試行コミットの禁止を追加\n\n{TRAILER}'", "pass"),
+        # The command's own front, carried into its argument while the command was assembled.
+        (f"git commit -m 'git試行コミットの禁止を追加\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'git commit 疎化の区間分割を見直す\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '-m 疎化の区間分割を見直す\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'git のフック設定を見直す\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'front_stage のテスト分割を見直す\n\n{TRAILER}'", "pass"),
+        (f"git commit -m '仮引数の既定値を見直す\n\n{TRAILER}'", "pass"),
         (f"git commit -m '件名 {TRAILER}'", "deny"),
         ("git commit -m '件名'", "deny"),
         (f"git commit -m '件名\n\n本文\n {TRAILER}'", "deny"),
