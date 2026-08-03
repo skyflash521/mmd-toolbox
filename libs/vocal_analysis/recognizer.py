@@ -2,8 +2,9 @@
 
 無音検出による区間分割・内容認識・G2P(pyopenjtalk-plus)は経路共通(手順1〜4)。強制アライメント段は
 `forced_aligner`引数で選択できる: 既定のwav2vec2 CTC強制アライメントと、SOFA経路
-(`sofa_align`モジュールへ委譲)。公開関数 recognize() が唯一の公開面(Recognizerアダプタ契約。
-契約は`forced_aligner`の選択に関わらず不変)。内容認識モデルは `content_recognizer_model`
+(`sofa_align`モジュールへ委譲)。利用先への公開面は recognize() だけ(Recognizerアダプタ契約。
+契約は`forced_aligner`の選択に関わらず不変)。G2P の変換はかな読みの公開面(`reading`)からも
+同じ経路で使うため、パッケージ内で共有する。内容認識モデルは `content_recognizer_model`
 (`ContentRecognizerModel`)で指定する(既定値 `DEFAULT_CONTENT_RECOGNIZER_MODEL`・任意指定も可)。
 `retry` はエコー幻覚・反復幻覚へのトリガ式リトライの
 有効/無効を切り替える(既定True。主モデル自身をプロンプト無しで再認識する。別モデルは使わない)。
@@ -1122,15 +1123,16 @@ def _prepare_english_katakana_conversion(
     convert_words(words, method, on_progress=on_progress)
 
 
-def _g2p(
-    text: str, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
-    on_progress: Callable[[str], None] | None = None,
-) -> list[str]:
-    """テキストをG2Pで音素記号列へ変換する(手順4。pyopenjtalk-plus、ルールベース)。
+def convert_with_g2p(
+    text: str, *, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None, kana: bool = False,
+):
+    """テキストをG2Pで変換する(手順4。pyopenjtalk-plus、ルールベース)。
 
     pyopenjtalk-plusへ渡す前に、英語カタカナ化フォールバック(convert_target_words)を適用する。
     methodで変換方式を選択する(既定`arpakana`)。on_progress は tinyllama-katakana-converter
     方式の変換モデルの取得・ロードが実際に発生した区間だけ進捗文言を渡して呼ぶ。
+    kana が真ならかな読みの文字列、偽なら音素記号列を返す。
     """
     import pyopenjtalk
 
@@ -1152,7 +1154,17 @@ def _g2p(
         ) from e
 
     with suppress_native_stderr():
+        if kana:
+            return pyopenjtalk.g2p(text, kana=True)
         return pyopenjtalk.g2p(text, kana=False, join=False)
+
+
+def _g2p(
+    text: str, method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
+    on_progress: Callable[[str], None] | None = None,
+) -> list[str]:
+    """テキストを音素記号列へ変換する(手順4)。"""
+    return convert_with_g2p(text, method=method, on_progress=on_progress, kana=False)
 
 
 def _sanitize_word_timestamps(
