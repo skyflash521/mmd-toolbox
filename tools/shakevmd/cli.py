@@ -20,7 +20,7 @@ from cli_events import (
     emit_failure,
     install_sigbreak_handler,
 )
-from cli_progress import progress
+from cli_progress_router import ProgressRouter
 from shakevmd import __version__, cuts, presets
 from shakevmd.bake import RangeOverlapError, bake
 from shakevmd.warn import ShakeWarning
@@ -45,6 +45,9 @@ _SMOOTH_TOLERANCES = Tolerances(
 # 必須引数で 3 要素を要するため、pos と同程度の値を添える。
 _SMOOTH_CUT_DIST = 5.0
 _SMOOTH_MAX_SEG = 5
+
+# 段 id と利用者向けの工程名。2段とも複数ツールで共有しうる工程。
+_STAGE_LABELS = {"bake": "ベイク", "smooth": "スムージング"}
 
 
 def _finite_float(text):
@@ -534,28 +537,21 @@ def _run(args, machine, emitter, fail) -> int:
     # 例: walking の歩調成分 gait_freq/gait_amp。bake 既定(無効)を上書きする。
     internal = {k: preset[k] for k in presets.INTERNAL_PARAM_NAMES if k in preset}
 
-    # 進捗のライブ表示。重いベイク・スムージングの進行を端末へ出す(--quiet で無効、既定は
-    # stderr が端末のときだけ)。機械モードでは進捗をイベントで出すのでライブ行は無効化する。副作用専用=
-    # 出力VMD・終了コード・統計・警告を変えない。最初の stage 以降は捕捉例外で終了コードを返す経路・
-    # dry-run の早期 return・想定外例外のいずれでも heartbeat を止め行を消すため try/finally で囲む。
-    # close は二重呼び出しに耐えるので明示 close と finally が重なって安全。
-    reporter = progress.ProgressReporter(
-        sys.stderr, enabled=False if (args.quiet or machine) else None
-    )
+    # 重いベイク・スムージングの進行の報告先。副作用専用=出力VMD・終了コード・統計・警告を変えない。
+    # 最初の stage 以降は捕捉例外で終了コードを返す経路・dry-run の早期 return・想定外例外のいずれでも
+    # 進捗を終えるため try/finally で囲む。close は二重呼び出しに耐えるので明示 close と finally が
+    # 重なって安全。
+    reporter = ProgressRouter(machine=machine, quiet=args.quiet, emitter=emitter,
+                              stream=sys.stderr, labels=_STAGE_LABELS)
     try:
         # ベイク。引数由来の異常は下の except で code 別に分ける(range_overlap / value_overflow)。
-        # 機械モードはベイク進捗をイベントで出す(TTY 非依存)。段開始で done=0,total=null を1本、
-        # 以降は bake() のフレーム進捗コールバックで done/total を出す。非機械は従来どおりライブ行の段開始のみ。
-        bake_cb = None
-        if machine:
-            bake_start = time.monotonic()
-            emitter.progress(stage="bake", done=0, total=None, note="", elapsed=0.0)
-            bake_cb = lambda done, total: emitter.progress(  # noqa: E731
-                stage="bake", done=done, total=total, note="",
-                elapsed=time.monotonic() - bake_start,
-            )
-        else:
-            reporter.stage("ベイク")
+        # 段開始で done=0,total=null を1本、以降は bake() のフレーム進捗コールバックで done/total を出す。
+        bake_start = time.monotonic()
+        reporter.stage("bake")
+
+        def bake_cb(done, total):
+            reporter.stage("bake", done=done, total=total,
+                           elapsed=time.monotonic() - bake_start)
         try:
             result = bake(
                 doc.camera,
@@ -670,19 +666,14 @@ def _run(args, machine, emitter, fail) -> int:
         # 誤判定する余地も無くす。
         camera_out = result.camera_keys
         if args.smooth:
-            # 機械モードはスムージング進捗をイベントで出す。段開始で done=0,total=null を1本、以降は
-            # reduce_camera_track の progress(done, total, note) をそのままイベント化する。非機械は
-            # 従来どおりライブ行の段開始 + reporter.update を渡す。
-            if machine:
-                smooth_start = time.monotonic()
-                emitter.progress(stage="smooth", done=0, total=None, note="", elapsed=0.0)
-                smooth_cb = lambda done, total, note="": emitter.progress(  # noqa: E731
-                    stage="smooth", done=done, total=total, note=note,
-                    elapsed=time.monotonic() - smooth_start,
-                )
-            else:
-                reporter.stage("スムージング")
-                smooth_cb = reporter.update
+            # 段開始で done=0,total=null を1本、以降は reduce_camera_track の
+            # progress(done, total, note) をそのまま同じ段の進行として報告する。
+            smooth_start = time.monotonic()
+            reporter.stage("smooth")
+
+            def smooth_cb(done, total, note=""):
+                reporter.stage("smooth", done=done, total=total, note=note,
+                               elapsed=time.monotonic() - smooth_start)
             # 機械的 grid: 各範囲を max_seg 間隔のキーで区切る。sliding max_seg は「線形でも許容内に収まる」
             # 長区間を作り、手ぶれを疎キー＋線形補間=キー境界のコーナーで返すため 30fps 超でカクつき、
             # サブフレームでは揺れを取りこぼす。grid を keep に与えて区間長を max_seg 以下に抑えると、各区間は
@@ -691,8 +682,7 @@ def _run(args, machine, emitter, fail) -> int:
             grid = {f for f0, f1 in result.resolved for f in range(int(f0), int(f1) + 1, _SMOOTH_MAX_SEG)}
             keep = sorted({f for c in detected_cuts for f in (c - 1, c) if f >= 0} | grid)
             # progress=smooth_cb: reduce は progress(処理済みフレーム, 全フレーム総数, note) を 3 引数で
-            # 呼び、出力後検証区間では note="出力後検証" を添える。非機械では smooth_cb=reporter.update で
-            # シグネチャが一致し、機械では note を載せる smooth イベントに中継する。
+            # 呼び、出力後検証区間では note="出力後検証" を添える。
             camera_out = reduce_camera_track(
                 result.camera_keys,
                 result.resolved,
@@ -734,8 +724,7 @@ def _run(args, machine, emitter, fail) -> int:
                 max_amplitude=float(max_amp),
                 detected_cuts=[int(c) for c in detected_cuts],
             )
-        else:
-            reporter.summary(f"完了 {output}")
+        reporter.summary(f"完了 {output}")
         return 0
     finally:
         reporter.close()

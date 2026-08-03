@@ -172,6 +172,10 @@ def test_machine_emits_progress_events(tmp_path, capsysbinary):
     assert "bake" in stages
     for p in progress:
         assert set(p) >= {"type", "stage", "done", "total", "note", "elapsed"}
+    # 各段は開始時に done=0・total=null の1本から始まる。
+    first = progress[0]
+    assert (first["stage"], first["done"], first["total"], first["note"], first["elapsed"]) == \
+        ("bake", 0, None, "", 0.0)
 
 
 def test_machine_smooth_emits_smooth_progress(tmp_path, capsysbinary):
@@ -181,8 +185,11 @@ def test_machine_smooth_emits_smooth_progress(tmp_path, capsysbinary):
     assert rc == 0
     events = machine_events(capsysbinary)
     assert events[-1]["type"] == "result" and events[-1]["mode"] == "bake"  # 成功終端
-    stages = {e["stage"] for e in events if e["type"] == "progress"}
-    assert "smooth" in stages
+    progress = [e for e in events if e["type"] == "progress"]
+    assert "smooth" in {e["stage"] for e in progress}
+    first_smooth = next(e for e in progress if e["stage"] == "smooth")
+    assert (first_smooth["done"], first_smooth["total"], first_smooth["note"],
+            first_smooth["elapsed"]) == (0, None, "", 0.0)
 
 
 def test_non_machine_default_unchanged(tmp_path, capsys):

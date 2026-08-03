@@ -28,7 +28,7 @@ from cli_events import (
     emit_failure,
     install_sigbreak_handler,
 )
-from cli_progress import progress
+from cli_progress_router import ProgressRouter
 from pmx.types import PmxFormatError
 from vmd import io
 from vmd.reduce import BONE_LINEAR_INTERP
@@ -37,6 +37,13 @@ from vmd.types import BoneKey
 from . import __version__, classify, denoise, footik, presets, reduce, report
 from .model_profile import MocapModelProfileError
 from .pose_denoise import apply_pose_denoise
+
+# 段 id と利用者向けの工程名。3段とも複数ツールで共有しうる工程。
+_STAGE_LABELS = {
+    "denoise": "ノイズ軽減",
+    "foot_ik": "足IK接地安定化",
+    "reduce": "キーフレーム圧縮",
+}
 
 
 def _build_parser():
@@ -529,20 +536,17 @@ def _run(args, machine, emitter, fail):
                     f"ボーン値が不正(非有限・ゼロノルム quaternion): {e}", 1, field="input")
 
     # クリーニング → 足IK安定化 → 疎化のパイプライン。dry-run でも疎化レポートの素データを得るため
-    # 実行し、出力の書き出しだけを dry-run で省く。進捗は機械モードで progress イベント(端末非依存)、
-    # 非機械は端末時のライブ表示(--quiet で無効)。段ラベルは利用者向けの工程名を使う。
-    # 例外時もハートビートを止め行を消すため try/finally で囲む。
-    reporter = progress.ProgressReporter(sys.stderr, enabled=False if (args.quiet or machine) else None)
+    # 実行し、出力の書き出しだけを dry-run で省く。
+    # 例外時も進捗を終えるため try/finally で囲む。
+    reporter = ProgressRouter(machine=machine, quiet=args.quiet, emitter=emitter,
+                              stream=sys.stderr, labels=_STAGE_LABELS)
     # dry-run / verbose のときだけ診断素データを集める(通常実行のオーバーヘッドを避ける)。
     want_report = args.dry_run or args.verbose
     reduction_diag = {} if (args.reduce and want_report) else None
     pose_diag = {} if (args.denoise and args.denoise_mode == "pose" and want_report) else None
     try:
         if args.denoise:
-            if machine:
-                emitter.progress(stage="denoise", done=0, total=None, note="", elapsed=0.0)
-            else:
-                reporter.stage("ノイズ軽減")
+            reporter.stage("denoise")
             if args.denoise_mode == "pose":
                 # 表現空間ノイズ除去。PMX形式不正・モデルプロファイル不正は入力不正。
                 try:
@@ -557,22 +561,16 @@ def _run(args, machine, emitter, fail):
         else:
             new_bone = doc.bone
         if args.foot_ik_stabilize:
-            if machine:
-                emitter.progress(stage="foot_ik", done=0, total=None, note="", elapsed=0.0)
-            else:
-                reporter.stage("足IK接地安定化")
+            reporter.stage("foot_ik")
             new_bone = _stabilize_bones(new_bone, args.foot_slide_suppression)
         if args.reduce:
-            if machine:
-                reduce_start = time.monotonic()
-                emitter.progress(stage="reduce", done=0, total=None, note="", elapsed=0.0)
+            reduce_start = time.monotonic()
+            reporter.stage("reduce")
 
-                def reduce_cb(done, total):
-                    emitter.progress(stage="reduce", done=done, total=total, note="",
-                                     elapsed=time.monotonic() - reduce_start)
-            else:
-                reporter.stage("キーフレーム圧縮")
-                reduce_cb = reporter.update
+            def reduce_cb(done, total):
+                reporter.stage("reduce", done=done, total=total,
+                               elapsed=time.monotonic() - reduce_start)
+
             new_bone = reduce.reduce_bones(
                 new_bone,
                 args.preset,
@@ -617,7 +615,6 @@ def _run(args, machine, emitter, fail):
     if machine:
         emitter.result(mode="process", output=output,
                        input_keys=len(doc.bone), output_keys=len(new_bone))
-    else:
-        # 進捗表示が有効だった(端末・非 quiet)ときだけ、消した進捗行のあとに完了行を 1 行残す。
-        reporter.summary(f"完了 {output}")
+    # 進捗表示が有効だった(端末・非 quiet)ときだけ、消した進捗行のあとに完了行を 1 行残す。
+    reporter.summary(f"完了 {output}")
     return 0

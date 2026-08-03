@@ -4,7 +4,7 @@ MMDカメラモーション(VMD)に手ぶれを焼き込むCLIツール
 
 依存: vmd(同リポジトリのフォーマット層ライブラリ、[../../libs/vmd/vmd.md](../../libs/vmd/vmd.md)), cli_events(同リポジトリの
 共有ドメイン層ライブラリ、機械モードのイベント送出、[../../libs/cli_events/cli_events.md](../../libs/cli_events/cli_events.md)),
-cli_progress(同リポジトリの共有ドメイン層ライブラリ、進捗ライブ表示、[../../libs/cli_progress/cli_progress.md](../../libs/cli_progress/cli_progress.md)),
+cli_progress_router(同リポジトリの共有ドメイン層ライブラリ、進捗の報告先の振り分け、[../../libs/cli_progress_router/cli_progress_router.md](../../libs/cli_progress_router/cli_progress_router.md)),
 numpy, scipy, click または argparse
 
 ---
@@ -109,7 +109,10 @@ numpy, scipy, click または argparse
 ### 2.7.1 進捗表示
 
 工程はベイク(常に実行)と、`--smooth` 指定時のみのスムージング。有効条件・表記・停滞回避・副作用専用等の
-一般契約は[CLIインターフェース規約 §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性)が正。
+一般契約は[CLIインターフェース規約 §6](../../docs/conventions/cli-interface.md#6-横断的な一貫性)が正。**報告先の振り分け**(機械モードの
+イベント送出と人間向けライブ表示の切り替え・端末判定と `--quiet` の反映・同一段での進行更新)は共有モジュール
+[cli_progress_router](../../libs/cli_progress_router/cli_progress_router.md) が定める。`shakevmd` は上記2段の段 id と、それに対応する
+利用者向けの工程名を渡す。
 
 スムージング段の進捗通知(処理済みフレーム数・全範囲フレーム総数・出力後検証区間の注記)は共有疎化
 エンジンが持つ契約で、[vmd-reduce.md §11](../../libs/vmd/vmd-reduce.md#11-進捗通知progress-コールバック) を正とする
