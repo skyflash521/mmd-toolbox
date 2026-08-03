@@ -16,7 +16,7 @@ import soundfile as sf
 from cli_progress_router import ProgressEmitError
 from lipsync import MouthEvent, MouthShape
 from song2vmd import pipeline, presets
-from vocal_analysis import ContentRecognizerModel, RmsEnvelope, Segment
+from vocal_analysis import ChunkingPolicy, ContentRecognizerModel, RmsEnvelope, Segment
 from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
 from vocal_analysis.separator import SeparationError
@@ -51,7 +51,7 @@ def _common_kwargs(**overrides):
     kw = dict(
         separate_vocals="always", separator_name="audio-separator-htdemucs-ft",
         content_recognizer_model=_TEST_MODEL, retry=True,
-        max_duration_sec=300.0, use_n_morph=True,
+        chunking=ChunkingPolicy(max_duration_sec=300.0), use_n_morph=True,
         intensity_curve=0.6, silence_on=0.06,
         openness=openness, style_gen=style_gen, style_name="pop", model_name="",
         forced_aligner="wav2vec2-ctc-forcedalign", sofa_aligner=None,
@@ -405,19 +405,19 @@ def test_chunked_run_diagnostics_forced_split_reflects_any_boundary(
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: boundary_pairs)
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: boundary_pairs)
 
     def fake_merge(chunk_segments_list, chunk_offsets_sec, boundaries_sec):
         assert boundaries_sec == [3.0, 6.0]  # 座標だけのlist[float]で従来どおり
         return [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)]
 
-    monkeypatch.setattr(pipeline.chunking, "merge_chunk_segments", fake_merge)
+    monkeypatch.setattr(pipeline._chunking, "merge_chunk_segments", fake_merge)
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
-    result = pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+    result = pipeline.run(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
     assert result.diagnostics.forced_split is expected_forced_split
 
 
@@ -427,7 +427,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
 
     def fake_merge(chunk_segments_list, chunk_offsets_sec, boundaries_sec):
         assert len(chunk_segments_list) == 3
@@ -438,7 +438,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
         assert boundaries_sec == [3.0, 6.0]
         return [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)]
 
-    monkeypatch.setattr(pipeline.chunking, "merge_chunk_segments", fake_merge)
+    monkeypatch.setattr(pipeline._chunking, "merge_chunk_segments", fake_merge)
 
     separate_calls = []
     separate_kwargs = []
@@ -460,7 +460,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
     sofa_config = object()
     progress = _RecordingProgress()
     result = pipeline.run(input_path, progress=progress, **_common_kwargs(
-        max_duration_sec=3.0, forced_aligner="sofa-forcedalign", sofa_aligner=sofa_config,
+        chunking=ChunkingPolicy(max_duration_sec=3.0), forced_aligner="sofa-forcedalign", sofa_aligner=sofa_config,
         english_katakana_method="tinyllama-katakana-converter"))
 
     assert len(separate_calls) == 3
@@ -502,9 +502,9 @@ def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_e
         boundary_calls.append((duration_sec, rms_times_sec, rms_values))
         return [(3.0, False), (6.0, False)]
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", fake_find_boundaries)
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", fake_find_boundaries)
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
@@ -530,7 +530,7 @@ def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_e
 
     monkeypatch.setattr(pipeline.events, "confirm_mouth_events", spy_confirm)
 
-    pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+    pipeline.run(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
     assert len(boundary_calls) == 1
     assert boundary_calls[0][0] == pytest.approx(10.0, abs=0.05)
@@ -557,9 +557,9 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
     loud_vocal = tmp_path / "vocal_loud.wav"
     write_wav(loud_vocal, seconds=6.0, amplitude=0.9)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
 
     separate_call_count = [0]
@@ -582,7 +582,7 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
 
     monkeypatch.setattr(pipeline._va_rms, "compute_rms", recording_compute_rms)
 
-    pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+    pipeline.run(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
     # compute_rmsは2回呼ばれる: (1)境界決定用の生音声、(2)events用の曲全体ボーカル。
     whole_vocal_samples = compute_rms_pcms[1].samples
@@ -613,8 +613,8 @@ def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_pat
         seg("vowel", 4.0, 5.0, phoneme="o̞", confidence=0.9),
         seg("vowel", 5.0, 6.0, phoneme="ɯ", confidence=0.9),
     ]
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
-    monkeypatch.setattr(pipeline.chunking, "merge_chunk_segments", lambda *a, **k: combined_segments)
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "merge_chunk_segments", lambda *a, **k: combined_segments)
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         pipeline._va_recognizer, "recognize",
@@ -647,7 +647,7 @@ def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_pat
 
     openness = presets.OpennessParams(open_lo=0.0, open_hi=1.0, open_max=1.0)
     pipeline.run(input_path, **_common_kwargs(
-        max_duration_sec=3.0, openness=openness, intensity_curve=1.0))
+        chunking=ChunkingPolicy(max_duration_sec=3.0), openness=openness, intensity_curve=1.0))
 
     mouth_events = captured["mouth_events"]
     boundary_next_event = next(e for e in mouth_events if e.shape == MouthShape.I)
@@ -672,9 +672,9 @@ def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monk
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
@@ -682,7 +682,7 @@ def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monk
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     progress = _RecordingProgress()
-    pipeline.run(input_path, progress=progress, **_common_kwargs(max_duration_sec=3.0))
+    pipeline.run(input_path, progress=progress, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
     # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
     recognize_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "recognize"]
@@ -753,9 +753,9 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monk
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
 
@@ -767,7 +767,7 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monk
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
     progress = _RecordingProgress()
-    pipeline.run(input_path, progress=progress, **_common_kwargs(max_duration_sec=3.0))
+    pipeline.run(input_path, progress=progress, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
     recognize_calls = [c for c in progress.calls if c["stage"] == "recognize"]
     download_notes = [c for c in recognize_calls if c["note"] == "ダウンロード中: dummy-model 10%"]
@@ -809,9 +809,9 @@ def test_chunked_separate_on_progress_preserves_chunk_done_total(tmp_path, monke
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
 
     def fake_separate(pcm, mode, on_progress=None, **kwargs):
@@ -824,7 +824,7 @@ def test_chunked_separate_on_progress_preserves_chunk_done_total(tmp_path, monke
         seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     progress = _RecordingProgress()
-    pipeline.run(input_path, progress=progress, **_common_kwargs(max_duration_sec=3.0))
+    pipeline.run(input_path, progress=progress, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
     separate_calls = [c for c in progress.calls if c["stage"] == "separate"]
     download_notes = [c for c in separate_calls if c["note"] == "ダウンロード中: 10%"]
@@ -886,9 +886,9 @@ def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_recogn
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
 
@@ -900,7 +900,7 @@ def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_recogn
 
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", fake_recognize)
 
-    pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+    pipeline.run(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
     assert captured == [None, None]
 
@@ -998,9 +998,9 @@ def test_keep_intermediate_chunked_saves_concatenated_vocal(tmp_path, monkeypatc
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=6.0, amplitude=0.8)
 
-    monkeypatch.setattr(pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
+    monkeypatch.setattr(pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
@@ -1008,7 +1008,8 @@ def test_keep_intermediate_chunked_saves_concatenated_vocal(tmp_path, monkeypatc
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     keep_dir = tmp_path / "out.vmd.intermediate"
-    pipeline.run(input_path, keep_intermediate_dir=keep_dir, **_common_kwargs(max_duration_sec=3.0))
+    pipeline.run(input_path, keep_intermediate_dir=keep_dir,
+                 **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
     saved_samples, saved_sr = sf.read(str(keep_dir / "vocal.wav"), dtype="float32", always_2d=True)
     # 曲全体(6秒)分の核区間連結ボーカルが保存される(チャンクごとの重複区間を含まない)。
@@ -1074,9 +1075,9 @@ def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path,
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
     monkeypatch.setattr(
-        pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+        pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
     monkeypatch.setattr(
-        pipeline.chunking, "merge_chunk_segments",
+        pipeline._chunking, "merge_chunk_segments",
         lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
     monkeypatch.setattr(pipeline._va_separator, "separate", lambda pcm, mode, **kw: vocal_path)
     monkeypatch.setattr(
@@ -1095,7 +1096,7 @@ def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path,
     monkeypatch.setattr(pipeline.sf, "read", fail_on_vocal)
 
     with pytest.raises(pipeline.IntermediateReadError) as exc:
-        pipeline.run(input_path, **_common_kwargs(max_duration_sec=3.0))
+        pipeline.run(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
     assert str(exc.value.path) == str(vocal_path)
 
 
@@ -1141,11 +1142,12 @@ def _stage_failure_kwargs(tmp_path, monkeypatch, *, failing_stage, error, chunke
     monkeypatch.setattr(pipeline._va_recognizer, "recognize", recognize)
     if chunked:
         monkeypatch.setattr(
-            pipeline.chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+            pipeline._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
         monkeypatch.setattr(
-            pipeline.chunking, "merge_chunk_segments",
+            pipeline._chunking, "merge_chunk_segments",
             lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
-    return input_path, _common_kwargs(max_duration_sec=3.0 if chunked else 300.0)
+    return input_path, _common_kwargs(
+        chunking=ChunkingPolicy(max_duration_sec=3.0 if chunked else 300.0))
 
 
 class _UnlistedError(Exception):

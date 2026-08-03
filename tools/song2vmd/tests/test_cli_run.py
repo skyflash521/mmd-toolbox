@@ -24,7 +24,11 @@ from song2vmd import report as _report
 from song2vmd.resource_watch import warning_texts
 from vmd import VmdDocument
 from vmd import read as vmd_read
-from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL, ContentRecognizerModel
+from vocal_analysis import (
+    DEFAULT_CONTENT_RECOGNIZER_MODEL,
+    ChunkingPolicy,
+    ContentRecognizerModel,
+)
 from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
 from vocal_analysis.separator import SeparationError
@@ -108,7 +112,7 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["style_name"] == "pop"
     assert kwargs["separate_vocals"] == "always"
     assert kwargs["separator_name"] == "audio-separator-htdemucs-ft"
-    assert kwargs["max_duration_sec"] == 300.0
+    assert kwargs["chunking"] == ChunkingPolicy(max_duration_sec=300.0)
     assert kwargs["use_n_morph"] is False
     # --vowel-gain の既定 1:1:1:1:1 は presets.resolve での乗算後もプリセット値のまま。
     # pipeline.run へは style_gen.vowel_scale として渡る。

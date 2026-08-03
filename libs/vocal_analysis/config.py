@@ -102,5 +102,18 @@ class SofaAlignerConfig:
     timeout_sec: float = 300.0  # 1回のSOFA呼び出しあたりのサブプロセスタイムアウト秒数
 
 
+@dataclass(frozen=True)
+class ChunkingPolicy:
+    """長尺の自動分割の実行ポリシー。分割しないことはポリシーを渡さないことで表す。
+
+    探索窓とオーバーラップは利用者へ公開せずここの既定を使う(前段の内部の切り方であって、
+    利用者が選ぶ量ではないため)。
+    """
+
+    max_duration_sec: float  # チャンクの目標長。実境界は探索窓のぶん前後しうる
+    search_window_sec: float = 5.0  # 目標境界の前後を探す幅
+    overlap_sec: float = 1.0  # 隣接チャンクに持たせるオーバーラップ長
+
+
 RECOGNIZER_CONFIG = RecognizerConfig()
 SEPARATOR_CONFIG = SeparatorConfig()

@@ -4,8 +4,8 @@ vocal_analysis(S0読込・S1分離・S2認識・S3 RMS)から song2vmd 自身の
 長尺分割(chunking)・モーフ生成(morphs)までを1回のパイプライン実行として結線する。song2vmd 固有の
 判断(写像・閾値等)は追加せず、既存モジュールの呼び出し順序と受け渡しに徹する。
 
-長尺分割(--max-duration 超過時)は、処理資源対策のため S1分離・S2認識をチャンク単位(前後1.0秒の
-オーバーラップ付き)で行う。境界決定には分離前の生音声のRMSを使う(分離という重い処理を境界決定の
+長尺分割(--max-duration 超過時)は、処理資源対策のため S1分離・S2認識をチャンク単位(実行ポリシーが
+持つ長さのオーバーラップ付き)で行う。境界決定には分離前の生音声のRMSを使う(分離という重い処理を境界決定の
 ためだけに追加で行わずに済むため)。RMS(S3)は「曲全体基準」で正規化する必要がある
 ため、各チャンクの分離済みボーカル音声から重複領域を除いた「核」区間(隣接チャンクとの境界から
 その次の境界まで)だけを取り出して全チャンク分を連結し、その連結した曲全体のボーカル音声に対して
@@ -32,10 +32,9 @@ from vocal_analysis import rms as _va_rms
 from vocal_analysis import separator as _va_separator
 from vocal_analysis.types import AudioPcm
 
-from . import chunking, events, morphs, report
+from . import chunking as _chunking
+from . import events, morphs, report
 from . import progress as _progress
-
-_CHUNK_OVERLAP_SEC = 1.0  # 初期値。
 
 
 class IntermediateWriteError(Exception):
@@ -225,7 +224,7 @@ def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
 
 
 def run(input_path, *, separate_vocals, separator_name, content_recognizer_model,
-        retry, max_duration_sec,
+        retry, chunking,
         use_n_morph, intensity_curve, silence_on, openness, style_gen,
         style_name, model_name, forced_aligner, sofa_aligner,
         english_katakana_method=_DEFAULT_ENGLISH_KATAKANA_METHOD,
@@ -238,6 +237,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
     反復幻覚)の有効/無効。forced_aligner・sofa_aligner は同じ recognize が受け取るS2強制
     アライメント段のバックエンド選択。english_katakana_method は同じ recognize が受け取る
     英語カタカナ化フォールバックの変換方式選択(既定`arpakana`)。
+    chunking は長尺の自動分割の実行ポリシー(ChunkingPolicy)。None なら分割しない。
     keep_intermediate_dir を渡すと中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)をその
     ディレクトリへ保存する。省略時(既定None)は何も保存しない。
     """
@@ -245,7 +245,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
     pcm = _va_io.load_audio(input_path)
     duration_sec = len(pcm.samples) / pcm.sample_rate
 
-    if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
+    if chunking is None or chunking.max_duration_sec <= 0 or duration_sec <= chunking.max_duration_sec:
         segments, rms_envelope, vocal_pcm = _run_single(
             pcm, separate_vocals, separator_name, content_recognizer_model, retry,
             forced_aligner, sofa_aligner, english_katakana_method, progress)
@@ -253,7 +253,7 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
     else:
         segments, rms_envelope, vocal_pcm, forced_split = _run_chunked(
             pcm, duration_sec, separate_vocals, separator_name, content_recognizer_model,
-            retry, max_duration_sec, forced_aligner, sofa_aligner,
+            retry, chunking, forced_aligner, sofa_aligner,
             english_katakana_method, progress)
 
     if keep_intermediate_dir is not None:
@@ -307,12 +307,14 @@ def _run_single(pcm, separate_vocals, separator_name, content_recognizer_model, 
 
 
 def _run_chunked(pcm, duration_sec, separate_vocals, separator_name, content_recognizer_model,
-                 retry, max_duration_sec, forced_aligner, sofa_aligner,
+                 retry, chunking, forced_aligner, sofa_aligner,
                  english_katakana_method, progress):
     """長尺分割ありの実行。境界決定は分離前の生音声RMSを使う。"""
     raw_rms = _va_rms.compute_rms(pcm)
-    boundary_pairs = chunking.find_chunk_boundaries(
-        duration_sec, raw_rms.times_sec, raw_rms.values, max_duration_sec=max_duration_sec)
+    boundary_pairs = _chunking.find_chunk_boundaries(
+        duration_sec, raw_rms.times_sec, raw_rms.values,
+        max_duration_sec=chunking.max_duration_sec,
+        search_window_sec=chunking.search_window_sec)
     boundaries = [b for b, _ in boundary_pairs]
     forced_split = any(f for _, f in boundary_pairs)
     edges = [0.0] + boundaries + [duration_sec]
@@ -323,8 +325,8 @@ def _run_chunked(pcm, duration_sec, separate_vocals, separator_name, content_rec
     vocal_core_chunks = []
     for i in range(n):
         core_start, core_end = edges[i], edges[i + 1]
-        pad_start = max(0.0, core_start - _CHUNK_OVERLAP_SEC) if i > 0 else 0.0
-        pad_end = min(duration_sec, core_end + _CHUNK_OVERLAP_SEC) if i < n - 1 else duration_sec
+        pad_start = max(0.0, core_start - chunking.overlap_sec) if i > 0 else 0.0
+        pad_end = min(duration_sec, core_end + chunking.overlap_sec) if i < n - 1 else duration_sec
         chunk_offsets_sec.append(pad_start)
 
         chunk_pcm = _slice_pcm(pcm, pad_start, pad_end)
@@ -348,7 +350,7 @@ def _run_chunked(pcm, duration_sec, separate_vocals, separator_name, content_rec
         chunk_vocal_pcm = _read_intermediate(vocal_path, _read_pcm_raw)
         vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))
 
-    merged_segments = chunking.merge_chunk_segments(chunk_segments_list, chunk_offsets_sec, boundaries)
+    merged_segments = _chunking.merge_chunk_segments(chunk_segments_list, chunk_offsets_sec, boundaries)
     whole_vocal_pcm = _concat_pcm(vocal_core_chunks)
     _report_stage(progress, "rms")
     rms_envelope = _va_rms.compute_rms(whole_vocal_pcm)
