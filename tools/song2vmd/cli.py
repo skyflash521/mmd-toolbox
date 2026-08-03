@@ -44,6 +44,11 @@ from . import resource_watch as _resource_watch
 # 配布物内のモジュール(共有ライブラリ・自身のモジュール)は、導入の破損と区別するため取り込み文を
 # ここへ入れない。
 try:
+    from vocal_analysis.front_stage import (
+        IntermediateReadError,
+        IntermediateWriteError,
+        StageExecutionError,
+    )
     from vocal_analysis.io import AudioLoadError
     from vocal_analysis.recognizer import RecognitionError
     from vocal_analysis.separator import SeparationError
@@ -369,7 +374,7 @@ def _run(args, emitter, fail) -> int:
                 forced_aligner=args.forced_aligner, sofa_aligner=_va_cli.resolve_sofa_config(args),
                 english_katakana_method=args.english_katakana_method,
                 keep_intermediate_dir=keep_intermediate_dir, progress=progress)
-        except _pipeline.IntermediateReadError as e:
+        except IntermediateReadError as e:
             # 内部生成ファイルの読み直し失敗。利用者入力を指す field は載せず、対象ファイルを path に載せる。
             progress_reporter.close()
             return fail("not_audio", str(e), 1, path=str(e.path))
@@ -377,16 +382,18 @@ def _run(args, emitter, fail) -> int:
             progress_reporter.close()
             exit_code = 4 if e.reason == "decoder_missing" else 1
             return fail(e.reason, str(e), exit_code, field="input")
-        except _pipeline.StageExecutionError as e:
+        except StageExecutionError as e:
+            # 共有側は失敗の要旨だけを持つので、どの工程かは利用者向けの工程名で示す。
             progress_reporter.close()
-            return fail("stage_failed", str(e), 4, stage=e.stage)
+            return fail("stage_failed", f"{_progress.stage_label(e.stage)}に失敗しました: {e}",
+                        4, stage=e.stage)
         except SeparationError as e:
             progress_reporter.close()
             return fail("stage_failed", str(e), 4, stage="separate")
         except RecognitionError as e:
             progress_reporter.close()
             return fail("stage_failed", str(e), 4, stage="recognize")
-        except _pipeline.IntermediateWriteError as e:
+        except IntermediateWriteError as e:
             progress_reporter.close()
             return fail("write_failed", str(e), 3, field="--keep-intermediate", path=keep_intermediate_dir)
 

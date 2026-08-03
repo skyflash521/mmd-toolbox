@@ -1,114 +1,20 @@
 """song2vmd パイプライン統合。
 
-vocal_analysis(S0読込・S1分離・S2認識・S3 RMS)から song2vmd 自身の口形イベント確定(events)・
-長尺分割(chunking)・モーフ生成(morphs)までを1回のパイプライン実行として結線する。song2vmd 固有の
-判断(写像・閾値等)は追加せず、既存モジュールの呼び出し順序と受け渡しに徹する。
+音声前段(vocal_analysis の前段実行エンジン)から song2vmd 自身の口形イベント確定(events)・
+モーフ生成(morphs)までを1回のパイプライン実行として結線する。song2vmd 固有の判断(写像・閾値等)は
+追加せず、既存モジュールの呼び出し順序と受け渡しに徹する。
 
-長尺分割(--max-duration 超過時)は、処理資源対策のため S1分離・S2認識をチャンク単位(実行ポリシーが
-持つ長さのオーバーラップ付き)で行う。境界決定には分離前の生音声のRMSを使う(分離という重い処理を境界決定の
-ためだけに追加で行わずに済むため)。RMS(S3)は「曲全体基準」で正規化する必要がある
-ため、各チャンクの分離済みボーカル音声から重複領域を除いた「核」区間(隣接チャンクとの境界から
-その次の境界まで)だけを取り出して全チャンク分を連結し、その連結した曲全体のボーカル音声に対して
-1回だけRMSを算出する(チャンクごとに個別正規化しない)。この連結のため、各チャンクのボーカルWAVは
-vocal_analysis.io.load_audio のピーク正規化を経ずに読み込む(正規化はチャンクごとに異なる倍率を
-かけてしまい、チャンク間の相対的な強弱を壊すため。曲全体を1回だけ読む単一実行経路では、一様な
-倍率が全体にかかるだけなのでRMSの相対正規化(ゲイン不変)を壊さない)。
+前段の実行(S0読込・S1分離・S2認識・S3 RMS の呼び出し順序、長尺分割、失敗の分類、診断用中間生成物の
+書き出し)は共有側が持つので、ここは前段へ渡す設定の組み立てと、返った共有出力を後段へ渡すことだけを行う。
 """
 
-import json
-import time
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import dataclass
 
-import numpy as np
-import soundfile as sf
-
-from cli_progress_router import ProgressEmitError
 from lipsync import GenerationParams
 from vocal_analysis import DEFAULT_ENGLISH_KATAKANA_METHOD as _DEFAULT_ENGLISH_KATAKANA_METHOD
-from vocal_analysis import io as _va_io
-from vocal_analysis import recognizer as _va_recognizer
-from vocal_analysis import rms as _va_rms
-from vocal_analysis import separator as _va_separator
-from vocal_analysis.types import AudioPcm
+from vocal_analysis.front_stage import run_front_stage
 
-from . import chunking as _chunking
 from . import events, morphs, report
-from . import progress as _progress
-
-
-class IntermediateWriteError(Exception):
-    """--keep-intermediate の中間生成物書き込み失敗。"""
-
-
-class IntermediateReadError(Exception):
-    """内部生成ファイル(分離後ボーカルWAV)の読み直し失敗。
-
-    利用者入力の読み込み失敗と同じ例外で送出すると、CLI が利用者入力を指すフィールドで
-    報告してしまうため、対象ファイルを持つ別の例外に分ける。
-    """
-
-    def __init__(self, message, *, path):
-        super().__init__(message)
-        self.path = path
-
-
-class StageExecutionError(Exception):
-    """外部推論(分離・認識)の呼び出しから漏れた、分類の定まっていない例外。
-
-    どの工程で失敗したかを stage に持ち、CLI が工程失敗として報告できるようにする。
-    """
-
-    def __init__(self, message, *, stage):
-        super().__init__(message)
-        self.stage = stage
-
-
-# 呼び出し元で分類が定まっている例外。工程失敗へ写像すると、それぞれの終了コードの分岐を
-# 上書きしてしまうのでそのまま送出させる。KeyboardInterrupt は Exception の派生でないため
-# ここに挙げなくても通る。
-_CLASSIFIED_STAGE_EXCEPTIONS = (
-    _va_separator.SeparationError,
-    _va_recognizer.RecognitionError,
-    _va_io.AudioLoadError,
-    IntermediateReadError,
-    IntermediateWriteError,
-    ProgressEmitError,
-)
-
-
-def _run_inference(stage, func, *args, map_failures=True, **kwargs):
-    """外部推論の呼び出しを1回だけ包み、分類の定まっていない例外を工程失敗へ写像する。
-
-    包むのは呼び出しそのものに限る。前後の処理(音量解析・内部生成ファイルの読み直し等)まで
-    含めると、それらの失敗が工程の失敗に化ける。map_failures が偽なら写像せずそのまま呼ぶ
-    (その呼び出しが実際には外部推論を行わない場合に使う)。
-    """
-    if not map_failures:
-        return func(*args, **kwargs)
-    try:
-        return func(*args, **kwargs)
-    except _CLASSIFIED_STAGE_EXCEPTIONS:
-        raise
-    except Exception as e:
-        # 取得・実行のどちらで失敗したかは、分類されずに漏れてきた例外からは判別できないので
-        # 名乗らない(判別できる失敗は vocal_analysis 側が専用例外の文言で示す)。
-        raise StageExecutionError(
-            f"{_progress.stage_label(stage)}に失敗しました: {type(e).__name__}: {e}",
-            stage=stage) from e
-
-
-def _read_intermediate(path, reader):
-    """内部生成ファイルを reader で読み、失敗を IntermediateReadError へ包む。
-
-    読み手(ピーク正規化ありの読み込みと生読み込み)によらず、失敗の意味は同じ内部生成ファイルの
-    読み直し失敗なので、送出する例外も同じにする。捕捉するのは読み込み自体の失敗を表す例外だけで、
-    実装の不具合を表す例外(型の誤り・メモリ不足等)は内部エラーとして扱えるようそのまま通す。
-    """
-    try:
-        return reader(path)
-    except (_va_io.AudioLoadError, sf.SoundFileError, OSError) as e:
-        raise IntermediateReadError(str(e), path=path) from e
 
 
 @dataclass(frozen=True)
@@ -119,31 +25,6 @@ class PipelineResult:
     diagnostics: report.Diagnostics
     sample_rate: int
     channels: int
-
-
-def _slice_pcm(pcm, start_sec, end_sec):
-    """[start_sec, end_sec) の時刻範囲を切り出した AudioPcm を返す。"""
-    sr = pcm.sample_rate
-    start_idx = max(0, round(start_sec * sr))
-    end_idx = min(len(pcm.samples), round(end_sec * sr))
-    return AudioPcm(samples=pcm.samples[start_idx:end_idx], sample_rate=sr)
-
-
-def _concat_pcm(pcms):
-    """複数の AudioPcm を時間順に連結した AudioPcm を返す。"""
-    sr = pcms[0].sample_rate
-    samples = np.concatenate([p.samples for p in pcms], axis=0)
-    return AudioPcm(samples=samples, sample_rate=sr)
-
-
-def _read_pcm_raw(path):
-    """ピーク正規化を経ずに音声ファイルを読み込む(チャンクの核区間連結専用)。
-
-    vocal_analysis.io.load_audio は毎回ピーク正規化(目標値固定)を適用するため、チャンクごとに
-    個別に読み込むと倍率がチャンクごとに異なり、曲全体基準のRMSが壊れる。
-    """
-    samples, sample_rate = sf.read(path, dtype="float32", always_2d=True)
-    return AudioPcm(samples=samples, sample_rate=sample_rate)
 
 
 def _build_generation_params(openness, style_gen):
@@ -181,48 +62,6 @@ def _report_stage(progress, stage, *, done=0, total=None, note=""):
         progress.stage(stage, done=done, total=total, note=note, elapsed=0.0)
 
 
-def _model_download_progress(progress, stage, *, done, total):
-    """vocal_analysis.separator.separate()・recognizer.recognize() の on_progress へ渡す
-    コールバックを組み立てる。
-
-    モデル初回取得のダウンロード進捗文言、および分離・書き起こし・アライメントの各実処理が
-    進行中であることを示す文言を、呼び出し時点の完了数/総数(長尺分割時はチャンク進捗)を
-    保ったまま progress.stage() の note へ反映する(通知のたびに 0/None へ巻き戻さない)。elapsed は
-    このコールバックを組み立てた時点(直前の _report_stage 呼び出しと同時)からの実経過秒とする
-    (段開始からの経過秒として扱う)。progress が
-    None(進捗レポータ省略時)なら None を返し、存在しない進捗表示への橋渡しコールバックを作らない。
-    """
-    if progress is None:
-        return None
-
-    start = time.monotonic()
-
-    def on_progress(note):
-        progress.stage(stage, done=done, total=total, note=note, elapsed=time.monotonic() - start)
-
-    return on_progress
-
-
-def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
-    """--keep-intermediate 指定時に中間生成物を保存する。
-
-    S0正規化PCM(input_normalized.wav)・分離後ボーカルWAV(vocal.wav。長尺分割時は核区間を
-    連結した曲全体分)・S2認識結果(segments.json)を、指定ディレクトリへ保存する。書き込み失敗
-    (権限・ディスク等のI/O失敗)は IntermediateWriteError として送出する。
-    `sf.write` はlibsndfileが開くため失敗を `OSError` でなく `sf.SoundFileError` 系で送出する
-    (`mkdir`/`write_text` の失敗は `OSError`)ため、両方を捕捉する。
-    """
-    try:
-        directory = Path(keep_intermediate_dir)
-        directory.mkdir(parents=True, exist_ok=True)
-        sf.write(directory / "input_normalized.wav", pcm.samples, pcm.sample_rate)
-        sf.write(directory / "vocal.wav", vocal_pcm.samples, vocal_pcm.sample_rate)
-        (directory / "segments.json").write_text(
-            json.dumps([asdict(s) for s in segments], ensure_ascii=False, indent=2), encoding="utf-8")
-    except (OSError, sf.SoundFileError) as e:
-        raise IntermediateWriteError(str(e)) from e
-
-
 def run(input_path, *, separate_vocals, separator_name, content_recognizer_model,
         retry, chunking,
         use_n_morph, intensity_curve, silence_on, openness, style_gen,
@@ -231,37 +70,22 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         keep_intermediate_dir=None, progress=None):
     """song2vmd の音声→VMDパイプラインを実行する。
 
-    separator_name は vocal_analysis.separator.separate が受け取るS1分離アダプタの安定 id。
-    content_recognizer_model は vocal_analysis.recognizer.recognize が受け取る内容認識モデル
-    (ContentRecognizerModel)。retry は同じ recognize が受け取るトリガ式リトライ(エコー幻覚・
-    反復幻覚)の有効/無効。forced_aligner・sofa_aligner は同じ recognize が受け取るS2強制
-    アライメント段のバックエンド選択。english_katakana_method は同じ recognize が受け取る
-    英語カタカナ化フォールバックの変換方式選択(既定`arpakana`)。
-    chunking は長尺の自動分割の実行ポリシー(ChunkingPolicy)。None なら分割しない。
-    keep_intermediate_dir を渡すと中間生成物(正規化PCM・分離後ボーカルWAV・認識結果)をその
-    ディレクトリへ保存する。省略時(既定None)は何も保存しない。
+    separator_name・content_recognizer_model・retry・forced_aligner・sofa_aligner・
+    english_katakana_method・chunking・keep_intermediate_dir は音声前段の実行エンジンがそのまま
+    受け取る設定で、ここでは解釈しない。progress は前段の進捗の中継先で、None なら報告しない。
     """
-    _report_stage(progress, "load")
-    pcm = _va_io.load_audio(input_path)
-    duration_sec = len(pcm.samples) / pcm.sample_rate
-
-    if chunking is None or chunking.max_duration_sec <= 0 or duration_sec <= chunking.max_duration_sec:
-        segments, rms_envelope, vocal_pcm = _run_single(
-            pcm, separate_vocals, separator_name, content_recognizer_model, retry,
-            forced_aligner, sofa_aligner, english_katakana_method, progress)
-        forced_split = False
-    else:
-        segments, rms_envelope, vocal_pcm, forced_split = _run_chunked(
-            pcm, duration_sec, separate_vocals, separator_name, content_recognizer_model,
-            retry, chunking, forced_aligner, sofa_aligner,
-            english_katakana_method, progress)
-
-    if keep_intermediate_dir is not None:
-        _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments)
+    front = run_front_stage(
+        input_path, separate_vocals=separate_vocals, separator=separator_name,
+        content_recognizer_model=content_recognizer_model, retry=retry,
+        forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
+        english_katakana_method=english_katakana_method, chunking=chunking,
+        keep_intermediate_dir=keep_intermediate_dir,
+        on_progress=progress.stage if progress is not None else None)
 
     _report_stage(progress, "events")
     mouth_events, event_diag, mora_event_group_sizes = events.confirm_mouth_events(
-        segments, rms_envelope, open_lo=openness.open_lo, open_hi=openness.open_hi,
+        front.analysis.segments, front.analysis.rms,
+        open_lo=openness.open_lo, open_hi=openness.open_hi,
         open_max=openness.open_max, intensity_curve=intensity_curve, silence_on=silence_on,
         use_n_morph=use_n_morph)
 
@@ -270,88 +94,15 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
     document = morphs.build_vmd_document(mouth_events, gen_params, model_name)
 
     diagnostics = report.build_diagnostics(
-        segments=segments, mouth_events=mouth_events, event_diagnostics=event_diag,
+        segments=front.analysis.segments, mouth_events=mouth_events, event_diagnostics=event_diag,
         mora_event_group_sizes=mora_event_group_sizes,
         backends={"separator": separator_name, "recognizer": content_recognizer_model.model_id,
                   "forced_aligner": forced_aligner,
                   "english_katakana_method": english_katakana_method},
-        style=style_name, separated=(separate_vocals != "never"), duration_sec=duration_sec,
-        keys=len(document.morph), forced_split=forced_split)
+        style=style_name, separated=(separate_vocals != "never"),
+        duration_sec=front.duration_sec,
+        keys=len(document.morph), forced_split=front.forced_split)
 
     return PipelineResult(
-        document=document, diagnostics=diagnostics, sample_rate=pcm.sample_rate,
-        channels=pcm.samples.shape[1])
-
-
-def _run_single(pcm, separate_vocals, separator_name, content_recognizer_model, retry,
-                forced_aligner, sofa_aligner, english_katakana_method, progress):
-    """長尺分割なしの単一実行(通常経路)。"""
-    _report_stage(progress, "separate")
-    vocal_path = _run_inference(
-        "separate", _va_separator.separate, pcm, separate_vocals,
-        separator=separator_name,
-        # 分離しない指定では委譲先が外部推論を一切行わないので、その呼び出しの失敗は工程失敗でない。
-        map_failures=separate_vocals != "never",
-        on_progress=_model_download_progress(progress, "separate", done=0, total=None))
-    _report_stage(progress, "recognize")
-    segments = _run_inference(
-        "recognize", _va_recognizer.recognize, vocal_path,
-        content_recognizer_model=content_recognizer_model,
-        retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
-        english_katakana_method=english_katakana_method,
-        on_progress=_model_download_progress(progress, "recognize", done=0, total=None))
-    _report_stage(progress, "rms")
-    vocal_pcm = _read_intermediate(vocal_path, _va_io.load_audio)
-    rms_envelope = _va_rms.compute_rms(vocal_pcm)
-    return segments, rms_envelope, vocal_pcm
-
-
-def _run_chunked(pcm, duration_sec, separate_vocals, separator_name, content_recognizer_model,
-                 retry, chunking, forced_aligner, sofa_aligner,
-                 english_katakana_method, progress):
-    """長尺分割ありの実行。境界決定は分離前の生音声RMSを使う。"""
-    raw_rms = _va_rms.compute_rms(pcm)
-    boundary_pairs = _chunking.find_chunk_boundaries(
-        duration_sec, raw_rms.times_sec, raw_rms.values,
-        max_duration_sec=chunking.max_duration_sec,
-        search_window_sec=chunking.search_window_sec)
-    boundaries = [b for b, _ in boundary_pairs]
-    forced_split = any(f for _, f in boundary_pairs)
-    edges = [0.0] + boundaries + [duration_sec]
-    n = len(edges) - 1
-
-    chunk_offsets_sec = []
-    chunk_segments_list = []
-    vocal_core_chunks = []
-    for i in range(n):
-        core_start, core_end = edges[i], edges[i + 1]
-        pad_start = max(0.0, core_start - chunking.overlap_sec) if i > 0 else 0.0
-        pad_end = min(duration_sec, core_end + chunking.overlap_sec) if i < n - 1 else duration_sec
-        chunk_offsets_sec.append(pad_start)
-
-        chunk_pcm = _slice_pcm(pcm, pad_start, pad_end)
-        # done は「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
-        # 1個目のチャンクを始める時点(i=0)ではまだ0個も完了していない。
-        _report_stage(progress, "separate", done=i, total=n)
-        vocal_path = _run_inference(
-            "separate", _va_separator.separate, chunk_pcm, separate_vocals,
-            separator=separator_name,
-            map_failures=separate_vocals != "never",
-            on_progress=_model_download_progress(progress, "separate", done=i, total=n))
-        _report_stage(progress, "recognize", done=i, total=n)
-        chunk_segments_list.append(
-            _run_inference(
-                "recognize", _va_recognizer.recognize, vocal_path,
-                content_recognizer_model=content_recognizer_model,
-                retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
-                english_katakana_method=english_katakana_method,
-                on_progress=_model_download_progress(progress, "recognize", done=i, total=n)))
-
-        chunk_vocal_pcm = _read_intermediate(vocal_path, _read_pcm_raw)
-        vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))
-
-    merged_segments = _chunking.merge_chunk_segments(chunk_segments_list, chunk_offsets_sec, boundaries)
-    whole_vocal_pcm = _concat_pcm(vocal_core_chunks)
-    _report_stage(progress, "rms")
-    rms_envelope = _va_rms.compute_rms(whole_vocal_pcm)
-    return merged_segments, rms_envelope, whole_vocal_pcm, forced_split
+        document=document, diagnostics=diagnostics, sample_rate=front.pcm.sample_rate,
+        channels=front.pcm.samples.shape[1])

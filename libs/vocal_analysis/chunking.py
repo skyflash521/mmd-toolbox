@@ -1,11 +1,10 @@
-"""song2vmd 長尺分割の境界検出・セグメント結合。
+"""長尺分割の境界検出・セグメント結合。
 
-処理資源対策のための自動分割(`--max-duration`)を担う純粋ロジック。実際の音声ファイル分割・
-vocal_analysis(S0〜S2)呼び出し・RMSの曲全体基準での算出は、実音声を要する
-統合の関心事であり本モジュールの対象外。
+自動分割の純粋ロジックだけを持つ。実際の音声の切り出し・S0〜S2の呼び出し・RMSの曲全体基準での
+算出は、実音声を要する結線の関心事であり本モジュールの対象外。
 """
 
-from vocal_analysis import Segment
+from .types import Segment
 
 
 def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_duration_sec,
@@ -22,7 +21,7 @@ def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_durati
     境界が前進し続けることを保証する(max_duration_sec が search_window_sec 以下でも停止しない)。
 
     戻り値は (boundary_sec, forced) のタプル列。forced は探索窓内に無音が無く目標境界そのもので
-    強制分割したかどうかを境界ごとに示す(song2vmd.md 12.1 の forced_split 警告の送出判定に使う)。
+    強制分割したかどうかを境界ごとに示す。
     """
     if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
         return []

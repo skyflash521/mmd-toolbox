@@ -1,19 +1,18 @@
-"""song2vmd 長尺分割の境界検出・セグメント結合のテスト。
+"""長尺分割の境界検出・セグメント結合のテスト。
 
-処理資源対策のための自動分割(`--max-duration`)を検証する。範囲は次の2点に限る:
+処理資源対策のための自動分割を検証する。範囲は次の2点に限る:
 1. 目標境界±5秒(初期値)の探索窓で無音点を探し、無音が無ければ強制分割する境界検出
    (chunking.find_chunk_boundaries)。
 2. チャンクごとのセグメント列(チャンクローカル時刻)を、オーバーラップ区間はチャンク境界で切り詰め、
    境界をまたぐ連続母音区間(同一vowel)を1つへ結合して全曲セグメント列へ統合する処理
    (chunking.merge_chunk_segments)。
 
-音声ファイルの実際の分割・vocal_analysis(S0〜S2)呼び出し・RMSの曲全体基準での算出は
-実音声を要する統合の関心事であり、本モジュールの対象外(強弱の相対正規化を曲全体基準で行う要件は
+音声の実際の切り出し・S0〜S2の呼び出し・RMSの曲全体基準での算出は
+実音声を要する結線の関心事であり、本モジュールの対象外(強弱の相対正規化を曲全体基準で行う要件は
 RMS算出を1回だけ行うことで満たされ、本モジュールが担うセグメント結合とは別の関心事)。
 """
 
-from song2vmd import chunking
-from vocal_analysis import Segment
+from vocal_analysis import Segment, chunking
 
 
 def seg(type_, start, end, phoneme=None, confidence=None):
@@ -37,6 +36,17 @@ def test_boundary_picks_quietest_point_among_multiple_silence_candidates():
     # 単に最初に見つかった無音点ではなく、最も静かな点(298s)を選ぶ。無音採用点なのでforced=False。
     times = [290.0, 295.0, 296.0, 297.0, 298.0, 299.0, 300.0, 303.0, 305.0, 310.0]
     values = [0.8, 0.7, 0.05, 0.5, 0.02, 0.5, 0.6, 0.04, 0.8, 0.9]
+    boundaries = chunking.find_chunk_boundaries(
+        duration_sec=400.0, rms_times_sec=times, rms_values=values,
+        max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
+    )
+    assert boundaries == [(298.0, False)]
+
+
+def test_ties_pick_the_earliest_of_the_quietest_points():
+    # 同じ最小値の点が複数あるときは最も早い時刻の点を選ぶ(選び方が実行ごとに揺れない)。
+    times = [296.0, 298.0, 300.0, 302.0, 304.0]
+    values = [0.5, 0.02, 0.5, 0.02, 0.5]
     boundaries = chunking.find_chunk_boundaries(
         duration_sec=400.0, rms_times_sec=times, rms_values=values,
         max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
@@ -143,14 +153,16 @@ def test_overlap_is_trimmed_at_boundary():
 
 
 def test_matching_vowel_across_boundary_merges_into_one_event():
-    chunk0 = [seg("vowel", 0.0, 10.5, phoneme="a")]
-    chunk1 = [seg("vowel", 0.0, 5.0, phoneme="a")]  # オフセット9 → グローバル[9,14]
+    chunk0 = [seg("vowel", 0.0, 10.5, phoneme="a", confidence=0.9)]
+    chunk1 = [seg("vowel", 0.0, 5.0, phoneme="a", confidence=0.7)]  # オフセット9 → グローバル[9,14]
     merged = chunking.merge_chunk_segments(
         [chunk0, chunk1], chunk_offsets_sec=[0.0, 9.0], boundaries_sec=[10.0],
     )
     assert len(merged) == 1
     assert merged[0].type == "vowel" and merged[0].phoneme == "a"
     assert merged[0].start_sec == 0.0 and merged[0].end_sec == 14.0
+    # 結合した区間は2つのチャンクの別々の推定にまたがり、どちらの値も代表しないので信頼度を持たない。
+    assert merged[0].confidence is None
 
 
 def test_differing_segments_across_boundary_do_not_merge():

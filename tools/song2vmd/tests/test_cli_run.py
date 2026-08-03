@@ -2,8 +2,8 @@
 
 cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(PipelineResult)を
 --dry-run の人間向けレポート/機械モードの result イベント、VMD 書き出し、警告発行、
-エラー変換(AudioLoadError/SeparationError/RecognitionError/IntermediateWriteError)・中断(KeyboardInterrupt)へ
-正しく橋渡しすることを検証する。pipeline.run 自体はモックし、実音声処理は行わない。
+エラー変換(音声前段が返す各失敗・中断)へ正しく橋渡しすることを検証する。
+pipeline.run 自体はモックし、実音声処理は行わない。
 """
 
 import builtins
@@ -28,6 +28,11 @@ from vocal_analysis import (
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
     ChunkingPolicy,
     ContentRecognizerModel,
+)
+from vocal_analysis.front_stage import (
+    IntermediateReadError,
+    IntermediateWriteError,
+    StageExecutionError,
 )
 from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
@@ -649,6 +654,26 @@ def test_audio_load_error_maps_to_not_audio(tmp_path, monkeypatch, capsysbinary)
     assert events[-1]["exit_code"] == 1
 
 
+def test_intermediate_read_error_maps_to_not_audio_with_path_and_no_field(
+        tmp_path, monkeypatch, capsysbinary):
+    # 内部生成ファイルの読み直し失敗も not_audio だが、利用者入力を指す field は載せず、
+    # 対象ファイルを path に載せる(利用者入力の不備として指し示さない)。
+    src = _touch(tmp_path / "in.wav")
+    vocal = tmp_path / "vocal.wav"
+    monkeypatch.setattr(
+        cli._pipeline, "run",
+        lambda *a, **k: (_ for _ in ()).throw(
+            IntermediateReadError("broken vocal wav", path=vocal)))
+
+    rc = cli.main([src, "--machine", "--dry-run"])
+    assert rc == 1
+    events = _events_of(capsysbinary)
+    assert events[-1]["code"] == "not_audio"
+    assert events[-1]["field"] is None
+    assert events[-1]["path"] == str(vocal)
+    assert events[-1]["exit_code"] == 1
+
+
 def test_separation_error_maps_to_stage_failed_separate(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
@@ -677,7 +702,7 @@ def test_intermediate_write_error_maps_to_write_failed(tmp_path, monkeypatch, ca
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
         cli._pipeline, "run",
-        lambda *a, **k: (_ for _ in ()).throw(_pipeline.IntermediateWriteError("disk full")))
+        lambda *a, **k: (_ for _ in ()).throw(IntermediateWriteError("disk full")))
 
     rc = cli.main([src, "--keep-intermediate", "--machine", "--dry-run"])
     assert rc == 3
@@ -871,7 +896,7 @@ def test_low_dynamics_warning_closes_progress_before_stderr_print(tmp_path, monk
     lambda: AudioLoadError("no ffmpeg", reason="decoder_missing"),
     lambda: SeparationError("sep failed"),
     lambda: RecognitionError("rec failed"),
-    lambda: _pipeline.StageExecutionError("ボーカル分離に失敗しました", stage="separate"),
+    lambda: StageExecutionError("RuntimeError: 分離の失敗", stage="separate"),
 ])
 def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress, make_exc):
     src = _touch(tmp_path / "in.wav")
@@ -888,7 +913,7 @@ def test_intermediate_write_error_closes_progress_before_error_line(tmp_path, mo
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
         cli._pipeline, "run",
-        lambda *a, **k: (_ for _ in ()).throw(_pipeline.IntermediateWriteError("disk full")))
+        lambda *a, **k: (_ for _ in ()).throw(IntermediateWriteError("disk full")))
 
     rc = cli.main([src, "--keep-intermediate", "--dry-run"])
     assert rc == 3
@@ -962,7 +987,7 @@ def test_stage_execution_error_maps_to_stage_failed(tmp_path, monkeypatch, capsy
     src = _touch(tmp_path / "in.wav")
     _raise_from_pipeline(
         monkeypatch,
-        _pipeline.StageExecutionError("RuntimeError: CUDA out of memory", stage=stage))
+        StageExecutionError("RuntimeError: CUDA out of memory", stage=stage))
 
     rc = cli.main([src, "--machine", "--dry-run"])
     assert rc == 4
@@ -984,8 +1009,7 @@ def test_stage_execution_error_reports_single_line_without_machine(
     # 非機械モードには stage キーが無いので、どの工程で失敗したかは1行のエラー文言で示す。
     src = _touch(tmp_path / "in.wav")
     _raise_from_pipeline(
-        monkeypatch, _pipeline.StageExecutionError(
-            f"{stage_label}に失敗しました: RuntimeError: CUDA out of memory", stage=stage))
+        monkeypatch, StageExecutionError("RuntimeError: CUDA out of memory", stage=stage))
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 4
