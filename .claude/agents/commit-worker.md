@@ -35,7 +35,7 @@ model: haiku
 
 #### 条件1: verdict 未提示
 
-反復レビュー(codex-review-loop または fable-review-loop)の最終応答
+反復レビュー(codex-review-loop・fable-review-loop・opus-review-loop のいずれか)の最終応答
 テキストが渡されていない。
 
 #### 条件2: 収束が明示されていない

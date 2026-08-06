@@ -35,10 +35,9 @@ Codex への**一回限りの相談・調査・診断・修正方針のヒアリ
 ### 手順3: 相談実行(1回)
 
 `codex:codex-rescue` エージェント(`Agent` ツール、
-`subagent_type: "codex:codex-rescue"`)を、[codex-watchdog](../codex-watchdog/SKILL.md) スキルの契約(RUNID 生成・
-`TASK-RUNID` マーカー埋め込み・起動作法・禁止記号規約・サンドボックス規約・
-`run_in_background: true` 起動・エージェント内部の同期実行契約・watchdog 監視・完了判定の
-機械的な部分)のとおりに実行する。タスク指示文には[手順1](#手順1-相談内容の整理)でまとめた内容と、
+`subagent_type: "codex:codex-rescue"`)を、[codex-watchdog](../codex-watchdog/SKILL.md) スキルの契約のとおりに
+実行する(同スキルが定める契約全体に従う。一部だけを選んで適用しない)。
+タスク指示文には[手順1](#手順1-相談内容の整理)でまとめた内容と、
 [手順2](#手順2-実行モードの決定)で決めた read-only/`--write` の指定を含める。`node` を Bash で
 直接叩かない(層違い)。
 
