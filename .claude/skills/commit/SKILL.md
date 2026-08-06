@@ -7,7 +7,7 @@ description: gitコミットをcommit-workerエージェントに委譲して実
 
 トークンを使う作業(diff を読む・コミットメッセージを起草する・コミットする・不正コミット防止
 チェック)は `commit-worker` エージェント(ワーカー)に委譲する。**メインモデルはコミットメッセージを
-書かない。** ワーカーの詳細手順・不正コミット防止チェック・メッセージ規約・許可される git コマンド形は
+書かない。** ワーカーが従う手順・チェック・規約は
 `commit-worker` エージェント自身の定義([`.claude/agents/commit-worker.md`](../../agents/commit-worker.md))に組み込まれており、
 **メインモデルは本文を再掲しない**(再掲は高コストなメインモデルの出力を毎回浪費するため)。
 
@@ -23,9 +23,10 @@ description: gitコミットをcommit-workerエージェントに委譲して実
    コミットの明示的な指示があるとき(`autonomous-dev` のようにユーザーが明示起動したスキルの
    手順に含まれる場合を含む)に限る。**修正・実装の指示やレビューが収束した事実はコミット指示に
    ならない**——指示が無ければ収束を報告して止まる。そのうえで、対象変更が**収束**した後だけ。
-   収束の定義・結末の種類(収束/千日手/要ユーザー判断)は `review-loop-judgement` スキルが正。
-   レビュアーが codex-review-loop・fable-review-loop のどちらであっても収束の定義は同一で、
-   受理できる。
+   収束の定義・結末の種類(収束/千日手/要ユーザー判断)は
+   [review-loop-judgement の終了条件](../review-loop-judgement/SKILL.md#終了条件いずれかで停止) が正。
+   反復レビューが codex-review-loop・fable-review-loop・opus-review-loop のいずれであっても
+   収束の定義は同一で、受理できる。
    **千日手・要ユーザー判断・未完了(実行中/stall/タイムアウト/失敗/ハング/判定未取得)では
    本スキルを起動しない**(ユーザーに諮る / tooling を直して取り直す)。レビューがハング・無出力で
    完走しないとき、メインモデルの判断や合理化でコミットへ進むこと(=収束 verdict の代替)は禁止。
@@ -62,7 +63,7 @@ description: gitコミットをcommit-workerエージェントに委譲して実
 - <file1>
 - <file2>
 
-反復レビュー(codex-review-loop または fable-review-loop)の最終応答テキスト(原文・要約でない):
+反復レビュー(codex-review-loop・fable-review-loop・opus-review-loop のいずれか)の最終応答テキスト(原文・要約でない):
 <<<
 <verdict を含む原文をそのまま貼る>
 >>>
