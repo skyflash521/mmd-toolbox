@@ -44,6 +44,9 @@ vocal-analysis = [
     # (transformers・audio-separator の推移依存としても入るが、そちらの都合で外れると壊れる)。
     "huggingface-hub<2",
     "tqdm<5",
+    # librosa はピッチ推定のために直接 import する(audio-separator の推移依存としても入るが、
+    # そちらの都合で外れると壊れる)。
+    "librosa<1",
     "pyopenjtalk-plus<1",
     "nltk<4",
     "arpakana<1",

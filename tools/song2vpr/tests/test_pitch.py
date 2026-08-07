@@ -7,9 +7,8 @@
 import numpy as np
 import pytest
 
+from song2vpr import pitch
 from vocal_analysis import AudioPcm
-
-pitch = pytest.importorskip("song2vpr.pitch", reason="ピッチ推定のモジュールがまだ無い")
 
 SR = 22050
 
