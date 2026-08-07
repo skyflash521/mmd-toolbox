@@ -46,6 +46,12 @@ TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
 # stands in for the message's line structure -- and it is rejected wherever it appears.
 ESCAPE_NEWLINE = "\\n"
 TRAILER_PREFIX = "co-authored-by:"
+# The whole trailer is spelled out, so that each part it can lose is refused: the model name written
+# inside angle brackets (a bracketed placeholder filled in as-is), the address dropped instead of
+# the brackets, the Claude prefix or the model name left off.
+TRAILER_SHAPE = re.compile(
+    r"co-authored-by:\s*claude\s+[^<>\s][^<>]*\s<noreply@anthropic\.com>", re.IGNORECASE
+)
 # Placeholder subjects. A commit issued to try out the command form rather than to record the
 # drafted message puts the staged work into history under a throwaway subject, and neither --amend
 # nor git reset is available to repair it. The subject is what gives such a commit away: a
@@ -331,7 +337,8 @@ def _probe_subject_problem(subject):
 
 
 def _message_format_problem(message):
-    """Return a deny reason when the message's LINE STRUCTURE breaks the repo convention, else None.
+    """Return a deny reason when the message's LINE STRUCTURE or its trailer breaks the repo
+    convention, else None.
 
     A newline escape anywhere in the message, and a Co-Authored-By trailer that is not the final
     line below a subject, both mean the message does not have the line structure that was drafted.
@@ -342,7 +349,7 @@ def _message_format_problem(message):
     blanket rule, and spells the sequence out in words instead.
 
     A message with no trailer at all is denied too, so that deleting the trailer never becomes the
-    way past the other two.
+    way past the other denials.
     """
     if ESCAPE_NEWLINE in message:
         return (
@@ -354,7 +361,15 @@ def _message_format_problem(message):
         )
     lines = [line for line in message.split("\n") if line.strip()]
     if len(lines) >= 2 and lines[-1].lower().startswith(TRAILER_PREFIX):
-        return None
+        if TRAILER_SHAPE.fullmatch(lines[-1].rstrip()):
+            return None
+        return (
+            "Co-Authored-By trailer is malformed. Re-issue the SAME message with the trailer "
+            "written as the token Co-Authored-By: followed by Claude and then your own model name "
+            "as plain text, and then the address noreply@anthropic.com in angle brackets. Every "
+            "part is required: keep the Claude prefix and the model name, and do not put the model "
+            "name in angle brackets or drop the address."
+        )
     if TRAILER_PREFIX in message.lower():
         return (
             "The Co-Authored-By trailer must be the last non-empty line, must start that line, and "
@@ -363,9 +378,10 @@ def _message_format_problem(message):
             "breaks and the trailer as its final line."
         )
     return (
-        "Commit message must end with a `Co-Authored-By: Claude <model name> "
-        "<noreply@anthropic.com>` trailer on its own line. Add it -- dropping it is not a way past "
-        "another denial."
+        "Commit message must end with a Co-Authored-By trailer on its own line, written as the "
+        "token Co-Authored-By: followed by Claude and then your own model name as plain text, and "
+        "then the address noreply@anthropic.com in angle brackets. Add it -- dropping it is not a "
+        "way past another denial."
     )
 
 
@@ -512,6 +528,16 @@ def selftest():
         (f"git commit -m 'git のフック設定を見直す\n\n{TRAILER}'", "pass"),
         (f"git commit -m 'front_stage のテスト分割を見直す\n\n{TRAILER}'", "pass"),
         (f"git commit -m '仮引数の既定値を見直す\n\n{TRAILER}'", "pass"),
+        # The model name filled into the bracketed placeholder instead of replacing it, and the
+        # half fix that drops the address rather than the brackets.
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <Opus 5> <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <モデル名> <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <Opus 5>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Opus 5 <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude   <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>'", "pass"),
+        (f"git commit -m '件名\n\n本文\n\n{TRAILER} '", "pass"),
         (f"git commit -m '件名 {TRAILER}'", "deny"),
         ("git commit -m '件名'", "deny"),
         (f"git commit -m '件名\n\n本文\n {TRAILER}'", "deny"),
