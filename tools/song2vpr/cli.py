@@ -26,9 +26,11 @@ from cli_events import (
     install_sigbreak_handler,
 )
 from cli_options import describe_options
+from cli_resource_watch import ProgressWithResourceCheck, ResourceWatch, torch_gpu_warning
 
 from . import __version__
 from . import progress as _progress
+from . import resource_watch as _resource_watch
 
 # 追加依存(vocal-analysis extra)を要する取り込みだけをここへ集める。コンソールスクリプトは追加依存
 # なしの導入でも登録されるため、依存が揃わない環境から起動されうる。取り込み失敗を例外のまま保持して
@@ -217,36 +219,70 @@ def _run(args, emitter, fail) -> int:
         return fail("missing_dependency",
                     _va_cli.missing_dependency_message(_MISSING_DEPENDENCY), 4)
 
-    # 中間生成物は出力先の隣に <出力ファイル名>.intermediate を作って保存する。--dry-run でも
-    # 抑制しない(抑制するのは最終 vpr の書き出しだけ)。
-    keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
+    progress_reporter = _progress.build_router(
+        machine=args.machine, quiet=args.quiet, emitter=emitter, stream=sys.stderr)
 
+    def emit_warning(code, fields):
+        # 判定が返すのは安定コードと観測値だけなので、本文はここで組み立てる。人間向けの警告は
+        # ライブ進捗行と混線しないよう、書く前に close でライブ行を消す(改行付きの1行として確定し、
+        # 次の stage() でライブ行が下の行に再開する)。
+        message, human_text = _resource_watch.warning_texts(code, fields)
+        if emitter is not None:
+            emitter.warning(code=code, message=message, **fields)
+        else:
+            progress_reporter.close()
+            print(f"warning: {code}: {human_text}", file=sys.stderr)
+
+    # 全終了経路(正常終了・パイプラインの失敗・中断・想定外例外)でライブ行を必ず消す。失敗の理由行は
+    # ライブ行を消した後に書く必要があるので各 except でも消すが、close は現在の段の記録を戻すだけで
+    # 冪等なため、ここで重ねて呼んでも害はない。
     try:
-        _pipeline.run(
-            args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
-            content_recognizer_model=_va_cli.resolve_recognizer_model(args),
-            retry=args.recognizer_retry, forced_aligner=args.forced_aligner,
-            sofa_aligner=_va_cli.resolve_sofa_config(args),
-            english_katakana_method=args.english_katakana_method,
-            chunking=_va_cli.resolve_chunking_policy(args),
-            keep_intermediate_dir=keep_intermediate_dir)
-    except IntermediateReadError as e:
-        # 内部生成ファイルの読み直し失敗。利用者入力を指す field は載せず、対象ファイルを path に載せる。
-        return fail("not_audio", str(e), 1, path=str(e.path))
-    except AudioLoadError as e:
-        # 復号器の未検出は入力の不備ではなく環境の不足なので、入力不正と別の終了コードで返す。
-        return fail(e.reason, str(e), 4 if e.reason == "decoder_missing" else 1, field="input")
-    except StageExecutionError as e:
-        # 共有側は失敗の要旨だけを持つので、どの工程かは利用者向けの工程名で示す。
-        return fail("stage_failed", f"{_progress.stage_label(e.stage)}に失敗しました: {e}",
-                    4, stage=e.stage)
-    except SeparationError as e:
-        return fail("stage_failed", str(e), 4, stage="separate")
-    except RecognitionError as e:
-        return fail("stage_failed", str(e), 4, stage="recognize")
-    except IntermediateWriteError as e:
-        return fail("write_failed", str(e), 3, field="--keep-intermediate",
-                    path=keep_intermediate_dir)
+        # 資源逼迫の判定は段の切り替わりで呼ぶ。共有側が用意する接続を使い、進捗の中継へ相乗りさせる。
+        progress = ProgressWithResourceCheck(progress_reporter, ResourceWatch(emit_warning))
+        # GPU を使えない構成は処理を始める前に知らせる(数分かけてから伝えても手遅れなため)。実行デバイスの
+        # 選択はここより前(main)でプロセスへ適用済み。
+        torch_warning = torch_gpu_warning(args.device)
+        if torch_warning is not None:
+            emit_warning(*torch_warning)
 
-    # 音符化以降の処理経路をまだ持たないため、前段を終えた実行は vpr を書かずに 0 を返す。
-    return 0
+        # 中間生成物は出力先の隣に <出力ファイル名>.intermediate を作って保存する。--dry-run でも
+        # 抑制しない(抑制するのは最終 vpr の書き出しだけ)。
+        keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
+
+        try:
+            _pipeline.run(
+                args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
+                content_recognizer_model=_va_cli.resolve_recognizer_model(args),
+                retry=args.recognizer_retry, forced_aligner=args.forced_aligner,
+                sofa_aligner=_va_cli.resolve_sofa_config(args),
+                english_katakana_method=args.english_katakana_method,
+                chunking=_va_cli.resolve_chunking_policy(args),
+                keep_intermediate_dir=keep_intermediate_dir, progress=progress)
+        except IntermediateReadError as e:
+            # 内部生成ファイルの読み直し失敗。利用者入力を指す field は載せず、対象ファイルを path に載せる。
+            progress_reporter.close()
+            return fail("not_audio", str(e), 1, path=str(e.path))
+        except AudioLoadError as e:
+            # 復号器の未検出は入力の不備ではなく環境の不足なので、入力不正と別の終了コードで返す。
+            progress_reporter.close()
+            return fail(e.reason, str(e), 4 if e.reason == "decoder_missing" else 1, field="input")
+        except StageExecutionError as e:
+            # 共有側は失敗の要旨だけを持つので、どの工程かは利用者向けの工程名で示す。
+            progress_reporter.close()
+            return fail("stage_failed", f"{_progress.stage_label(e.stage)}に失敗しました: {e}",
+                        4, stage=e.stage)
+        except SeparationError as e:
+            progress_reporter.close()
+            return fail("stage_failed", str(e), 4, stage="separate")
+        except RecognitionError as e:
+            progress_reporter.close()
+            return fail("stage_failed", str(e), 4, stage="recognize")
+        except IntermediateWriteError as e:
+            progress_reporter.close()
+            return fail("write_failed", str(e), 3, field="--keep-intermediate",
+                        path=keep_intermediate_dir)
+
+        # 音符化以降の処理経路をまだ持たないため、前段を終えた実行は vpr を書かずに 0 を返す。
+        return 0
+    finally:
+        progress_reporter.close()

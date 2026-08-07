@@ -7,8 +7,7 @@ song2vpr のオプション名で書くこと——だけを検証する。
 
 import pytest
 
-warning_texts = pytest.importorskip(
-    "song2vpr.resource_watch", reason="警告の文言を組み立てるモジュールがまだ無い").warning_texts
+from song2vpr.resource_watch import warning_texts
 
 
 def test_gpu_oversubscription_texts_carry_observed_values_and_remedy():

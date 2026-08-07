@@ -12,8 +12,7 @@ import pytest
 
 from cli_resource_watch import watch as _watch_module
 from song2vpr import cli
-
-pytestmark = pytest.mark.xfail(reason="警告の判定を呼ぶ接続がまだ無い", strict=True)
+from vocal_analysis.separator import SeparationError
 
 _MIB = 2**20
 
@@ -117,6 +116,41 @@ def test_human_warning_closes_the_live_line_before_writing(tmp_path, monkeypatch
 
     assert cli.main([src, "-o", str(tmp_path / "out.vpr")]) == 0
     assert order[:2] == ["close", "warning"]
+
+
+@pytest.mark.parametrize("outcome,expected", [
+    (None, 0), (KeyboardInterrupt(), 130), (RuntimeError("boom"), 1),
+    (SeparationError("分離に失敗"), 4),
+])
+def test_live_line_is_closed_on_every_exit(tmp_path, monkeypatch, outcome, expected):
+    """終了時はライブ進捗行を消す(進捗の途中経過を画面に残さない)。
+
+    正常終了・中断・想定外の失敗・分類済みの失敗のいずれでも消す。節ごとに消す形だと、後から増えた
+    経路が漏れる。
+    """
+    src = _touch(tmp_path / "in.wav")
+    closed = []
+
+    class _Reporter:
+        def stage(self, stage_id, **kwargs):
+            pass
+
+        def close(self):
+            closed.append(True)
+
+        def summary(self, message):
+            pass
+
+    def fake_run(input_path, **kwargs):
+        if outcome is not None:
+            raise outcome
+        return None
+
+    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _Reporter())
+    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run))
+
+    assert cli.main([src, "-o", str(tmp_path / "out.vpr")]) == expected
+    assert closed
 
 
 def test_resource_warning_does_not_change_the_exit_code(tmp_path, monkeypatch, capsysbinary):

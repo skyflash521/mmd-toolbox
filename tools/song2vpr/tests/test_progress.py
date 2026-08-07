@@ -36,7 +36,6 @@ def test_label_table_covers_exactly_the_documented_stages():
         "load", "separate", "recognize", "rms", "f0", "notes", "write"}
 
 
-@pytest.mark.xfail(reason="進捗の振り分けを組み立てる関数がまだ無い", strict=True)
 @pytest.mark.parametrize("machine,quiet", [(True, False), (False, True), (False, False)])
 def test_build_router_passes_labels_and_stderr_write_lock(monkeypatch, machine, quiet):
     # 音声前段は処理中に標準エラーの出力先を一時的に差し替えるので、同じ排他を進捗表示へ渡さないと
