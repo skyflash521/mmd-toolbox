@@ -15,7 +15,7 @@ import pytest
 
 from cli_options import RangeValidator
 
-cli = pytest.importorskip("song2vpr.cli", reason="impl pending: T-1 パッケージ雛形とCLI骨組み")
+cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
 
 # メタ/モード操作は options に載せない。
 _EXCLUDED = {"--describe", "--version", "--help", "--machine"}
@@ -28,7 +28,7 @@ _SHARED_OPTIONS = {
     "--sofa-timeout", "--english-katakana-method", "--device", "--max-duration",
 }
 
-# song2vpr 自身が持つ引数の (type, constraint, default)。値の正本は要求仕様書 §9.2。
+# 共通引数群を除く、song2vpr 自身が持つ引数の (type, constraint, default)。
 _OWN_OPTIONS = {
     "input": ("str", None, None),
     "--output": ("str", None, None),

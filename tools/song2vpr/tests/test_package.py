@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-song2vpr = pytest.importorskip("song2vpr", reason="impl pending: T-1 パッケージ雛形とCLI骨組み")
-cli = pytest.importorskip("song2vpr.cli", reason="impl pending: T-1 パッケージ雛形とCLI骨組み")
+song2vpr = pytest.importorskip("song2vpr", reason="パッケージがまだ無い")
+cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
 
 
 def test_package_imports():

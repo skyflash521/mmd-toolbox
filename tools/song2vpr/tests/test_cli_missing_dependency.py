@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-cli = pytest.importorskip("song2vpr.cli", reason="impl pending: T-1 パッケージ雛形とCLI骨組み")
+cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
 
 _MISSING = ModuleNotFoundError("No module named 'soundfile'", name="soundfile")
 

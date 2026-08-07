@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-cli = pytest.importorskip("song2vpr.cli", reason="impl pending: T-1 パッケージ雛形とCLI骨組み")
+cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
 
 
 def _touch(path):
@@ -83,7 +83,7 @@ def test_machine_help_stays_human(capsys):
 # --- 正常経路の終端 ----------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: T-2 音声前段の呼び出しの組み立て", strict=True)
+@pytest.mark.xfail(reason="音声前段を呼ぶ処理経路がまだ無く、終端イベントを出せない", strict=True)
 def test_machine_processing_path_terminates_with_one_event(tmp_path, capsysbinary):
     """処理経路へ入った実行も、ストリームを result か error のちょうど1つで終端する。
 
@@ -125,6 +125,26 @@ def test_machine_error_bad_argument_value_error_names_the_option(tmp_path, capsy
     event = machine_error(capsysbinary)
     assert event["code"] == "bad_argument"
     assert event["field"] == "--max-duration"
+
+
+def test_machine_error_combination_check_names_the_option(tmp_path, capsysbinary):
+    """組み合わせ検証の違反は、共有側が返す対象引数の長形式フラグ名を field に載せる。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main(["--machine", src, "--recognizer-model-revision", "abc123"]) == 2
+    event = machine_error(capsysbinary)
+    assert event["code"] == "bad_argument"
+    assert event["field"] == "--recognizer-model-revision"
+    assert event["exit_code"] == 2
+
+
+def test_machine_error_combination_check_names_the_missing_option(tmp_path, capsysbinary):
+    """必須項目の欠落は、欠けている当の引数名を field に載せる(先に判定される項目から順に)。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main(["--machine", src, "--forced-aligner", "sofa-forcedalign"]) == 2
+    event = machine_error(capsysbinary)
+    assert event["code"] == "bad_argument"
+    assert event["field"] == "--sofa-python"
+    assert event["exit_code"] == 2
 
 
 def test_machine_error_output_exists(tmp_path, capsysbinary):
