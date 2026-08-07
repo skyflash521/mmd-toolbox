@@ -41,6 +41,40 @@ class VprWarning:
 
 
 @dataclass
+class VibratoPoint:
+    """ビブラートの自動化曲線の1点。
+
+    pos は他のコントローラ点と同じプロジェクト絶対 tick(ファイル上のビブラート区間相対値では
+    ない)、value はファイル格納の生値。
+    """
+
+    pos: int
+    value: int
+
+
+@dataclass
+class NoteVibrato:
+    """音符のビブラート。フィールドと値の意味は形式仕様が定める。"""
+
+    type: int  # ビブラートの種別
+    duration: int  # ビブラート区間長(tick)。0 はビブラート無し
+    depths: list[VibratoPoint] = field(default_factory=list)  # 深さの自動化曲線
+    rates: list[VibratoPoint] = field(default_factory=list)  # 速さの自動化曲線
+
+
+@dataclass
+class NoteAiExpression:
+    """音符単位の表現パラメータのうち、ビブラートの深さ包絡。
+
+    2つの値はどちらも必須で、値の不在は外側の Note.ai_expression が None であることだけで表す
+    (片方だけを持つ状態を作れないようにして、読みと書きの対称性を保つ)。
+    """
+
+    vibrato_leading_depth: float
+    vibrato_following_depth: float
+
+
+@dataclass
 class Note:
     """音符。start_tick はプロジェクト絶対 tick、duration_tick は tick 長。"""
 
@@ -50,6 +84,8 @@ class Note:
     lyric: str  # 表示歌詞
     velocity: int  # 0〜127 の生値
     phonemes: list[str] = field(default_factory=list)  # 音符内の音素列(空可)
+    vibrato: NoteVibrato | None = None
+    ai_expression: NoteAiExpression | None = None
 
 
 @dataclass
@@ -79,6 +115,8 @@ class Part:
 
     name: str
     start_tick: int
+    duration_tick: int = 0  # パート長
+    voice: "VoiceBank | None" = None  # このパートが使うボイスバンク
     notes: list[Note] = field(default_factory=list)  # start_tick の昇順
     controllers: list[ControllerCurve] = field(default_factory=list)  # 連続コントローラ曲線
 
@@ -87,6 +125,18 @@ class Part:
 class Track:
     name: str
     parts: list[Part] = field(default_factory=list)
+
+
+@dataclass
+class VoiceBank:
+    """歌唱に使うボイスバンクの指定。
+
+    どの歌手を使うかは形式の事実でなく利用先の判断なので、vpr は与えられたものを直列化するだけとし、
+    値を選ばない。
+    """
+
+    comp_id: str
+    name: str
 
 
 @dataclass
@@ -108,5 +158,8 @@ class VprProject:
     tempos: list[TempoEvent] = field(default_factory=list)
     time_signatures: list[TimeSignature] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
+    title: str = ""  # 曲名
     # 未解釈データのロスレス保持。read は sequence.json 全体を保持し、手組み時は None。
     raw_sequence: dict | None = None
+    # Project/sequence.json 以外の ZIP エントリ。read が保持し、write がそのまま書き戻す。
+    entries: dict[str, bytes] | None = None

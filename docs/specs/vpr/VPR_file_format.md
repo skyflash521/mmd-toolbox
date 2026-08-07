@@ -67,6 +67,15 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `parts[]` | list | パート(歌唱区間/オーディオ区間) |
 | その他 | — | `color`/`busNo`/`volume`/`panpot`/`isMuted` 等 |
 
+### voices[]
+
+歌唱に使うボイスバンクの定義。パートはここへ識別子で参照する(下記 [`parts[]`](#parts歌唱トラック) の `aiVoice`)。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `compID` | str | ボイスバンクの識別子。パートの `aiVoice.compID` と一致するものが対応する |
+| `name` | str | ボイスバンク名(例 `HATSUNE_MIKU_V6_ORIGINAL`) |
+
 ### `parts[]`(歌唱トラック)
 
 | フィールド | 型 | 説明 |
@@ -76,7 +85,8 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `duration` | int | パート長(tick) |
 | `notes[]` | list | 音符 |
 | `controllers[]` | list | パート単位の連続コントローラ曲線(下記の [parts[] の controllers[]](#parts-の-controllers)) |
-| その他 | — | `styleName`/`aiVoice` 等 |
+| `aiVoice` | dict | 使うボイスバンクの参照。`compID`(str。[`voices[]`](#voices) の同じ値を持つ要素が定義)と `langIDs`(list。各要素 `{langID: int}`)を持つ |
+| `styleName` | str | 歌い方スタイルの名前(例 `Silk`)。`voices[]` とは対応せず、`stylePresetID`(str)と対で持つ |
 
 オーディオトラックのパートは `{name, pos, wav, region}` を持ち `notes` を持たない。
 
@@ -166,7 +176,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
   直接観測したが下端 `0` は未観測で、値域が 0〜1 であることと、`0.5` が「変化なし」の中立値であることは、
   いずれも公式文書に明記が無く観測パターンからの推定にとどまる。
 - **未解析の領域:** `exp`/`singingSkill` および `aiExp` のビブラート深さ2キー以外の内部構造、
-  `isAiVibratoEnabled` の意味、トップレベル `voices` の内部構造と、`parts[].aiVoice`・`styleName` との
-  対応(対応関係の有無を含めて未解析)、オーディオトラックの詳細、`Project/sequence.json` 以外の ZIP エントリ
+  `isAiVibratoEnabled` の意味、`aiVoice.langIDs` の値の意味、`stylePresetID` の値の意味、
+  オーディオトラックの詳細、`Project/sequence.json` 以外の ZIP エントリ
   (`Project/Audio/*.wav` 等)は、本書で詳細レイアウトを解析していない(確証が低い領域)。実ファイルで
   確定でき次第、本書を更新する。

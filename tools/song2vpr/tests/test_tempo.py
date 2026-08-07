@@ -186,9 +186,9 @@ def test_adopted_tempo_is_representable_in_the_output_format():
 
 def test_resolution_matches_the_format_layer():
     """分解能は形式が固定する値。書き出し側とずれると音符の位置が丸ごとずれた vpr になる。"""
-    from vpr.io import _RESOLUTION
+    from vpr.constants import RESOLUTION
 
-    assert tempo.RESOLUTION == _RESOLUTION
+    assert tempo.RESOLUTION == RESOLUTION
 
 
 # --- 決定論 ------------------------------------------------------------------

@@ -689,3 +689,78 @@ def test_read_accepts_fractional_tempo_value():
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0, "value": 12050.5}])
     project, _ = read(_make_vpr(seq))
     assert project.tempos[0].bpm == 120.505
+
+
+# --- 書き利用のために新たに読むキー -------------------------------------------
+
+
+def _vibrato_note(vibrato, pos=0, duration=480):
+    note = _note(pos, duration, 60, "あ", "a", 64)
+    note["vibrato"] = vibrato
+    return note
+
+
+def test_read_maps_vibrato_points_to_absolute_ticks():
+    # 格納値は区間始端からの相対位置なので、区間始端(音符終端 − 区間長)を足して絶対 tick で公開する。
+    from vpr import read
+
+    seq = _sequence([_singing_track([_vibrato_note(
+        {"type": 0, "duration": 240, "depths": [{"pos": 0, "value": 64}],
+         "rates": [{"pos": 120, "value": 70}]}, pos=960, duration=480)], part_pos=480)])
+    project, _ = read(_make_vpr(seq))
+    vibrato = project.tracks[0].parts[0].notes[0].vibrato
+    span_start = 480 + 960 + 480 - 240
+    assert [(p.pos, p.value) for p in vibrato.depths] == [(span_start, 64)]
+    assert [(p.pos, p.value) for p in vibrato.rates] == [(span_start + 120, 70)]
+
+
+@pytest.mark.parametrize("vibrato", [
+    {"type": 0, "duration": 0},  # 区間長 0 はビブラート無し
+    {"type": 0, "duration": -240},  # 区間始端が音符の開始前になる区間は形式が持たない
+    {"type": 0},  # 必須キーの欠落
+    {"type": 0, "duration": "240"},  # 型不正
+    {"type": 0, "duration": 240, "depths": [{"pos": 0}]},  # 制御点の欠落
+    "vibrato",  # 構造自体が違う
+])
+def test_read_maps_unusable_vibrato_to_none(vibrato):
+    # 書き利用のために新たに読むキーは、写せなければ読みを失敗させず None にする。
+    from vpr import read
+
+    project, _ = read(_make_vpr(_sequence([_singing_track([_vibrato_note(vibrato)])])))
+    assert project.tracks[0].parts[0].notes[0].vibrato is None
+
+
+@pytest.mark.parametrize("expression", [
+    {"vibratoLeadingDepth": 0.25},  # 片方だけ
+    {"vibratoLeadingDepth": 0.25, "vibratoFollowingDepth": True},  # 真偽値は数値として通さない
+    {},
+    "aiExp",
+])
+def test_read_maps_unusable_depth_envelope_to_none(expression):
+    from vpr import read
+
+    note = _note(0, 480, 60, "あ", "a", 64)
+    note["aiExp"] = expression
+    project, _ = read(_make_vpr(_sequence([_singing_track([note])])))
+    assert project.tracks[0].parts[0].notes[0].ai_expression is None
+
+
+def test_read_maps_missing_part_duration_and_title_to_defaults():
+    from vpr import read
+
+    seq = _sequence([{"type": 2, "name": "vocal", "parts": [{"name": "p", "pos": 0, "notes": []}]}])
+    del seq["title"]
+    project, _ = read(_make_vpr(seq))
+    assert project.title == ""
+    assert project.tracks[0].parts[0].duration_tick == 0
+
+
+def test_read_raises_format_error_on_a_time_signature_without_a_bar_length():
+    # 分母 0 は小節長を定義できない。ゼロ除算で落とさず構造化エラーで返す。
+    from vpr import VprFormatError, read
+
+    seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "numer": 4, "denom": 0}])
+    with pytest.raises(VprFormatError) as exc:
+        read(_make_vpr(seq))
+    assert exc.value.key == "denom"
+    assert exc.value.path == "masterTrack.timeSig.events[0]"
