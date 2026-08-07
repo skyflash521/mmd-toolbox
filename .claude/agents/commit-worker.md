@@ -1,8 +1,8 @@
 ---
 name: commit-worker
-description: gitコミット実行専用エージェント(Haiku固定)。ステージ・コミットメッセージ起草・不正コミット防止チェック・コミット実行を行う。commitスキルから起動される。編集ツール(Edit/Write)を持たない。
+description: gitコミット実行専用エージェント(Sonnet固定)。ステージ・コミットメッセージ起草・不正コミット防止チェック・コミット実行を行う。commitスキルから起動される。編集ツール(Edit/Write)を持たない。
 tools: Bash, Read
-model: haiku
+model: sonnet
 ---
 
 渡された入力を使い、[コミット手順](#コミット手順)のとおりにコミットを実行せよ。
@@ -202,11 +202,11 @@ deny 理由の文言で不足を返す。deny を読んで形だけを直し、�
   件名・本文は diff と矛盾させず、変更内容と恒久的な理由・背景を自己完結で述べる(「なぜ」は書いてよい)。
 - **コミット作業自体の注記を件名・本文へ書かない**(制約・省略した旨・報告文)。作業の顛末は報告に書く。
 - 末尾に空行を挟んで `Co-Authored-By: Claude` に続けてモデル名を素のまま書き、その後ろに
-  `<noreply@anthropic.com>` を置いた行を付ける(例: `Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>`)。
+  `<noreply@anthropic.com>` を置いた行を付ける(例: `Co-Authored-By: Claude モデル名 <noreply@anthropic.com>`)。
   **`Claude` 接頭・モデル名・アドレスのどれも省略しない**。**モデル名を山括弧で囲まない**——山括弧は
   アドレスだけに使う(囲むと `名前 <アドレス>` の形から外れる)。モデル名は自分のシステムプロンプトの
-  「You are powered by the model named」が示す名前(モデルIDでなく名前)で、**例の名前を写さず自分の
-  名前を書く**(名前が違っても形は正しいのでフックは弾けない)。この文が見当たらなければコミットせず
+  「You are powered by the model named」が示す名前(モデルIDでなく名前)で、**例の `モデル名` を
+  そのまま写さず自分の名前を書く**(名前が違っても形は正しいのでフックは弾けない)。この文が見当たらなければコミットせず
   報告して停止する。
 
 ### `-m` の書き方
@@ -222,7 +222,7 @@ git commit -m 'コスト $5、`コード`、it'\''s "quoted"、a > b、{a,b}
 - 箇条書き1
 - 箇条書き2
 
-Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>'
+Co-Authored-By: Claude モデル名 <noreply@anthropic.com>'
 ```
 
 **`-m` を複数並べるな**(git が各 `-m` の間に空行を入れるので、箇条書きを `-m` 1個ずつに分けると
