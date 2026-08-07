@@ -7,16 +7,14 @@ console script のエントリ(cli.main)が公開・登録され、配布物に�
 import tomllib
 from pathlib import Path
 
-import pytest
-
-song2vpr = pytest.importorskip("song2vpr", reason="パッケージがまだ無い")
-cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
+import song2vpr
+from song2vpr import cli
 
 
 def test_package_imports():
     # namespace package(__init__.py 不在)ではなく実パッケージであること。
     assert song2vpr.__file__ is not None
-    assert song2vpr.__version__ == "0.0.1"
+    assert song2vpr.__version__ == "0.0.0"
 
 
 def test_console_script_entry_point_callable():

@@ -14,8 +14,7 @@ import json
 import pytest
 
 from cli_options import RangeValidator
-
-cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
+from song2vpr import cli
 
 # メタ/モード操作は options に載せない。
 _EXCLUDED = {"--describe", "--version", "--help", "--machine"}

@@ -12,9 +12,7 @@ import io
 import json
 import sys
 
-import pytest
-
-cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
+from song2vpr import cli
 
 # cp932(Windows のロケール符号化)で表せない文字(絵文字 U+1F3A5)。ロケール符号化外の文字を
 # 人間向け標準エラーへ書く経路を作り、符号化安全性を検証するために使う。

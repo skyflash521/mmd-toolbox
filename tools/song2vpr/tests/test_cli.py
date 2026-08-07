@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
+from song2vpr import cli
 
 
 def _touch(path):
@@ -77,6 +77,12 @@ def test_unknown_option_is_arg_error(tmp_path):
 
 def test_missing_positional_is_arg_error():
     assert cli.main([]) == 2
+
+
+def test_abbreviated_flag_is_arg_error(tmp_path):
+    """仕様外の前置き省略形は受理しない。省略形がフラグとして通るとガード回避等を招くため。"""
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--over", "--dry-run"]) == 2
 
 
 def test_unknown_separate_vocals_is_arg_error(tmp_path):

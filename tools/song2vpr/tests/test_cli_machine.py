@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-cli = pytest.importorskip("song2vpr.cli", reason="CLI モジュールがまだ無い")
+from song2vpr import cli
 
 
 def _touch(path):
@@ -204,6 +204,58 @@ def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path
     assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
     # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
     assert err[0] == expected[0]
+
+
+# --- 中断と想定外の失敗 ------------------------------------------------------
+
+
+def _raise(exc):
+    def _f(*_args, **_kwargs):
+        raise exc
+
+    return _f
+
+
+def test_interrupt_is_reported_as_cancelled(tmp_path, monkeypatch, capsysbinary):
+    """中断はどの時点で届いても cancelled/130 として畳む。"""
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(cli, "_build_parser", _raise(KeyboardInterrupt()))
+    assert cli.main(["--machine", src]) == 130
+    event = machine_error(capsysbinary)
+    assert event["code"] == "cancelled"
+    assert event["field"] is None  # 中断は対象引数を持たない
+    assert event["exit_code"] == 130
+
+
+def test_interrupt_in_non_machine_mode_prints_single_line(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(cli, "_build_parser", _raise(KeyboardInterrupt()))
+    assert cli.main([src]) == 130
+    captured = capsys.readouterr()
+    assert captured.out == ""  # 非機械モードは標準出力へ JSON を出さない
+    lines = captured.err.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("error: ")
+
+
+def test_unexpected_exception_is_reported_as_internal_error(tmp_path, monkeypatch, capsysbinary):
+    """想定外の失敗はトレースバックを漏らさず internal_error/1 へ畳む。"""
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(cli, "_build_parser", _raise(RuntimeError("boom")))
+    assert cli.main(["--machine", src]) == 1
+    event = machine_error(capsysbinary)
+    assert event["code"] == "internal_error"
+    assert event["field"] is None  # 想定外の失敗は対象引数を持たない
+    assert event["exit_code"] == 1
+
+
+def test_unexpected_exception_in_non_machine_mode_omits_traceback(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    monkeypatch.setattr(cli, "_build_parser", _raise(RuntimeError("boom")))
+    assert cli.main([src]) == 1
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert len(captured.err.splitlines()) == 1
 
 
 # --- 非機械モードは同じ判定を人間向け1行で返す ------------------------------
