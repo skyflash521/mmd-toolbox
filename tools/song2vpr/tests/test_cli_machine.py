@@ -86,8 +86,8 @@ def test_machine_help_stays_human(capsys):
 def test_machine_processing_path_terminates_with_one_event(tmp_path, capsysbinary):
     """処理経路へ入った実行も、ストリームを result か error のちょうど1つで終端する。
 
-    音声の中身を持たない入力なので前段が入力不正で終わるが、終端規則は終了コードに依らず成立する
-    ため、ここでは終了コードを見ない。
+    音声の中身を持たない入力で、共有フィクスチャが外部コマンドの照会を不在へ倒すため、前段は
+    復号器の未検出で終わる。終端規則は終了コードに依らず成立するので、ここでは終了コードを見ない。
     """
     src = _touch(tmp_path / "in.wav")
     cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr"), "--dry-run"])
