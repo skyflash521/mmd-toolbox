@@ -28,8 +28,7 @@ def _stub_pipeline_run(monkeypatch):
     差し替えはこのファイル内に閉じる(共有のフィクスチャにすると、処理経路へ入った実行の終端規則を
     見るテストにも効いてしまい、その検査が成立しなくなる)。
     """
-    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=lambda *a, **k: None),
-                        raising=False)
+    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=lambda *a, **k: None))
 
 
 # --- 主要オプションの受理 ----------------------------------------------------

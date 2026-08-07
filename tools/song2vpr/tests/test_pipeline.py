@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from song2vpr import pipeline
 from vocal_analysis import (
     AnalysisResult,
     AudioPcm,
@@ -21,9 +22,6 @@ from vocal_analysis import (
     front_stage,
 )
 from vocal_analysis.front_stage import FrontStageResult
-
-pipeline = pytest.importorskip(
-    "song2vpr.pipeline", reason="音声前段を呼ぶパイプラインがまだ無い")
 
 _TEST_MODEL = ContentRecognizerModel(model_id="test-content-recognizer")
 

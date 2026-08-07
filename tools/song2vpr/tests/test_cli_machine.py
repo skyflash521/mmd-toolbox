@@ -83,13 +83,11 @@ def test_machine_help_stays_human(capsys):
 # --- 正常経路の終端 ----------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="音声前段を呼ぶ処理経路がまだ無く、終端イベントを出せない", strict=True)
 def test_machine_processing_path_terminates_with_one_event(tmp_path, capsysbinary):
     """処理経路へ入った実行も、ストリームを result か error のちょうど1つで終端する。
 
-    この骨組みには処理経路がまだ無く、ガードをすべて通ると何も出さずに終わる。音声前段を配線
-    するまでこの契約は満たせない。終了コードは経路によって変わるのでここでは見ない(終端規則は
-    終了コードに依らず成立する)。
+    音声の中身を持たない入力なので前段が入力不正で終わるが、終端規則は終了コードに依らず成立する
+    ため、ここでは終了コードを見ない。
     """
     src = _touch(tmp_path / "in.wav")
     cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr"), "--dry-run"])

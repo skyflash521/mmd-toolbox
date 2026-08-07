@@ -19,8 +19,6 @@ from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
 from vocal_analysis.separator import SeparationError
 
-pytestmark = pytest.mark.xfail(reason="音声前段を呼ぶ処理経路がまだ無い", strict=True)
-
 
 def _touch(path):
     path.write_bytes(b"")
@@ -43,9 +41,9 @@ def _stub_pipeline(monkeypatch, raises=None, captured=None):
             raise raises
         return None
 
-    # モジュールごと差し替える(取り込みは追加依存のガードの内側にあり、名前が未束縛の環境でも
-    # 同じ形で置けるようにするため)。
-    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run), raising=False)
+    # モジュールごと差し替える(取り込みが追加依存のガードの内側にあるため、属性を差し替えるより
+    # 取り込みの構造に左右されない)。
+    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run))
 
 
 def _run_machine(tmp_path, monkeypatch, exc, extra=()):

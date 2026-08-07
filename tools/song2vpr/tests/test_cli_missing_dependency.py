@@ -20,7 +20,7 @@ _MISSING = ModuleNotFoundError("No module named 'soundfile'", name="soundfile")
 
 # 追加依存を要する取り込みが与える名前。取り込みが失敗した環境では未定義になる。
 _GUARDED_NAMES = (
-    "_front_stage", "_pipeline",
+    "_pipeline",
     "AudioLoadError", "IntermediateReadError", "IntermediateWriteError",
     "RecognitionError", "SeparationError", "StageExecutionError",
 )
@@ -30,14 +30,12 @@ _GUARDED_NAMES = (
 def missing_dependency(monkeypatch):
     monkeypatch.setattr(cli, "_MISSING_DEPENDENCY", _MISSING)
     for name in _GUARDED_NAMES:
-        # まだ束縛していない名前は外す対象にならない(未定義の状態は再現したい状態そのもの)。
-        monkeypatch.delattr(cli, name, raising=False)
+        monkeypatch.delattr(cli, name)
 
 
-@pytest.mark.xfail(reason="パイプラインと失敗の写像に使う取り込みがまだ無い", strict=True)
 def test_guarded_names_are_bound_in_dev_environment():
-    # 上のフィクスチャは未束縛の名前を黙って読み飛ばすので、宣言した名前が実装から消えても
-    # 別名になっても気付けない。開発インストールでは全て束縛されていることをここで別に見る。
+    # 宣言した名前が実装から消える・別名になると、上のフィクスチャが再現する未導入状態が
+    # 実態とずれる。開発インストールでは全て束縛されていることをここで別に見る。
     assert [name for name in _GUARDED_NAMES if not hasattr(cli, name)] == []
 
 

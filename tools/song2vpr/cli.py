@@ -28,6 +28,7 @@ from cli_events import (
 from cli_options import describe_options
 
 from . import __version__
+from . import progress as _progress
 
 # 追加依存(vocal-analysis extra)を要する取り込みだけをここへ集める。コンソールスクリプトは追加依存
 # なしの導入でも登録されるため、依存が揃わない環境から起動されうる。取り込み失敗を例外のまま保持して
@@ -35,7 +36,16 @@ from . import __version__
 # 成否で行う。追加依存を要しない配布物内のモジュール(共有ライブラリ・自身のモジュール)は、導入の破損と
 # 区別するため取り込み文をここへ入れない。
 try:
-    from vocal_analysis import front_stage as _front_stage  # noqa: F401
+    from vocal_analysis.front_stage import (
+        IntermediateReadError,
+        IntermediateWriteError,
+        StageExecutionError,
+    )
+    from vocal_analysis.io import AudioLoadError
+    from vocal_analysis.recognizer import RecognitionError
+    from vocal_analysis.separator import SeparationError
+
+    from . import pipeline as _pipeline
 except ImportError as exc:
     _MISSING_DEPENDENCY = exc
 else:
@@ -207,5 +217,36 @@ def _run(args, emitter, fail) -> int:
         return fail("missing_dependency",
                     _va_cli.missing_dependency_message(_MISSING_DEPENDENCY), 4)
 
-    # 音声前段以降の処理経路をまだ持たないため、ガードをすべて通った実行は何も書かずに 0 を返す。
+    # 中間生成物は出力先の隣に <出力ファイル名>.intermediate を作って保存する。--dry-run でも
+    # 抑制しない(抑制するのは最終 vpr の書き出しだけ)。
+    keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
+
+    try:
+        _pipeline.run(
+            args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
+            content_recognizer_model=_va_cli.resolve_recognizer_model(args),
+            retry=args.recognizer_retry, forced_aligner=args.forced_aligner,
+            sofa_aligner=_va_cli.resolve_sofa_config(args),
+            english_katakana_method=args.english_katakana_method,
+            chunking=_va_cli.resolve_chunking_policy(args),
+            keep_intermediate_dir=keep_intermediate_dir)
+    except IntermediateReadError as e:
+        # 内部生成ファイルの読み直し失敗。利用者入力を指す field は載せず、対象ファイルを path に載せる。
+        return fail("not_audio", str(e), 1, path=str(e.path))
+    except AudioLoadError as e:
+        # 復号器の未検出は入力の不備ではなく環境の不足なので、入力不正と別の終了コードで返す。
+        return fail(e.reason, str(e), 4 if e.reason == "decoder_missing" else 1, field="input")
+    except StageExecutionError as e:
+        # 共有側は失敗の要旨だけを持つので、どの工程かは利用者向けの工程名で示す。
+        return fail("stage_failed", f"{_progress.stage_label(e.stage)}に失敗しました: {e}",
+                    4, stage=e.stage)
+    except SeparationError as e:
+        return fail("stage_failed", str(e), 4, stage="separate")
+    except RecognitionError as e:
+        return fail("stage_failed", str(e), 4, stage="recognize")
+    except IntermediateWriteError as e:
+        return fail("write_failed", str(e), 3, field="--keep-intermediate",
+                    path=keep_intermediate_dir)
+
+    # 音符化以降の処理経路をまだ持たないため、前段を終えた実行は vpr を書かずに 0 を返す。
     return 0
