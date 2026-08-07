@@ -166,6 +166,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
   直接観測したが下端 `0` は未観測で、値域が 0〜1 であることと、`0.5` が「変化なし」の中立値であることは、
   いずれも公式文書に明記が無く観測パターンからの推定にとどまる。
 - **未解析の領域:** `exp`/`singingSkill` および `aiExp` のビブラート深さ2キー以外の内部構造、
-  `isAiVibratoEnabled` の意味、オーディオトラックの詳細、`Project/sequence.json` 以外の ZIP エントリ
+  `isAiVibratoEnabled` の意味、トップレベル `voices` の内部構造と、`parts[].aiVoice`・`styleName` との
+  対応(対応関係の有無を含めて未解析)、オーディオトラックの詳細、`Project/sequence.json` 以外の ZIP エントリ
   (`Project/Audio/*.wav` 等)は、本書で詳細レイアウトを解析していない(確証が低い領域)。実ファイルで
   確定でき次第、本書を更新する。
