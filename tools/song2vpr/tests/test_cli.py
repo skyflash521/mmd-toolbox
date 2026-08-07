@@ -8,6 +8,7 @@
 """
 
 import re
+import types
 
 import pytest
 
@@ -17,6 +18,18 @@ from song2vpr import cli
 def _touch(path):
     path.write_bytes(b"")
     return str(path)
+
+
+@pytest.fixture(autouse=True)
+def _stub_pipeline_run(monkeypatch):
+    """引数解析・検証・ガードだけを対象にするため、処理経路を決定論的スタブへ差し替える。
+
+    このファイルの受理系は音声の中身を持たない入力を渡すので、実処理を通すと入力不正で終わる。
+    差し替えはこのファイル内に閉じる(共有のフィクスチャにすると、処理経路へ入った実行の終端規則を
+    見るテストにも効いてしまい、その検査が成立しなくなる)。
+    """
+    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=lambda *a, **k: None),
+                        raising=False)
 
 
 # --- 主要オプションの受理 ----------------------------------------------------

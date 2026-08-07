@@ -11,8 +11,22 @@
 import io
 import json
 import sys
+import types
+
+import pytest
 
 from song2vpr import cli
+
+
+@pytest.fixture(autouse=True)
+def _stub_pipeline_run(monkeypatch):
+    """パス解決と符号化だけを対象にするため、処理経路を決定論的スタブへ差し替える。
+
+    差し替えはこのファイル内に閉じる(共有のフィクスチャにすると、処理経路へ入った実行の終端規則を
+    見るテストにも効いてしまい、その検査が成立しなくなる)。
+    """
+    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=lambda *a, **k: None),
+                        raising=False)
 
 # cp932(Windows のロケール符号化)で表せない文字(絵文字 U+1F3A5)。ロケール符号化外の文字を
 # 人間向け標準エラーへ書く経路を作り、符号化安全性を検証するために使う。
