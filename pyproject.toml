@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmd-toolbox"
-version = "2026.7.3"
+version = "2026.8.8"
 description = "MikuMikuDance 向けユーティリティツール群"
 requires-python = ">=3.12"
 # 上限は、動作実績のある版を既知の天井として次のメジャーを除く形で置く。下限は、実装が実際に

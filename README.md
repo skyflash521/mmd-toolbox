@@ -6,8 +6,8 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 
 | ツール | 概要 | バージョン | 詳しい使い方 |
 |---|---|---|---|
-| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.1 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
-| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.2 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
+| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.2 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
+| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.3 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
 | `song2vmd` | 日本語の歌の音声ファイルから、リップモーション VMD を自動生成する | 0.0.1 | [tools/song2vmd/README.md](tools/song2vmd/README.md) |
 
 ## 使い方
