@@ -1,10 +1,11 @@
-"""vmd-camera のテスト(vmd-camera.md §6 テスト要件1〜4)。
+"""vmd-camera のテスト。
 
-要件4(独立実装との数値クロスバリデーション)の基準として、§2 の式を別実装で
-書き直した順次回転適用版 _fk を末尾近くに置く——回転を1軸ずつ順に適用する素朴な
-実装で、読めば正しさが確認できる「テストの底」として機能する。
+独立実装との数値クロスバリデーションの基準として、回転規約
+R = Ry(-ry)·Rx(-rx)·Rz(-rz) を別実装で書き直した順次回転適用版 _fk を
+末尾近くに置く——回転を1軸ずつ順に適用する素朴な実装で、読めば正しさが
+確認できる「テストの底」として機能する。
 
-絶対的なMMD一致(規約そのものの正しさ)は §4 の視覚A/Bスモークが最終ゲート。
+絶対的なMMD一致(規約そのものの正しさ)は視覚A/Bスモークが最終ゲート。
 本ファイルのテストは to_world/from_world の自己整合性と、式の実装ミス検出を担う。
 """
 
@@ -17,7 +18,7 @@ from vmd import camera, normalize, read
 from vmd.types import CameraKey
 
 # ---------------------------------------------------------------------------
-# 独立実装(クロスバリデーションの基準): §2 の式を順次回転で書き直す
+# 独立実装(クロスバリデーションの基準): 回転規約の式を順次回転で書き直す
 # ---------------------------------------------------------------------------
 
 
@@ -37,7 +38,7 @@ def _rz(a):
 
 
 def _matrix(rx, ry, rz):
-    # R = Ry(-ry) · Rx(-rx) · Rz(-rz)(vmd-camera.md §2)
+    # R = Ry(-ry) · Rx(-rx) · Rz(-rz)
     return _ry(-ry) @ _rx(-rx) @ _rz(-rz)
 
 
@@ -82,7 +83,7 @@ GRID = [
 
 
 # ---------------------------------------------------------------------------
-# テスト4 + 基盤: to_world が §2 の式(独立実装)と一致
+# to_world が回転規約の式(独立実装)と一致
 # ---------------------------------------------------------------------------
 
 
@@ -96,7 +97,7 @@ class TestToWorldMatchesReference:
         assert _approx(pose.up, up)
 
     def test_forward_points_toward_center(self):
-        # distance<0 のとき前方軸はカメラ位置→カメラ中心の向きと一致(§2)
+        # distance<0 のとき前方軸はカメラ位置→カメラ中心の向きと一致
         center = np.array([1.0, 2.0, 3.0])
         key = cam_key(tuple(center), -25.0, (0.3, 0.5, 0.0))
         pose = camera.to_world(key)
@@ -168,7 +169,7 @@ class TestDistanceZero:
 class TestAngleContinuity:
     def test_yaw_sweep_across_pi_is_continuous(self):
         # ヨーを π をまたいで滑らかに動かす。生の atan2 は±2πの跳びを生むが、
-        # prev_rotation 付きの from_world は連続な系列を返すべき(§5)。
+        # prev_rotation 付きの from_world は連続な系列を返すべき。
         prev = None
         recovered = []
         for ry in np.linspace(2.9, 3.4, 12):  # π≈3.14159 をまたぐ

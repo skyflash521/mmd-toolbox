@@ -1,4 +1,4 @@
-"""口形イベント確定のテスト(vpr2vmd.md §3、重なり音符の非重複化)。
+"""口形イベント確定のテスト(重なり音符の非重複化)。
 
 `resolve_overlaps` は collect_notes が整列した音符列(start_tick 昇順・duration_tick 降順・
 パート出現順・索引昇順)を受け、単音前提の採用音符列へ非重複化する。2段階:
@@ -6,11 +6,8 @@
 長さ 0 以下は除外する。
 """
 
-import pytest
-
 from lipsync import MouthShape
 from vpr import Note, TempoEvent
-
 from vpr2vmd import events
 
 
@@ -205,6 +202,14 @@ def test_build_continuation_after_moraic_nasal_stays_closed_when_off():
     ]
 
 
+def test_build_moraic_nasal_is_silence_when_use_n_morph_omitted():
+    # build_mouth_events 自身の use_n_morph 既定値(off)を直接検証する(_build_se ヘルパーは
+    # 既定 use_n_morph=True を明示するため、この既定値の回帰は検出できない)。
+    adopted = [_note(0, 240, phonemes=["N\\"])]
+    result, _diag = events.build_mouth_events(adopted, _TEMPOS, _RES)
+    assert [(e.shape, e.start, e.end) for e in result] == [(MouthShape.SILENCE, 0.0, 7.5)]
+
+
 def test_build_continuation_after_rest_holds_closed_not_pre_rest_vowel():
     # 休符(閉口)の直後の母音なし音符は、休符前の母音を再開せず閉口を継続する。
     # [a][0,240) frame[0,7.5)、休符[7.5,22.5)、[-][720,960) frame[22.5,30)。
@@ -231,7 +236,7 @@ def test_build_is_contiguous_and_covers_full_axis():
     adopted = [_note(240, 240, phonemes=["m", "a"]), _note(720, 240, phonemes=["i"])]
     result, _diag = events.build_mouth_events(adopted, _TEMPOS, _RES, use_n_morph=True)
     assert result[0].start == 0.0
-    for a, b in zip(result, result[1:]):
+    for a, b in zip(result, result[1:], strict=False):
         assert a.end == b.start
     assert result[-1].end == 30.0  # 960/32
 

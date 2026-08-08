@@ -1,4 +1,4 @@
-"""区間削減器(linear mode)のテスト(vmd-reduce.md §4, §6, §3)。
+"""区間削減器(linear mode)のテスト。
 
 reduce_track は必須境界の間を区間化し、各区間を全チャンネルが許容誤差以内で
 線形表現できるか検査する。超過時は最大正規化誤差フレームで再帰分割する(error-split)。
@@ -41,7 +41,7 @@ def test_peak_splits_at_extremum():
 
 
 def test_valley_splits_at_extremum():
-    # 谷(0..-5..0)も極値で分割される(vmd-reduce.md §6 山・谷・切り返し)。
+    # 谷(0..-5..0)も極値で分割される(山・谷・切り返し)。
     vals = [0, -1, -2, -3, -4, -5, -4, -3, -2, -1, 0]
     ch = lin(0, vals, tol=1.0)
     keys = reduce_track([0, 10], [ch], min_seg=1, max_seg=180, strict=False)
@@ -77,7 +77,7 @@ def test_max_segment_sliding_cap():
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
     assert keys[0] == 0 and keys[-1] == 100
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3  # ceil(100/40) の最小区間数
 
@@ -99,7 +99,7 @@ def test_strict_raises_when_min_seg_blocks():
 
 
 def test_min_seg_blocks_then_dense_non_strict():
-    # 同じケースで非strict: min_seg を無視して1フレームまで密に保持(vmd-reduce.md §3)。
+    # 同じケースで非strict: min_seg を無視して1フレームまで密に保持。
     vals = [0, 5, 0, 5, 0]
     ch = lin(0, vals, tol=0.5)
     keys = reduce_track([0, 4], [ch], min_seg=4, max_seg=180, strict=False)
@@ -109,7 +109,7 @@ def test_min_seg_blocks_then_dense_non_strict():
 def test_multichannel_respects_each_channel_tolerance():
     # chA は大振幅だが緩い tol で誤差0(線形)。chB は微小な 0.05 のバンプだが tol=0.01。
     # 各チャンネル固有の許容で判定するため、絶対誤差が小さくても chB のピーク5で分割する
-    # (グローバルな生誤差閾値では見逃すケース。vmd-reduce.md §6 の正規化誤差)。
+    # (グローバルな生誤差閾値では見逃すケース。正規化誤差による判定)。
     ch_a = lin(0, [float(i) for i in range(11)], tol=1.0)
     ch_b = lin(0, [0, 0, 0, 0, 0, 0.05, 0, 0, 0, 0, 0], tol=0.01)
     keys = reduce_track([0, 10], [ch_a, ch_b], min_seg=1, max_seg=180, strict=False)
@@ -121,7 +121,7 @@ def test_multichannel_respects_each_channel_tolerance():
 
 def test_split_prefers_extremum_not_max_error_frame():
     # 端点0,20。最大誤差は frame3 だが速度反転の極値は frame2。tol=9 で1回分割。
-    # 極値優先なら [0,2,4]、生の最大誤差優先なら [0,3,4] になる。vmd-reduce.md §6。
+    # 極値優先なら [0,2,4]、生の最大誤差優先なら [0,3,4] になる。
     ch = lin(0, [0, 10, 2, 4, 20], tol=9.0)
     keys = reduce_track([0, 4], [ch], min_seg=1, max_seg=180, strict=False)
     assert keys == [0, 2, 4]
@@ -136,7 +136,7 @@ def test_adjacent_segment_accepted():
 
 def test_constant_span_not_capped():
     # 全フレーム同値(定数)の span は max_seg を超えても分割されず両端2キーになる
-    # (定数区間には編集すべき曲がりが無いため maxspan-cap の対象外。vmd-reduce.md §4 step3)。
+    # (定数区間には編集すべき曲がりが無いため maxspan-cap の対象外)。
     ch = lin(0, [5.0] * 101, tol=0.01)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
     assert keys == [0, 100]
@@ -146,7 +146,7 @@ def test_loose_non_constant_span_capped():
     # 緩い線形(定数でない)長い span は maxspan-cap で上限以下に保たれる(編集容易性の回帰防止)。
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3  # 定数判定が誤発火せず非定数として maxspan-cap が効く
 
@@ -168,7 +168,7 @@ def test_maxspan_cap_requires_all_channels_constant():
     const_ch = lin(0, [5.0] * 101, tol=0.01)
     vary_ch = lin(0, [float(i) for i in range(101)], tol=1.0)
     keys = reduce_track([0, 100], [const_ch, vary_ch], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3
 
@@ -180,7 +180,7 @@ def test_non_constant_fallback_when_channel_lacks_is_constant():
             return (0.0, None)  # 常に許容内(tol 分割しない)
 
     keys = reduce_track([0, 100], [StubChannel()], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3  # is_constant 不在 → 非定数扱いで maxspan-cap
 
@@ -210,7 +210,7 @@ def test_reduce_uses_only_normalized_contract():
     assert keys == [0, 5, 10]
 
 
-# --- sliding max_seg / maxspan-cap (vmd-reduce.md §4 step3/step6, §6) -------------------
+# --- sliding max_seg / maxspan-cap -------------------
 
 
 def test_fitting_long_span_capped_and_recorded():
@@ -219,7 +219,7 @@ def test_fitting_long_span_capped_and_recorded():
     ch = lin(0, [float(i) for i in range(101)], tol=1.0)  # 線形=1本で表現可
     caps = []
     keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False, caps=caps)
-    gaps = [b - a for a, b in zip(keys, keys[1:])]
+    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert caps and all(0 < c["frame"] < 100 for c in caps)
 

@@ -9,15 +9,14 @@ import math
 
 import pytest
 
+from mocapvmd.markers import extract_markers
+from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
+from mocapvmd.pose_denoise import apply_pose_denoise
 from pmx.pose import evaluate_fk, sample_local_poses
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey
 
 from .helpers import BONE_NONLINEAR, bone, build_standard_pmx
-from mocapvmd.markers import extract_markers
-from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
-
-from mocapvmd.pose_denoise import apply_pose_denoise
 
 
 def _quat_y(deg):
@@ -103,7 +102,7 @@ def test_clean_moving_motion_passes_through_unchanged():
     after = _marker_trajectory(profile, apply_pose_denoise(keys, pmx_path=None), "head")
     # 明確に動いている(静止テストと別物であることを担保)。
     assert math.dist(before[0], before[-1]) > 0.1
-    for a, b in zip(before, after):
+    for a, b in zip(before, after, strict=True):
         assert a == pytest.approx(b, abs=1e-6)
 
 
@@ -120,11 +119,11 @@ def test_output_keys_are_valid_bonekeys():
         assert len(k.interpolation) == 64
 
 
-# --- 診断レポート素データ(§12: diagnostics_out) -----------------------------
+# --- 診断レポート素データ -----------------------------------------------
 
 
 def test_diagnostics_out_populated():
-    # diagnostics_out を渡すと §12 構造(マーカー数・必須ボーン検証・変位・fit診断)を埋める。
+    # diagnostics_out を渡すとマーカー数・必須ボーン検証・変位・fit診断を埋める。
     keys = [
         bone("センター", 0, pos=(0.2, 0.0, 0.0)),
         bone("センター", 5, pos=(0.5, 0.0, 0.0)),

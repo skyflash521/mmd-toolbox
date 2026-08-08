@@ -1,12 +1,12 @@
-"""tick→秒→フレーム変換のテスト(vpr2vmd.md §3・§6)。
+"""tick→秒→フレーム変換のテスト。
 
 vpr の tick(整数、resolution=tick/四分音符)とテンポマップから 30fps の float フレームへ
 変換する。テンポマップの区分積分で秒を求め、30 を掛けてフレーム化する(量子化は lipsync 側)。
 """
 
 import pytest
-from vpr import Note, TempoEvent
 
+from vpr import Note, TempoEvent
 from vpr2vmd import timing
 
 

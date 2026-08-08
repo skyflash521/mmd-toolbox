@@ -1,4 +1,4 @@
-"""FK評価(pmx.md §7)。
+"""FK評価。
 
 VMDボーンキーを指定フレームでサンプルしてローカル姿勢を作り、PMXボーン
 階層に沿って前方運動学でワールド姿勢を評価する。IK・付与親・物理演算は
@@ -11,7 +11,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from vmd.interp import sample
-from .types import PmxModel
 
 _IDENTITY_QUAT = (0.0, 0.0, 0.0, 1.0)
 

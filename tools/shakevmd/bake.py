@@ -1,8 +1,8 @@
-"""ベイクループ・視線揺れ変換(shakevmd.md §3, §4, §5)。
+"""ベイクループ・視線揺れ変換。
 
-§4.2 の視線揺れ変換 apply_gaze_shake と、ベイクループ本体 bake() を実装する。
+視線揺れ変換 apply_gaze_shake と、ベイクループ本体 bake() を実装する。
 
-§4.2 の実現方針: 揺れ角度は「元の角度 + ノイズ」のオイラー加算とし、カメラの
+視線揺れ変換の実現方針: 揺れ角度は「元の角度 + ノイズ」のオイラー加算とし、カメラの
 ワールド位置が固定される(位置ノイズ分だけシフトする)ように新しいカメラ中心を
 逆算する。これにより距離0では自動的に素朴な角度加算と一致し、姿勢の再分解
 (camera.from_world)やジンバル対策は不要になる。
@@ -13,14 +13,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from vmd import camera, interp
-from vmd.types import CameraKey
 from shakevmd import cuts, motion, noise
 from shakevmd.warn import ShakeWarning
+from vmd import camera, interp
+from vmd.types import CameraKey
 
 
 class RangeOverlapError(ValueError):
-    """揺れ適用範囲が重複/接触している(§5.2)。
+    """揺れ適用範囲が重複/接触している。
 
     ValueError の派生にするのは、範囲重複という意図的な引数エラーを、過大値でベイクが破綻して
     生じる偶発的な ValueError(inf 回転による math domain error 等)と CLI 側で区別するため。
@@ -29,7 +29,7 @@ class RangeOverlapError(ValueError):
 
 
 def round_half_up(x) -> int:
-    """整数度への丸め(四捨五入)。視野角の丸め既定は四捨五入(vmd-interp.md §3/§5)。
+    """整数度への丸め(四捨五入)。視野角の丸め既定は四捨五入。
 
     Python 組み込み round() は銀行丸め(round half to even)で .5 境界が
     四捨五入と食い違うため使わない。視野角は正なので floor(x+0.5) で四捨五入になる。
@@ -38,12 +38,12 @@ def round_half_up(x) -> int:
 
 
 def apply_gaze_shake(camera_key, rot_noise, pos_noise=(0.0, 0.0, 0.0), naive=False) -> dict:
-    """視線揺れ変換(§4.2)。
+    """視線揺れ変換。
 
     - 揺れ角度 = camera_key.rotation + rot_noise(成分ごとのオイラー加算)
     - カメラのワールド位置は固定(pos_noise 指定時はその分だけワールドでシフト)
     - 新しい角度・距離からカメラ中心を逆算: center = cam_pos - R(新角度)·(0,0,distance)
-    naive=True(素朴な角度加算モード、§8)では中心の逆算を行わず、元のカメラ中心に
+    naive=True(素朴な角度加算モード)では中心の逆算を行わず、元のカメラ中心に
     位置ノイズだけ加える(角度はオイラー加算、ワールド位置は固定しない)。距離0では
     既定と一致する。
     rot_noise=(drx,dry,drz) ラジアン、pos_noise=(dx,dy,dz)。
@@ -69,7 +69,7 @@ def apply_gaze_shake(camera_key, rot_noise, pos_noise=(0.0, 0.0, 0.0), naive=Fal
 # MMDデフォルトの線形補間ブロック(カメラ24バイト = 6チャンネル × (20,107,20,107))
 LINEAR_CAMERA_INTERP = bytes([20, 107, 20, 107]) * 6
 
-# ベイクは30fps・1フレーム間隔固定(§4.1)。間隔変更オプションは持たない。
+# ベイクは30fps・1フレーム間隔固定。間隔変更オプションは持たない。
 FPS = 30.0
 
 # 視線揺れノイズの6チャンネル(セグメント別にシード派生する)
@@ -78,7 +78,7 @@ _POS_CHANNELS = ("pos_x", "pos_y", "pos_z")
 
 
 def _crossfaded_channel(seed, si, ch, t, freq, weights, octaves=noise.DEFAULT_OCTAVES):
-    """1チャンネルの帯域制限ノイズを、フレーム毎の静止/移動プロファイル重みで合成する(§6.2)。
+    """1チャンネルの帯域制限ノイズを、フレーム毎の静止/移動プロファイル重みで合成する。
 
     band_limited_noise の固定 persistence に代えて、octave_components(合成前のオクターブ成分)を
     weights[:, oct](= motion.profile_weights が速度から作るフレーム毎のオクターブ重み)で重み付け
@@ -103,7 +103,7 @@ class BakeResult:
 
 
 def _working_view(camera_keys):
-    """正規化作業ビュー(フレーム昇順・同一フレーム重複は後勝ち)と破棄件数を返す(§3.1)。"""
+    """正規化作業ビュー(フレーム昇順・同一フレーム重複は後勝ち)と破棄件数を返す。"""
     by_frame = {}
     for k in camera_keys:
         by_frame[k.frame] = k   # 同一フレームは後勝ち(入力順で後のものが残る)
@@ -112,12 +112,12 @@ def _working_view(camera_keys):
 
 
 def _snap(frame, wv_frames):
-    """frame を最近接の既存キーフレームへスナップする(§5.2)。等距離は小さい側。"""
+    """frame を最近接の既存キーフレームへスナップする。等距離は小さい側。"""
     return min(wv_frames, key=lambda f: (abs(f - frame), f))
 
 
 def _impulse_direction(seed: int, frame: int) -> np.ndarray:
-    """衝撃(§6.3)の方向をシード(と発火フレーム)から決定する固定単位3ベクトル。
+    """衝撃(impulse)の方向をシード(と発火フレーム)から決定する固定単位3ベクトル。
 
     同一シード・同一フレームで再現、異なるシードで変わる。フレーム由来なので、
     同じ衝撃が単独でも複合でも同じ方向になる(加算合成の整合)。
@@ -134,7 +134,7 @@ def _impulse_direction(seed: int, frame: int) -> np.ndarray:
 
 
 def _governing_perspective(wv, frame):
-    """当該フレーム以前で最も近いキーのパースペクティブをホールドする(§3.1)。"""
+    """当該フレーム以前で最も近いキーのパースペクティブをホールドする。"""
     persp = wv[0].perspective
     for k in wv:
         if k.frame <= frame:
@@ -154,26 +154,26 @@ def bake(
     rot_weights=(1.0, 1.0, 0.3),  # Pitch/Yaw/Roll = rx/ry/rz 個別重み
     freq: float = 1.2,
     motion_damp: float = 1.0,
-    settle: float = 0.0,         # 度。停止後の減衰振動の初期振幅(§6.2)。0で無効(既定=無効)
-    settle_time: float = motion.DEFAULT_SETTLE_TIME_SEC,  # 秒。settle減衰振動の収束時間(§2.5/§8 内蔵)
-    # 静止/移動プロファイル(オクターブ重み構成、§6.2/§8 内蔵)。オクターブ数=プロファイル長。
+    settle: float = 0.0,         # 度。停止後の減衰振動の初期振幅。0で無効(既定=無効)
+    settle_time: float = motion.DEFAULT_SETTLE_TIME_SEC,  # 秒。settle減衰振動の収束時間(内蔵)
+    # 静止/移動プロファイル(オクターブ重み構成、内蔵)。オクターブ数=プロファイル長。
     still_profile=motion.STILL_PROFILE,
     moving_profile=motion.MOVING_PROFILE,
-    # 速度正規化の絶対基準(§6.2 内蔵)。移動(ワールド位置)と回転(角度)で別個。
+    # 速度正規化の絶対基準(内蔵)。移動(ワールド位置)と回転(角度)で別個。
     speed_ref_world: float = motion.DEFAULT_SPEED_REF_WORLD,
     speed_ref_angle: float = motion.DEFAULT_SPEED_REF_ANGLE,
-    naive_rotation: bool = False,  # 素朴な角度加算モード(§8 内蔵)。中心逆算を行わない
-    gait_freq: float = 0.0,      # Hz。歩調周期成分の周波数(§2.7/§95 walking)。0で無効
+    naive_rotation: bool = False,  # 素朴な角度加算モード(内蔵)。中心逆算を行わない
+    gait_freq: float = 0.0,      # Hz。歩調周期成分の周波数(walking プリセット用)。0で無効
     gait_amp: float = 0.0,       # 歩調成分の振幅(MMD距離単位)。左右=gait_freq、上下=2×gait_freq
     fade_sec: float = 0.7,
     cut_pos_threshold: float = 5.0,
     cut_rot_threshold: float = 20.0,
     manual_cuts_add=(),
     manual_cuts_remove=(),
-    impulses=(),                 # (F,S,D) の並び。フレームFに強さS度・減衰D秒の衝撃(§6.3)
+    impulses=(),                 # (F,S,D) の並び。フレームFに強さS度・減衰D秒の衝撃
     progress=None,               # progress(done, total) を各ベイクフレームで呼ぶ(機械モード進捗。None で無効)
 ) -> BakeResult:
-    """ベイクループ本体(§3, §4, §5)。
+    """ベイクループ本体。
 
     camera_keys(原本、順不同可)を受け取り、ranges(各 (start,end)、None=全範囲)の
     範囲を30fps・1フレーム間隔でベイクした高密度キーを生成し、範囲外は原本を
@@ -184,7 +184,7 @@ def bake(
     - 視野角は四捨五入、パースは直前キーをホールド
     """
     if not camera_keys:
-        raise ValueError("カメラキーが空(§3.1: 終了コード1相当)")
+        raise ValueError("カメラキーが空")
     if len(still_profile) != len(moving_profile):
         raise ValueError(
             f"still_profile と moving_profile の長さが不一致(オクターブ数の整合): "
@@ -197,7 +197,7 @@ def bake(
     if dropped:
         warnings.append(ShakeWarning(
             "bake_normalize_duplicate",
-            f"正規化: 同一フレーム重複 {dropped} 件を後勝ちで破棄した(§3.1)",
+            f"正規化: 同一フレーム重複 {dropped} 件を後勝ちで破棄した",
             ("camera",),
         ))
     wv_frames = [k.frame for k in wv]
@@ -217,7 +217,7 @@ def bake(
     for i in range(1, len(resolved)):
         if resolved[i][0] <= resolved[i - 1][1]:
             raise RangeOverlapError(
-                f"範囲が重複/接触している: {resolved[i - 1]} と {resolved[i]}(§5.2)"
+                f"範囲が重複/接触している: {resolved[i - 1]} と {resolved[i]}"
             )
 
     # --- カット検出(作業ビュー全体)+ 手動指定 ---
@@ -228,7 +228,7 @@ def bake(
 
     # 視野角が複数フレームにわたって変化する区間(隣接する作業ビューキーで視野角が異なり、かつ
     # フレーム間隔が2以上=ゆっくりズーム)は密キーを焼かず、その区間の元キーを温存して MMD の実数
-    # 補間に委ねる(§3.1)。整数 FOV を毎フレーム焼くとゆっくりズームが1°刻みの階段になるため。
+    # 補間に委ねる。整数の視野角を毎フレーム焼くとゆっくりズームが1°刻みの階段になるため。
     # 隣接フレーム(間隔1)の瞬間 FOV ジャンプ(カット等のショット切替)は階段にならないので除外し、
     # 通常どおり密ベイクする(温存すると短いショット内で揺れが急にオン/オフして不連続になるため)。
     fov_ramp_frames: set = set()
@@ -255,15 +255,15 @@ def bake(
             warnings.append(ShakeWarning(
                 "fade_shortened",
                 f"範囲[{a},{b}](長さ{n}f)が 2×fade({2 * fade_frames}f)未満。"
-                f"フェードを自動短縮した(§5.1)",
+                f"フェードを自動短縮した",
             ))
         for si, seg in enumerate(cuts.segment_bounds(a, b, cut_frames)):
             sframes = list(range(seg.start, seg.end + 1))
             if all(f in fov_ramp_frames for f in sframes):
-                continue            # 全フレームが FOV 変化区間 → 密ベイクせず、ノイズ計算・警告も行わない
+                continue            # 全フレームが視野角変化区間 → 密ベイクせず、ノイズ計算・警告も行わない
             t = np.array([f / FPS for f in sframes], dtype=float)
 
-            # 速度解析(セグメント単位。カットをまたがない。§6.2 角速度＋移動速度)。
+            # 速度解析(セグメント単位。カットをまたがない。角速度＋移動速度)。
             # クロスフェード/呼吸ドリフトがフレーム毎の速度に依存するため、ノイズ合成より先に算出する。
             # カメラ中心位置だけでは、その場回転(パン/チルト/ロール)や距離のみのズームを
             # 静止と誤判定する。カメラのワールド位置(中心+R·(0,0,距離))は回転・ズーム・移動を
@@ -280,8 +280,8 @@ def bake(
             angle_speed = motion.frame_speeds(angles, speed_ref_angle)
             speeds = np.maximum(motion.frame_speeds(world, speed_ref_world), angle_speed)
 
-            # チャンネル別ノイズ(セグメント別シード派生=位相独立。§5.3-1)。
-            # 静止/移動プロファイルのオクターブ重みをフレーム毎の速度でクロスフェード(§6.2)。
+            # チャンネル別ノイズ(セグメント別シード派生=位相独立)。
+            # 静止/移動プロファイルのオクターブ重みをフレーム毎の速度でクロスフェード。
             weights = motion.profile_weights(speeds, still_profile, moving_profile)  # (n_frames, n_oct)
             rot_n = []
             for ch in _ROT_CHANNELS:
@@ -294,7 +294,7 @@ def bake(
                 pos_n.append(vals)
                 warnings.extend(ShakeWarning("octave_clamped", w) for w in warns)
 
-            # 呼吸ドリフト(§6.2「完全静止区間: 長周期ドリフト 0.3Hz 相当」)。位置のみに、
+            # 呼吸ドリフト(完全静止区間の長周期ドリフト 0.3Hz 相当)。位置のみに、
             # フレーム毎の (1-speed) スケールで加算する(回転=向きには載せない)。軸ごとに独立位相。
             breath = np.zeros((len(sframes), 3))
             breath_amp = amp_pos * motion.BREATHING_AMP_FACTOR
@@ -306,7 +306,7 @@ def bake(
                         t + phase_sec, breath_amp
                     )
 
-            # 歩調周期成分(§2.7/§95 walking): 乱数ノイズに加算で混合する。位置のみ、左右(x)=
+            # 歩調周期成分(walking プリセット): 乱数ノイズに加算で混合する。位置のみ、左右(x)=
             # gait_freq、上下(y)=2×gait_freq の正弦波。奥行(z)・回転には載せない。位相は軸別に
             # シード派生(決定論的)。gait_freq=0 または gait_amp=0 で無効。
             gait = np.zeros((len(sframes), 3))
@@ -318,10 +318,10 @@ def bake(
                         2.0 * np.pi * (gait_freq * mult) * t + phase
                     )
 
-            # settle(§6.2): 角速度の停止点で、停止直前の回転移動方向へ減衰振動を加算する。
+            # settle: 角速度の停止点で、停止直前の回転移動方向へ減衰振動を加算する。
             # 停止時刻のΔ角度は0なので「直前の角速度ベクトル」angles[i-1]-angles[i-2] を方向に使う。
             # detect_stops/settle_oscillation はセグメントの angle_speed に対して行うため、
-            # カットをまたがず(セグメント分割)、カット点では発動しない(§5.3-3)。
+            # カットをまたがず(セグメント分割)、カット点では発動しない。
             settle_rot = np.zeros((len(sframes), 3))
             if settle > 0.0:
                 for stop_idx in motion.detect_stops(angle_speed):
@@ -338,7 +338,7 @@ def bake(
                         )
                         settle_rot[j] += val * direction
 
-            # impulse(§6.3): 各衝撃 (F,S,D) を、フレームF以降に
+            # impulse: 各衝撃 (F,S,D) を、フレームF以降に
             # radians(S)·exp(-Δt/D)(Δt=(f-F)/FPS 秒)の包絡 × 8Hz帯域制限の高周波ノイズ ×
             # F由来シードの固定方向、で回転ノイズに加算する。絶対フレーム基準でセグメント
             # 非依存(カットをまたいでよい)。複数指定は加算合成。F以前は0。
@@ -349,7 +349,7 @@ def bake(
                     continue
                 direction = _impulse_direction(seed, F)
                 # 高周波ノイズ。基本周波数=帯域上限8Hz、単一オクターブ(octaves=1)にして
-                # 上位オクターブのクランプを起こさない(§6.1 のクランプ警告が出ないようにする)。
+                # 上位オクターブのクランプを起こさない(クランプ警告が出ないようにする)。
                 # シードは F 由来(index 非依存=加算性)。警告が出れば伝播する(握りつぶさない)。
                 osc, owarns = noise.band_limited_noise(
                     noise.derive_seed(seed, "impulse_osc", F), t, noise.BANDLIMIT_HZ,
@@ -364,12 +364,12 @@ def bake(
 
             for idx, f in enumerate(sframes):
                 if f in fov_ramp_frames:
-                    continue            # FOV 変化区間は密キーを焼かない(§3.1。元キーを後で温存)
+                    continue            # 視野角変化区間は密キーを焼かない(元キーを後で温存)
                 s = samples[idx]
                 fade_v = fade[f - a]
                 # 振幅 = 基本 × 適応 clamp(1 - motion_damp×速度, 0, 1) × 範囲フェード。
-                # 動くほど揺れを減衰させる(§6.2)。settle/impulse は別成分(自前の振幅)で、
-                # 範囲フェードのみ掛けて加算する(§6.2/§6.3)。
+                # 動くほど揺れを減衰させる。settle/impulse は別成分(自前の振幅)で、
+                # 範囲フェードのみ掛けて加算する。
                 amp_factor = max(0.0, 1.0 - motion_damp * speeds[idx]) * fade_v
                 rot_noise = tuple(
                     rot_n[i][idx] * math.radians(amp_rot * rot_weights[i]) * amp_factor
@@ -399,7 +399,7 @@ def bake(
                     done_baked += 1
                     progress(done_baked, total_baked)
 
-    # --- 範囲外は原本レコードをそのまま透過(バイト保持。§3.2) ---
+    # --- 範囲外は原本レコードをそのまま透過(バイト保持) ---
     # 原本キーはそのまま(同一オブジェクト=バイト同一)。出力はフレーム昇順に整列して、
     # 範囲外キー(例: 範囲[30,60]に対する先頭 frame0)がベイク群の後ろに紛れないようにする。
     def _in_range(fr):
@@ -407,7 +407,7 @@ def bake(
 
     out_keys = [k for k in camera_keys if not _in_range(k.frame)]
 
-    # FOV 変化区間の境界キーは、範囲内でも密ベイクせず元キー(作業ビュー)を温存する(§3.1)。
+    # 視野角変化区間の境界キーは、範囲内でも密ベイクせず元キー(作業ビュー)を温存する。
     # 範囲外の境界キーは out_keys が原本バイトで保持するため、ここでは範囲内のみを対象にする。
     fov_preserved = [k for k in wv if k.frame in ramp_boundary and _in_range(k.frame)]
 

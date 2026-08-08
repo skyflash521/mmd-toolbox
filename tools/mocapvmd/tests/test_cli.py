@@ -1,4 +1,4 @@
-"""mocapvmd CLI のテスト(mocapvmd.md §3)。
+"""mocapvmd CLI のテスト。
 
 CLI は引数解析 → VMD読み → 全ボーンの一般ノイズ軽減(クリーニング)→ VMD書き。終了コード:
 0 正常 / 1 入力不正 / 2 引数エラー / 3 出力書き込み失敗。
@@ -9,8 +9,9 @@ CLI は引数解析 → VMD読み → 全ボーンの一般ノイズ軽減(ク�
 
 import pytest
 
+from mocapvmd import cli
+from mocapvmd import report as mocap_report
 from vmd import io
-from mocapvmd import cli, report as mocap_report
 
 from .helpers import (
     BONE_NONLINEAR,
@@ -25,15 +26,17 @@ from .helpers import (
 )
 
 _FORMAT_DRY_RUN = mocap_report.format_dry_run
+_DEFAULT_MODEL_NAME_RAW = b"TestModel".ljust(20, b"\x00")
 
 
-def _full_doc(path):
+def _full_doc(path, *, model_name_raw=_DEFAULT_MODEL_NAME_RAW):
     """全セクションにキーを持つVMDを書き出す。透過確認用。
 
     ボーン・カメラには非線形の補間バイトを入れ、再構築・線形化されれば検出できるようにする。
     """
     write_vmd(
         path,
+        model_name_raw=model_name_raw,
         bone=[
             bone("センター", 0, interp=BONE_NONLINEAR),
             bone("センター", 1, pos=(1.0, 0.0, 0.0), interp=BONE_NONLINEAR),
@@ -51,9 +54,16 @@ def _full_doc(path):
 # --- パス検証・ガード -------------------------------------------------------
 
 
-def test_missing_input_is_arg_error(tmp_path):
+def test_missing_input_is_input_error(tmp_path):
     code = cli.main([str(tmp_path / "nope.vmd")])
-    assert code == 2
+    assert code == 1
+
+
+def test_input_directory_is_input_error(tmp_path):
+    d = tmp_path / "indir"
+    d.mkdir()
+    code = cli.main([str(d)])
+    assert code == 1
 
 
 def test_non_vmd_input_is_input_error(tmp_path):
@@ -134,8 +144,7 @@ def test_overwrite_guard_blocks_same_path(tmp_path):
 
 
 def test_overwrite_guard_via_symlink(tmp_path):
-    # 入力へのシンボリックリンク経由の出力も「同一ファイル」としてガードが効く。
-    # 文字列比較でなく samefile/realpath で判定することの検証。
+    # シンボリックリンク経由の出力先も、実体が存在するファイルとしてガードが効く。
     src = tmp_path / "in.vmd"
     _full_doc(src)
     before = src.read_bytes()
@@ -166,14 +175,23 @@ def test_overwrite_allows_same_path(tmp_path):
     assert len(out_doc.bone) >= 1
 
 
-def test_existing_distinct_output_allowed(tmp_path):
-    # 上書きガードは「入力と同一パス」限定。入力と別の既存ファイルへの出力は --overwrite なしでも許可
-    # (全既存出力を拒否する実装を排除)。
+def test_existing_distinct_output_blocked_without_overwrite(tmp_path):
+    # 別パスの既存出力も --overwrite 無しでは上書きガードで拒否する。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
     out.write_bytes(b"old content")
     code = cli.main([str(src), "-o", str(out)])
+    assert code == 2
+    assert out.read_bytes() == b"old content"
+
+
+def test_existing_distinct_output_allowed_with_overwrite(tmp_path):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    _full_doc(src)
+    out.write_bytes(b"old content")
+    code = cli.main([str(src), "-o", str(out), "--overwrite"])
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
@@ -204,7 +222,8 @@ def test_explicit_output_written(tmp_path):
 
 
 def test_nonbone_sections_passthrough_with_denoise(tmp_path):
-    # 既定(denoise on)でも対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)は無加工透過。
+    # 既定(denoise on)でも対象外セクション(モーフ・カメラ・照明・セルフ影・IKプロパティ)と
+    # ヘッダの model_name は無加工透過。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
@@ -218,6 +237,7 @@ def test_nonbone_sections_passthrough_with_denoise(tmp_path):
     assert out_doc.self_shadow == in_doc.self_shadow
     assert out_doc.ik_property == in_doc.ik_property
     assert out_doc.camera[0].interpolation == CAM_NONLINEAR
+    assert out_doc.model_name_raw == in_doc.model_name_raw
 
 
 def test_no_denoise_keeps_bones_verbatim(tmp_path):
@@ -497,7 +517,7 @@ def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
     )["右足ＩＫ"].locked_positions
     out_foot = sorted((k for k in out_doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
     assert [k.frame for k in out_foot] == [k.frame for k in foot]  # 件数・フレーム列の一致
-    for got, exp in zip(out_foot, expected):
+    for got, exp in zip(out_foot, expected, strict=True):
         assert got.position == pytest.approx(exp)
 
 
@@ -577,7 +597,7 @@ def _curve_doc(path):
 
 
 def test_default_output_is_reduced(tmp_path):
-    # 既定でクリーニング後に疎化し(キー数減)、既定の curve-mode は bezier(明示 bezier と一致・linear と相違)(§3.3)。
+    # 既定でクリーニング後に疎化し(キー数減)、既定の curve-mode は bezier(明示 bezier と一致・linear と相違)。
     src = tmp_path / "in.vmd"
     out_default = tmp_path / "default.vmd"
     out_bezier = tmp_path / "bezier.vmd"
@@ -595,7 +615,7 @@ def test_default_output_is_reduced(tmp_path):
 
 
 def test_no_reduce_keeps_dense_linear(tmp_path):
-    # --no-reduce ではクリーニング後の密キー(全フレーム・線形補間)を出力する(§3.3)。
+    # --no-reduce ではクリーニング後の密キー(全フレーム・線形補間)を出力する。
     from vmd.reduce import BONE_LINEAR_INTERP
 
     src = tmp_path / "in.vmd"
@@ -630,13 +650,14 @@ def test_reduce_error_override_validation(tmp_path):
     out = tmp_path / "out.vmd"
     _ramp_doc(src)
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "0.05"]) == 0
-    assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-rot", "0.5"]) == 0  # 有効な回転許容値は受理
+    # 有効な回転許容値は受理
+    assert cli.main([str(src), "-o", str(out), "--overwrite", "--reduce-error-bone-rot", "0.5"]) == 0
     assert cli.main([str(src), "--reduce-error-bone-pos", "-1"]) == 2  # 負の許容値は引数エラー
     assert cli.main([str(src), "--reduce-error-bone-rot", "nan"]) == 2  # 非有限は引数エラー
 
 
 def test_denoise_output_is_dense_linear(tmp_path):
-    # クリーニング後は連続フレームの密キーで、補間ブロックは線形(§3.3 のクリーニング後の密キー形式)。
+    # クリーニング後は連続フレームの密キーで、補間ブロックは線形(クリーニング後の密キー形式)。
     from vmd.reduce import BONE_LINEAR_INTERP
 
     src = tmp_path / "in.vmd"
@@ -652,11 +673,11 @@ def test_denoise_output_is_dense_linear(tmp_path):
         assert k.interpolation == BONE_LINEAR_INTERP
 
 
-# --- 疎化レポートの CLI 配線(§4.4。疎化を実行して reduction 診断をレポートへ載せる) ------
+# --- 疎化レポートの CLI 配線(疎化を実行して reduction 診断をレポートへ載せる) ------
 
 
 def test_report_includes_reduction_section(tmp_path, monkeypatch):
-    # 既定(疎化 on)の dry-run は、全ボーン(多キー・単一キー)に疎化レポート(§4.4)を載せる。
+    # 既定(疎化 on)の dry-run は、全ボーン(多キー・単一キー)に疎化レポートを載せる。
     # 特定ボーンだけ診断を渡す不完全な配線を排除する。
     src = tmp_path / "in.vmd"
     keys = [bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0)) for f in range(11)]
@@ -747,7 +768,7 @@ def test_dry_run_invalid_input_is_error(tmp_path, bad_key):
     assert cli.main([str(src), "--dry-run"]) == 1
 
 
-# --- --list-bones(ボーン一覧と分類を表示して終了。§3.2) ------------------------
+# --- --list-bones(ボーン一覧と分類を表示して終了) --------------------------
 
 
 def _list_lines(capsys):
@@ -761,7 +782,7 @@ def _line_with(lines, name):
 
 def test_list_bones_pairs_name_and_category_per_line(tmp_path, capsys):
     # 各ボーンの行に「自分の分類だけ」が並ぶ。他分類を含まないことも検証し、全分類を各行へ出す誤実装
-    # (例「センター center foot_ik unknown」)も排除する(§3.2)。
+    # (例「センター center foot_ik unknown」)も排除する。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("右足ＩＫ", 0), bone("謎ボーン", 0)])
     assert cli.main([str(src), "--list-bones"]) == 0
@@ -781,7 +802,7 @@ def test_list_bones_appearance_order_and_dedup(tmp_path, capsys):
     write_vmd(src, bone=[bone("右腕", 0), bone("センター", 0), bone("右腕", 5)])
     assert cli.main([str(src), "--list-bones"]) == 0
     lines = _list_lines(capsys)
-    first = lambda name: next(i for i, ln in enumerate(lines) if name in ln)
+    first = lambda name: next(i for i, ln in enumerate(lines) if name in ln)  # noqa: E731
     assert first("右腕") < first("センター")                       # 初出順
     assert sum(1 for ln in lines if "右腕" in ln) == 1            # 重複キーでも1回
     assert sum(1 for ln in lines if "センター" in ln) == 1
@@ -827,10 +848,33 @@ def test_reduce_override_validation_priority_over_unreadable_input(tmp_path):
     assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "nan"]) == 2
 
 
+def test_human_warning_line_uses_common_format(tmp_path, capsys):
+    # 警告行は共通コードのラベルで1行にまとめて標準エラーへ出す(安定コードは機械モードの
+    # warning イベントと同じ値)。旧来の日本語ラベルは出さず、標準出力には何も漏らさない。
+    from vmd.reduce import BONE_LINEAR_INTERP
+    from vmd.types import BoneKey, VmdDocument
+    bad_name = b"\x81\x20name".ljust(15, b"\x00")  # cp932 で復号できないバイト列
+    keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
+            for f in range(4)]
+    io.write_file(VmdDocument(bone=keys), str(tmp_path / "in.vmd"))
+    rc = cli.main([str(tmp_path / "in.vmd"), "-o", str(tmp_path / "out.vmd"), "--no-reduce"])
+    assert rc == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    lines = err.splitlines()  # 空行混入も検出するため除外しない
+    assert len(lines) == 1
+    prefix = "warning: decode-error: "
+    assert lines[0].startswith(prefix)
+    body = lines[0][len(prefix):]
+    assert body.strip()  # 本文が空白のみでない
+    assert not body.startswith(" ")  # 接頭辞直後の空白が1つだけ(既に prefix に含む)
+    assert "警告:" not in err
+
+
 def test_version_flag_prints_name_and_version_and_exits_zero(capsys):
-    # --version は版を表示して終了コード0。argparse の version アクションは SystemExit を投げるが、
+    # --version はバージョンを表示して終了コード0。argparse の version アクションは SystemExit を投げるが、
     # main はそれを捕捉して終了コードへ変換する(--help と同じ)ため戻り値で確認する。
-    # 版番号は __version__ を正本とし、表示文字列にツール名と版を含む。
+    # バージョン番号は __version__ を正本とし、表示文字列にツール名とバージョンを含む。
     from mocapvmd import __version__
 
     assert cli.main(["--version"]) == 0

@@ -1,7 +1,7 @@
-"""sparsevmd プリセット・許容誤差解決のテスト(sparsevmd.md §2.3, §2.4)。
+"""sparsevmd プリセット・許容誤差解決のテスト。
 
-`resolve_tolerances(preset_name, overrides)` は、プリセット名から §2.4 の既定値を引き、
-個別オプションの明示値があればそれを優先する(§2.3)。値の検証もここで行う:
+`resolve_tolerances(preset_name, overrides)` は、プリセット名から許容誤差の既定値を引き、
+個別オプションの明示値があればそれを優先する。値の検証もここで行う:
 FOV以外は0以上の有限値(0は整数フレーム完全一致を要求)、FOVは0.5以上。
 NaN/Inf/負値、未知プリセット、FOV<0.5 は ValueError。
 """
@@ -14,12 +14,12 @@ from sparsevmd import presets
 
 
 def test_preset_names():
-    # §2.3 の3プリセット。
+    # 公開する3プリセットの名前を固定する。
     assert presets.PRESET_NAMES == ("precise", "balanced", "aggressive")
 
 
 def test_balanced_values():
-    # §2.4 balanced 列。
+    # balanced プリセットの既定値を全件固定する。
     t = presets.resolve_tolerances("balanced")
     assert t.bone_pos == pytest.approx(0.01)
     assert t.bone_rot == pytest.approx(0.10)
@@ -30,7 +30,7 @@ def test_balanced_values():
 
 
 def test_precise_values():
-    # §2.4 precise 列。
+    # precise プリセットの既定値を全件固定する。
     t = presets.resolve_tolerances("precise")
     assert t.bone_pos == pytest.approx(0.005)
     assert t.bone_rot == pytest.approx(0.05)
@@ -41,7 +41,7 @@ def test_precise_values():
 
 
 def test_aggressive_values():
-    # §2.4 aggressive 列。
+    # aggressive プリセットの既定値を全件固定する。
     t = presets.resolve_tolerances("aggressive")
     assert t.bone_pos == pytest.approx(0.05)
     assert t.bone_rot == pytest.approx(0.50)
@@ -52,7 +52,7 @@ def test_aggressive_values():
 
 
 def test_override_precedence():
-    # 個別オプション明示はプリセットより優先(§2.3)。指定外はプリセット値のまま。
+    # 個別オプション明示はプリセットより優先。指定外はプリセット値のまま。
     t = presets.resolve_tolerances("balanced", {"camera_fov": 0.75, "bone_pos": 0.001})
     assert t.camera_fov == pytest.approx(0.75)
     assert t.bone_pos == pytest.approx(0.001)
@@ -60,7 +60,7 @@ def test_override_precedence():
 
 
 def test_tolerances_fields():
-    # 公開する許容誤差フィールド集合(§2.4 の6項目)を固定する。
+    # 公開する許容誤差フィールド集合(6項目)を固定する。
     t = presets.resolve_tolerances("balanced")
     assert set(vars(t)) == {
         "bone_pos",
@@ -76,12 +76,12 @@ def test_tolerances_fields():
     "field", ["bone_pos", "bone_rot", "camera_pos", "camera_rot", "camera_distance"]
 )
 def test_zero_allowed_for_non_fov(field):
-    # FOV以外の0は許容(整数フレーム完全一致の要求。§2.4)。
+    # 視野角以外の0は許容(整数フレーム完全一致の要求)。
     t = presets.resolve_tolerances("balanced", {field: 0.0})
     assert getattr(t, field) == 0.0
 
 
-# NOTE: 「単位付き文字列はエラー」(§2.4)は二重に守る。CLI(argparse)層が parse 時に
+# NOTE: 「単位付き文字列はエラー」は二重に守る。CLI(argparse)層が parse 時に
 # 弾いて終了コード2にするのに加え、resolve_tolerances 自体も float() 不能な値を
 # ValueError とする(下の test_non_numeric_override_rejected)。終了コードへの対応づけは
 # CLI テストで別途検証する。
@@ -110,7 +110,7 @@ def test_unknown_preset_raises():
 
 
 def test_fov_floor():
-    # FOVは0.5以上必須。0.5未満は ValueError(§2.4)。
+    # 視野角は0.5以上必須。0.5未満は ValueError。
     with pytest.raises(ValueError):
         presets.resolve_tolerances("balanced", {"camera_fov": 0.4})
     # ちょうど0.5は許容。

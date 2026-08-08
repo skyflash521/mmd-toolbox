@@ -1,4 +1,4 @@
-"""口形イベント確定(vpr2vmd.md §3)。
+"""口形イベント確定。
 
 collect_notes が整列した音符列を単音前提の採用音符列へ非重複化し、解析範囲・休符の再導出、
 音素→口形イベント写像と時間配分を経て lipsync の口形イベント列(MouthEvent)を作る。
@@ -15,13 +15,13 @@ from .phonemes import PhonemeCategory, categorize
 from .timing import tick_to_frame
 
 # 母音的口形(合成プロファイルを持ち開き量で保持値が決まる)。開き量はこれらのイベントのみ有意で、
-# 両唇閉鎖・無音は閉口なので開き量を持たない(0)([lipsync 仕様](../../libs/lipsync/lipsync.md) §2.2)。
+# 両唇閉鎖・無音は閉口なので開き量を持たない(0)。
 _VOWEL_LIKE = frozenset(
     {MouthShape.A, MouthShape.I, MouthShape.U, MouthShape.E, MouthShape.O, MouthShape.N}
 )
 
-# レガート間隙と判定する間隙長の上限(フレーム)。初期値は 8分音符相当の目安で、視覚で詰める
-# (vpr2vmd.md §3)。実テンポへの適応は別途プリセット/テンポ補正が担う。
+# レガート間隙と判定する間隙長の上限(フレーム)。初期値は 8分音符相当の目安で、視覚で詰める。
+# 実テンポへの適応は別途プリセット/テンポ補正が担う。
 _LEGATO_MAX_FRAMES = 8.0
 
 
@@ -31,12 +31,12 @@ def _classify_gap(
     gap_len: float,
     legato_max_frames: float,
 ) -> MouthShape:
-    """母音間の短い間隙をレガート間隙(LEGATO_GAP)/休符(SILENCE)へ分類する(vpr2vmd.md §3)。
+    """母音間の短い間隙をレガート間隙(LEGATO_GAP)/休符(SILENCE)へ分類する。
 
-    前後の実効口形がともに母音的(母音・撥音「ん」)で、間隙が `legato_max_frames` 以下のときだけ
+    前後の実効口形がともに母音的(母音・「ん」)で、間隙が `legato_max_frames` 以下のときだけ
     `LEGATO_GAP`(谷で繋ぐ)。非母音的な隣接(両唇閉鎖・促音閉口・直前が閉口の継続など)・長い間隙・
     曲頭(直前口形なし `left_shape is None`)は `SILENCE`(完全閉口)。判定は確定済みの口形だけに依り、
-    `lipsync` 側はこの分類結果を入力として受ける([lipsync 仕様](../../libs/lipsync/lipsync.md) §6・§4.12)。
+    `lipsync` 側はこの分類結果を入力として受ける。
     """
     if left_shape not in _VOWEL_LIKE or right_shape not in _VOWEL_LIKE:
         return MouthShape.SILENCE
@@ -47,7 +47,7 @@ def _classify_gap(
 
 @dataclass(frozen=True)
 class OverlapDiagnostics:
-    """重なり解決で生じた除外・切り詰めの件数(vpr2vmd.md §4.4)。"""
+    """重なり解決で生じた除外・切り詰めの件数。"""
 
     excluded: int  # 同一 start の重複・切り詰めで長さ0以下になり除外した音符数
     truncated: int  # 後続開始へ終端を切り詰めて採用した音符数
@@ -55,14 +55,14 @@ class OverlapDiagnostics:
 
 @dataclass(frozen=True)
 class EventDiagnostics:
-    """口形イベント確定の診断(vpr2vmd.md §4.4)。"""
+    """口形イベント確定の診断。"""
 
     vowel_undetermined: int  # 母音が得られず直前口形を継続した音符数
     non_event_symbols: dict[str, int]  # 自前イベントを作らない記号(その他子音・未知)→件数
 
 
 def resolve_overlaps(notes: list[Note]) -> tuple[list[Note], OverlapDiagnostics]:
-    """重なり音符を単音前提の採用音符列へ非重複化し、採用列と診断を返す(vpr2vmd.md §3・§4.4)。
+    """重なり音符を単音前提の採用音符列へ非重複化し、採用列と診断を返す。
 
     入力は collect_notes が整列した音符列(start_tick 昇順・duration_tick 降順・パート出現順・
     索引昇順)。2段階で処理する:
@@ -103,11 +103,11 @@ def build_mouth_events(
     adopted_notes: list[Note],
     tempos: list[TempoEvent],
     resolution: int,
-    use_n_morph: bool = True,
+    use_n_morph: bool = False,
     open_by_note: list[float] | None = None,
     legato_max_frames: float = _LEGATO_MAX_FRAMES,
 ) -> tuple[list[MouthEvent], EventDiagnostics]:
-    """採用音符列から lipsync の口形イベント列を組み立てる(vpr2vmd.md §3)。
+    """採用音符列から lipsync の口形イベント列を組み立てる。
 
     各採用音符を tick→フレーム変換し、note_mouth_events で文脈なしに定まる口形を得る。母音を持たず
     撥音/促音でもない音符(note_mouth_events が None)は、直前の確定口形を継続する(直前が無ければ無音)。
@@ -118,16 +118,16 @@ def build_mouth_events(
     `legato_max_frames` はレガート間隙と判定する間隙長の上限(視覚で詰める)。
 
     `open_by_note`(採用音符に整列した開き量列。`adopted_notes` と同長)を渡すと、その音符が生む
-    母音的口形イベント(母音・撥音「ん」)へ該当音符の開き量を刻印する。両唇閉鎖・無音(休符・促音・
+    母音的口形イベント(母音・「ん」)へ該当音符の開き量を刻印する。両唇閉鎖・無音(休符・促音・
     閉口継続)は閉口なので開き量を持たない(0)。継続(母音なし)の保持イベントも、保持口形が母音的なら
     その継続音符自身の開き量を刻印する。`open_by_note` が None なら全イベントの開き量は 0。
 
     診断(`EventDiagnostics`)として、母音が得られず直前口形を継続した音符数(`vowel_undetermined`)と、
     自前イベントを作らない記号(その他子音・未知記号 = `PhonemeCategory.OTHER`)の記号→件数
-    (`non_event_symbols`)を併せて返す(vpr2vmd.md §4.4)。
+    (`non_event_symbols`)を併せて返す。
     """
     result: list[MouthEvent] = []
-    prev_held: MouthShape | None = None  # 直前の確定口形(母音/撥音「ん」/閉口)。継続が引き継ぐ。
+    prev_held: MouthShape | None = None  # 直前の確定口形(母音/「ん」/閉口)。継続が引き継ぐ。
     cursor = 0.0
     vowel_undetermined = 0
     non_event_symbols: Counter[str] = Counter()

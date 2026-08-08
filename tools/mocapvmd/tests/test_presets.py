@@ -1,4 +1,4 @@
-"""クリーニング強度解決のテスト(mocapvmd.md §5.2)。
+"""クリーニング強度解決のテスト。
 
 種別ごとの基準パラメータ(位置の窓幅・回転の窓幅・位置のブレンド率・回転のブレンド率)に、--clean-strength の
 数値倍率をブレンド率のみへ掛けてクリーニングパラメータを解決する。窓幅は倍率で変えない。倍率適用後の
@@ -15,7 +15,7 @@ def test_preset_names_are_reduction_levels():
     assert presets.PRESET_NAMES == ("slower", "slow", "medium", "fast", "faster")
 
 
-# §5.2 初期パラメータ表(倍率 1.0 基準): category -> (pos_window, rot_window, pos_strength, rot_strength)。
+# 初期パラメータ表(倍率 1.0 基準): category -> (pos_window, rot_window, pos_strength, rot_strength)。
 # 期待値オラクル。resolve_cleaning の strength=1.0 出力と一致するべき基準。
 _BASE = {
     "root": (3, 3, 0.15, 0.10),
@@ -88,17 +88,17 @@ def test_invalid_category_raises():
         presets.resolve_cleaning(1.0, "nonexistent")
 
 
-# --- 疎化の許容誤差解決(§5.3)-----------------------------------------------
+# --- 疎化の許容誤差解決 ------------------------------------------------------
 # 各ボーンの許容誤差 = プリセット基準値 × 種別スケール。--reduce-error-* 明示時は基準値を上書き
 # (種別スケールは引き続き掛ける)。slower/slow/medium/fast/faster(速度観点)と種別スケールは mocapvmd 独自値。
 
-# §5.3 プリセット基準値(位置 MMD単位 / 回転 度)。既定は中央の medium(0.20 / 1.50)。
+# プリセット基準値(位置 MMD単位 / 回転 度)。既定は中央の medium(0.20 / 1.50)。
 _REDUCE_BASE = {
     "slower": (0.05, 0.40), "slow": (0.10, 0.75), "medium": (0.20, 1.50),
     "fast": (0.80, 6.0), "faster": (1.60, 12.0),
 }
 
-# §5.3 種別スケール(位置, 回転)。
+# 種別スケール(位置, 回転)。
 _REDUCE_SCALE = {
     "root": (1.0, 1.0), "center": (0.7, 0.8), "torso": (0.8, 0.9), "arms": (1.0, 1.0),
     "fingers": (1.5, 1.5), "legs": (1.0, 1.0), "foot_ik": (0.7, 1.0),
@@ -168,7 +168,7 @@ def test_reduction_tolerance_invalid_override_raises(bad):
         presets.resolve_reduction_tolerances("medium", "center", override_rot=bad)
 
 
-# --- 接地ロック強度・接地検出(§4.3 / §5.4 / §5.5)----------------------------
+# --- 接地ロック強度・接地検出 ------------------------------------------------
 # 接地ロック・検出は横滑り抑制 S(0〜1)で連動する。foot_ik の X/Z 接地中央は S=0→0.0 / S=1→0.97 の
 # 線形写像、他チャンネル(foot_ik の Y、toe_ik の全チャンネル)は S 非依存の固定値。接地検出の水平
 # 速度許容(S=0→0.08 / S=1→1.0)と最大補正量上限(S=0→0.5 / S=1→2.0)も S で線形に動く。
@@ -176,7 +176,7 @@ def test_reduction_tolerance_invalid_override_raises(bad):
 
 @pytest.mark.parametrize("s,xz", [(0.0, 0.0), (0.5, 0.485), (1.0, 0.97)])
 def test_foot_lock_foot_ik_xz_center_by_suppression(s, xz):
-    # foot_ik の X/Z 接地中央は 0.97×S、接地端は 0.25×S(端≤中央を保ち S=0 で完全にロックを外す。§5.4)。
+    # foot_ik の X/Z 接地中央は 0.97×S、接地端は 0.25×S(端≤中央を保ち S=0 で完全にロックを外す)。
     p = presets.resolve_foot_lock(s, "foot_ik")
     assert p["xz_center"] == pytest.approx(xz)
     assert p["xz_edge"] == pytest.approx(0.25 * s)
@@ -184,13 +184,13 @@ def test_foot_lock_foot_ik_xz_center_by_suppression(s, xz):
 
 
 def test_foot_lock_default_suppression_removes_slide():
-    # 既定 S=1.0 は X/Z 接地中央が最強(0.97)=規定「横滑りなし」(§5.4)。
+    # 既定 S=1.0 は X/Z 接地中央が最強(0.97)=規定「横滑りなし」。
     assert presets.resolve_foot_lock(1.0, "foot_ik")["xz_center"] == pytest.approx(0.97)
 
 
 @pytest.mark.parametrize("s", [0.0, 0.5, 1.0])
 def test_foot_lock_foot_ik_y_is_suppression_independent(s):
-    # foot_ik の Y は中央0.50・端0.10 で S 非依存(§5.4)。
+    # foot_ik の Y は中央0.50・端0.10 で S 非依存。
     p = presets.resolve_foot_lock(s, "foot_ik")
     assert p["y_center"] == pytest.approx(0.50)
     assert p["y_edge"] == pytest.approx(0.10)
@@ -198,7 +198,7 @@ def test_foot_lock_foot_ik_y_is_suppression_independent(s):
 
 @pytest.mark.parametrize("s", [0.0, 0.5, 1.0])
 def test_foot_lock_toe_ik_is_suppression_independent(s):
-    # toe_ik は X/Z・Y とも中央0.30・端0.10 で S 非依存(つま先の動き・回転を保つ。§5.4)。
+    # toe_ik は X/Z・Y とも中央0.30・端0.10 で S 非依存(つま先の動き・回転を保つ)。
     p = presets.resolve_foot_lock(s, "toe_ik")
     assert p["xz_center"] == pytest.approx(0.30)
     assert p["xz_edge"] == pytest.approx(0.10)
@@ -207,7 +207,7 @@ def test_foot_lock_toe_ik_is_suppression_independent(s):
 
 
 def test_foot_lock_foot_ik_xz_center_monotonic_in_suppression():
-    # 接地固定の強さは S が大きいほど強い(単調増加。§5.4)。
+    # 接地固定の強さは S が大きいほど強い(単調増加)。
     centers = [presets.resolve_foot_lock(s, "foot_ik")["xz_center"]
                for s in (0.0, 0.25, 0.5, 0.75, 1.0)]
     assert centers == sorted(centers)
@@ -217,7 +217,7 @@ def test_foot_lock_foot_ik_xz_center_monotonic_in_suppression():
 @pytest.mark.parametrize("category", ["foot_ik", "toe_ik"])
 @pytest.mark.parametrize("s", [0.0, 0.5, 1.0])
 def test_foot_lock_fade_width_default_3(s, category):
-    # フェード幅は端から既定3フレーム(§5.4)。
+    # フェード幅は端から既定3フレーム。
     assert presets.resolve_foot_lock(s, category)["fade_width"] == 3
 
 
@@ -235,7 +235,7 @@ def test_foot_lock_invalid_suppression_raises(bad):
         presets.resolve_foot_lock(bad, "foot_ik")
 
 
-# --- 接地検出の S 連動パラメータ(§4.3 / §5.5)-------------------------------
+# --- 接地検出の S 連動パラメータ ---------------------------------------------
 
 
 @pytest.mark.parametrize("s,horiz,maxd", [(0.0, 0.08, 0.5), (0.5, 0.54, 1.25), (1.0, 1.0, 2.0)])

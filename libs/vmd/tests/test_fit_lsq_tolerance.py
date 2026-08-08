@@ -1,4 +1,4 @@
-"""least_squares 収束許容のサンプル数連動テスト(vmd.md §6.3)。
+"""least_squares 収束許容のサンプル数連動テスト。
 
 采否は量子化後誤差で判定するので scipy 既定精度(~1e-8)まで詰める必要はない。ただし緩めると
 フィット精度が落ちて分割が増えうるので、緩和の速度効果が大きい「サンプル数の多い高コスト区間」だけ
@@ -8,8 +8,6 @@ ftol/xtol/gtol を緩め、少数サンプルの小区間(緩めても速度効�
 """
 
 import math
-
-import pytest
 
 from vmd import fit, interp
 from vmd import reduce as vreduce
@@ -70,7 +68,7 @@ def test_fit_coeff_loosens_tolerance_for_large_segment(monkeypatch):
     targets = [math.sin(math.pi * x) for x in xs]  # 山型=1本のベジェで表現不可
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     fit._fit_coeff_curve(xs, resid_at)
     assert cap, "least_squares が呼ばれていない"

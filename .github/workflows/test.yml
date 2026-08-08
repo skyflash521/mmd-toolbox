@@ -2,6 +2,7 @@ name: test
 
 on:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   pytest:
@@ -10,8 +11,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version:
-          - "3.11"
           - "3.12"
+          - "3.14"
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +23,55 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,vocal-analysis]"
 
       - name: Run pytest
         run: pytest
+
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # 版の境界は pyproject.toml の dev extra が正本。ここで版を指定すると宣言が二重になる。
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run ruff
+        run: ruff check
+
+  rumdl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # rumdl は GitHub Action としても配布されているが、それを使うと版の宣言が
+      # pyproject.toml の dev extra と二重になるため、ruff と同じく pip で入れる。
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run rumdl
+        run: rumdl check
+
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config lychee.toml . .claude
+          lycheeVersion: v0.24.2
+      - name: Check for bare section references
+        run: python scripts/check_section_references.py

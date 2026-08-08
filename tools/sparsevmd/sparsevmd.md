@@ -2,24 +2,29 @@
 
 密なVMDキーフレームを疎なキーフレームと補間曲線へ変換するCLIツール
 
-実装言語: Python 3.11+
-依存: vmd(同リポジトリのフォーマット層ライブラリ、../../libs/vmd/vmd.md), numpy, scipy, click または argparse
+依存: vmd(同リポジトリのフォーマット層ライブラリ、[../../libs/vmd/vmd.md](../../libs/vmd/vmd.md)), cli_events(同リポジトリの
+共有ドメイン層ライブラリ、機械モードのイベント送出、[../../libs/cli_events/cli_events.md](../../libs/cli_events/cli_events.md)),
+cli_progress(同リポジトリの共有ドメイン層ライブラリ、進捗ライブ表示、[../../libs/cli_progress/cli_progress.md](../../libs/cli_progress/cli_progress.md)),
+numpy, scipy, click または argparse
 
 ---
 
 ## 1. 概要
 
 ### 1.1 目的
+
 shakevmdの出力VMDやモーションキャプチャー由来VMDのように、
 連続フレームにキーフレームが存在する高密度モーションを、
 MMD互換の疎なキーフレームと補間曲線へ変換する。
 
 目的は以下の3つ:
+
 - MMD上で扱いやすいキー数に減らす
 - 再生結果を指定誤差以内に保つ
 - 補間曲線を使った自然な編集可能モーションに戻す
 
 ### 1.2 基本方針
+
 - 対象は初期実装では **カメラキー** と **ボーンキー** とする。
   shakevmd出力のカメラVMD、モーションキャプチャー由来のボーンVMDの両方を扱う。
 - モーフ/照明/セルフ影/IKキーは初期実装では無加工で透過する。
@@ -34,6 +39,7 @@ MMD互換の疎なキーフレームと補間曲線へ変換する。
 - 同一入力・同一引数からは常に同一出力。
 
 ### 1.3 非目標
+
 - VMDの完全な可逆圧縮。対象セクションは再構築されるためバイト一致は保証しない
 - モーションキャプチャーのノイズ除去、足接地補正、IK補正、姿勢推定の修正
 - MMD/VMDに存在しない補間方式の導入
@@ -54,7 +60,7 @@ MMD互換の疎なキーフレームと補間曲線へ変換する。
 |---|---|---|---|
 | `<入力ファイル名>` | パス | (必須) | 入力VMD |
 | `-o, --output` | パス | `<入力ファイル名>_sparse.vmd` | 出力先 |
-| `--overwrite` | flag | off | 入力と同一パスへの出力を許可。未指定で同一パスならエラー |
+| `--overwrite` | flag | off | 出力先の既存ファイルへの上書きを許可。未指定で出力先に既存ファイルがあるとエラー |
 | `--target` | `camera` / `bone` / `all` | `all` | 削減対象セクション。`all` は camera + bone |
 | `--bone NAME` | NAME(反復可) | なし | 指定ボーンのみ処理。未指定なら全ボーン |
 | `--bone-glob PATTERN` | GLOB(反復可) | なし | globに一致するボーンを処理対象に追加 |
@@ -67,6 +73,7 @@ MMD互換の疎なキーフレームと補間曲線へ変換する。
 | `--range RANGE` | RANGE(反復可) | 全範囲 | 削減範囲。`START:END` 形式。START/ENDの一方は省略可 |
 
 CLI値の共通書式:
+
 - `反復可` は同じオプションを複数回指定することを意味する。
   カンマ区切りリストは受け付けない。
   例: `--bone センター --bone 上半身`、`--range 0:240 --range 300:420`
@@ -84,11 +91,9 @@ CLI値の共通書式:
   1つもない場合は全ボーンをincludeしたものとして扱う。
   その後、`--exclude-bone` / `--exclude-bone-glob` / `--exclude-bone-group` /
   `--bone-file` 内のexcludeを引く。
-- `--bone` と `--exclude-bone` の両方に同じ `NAME` が指定された場合はエラー
-  (終了コード2)。`--bone` で指定した名前が入力VMDに存在しない場合もエラー。
-  この判定は `--target all` でも適用し、§3.1のカメラのみ処理フォールバックより
-  優先する。すなわち `--bone NAME` で明示した名前が(ボーンセクションが空の場合を
-  含め)入力に存在しなければ、カメラの有無に関わらず引数エラー(終了コード2)とする。
+- ボーンセクションにキーが存在する場合に限り、次を検査する: `--bone` と `--exclude-bone` の
+  両方に同じ `NAME` が指定された場合、`--bone` で指定した名前が入力VMDに存在しない場合、
+  空文字 `NAME` を指定した場合は、いずれもエラー(終了コード2)。
   `--exclude-bone` のみで存在しない名前を指定した場合は警告して続行する。
   glob/groupが1件も一致しない場合は、その選択子について警告して続行する
   (その選択子は何も寄与しないものとして扱い、他の選択子の一致は活きる)。
@@ -97,7 +102,14 @@ CLI値の共通書式:
   include/exclude適用結果が(理由を問わず)0件になる場合は引数エラー(終了コード2)。
   したがって唯一のinclude選択子が不一致のglob/groupだった場合は、警告を出した上で
   最終結果0件として終了コード2になる。
-  入力VMDに対象セクションのキー自体が存在しない場合は入力不正(終了コード1、§3.1)。
+  ボーンセクション自体にキーが1件も存在しない場合、`--target bone` ではボーン選択を明示した
+  かどうかによらず入力不正(終了コード1、[§3.1](#31-入力))とする(bone は他セクションへのフォールバック先を
+  持たないため)。`--target all` では、ボーン選択を明示した場合に限り、カメラの有無に関わらず
+  入力不正(終了コード1)とし[§3.1](#31-入力)のカメラのみ処理フォールバックより優先する。ボーン選択を
+  明示していない場合は[§3.1](#31-入力)のフォールバックに従う(カメラにキーがあればカメラのみ処理して
+  正常終了。カメラも空なら対象セクションのキー無しの入力不正)。
+  この入力不正の判定は、いずれの `--target` でも上記のボーン選択に関するあらゆる判定
+  (終了コード2)より優先する。
 - `--target camera` とボーン選択オプションを同時指定した場合はエラー
   (終了コード2)。ただし `--list-bones` 指定時は検査モードとして扱い、
   `--target` に関係なくボーン一覧と選択状態を表示する。
@@ -134,16 +146,16 @@ CLI値の共通書式:
   出力VMDを作る場合は対象セクションも含め元のキーを保持する。
   dry-runには「削減対象なし」と記録する。
 - `flag` は値を取らない真偽オプション。同じflagを複数回指定しても1回指定と同じ。
-- `パス` はローカルファイルパス。入力パスが存在しない/通常ファイルでない場合は
-  引数エラー(終了コード2、読み込み前のパス検証で判定)。
+- `パス` はローカルファイルパス。入力として読むパス(主入力・`--bone-file`)が存在しない/
+  通常ファイルでない/内容を読めない場合は入力不正(終了コード1、[§9](#9-終了コード))。
   出力VMDの親ディレクトリが存在しない場合や、
   その他の書き込み失敗(`io.write_file` 等が送出する例外)は出力書き込み失敗
-  (終了コード3、§9)。
-  入力と異なる既存ファイルは上書きする。`--overwrite` は入力パスそのものへの
-  書き込み許可だけを制御する。
+  (終了コード3、[§9](#9-終了コード))。
+  `--overwrite` は出力先に既存ファイルがあるときの上書き許可を制御する
+  (入力パスと同一かどうかは問わない)。
 
 `--range` 指定時、対象トラックの**範囲外キーは値・補間曲線ともに変更不可**で逐語保持する
-(§6.3)。範囲端は必須キーとして範囲内に保持する。範囲外への境界キー追加や範囲外キーの
+([§6.3](#63-範囲端))。範囲端は必須キーとして範囲内に保持する。範囲外への境界キー追加や範囲外キーの
 補間曲線書き換えは行わない。範囲開始キー(範囲内)の到達側曲線を手前の範囲外区間の動きに
 合わせて再フィットした場合は、`--dry-run` と verbose ログ・レポート(診断 `seam_rewrites`)で
 報告する。
@@ -155,6 +167,7 @@ CLI値の共通書式:
 | `--preset NAME` | `precise` / `balanced` / `aggressive` | `balanced` | 品質プリセット |
 
 プリセットの意味:
+
 - `precise`: 誤差を小さくし、キー削減率より忠実度を優先
 - `balanced`: 標準。見た目の差を抑えつつキー数を削減
 - `aggressive`: キー削減率を優先。モーションの細部は丸くなる
@@ -164,7 +177,7 @@ CLI値の共通書式:
 ### 2.4 許容誤差
 
 列 `precise` / `balanced` / `aggressive` は各プリセット選択時のデフォルト値。
-個別オプション明示時はその値が優先する(§2.3)。
+個別オプション明示時はその値が優先する([§2.3](#23-品質プリセット))。
 
 | 引数 | 型 / 単位 | `precise` | `balanced` | `aggressive` | 説明 |
 |---|---|---|---|---|---|
@@ -176,7 +189,7 @@ CLI値の共通書式:
 | `--camera-fov-tol` | 度 | 0.50 | 0.50 | 1.00 | 視野角の最大許容誤差 |
 
 許容誤差の意味(`0` の完全一致・float32 量子化誤差の扱い・視野角整数度の意味)は
-[vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §2 を正とする。
+[vmd-reduce.md §2](../../libs/vmd/vmd-reduce.md#2-許容誤差の意味) を正とする。
 
 各値は0以上の有限小数。`--camera-fov-tol` はVMDの視野角キーが整数度保存であるため
 0.5以上でなければならない。0.5未満はエラー(終了コード2)。
@@ -192,7 +205,7 @@ NaN/Inf、負値、単位付き文字列はエラー(終了コード2)。
 | `--strict` | flag | off | 指定誤差を満たせない場合に高密度キー保持で続行せずエラー |
 
 区間化の挙動(最小区間長の分割下限・最大区間長の sliding 上限・strict の扱い)は
-[vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §3 を正とする。
+[vmd-reduce.md §3](../../libs/vmd/vmd-reduce.md#3-区間化の制御) を正とする。
 
 `--min-segment-frames` は1以上の整数。`--max-segment-frames` は未指定なら上限なし(無制限)で、
 指定する場合は1以上の整数。`--max-segment-frames` を指定したとき
@@ -218,29 +231,27 @@ NaN/Inf、負値、単位付き文字列はエラー(終了コード2)。
 特定トラックの有効範囲外にある場合、そのトラックでは無視する。
 
 不連続・境界処理(境界を `F-1`/`F` の間に置くこと、境界をまたぐ区間フィットを行わずジャンプを
-保持すること)は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §7 を正とする。
+保持すること)は [vmd-reduce.md §7](../../libs/vmd/vmd-reduce.md#7-不連続境界処理) を正とする。
 
 ### 2.7 レポート・運用
 
 | 引数 | 説明 |
 |---|---|
-| `--dry-run` | 出力VMDを書かずに統計表示。選択ボーン、入力キー数、出力予定キー数、削減率、最大誤差、不連続検出位置、出力後検証の反復概要(§7.3)を表示 |
-| `-v, --verbose` | 詳細ログ |
+| `--dry-run` | 出力VMDを書かずに統計表示。選択ボーン、入力キー数、出力予定キー数、削減率、最大誤差、不連続検出位置、出力後検証の反復概要([§7.3](#73-出力後検証))を表示 |
+| `-v, --verbose` | 詳細ログ(通常時は標準出力、`--machine` 併用時は標準エラー) |
 | `--quiet` | 進捗のライブ表示を抑制する(警告・統計・終了コードは抑制しない) |
-| `--machine` | 出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない(§12) |
-| `--describe` | VMD を読まずにオプション定義とプリセット一覧の result イベントを出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作(§12.3) |
-| `--version` | バージョンを表示して終了する(§8 の `__version__` を表示) |
+| `--machine` | 出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない([§12](#12-機械モード機械可読インターフェース)) |
+| `--describe` | VMD を読まずにオプション定義とプリセット一覧の result イベントを出して終了する。`--machine` を要さず単独で起動でき、入力 positional も要求しない独立メタ操作([§12.3](#123---describe-の中身)) |
+| `--version` | バージョンを表示して終了する |
 
-削減処理中は、対話端末(stderr が tty)のとき処理経過を stderr の1行に上書き表示する。
-カメラは処理済みフレーム数の割合で進捗を示し、bezier の重い区間でも再帰分割の途中で
-部分区間が確定するごとに進むため表示が長く停滞しない。出力後検証など区間処理後に重く
-なりうる段階はフェーズ名を添えて停滞表示でないことを示す。ボーンは削減対象ボーン(選択され
-2キー以上を持つトラック)1件ごとに進捗を示し、カメラのような区間単位の細粒度進捗や
-フェーズ名表示は行わない。stderr がリダイレクト・パイプの場合は表示せず、出力・警告・
-終了コードには影響しない。`--quiet` はこのライブ表示だけを抑制し、警告・統計・終了コードは
-変えない。機械モード(`--machine`。§12)ではライブ表示を無効化し、同じ進捗を progress
-イベントとして発行する(端末判定に依存しない)。`--quiet` が抑制するのはライブ表示だけで、
-機械モードの progress イベントには影響しない。
+削減処理中は、規約([CLI インターフェース規約 §6.1](../../docs/conventions/cli-interface.md#61-人間向け表示の表記))が
+定める書式・有効条件・副作用専用等の一般契約に従い、標準エラーへ1行のライブ表示をする。工程は
+camera・bone の2段で、いずれも共有工程名「キーフレーム圧縮」で統一し、対象は行末の補足(note)で示す。
+カメラ段の進捗通知(処理済みフレーム数・全範囲フレーム総数・出力後検証区間の補足)は共有疎化エンジンが
+持つ契約で、[vmd-reduce.md §11](../../libs/vmd/vmd-reduce.md#11-進捗通知progress-コールバック) を正とする(本書では重複記述しない)。
+補足があれば「カメラ <補足>」として note に残す。ボーンは削減対象ボーン(選択され2キー以上を持つ
+トラック)ごとに、着手前の対象ボーン名を note として示してから完了数/総数を進める(カメラのような
+区間単位の細粒度進捗は行わない。ボーン単位の進捗はエンジンでなく sparsevmd 自身が数える)。
 
 `--list-bones` は出力VMDを作らず、ボーン名、ボーンごとのキー数、
 include/exclude適用後の選択状態、未一致の選択子警告を表示して終了する。
@@ -253,13 +264,15 @@ include/exclude適用後の選択状態、未一致の選択子警告を表示�
 ## 3. VMD入出力
 
 VMDの読み書き・データモデル・正規化は共通ライブラリ vmd に委譲する
-(仕様: ../../libs/vmd/vmd-io.md。補間評価: ../../libs/vmd/vmd-interp.md)。
+(仕様: [../../libs/vmd/vmd-io.md](../../libs/vmd/vmd-io.md)。補間評価: [../../libs/vmd/vmd-interp.md](../../libs/vmd/vmd-interp.md))。
 本章はsparsevmdとしての利用要件のみ規定する。
 
 ### 3.1 入力
+
 - 対象セクション(camera/bone)は内部作業ビューで正規化する。
   フレーム順にソートし、同一キー重複は後勝ちとする。
 - 対象外セクションは原本を保持し、出力時に無加工で透過する。
+- VMDヘッダ(`model_name`)は入力の値をそのまま出力に引き継ぐ(変更しない)。
 - 対象キーが1件以下のトラックは削減不能としてそのまま保持する。
 - 入力がすでに疎なVMDでも処理可能。入力補間曲線を評価したサンプル列を
   ソースモーションとして扱い、再度フィットする。
@@ -267,42 +280,47 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 - 通常処理では、指定された `--target` が対象とするセクションのキーが
   入力VMDに1件も存在しない場合はエラー(終了コード1)。
   `--target all` でカメラ0件・ボーンありの場合はボーンのみ処理し、
-  ボーン0件・カメラありの場合はカメラのみ処理する。
+  ボーン0件・カメラありの場合はカメラのみ処理する。ただしボーン選択を明示した場合、
+  ボーン0件のときはこのカメラのみ処理フォールバックを行わず、入力不正(終了コード1、
+  [§2.2](#22-入出力対象))とする(カメラ0件・ボーンありの側のフォールバックは、ボーン選択の明示有無に
+  関わらず変わらない)。
   ボーンセクションにキーは存在するが、ボーン選択ルールの結果が0件になる場合は
-  入力不正ではなく引数エラー(終了コード2、§2.2)とする。
+  入力不正ではなく引数エラー(終了コード2、[§2.2](#22-入出力対象))とする。
   対象トラックは存在するが全トラックが1キー以下の場合は、削減不能として出力を作成し、
   dry-runに「削減対象なし」と記録する。
 
 ### 3.2 出力
+
 - 対象セクションは削減後のキー列として再構築する。
   このため対象セクションのバイト一致・元のキー順・元の補間ブロック保持は保証しない。
-- ボーン選択(§2.2)で非選択になったボーントラック、および削減不能トラック
-  (キー1件以下。§3.1)は、削減せず元のフィールド値と補間曲線をそのまま出力する。
+- ボーン選択([§2.2](#22-入出力対象))で非選択になったボーントラック、および削減不能トラック
+  (キー1件以下。[§3.1](#31-入力))は、削減せず元のフィールド値と補間曲線をそのまま出力する。
   ただしボーンセクション全体は再構築・再ソートして書き出すため、これら非処理
   トラックも含めセクションのバイト一致は保証しない(値と補間ブロックは保持する)。
 - `--range` 外の対象キーは、削減区間に隣接するか否かに関わらず、元のフィールド値と
-  補間曲線を逐語保持する(変更不可、§6.3)。範囲外への境界キー追加や範囲外キーの補間曲線
+  補間曲線を逐語保持する(変更不可、[§6.3](#63-範囲端))。範囲外への境界キー追加や範囲外キーの補間曲線
   書き換えは行わない。範囲端に接する到達側曲線のうち書き換えるのは範囲内の範囲開始キーのみ。
 - 対象外セクションはバイト単位で保持する。
 - 出力キーの再構築・量子化・格納の規約(フレーム昇順・生バイト安定ソート・制御点の `[0,127]`
-  量子化・到達側格納・区間長1の線形)は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §9 を正とする。
-- カメラキーの perspective フラグの設定方針は §4.2 のとおり vmd-reduce.md §1 を正とする。
+  量子化・到達側格納・区間長1の線形)は [vmd-reduce.md §9](../../libs/vmd/vmd-reduce.md#9-出力キーの再構築量子化格納) を正とする。
+- カメラキーの perspective フラグの設定方針は [§4.2](#42-チャンネルグループ) のとおり [vmd-reduce.md §1](../../libs/vmd/vmd-reduce.md#1-削減の単位とチャンネルグループ) を正とする。
 
 ---
 
 ## 4. 削減対象の単位
 
 ### 4.1 トラック
+
 - カメラ: VMD内のカメラキー列全体を1トラックとして扱う。
 - ボーン: ボーン名ごとに独立したトラックとして扱う。
 
 ### 4.2 チャンネルグループ
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §1 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §1](../../libs/vmd/vmd-reduce.md#1-削減の単位とチャンネルグループ) を正とする(本書では重複記述しない)。
 
 ### 4.3 共有曲線の制約
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §1 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §1](../../libs/vmd/vmd-reduce.md#1-削減の単位とチャンネルグループ) を正とする(本書では重複記述しない)。
 
 ---
 
@@ -310,23 +328,23 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 
 ### 5.1 全体手順
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §4 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §4](../../libs/vmd/vmd-reduce.md#4-全体手順) を正とする(本書では重複記述しない)。
 
 ### 5.2 スカラー曲線フィット
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §5.1 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §5.1](../../libs/vmd/vmd-reduce.md#51-スカラー曲線フィット) を正とする(本書では重複記述しない)。
 
 ### 5.3 回転曲線フィット
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §5.2 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §5.2](../../libs/vmd/vmd-reduce.md#52-回転曲線フィット) を正とする(本書では重複記述しない)。
 
 ### 5.4 制御点探索
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §5.3 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §5.3](../../libs/vmd/vmd-reduce.md#53-制御点探索) を正とする(本書では重複記述しない)。
 
 ### 5.5 分割点の選択
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §6 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §6](../../libs/vmd/vmd-reduce.md#6-分割点の選択) を正とする(本書では重複記述しない)。
 
 ---
 
@@ -334,15 +352,15 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 
 ### 6.1 不連続検出
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §7.1 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §7.1](../../libs/vmd/vmd-reduce.md#71-不連続検出) を正とする(本書では重複記述しない)。
 
 ### 6.2 境界の保存
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §7.2 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §7.2](../../libs/vmd/vmd-reduce.md#72-境界の保存) を正とする(本書では重複記述しない)。
 
 ### 6.3 範囲端
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §7.3 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §7.3](../../libs/vmd/vmd-reduce.md#73-範囲端継ぎ目) を正とする(本書では重複記述しない)。
 
 ---
 
@@ -350,50 +368,29 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 
 ### 7.1 評価タイミング
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §8.1 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §8.1](../../libs/vmd/vmd-reduce.md#81-評価タイミング) を正とする(本書では重複記述しない)。
 
 ### 7.2 評価指標
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §8.2 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §8.2](../../libs/vmd/vmd-reduce.md#82-評価指標) を正とする(本書では重複記述しない)。
 
 ### 7.3 出力後検証
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §8.3 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §8.3](../../libs/vmd/vmd-reduce.md#83-出力後検証) を正とする(本書では重複記述しない)。
 
 ### 7.4 補間曲線の端点速度平滑化(C1近似)
 
-共有疎化エンジンの仕様は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §8.4 を正とする(本書では重複記述しない)。
+共有疎化エンジンの仕様は [vmd-reduce.md §8.4](../../libs/vmd/vmd-reduce.md#84-端点速度平滑化c1近似) を正とする(本書では重複記述しない)。
 
 ---
 
 ## 8. パッケージ構成
 
-    mmd-toolbox/
-      libs/
-        vmd/                # フォーマット層ライブラリ
-          types.py, io.py, interp.py, camera.py
-          sample.py       # サンプリング小ヘルパ(perspective 直近ホールド)
-          cuts.py         # 不連続検出・必須境界管理
-          fit.py          # VMD補間曲線フィット・量子化・誤差評価
-          reduce.py       # 区間分割・キー削減の全体制御
-      tools/
-        sparsevmd/
-          __init__.py
-          sample.py       # 対象トラックの正規化・分割・サンプリング(評価は vmd.interp に委譲)
-          ranges.py       # --range の解析・展開・積集合
-          selection.py    # ボーン選択ルールの解決
-          cuts.py         # 閾値文字列パース(検出本体は vmd.cuts を再公開)
-          fit.py          # vmd.fit の後方互換 re-export
-          reduce.py       # vmd.reduce の後方互換 re-export
-          report.py       # dry-run レポート
-          presets.py      # 品質プリセット
-          cli.py          # CLI(コアの薄いラッパー)
-
-- VMD読み書き・補間評価・カメラ座標変換はvmdに委譲する。
+- VMD読み書き・補間評価・カメラ座標変換・補間曲線フィット・分割戦略・不連続検出は
+  共通ライブラリ vmd に委譲する。移設前からの利用者向けに、旧来の公開 import パス
+  (`sparsevmd.fit`・`sparsevmd.reduce`・`sparsevmd.cuts`)は後方互換として維持し、
+  同名モジュールが vmd の実装を re-export する。
 - コアはCLI非依存。Jupyter等からトラック単位で試行できるAPIを提供する。
-- 補間曲線の制約集中管理(fit)・分割戦略(reduce)・不連続検出(cuts)は共通ライブラリ
-  vmd に置き、sparsevmd は旧 import パス維持のため同名モジュールで re-export する。
-- バージョンの正本は `__init__.py` の `__version__`。`--version` はこれを表示する。
 
 ---
 
@@ -402,25 +399,25 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 | コード | 意味 |
 |---|---|
 | 0 | 正常終了 |
-| 1 | 入力ファイル不正(VMDでない / 指定 `--target` の対象セクションにキーが存在しない) |
+| 1 | 入力ファイル不正(パス不在・VMDでない / 指定 `--target` の対象セクションにキーが存在しない / `--bone-file` のパス不在・読み込み失敗) |
 | 2 | 引数エラー(範囲不正・対象ボーンなし・上書き未許可 など) |
 | 3 | VMD書き込み失敗 |
 | 4 | `--strict` 指定時に許容誤差を満たせない |
 | 130 | 協調的な中断(Ctrl-C 等。全ツール共通予約) |
 
-0〜3 は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)(以下「規約」)§5 の基底と同じ意味、
-4 はツール固有(`--strict`)。130 は規約 §5 の全ツール共通予約(中断。§12.5)。想定外の内部エラーは
-最も近い基底へ寄せて 1 で終え、機械モードでは error イベントの `code` = `internal_error` で識別できる(§12.4)。
+0〜3 は[CLI インターフェース規約](../../docs/conventions/cli-interface.md)(以下「規約」)[§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の基底と同じ意味、
+4 はツール固有(`--strict`)。130 は規約 [§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) の全ツール共通予約(中断。[§12.5](#125-中断と出力の原子性))。想定外の内部エラーは
+最も近い基底へ寄せて 1 で終え、機械モードでは error イベントの `code` = `internal_error` で識別できる([§12.4](#124-構造化エラー))。
 
 ---
 
 ## 10. テスト要件
 
-テストフレームワーク・実行方法・テストデータの扱いは [vmd.md](../../libs/vmd/vmd.md) §4 の方針に従う
+テストフレームワーク・実行方法・テストデータの扱いは [vmd.md §4](../../libs/vmd/vmd.md#4-テスト方針) の方針に従う
 (pytest、決定論的、外部サービス不要)。
 
 エンジン契約のテスト要件(線形・既知ベジェ・局所極値・カメラ回転共有曲線・ボーン回転・
-不連続保存・視野角量子化など)は [vmd-reduce.md](../../libs/vmd/vmd-reduce.md) §10
+不連続保存・視野角量子化など)は [vmd-reduce.md §10](../../libs/vmd/vmd-reduce.md#10-テスト要件エンジン契約)
 を正とする。本節は sparsevmd の CLI 挙動に固有のテスト項目のみを列挙する。
 
 1. 対象外セクション透過: モーフ/照明/セルフ影/IKがバイト単位で保持されること
@@ -435,20 +432,20 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 8. カメラ距離カット: `--cut-threshold-camera POS,ROT,DIST` の DIST で距離ジャンプを
    不連続として検出すること
 
-機械モード(§12)の CLI 固有テスト:
+機械モード([§12](#12-機械モード機械可読インターフェース))の CLI 固有テスト:
 
 9. 機械モード出力: `--machine` の標準出力が有効な JSON Lines(各行が単一 JSON・UTF-8、行区切りが LF
    のみ)で、result または error のちょうど 1 つで終端すること(通常実行・dry-run・list-bones・
    describe・各エラー経路)。
-10. `--describe`: 入力無しで動き、§12.3 の 31 オプションと 3 プリセットを固定形で返すこと。
-11. inspect: `--machine --dry-run` が VMD を書かず §12.2 の inspect ペイロード(target・keys・
+10. `--describe`: 入力無しで動き、[§12.3](#123---describe-の中身) の 31 オプションと 3 プリセットを固定形で返すこと。
+11. inspect: `--machine --dry-run` が VMD を書かず [§12.2](#122-イベントペイロード) の inspect ペイロード(target・keys・
     frame_range・ranges・camera/bones の誤差とカット)を返し、`--target` の各値と範囲・選択の
     組み合わせで camera/bones の null 有無が正しいこと。
-12. list_bones: `--machine --list-bones` が §12.2 の list_bones ペイロードを返し、選択子解決不能でも
+12. list_bones: `--machine --list-bones` が [§12.2](#122-イベントペイロード) の list_bones ペイロードを返し、選択子解決不能でも
     `selector_unmatched`(蓄積分)と `selection_unresolved`(理由)の warning の後に result で終端し
     終了コード 0 になること。
-13. 構造化エラー: §12.4 の各経路で、機械モードは所定の `code`/`field`/`exit_code` の error イベント、
-    非機械モードは標準エラーへの理由 1 行+同じ終了コードになること(§12.4 の全 `code` を網羅)。
+13. 構造化エラー: [§12.4](#124-構造化エラー) の各経路で、機械モードは所定の `code`/`field`/`exit_code` の error イベント、
+    非機械モードは標準エラーへの理由 1 行+同じ終了コードになること([§12.4](#124-構造化エラー) の全 `code` を網羅)。
 14. 中断: 削減段に `KeyboardInterrupt` を注入し、機械モードで `cancelled`(exit 130)の終端イベント、
     非機械モードで理由 1 行+130 になり、出力ファイルが残らないこと。
 15. progress: カメラ段がフレーム進捗と補足(出力後検証)を、ボーン段がトラック進捗とボーン名を、
@@ -456,7 +453,7 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 16. 既定挙動の回帰: 非機械・正常系の出力 VMD がバイト一致で不変、終了コード不変、dry-run /
     list-bones の標準出力テキスト不変。`--help`/`--version` が `--machine` 併用でも人間向けテキスト+
     終了コード 0 のままであること。
-17. 移植性(規約 §10): 非 ASCII(日本語)の入出力パスで動作し、stderr がロケール符号化で表せない
+17. 移植性(規約 [§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール)): 非 ASCII(日本語)の入出力パスで動作し、stderr がロケール符号化で表せない
     文字を含む警告でも異常終了しないこと。
 18. 警告透過: デコード不能ボーン名を含む入力で `decode-error` の warning イベントが人間向け経路と同じ
     重複集約で出て、不一致選択子で `selector_unmatched`、範囲外 keep-frame で `keep_frame_ignored` が
@@ -479,9 +476,9 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 
 ### 11.1 性能上の制約と推奨運用
 
-- `bezier` モードは高品質だが `linear` より計算量が大きい。出力後検証(§7.3)で許容超過があれば
+- `bezier` モードは高品質だが `linear` より計算量が大きい。出力後検証([§7.3](#73-出力後検証))で許容超過があれば
   区間を密化して再フィットするため、長尺・高密度入力ではフィット回数が増えて処理時間が伸びる
-  (フィットコストの支配項は共有エンジンの正本 [vmd.md §6.1](../../libs/vmd/vmd.md#61-コストモデルどこが支配的か))。
+  (フィットコストの支配項は共有エンジンの正本 [vmd.md §6](../../libs/vmd/vmd.md#6-疎化フィットの性能契約))。
 - 長尺・高密度入力で待ち時間が問題になる場合の運用回避策:
   - `--range` で区間を分割して必要部分だけ処理する。
   - `--preset aggressive` で許容を緩めてキー数とフィット回数を減らす。
@@ -490,8 +487,8 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 - `shakevmd --smooth` は `curve-mode=bezier` + aggressive 相当 + `max-segment-frames=5` を
   固定設定として使う(短い区間で高速にフィットする)。
 - 既定設定で対話的に待てない時間まで未完了になる状態は性能回帰として扱う。
-- フィットコストの支配項・棄却済み最適化(曲線評価の numpy ベクトル化は遅化するため不採用)・
-  有効な高速化方向は、共有エンジンの正本 [vmd.md §6](../../libs/vmd/vmd.md#6-疎化フィットの性能特性棄却済み最適化) を参照する(ここに重複して書かない)。
+- フィットの性能契約(采否の不変条件・ファストパスの既定と `force_bezier` によるオプトアウト)は、
+  共有エンジンの正本 [vmd.md §6](../../libs/vmd/vmd.md#6-疎化フィットの性能契約) を参照する(ここに重複して書かない)。
 
 ---
 
@@ -499,34 +496,35 @@ VMDの読み書き・データモデル・正規化は共通ライブラリ vmd 
 
 機械モードは、他のソフトウェアが sparsevmd を子プロセスとして呼ぶための構造化出力を提供する。
 共通契約(イベント種別の語彙・終端規則・チャネル固定・stdout の UTF-8/LF 固定・終了コードの基底)は
-規約 §3〜§6・§8・§10 と、共有基盤 [cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は
-sparsevmd 固有のイベントペイロードと `code` 値だけを定める。イベント送出は cli_events の `EventEmitter` を用いる。
+規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動)〜[§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性)・[§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性)・[§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール) と、共有基盤 [cli_events](../../libs/cli_events/cli_events.md) が正本であり、本節は
+sparsevmd 固有のイベントペイロードと `code` 値だけを定める。イベント送出は共有基盤 cli_events に委譲する。
 
 ### 12.1 チャネルと終端
 
-- **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 §3。`--describe` は人間向け
-  既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定してエミッタと
-  `MachineArgumentParser`(§12.4)を使い、使用法エラー・想定外エラーも error イベントで終端する
+- **構造化出力モード**は `--machine` 指定時と `--describe` 指定時(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動)。`--describe` は人間向け
+  既定を持たない独立メタ操作)。どちらかが argv にあれば引数解析前に先取り判定し、
+  使用法エラー・想定外エラーも error イベントで終端する
   (例: `--describe` と未知オプションの併用も `bad_argument` イベント+終了コード 2)。
-- 構造化出力モードの標準出力は §12.2 のイベントのみ。エミッタ(`cli_events.EventEmitter`)はバイナリ
-  標準出力(`sys.stdout.buffer`)へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない
-  (規約 §10)。
-- 人間向け標準エラーは `sys.stderr.reconfigure(errors="backslashreplace")` で符号化失敗時もプロセスを
-  落とさない(規約 §10。機械モードに限らず常に適用する)。`--verbose` の詳細ログは機械モードでも
+- 構造化出力モードの標準出力は [§12.2](#122-イベントペイロード) のイベントのみ。バイナリストリームとして
+  標準出力へ UTF-8・行区切り LF で書き、ロケール符号化・CRLF 変換に依存しない
+  (規約 [§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール))。
+- 人間向け標準エラーは、ロケール符号化で表せない文字を置換して出し、符号化失敗でプロセスを
+  落とさない(規約 [§10](../../docs/conventions/cli-interface.md#10-移植性パス符号化改行ロケール)。機械モードに限らず常に適用する)。`--verbose` の詳細ログは機械モードでも
   従来どおり標準エラーへ出す(機械利用側は解釈しない)。
-- ストリームは result または error のちょうど 1 つで終端する。終端は `main()` の単一経路で送出し、
-  終端後の送出はしない(cli_events が `StreamTerminatedError` で拒否する)。
+- ストリームは result または error のちょうど 1 つで終端する(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める終端保証の
+  例外を除く)。終端は CLI 本体の単一経路で送出し、終端後の送出は拒否される。
 - `--help` / `--version` は `--machine` 併用でも人間向けテキストを出して終了コード 0 で終わり、イベント
-  ストリームには載せない(規約 §3 のメタ操作の例外)。
-- イベント契約の進化は規約 §4.1 に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
+  ストリームには載せない(規約 [§3](../../docs/conventions/cli-interface.md#3-機械モードの起動) のメタ操作の例外)。
+- イベント契約の進化は規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換) に従う(フィールド・種別・`code` の追加=MINOR、削除・意味変更=MAJOR。
   受信側は未知要素を無視できる前提)。
 
 ### 12.2 イベントペイロード
 
 - **progress**: `{type:"progress", stage, done, total, note, elapsed}`。`stage` は安定 id
-  `"camera"`(カメラ削減)/ `"bone"`(ボーン削減)。各段は開始時に `done=0, total=null, note:"",
-  elapsed:0.0` を 1 本出す。`camera` 段は `reduce_camera_track` の進捗通知(処理済みフレーム数・
-  全範囲フレーム総数・補足文字列。出力後検証区間では補足が付く)を `done`/`total`/`note` で出す。
+  `"camera"`(キーフレーム圧縮・カメラ対象)/ `"bone"`(キーフレーム圧縮・ボーン対象)。各段は開始時に
+  `done=0, total=null, note:"",
+  elapsed:0.0` を 1 本出す。`camera` 段の `done`/`total`/`note` はエンジンの進捗通知契約
+  ([vmd-reduce.md §11](../../libs/vmd/vmd-reduce.md#11-進捗通知progress-コールバック) を正とする)をそのまま写す。
   `bone` 段は削減対象ボーン(選択され 2 キー以上を持つトラック)1 件の完了ごとに `done`/`total`
   (`total`=対象トラック数)、`note`=ボーン名で出す。`elapsed` は段開始からの経過秒(float)。処理しない
   段(`--target bone` のカメラ段など)はイベント自体を出さない。
@@ -536,10 +534,10 @@ sparsevmd 固有のイベントペイロードと `code` 値だけを定める�
     `sections-missing`)をそのまま透過し、`section` は `VmdWarning.section` があれば単一要素配列
     `[section]`、無ければ `null`(`sections-missing` は `section` を持たない)。人間向け経路と
     同じ基準(code・section・message の同一組は 1 件)で重複をまとめる。
-  - ボーン選択の不一致警告(不在の exclude 名・1 件も一致しない glob/group。`SelectionError` 到達前の
-    蓄積分を含む): `selector_unmatched`、`section` は `null`。文言は現行の警告文字列を `message` に
-    載せる。
-  - `--list-bones` で選択子が解決不能(`SelectionError`。通常経路なら §12.4 の `bone_selection_invalid`
+  - ボーン選択の不一致警告(不在の exclude 名・1 件も一致しない glob/group。選択解決ハードエラー
+    到達前の蓄積分を含む): `selector_unmatched`、`section` は `null`。文言は現行の警告文字列を
+    `message` に載せる。
+  - `--list-bones` で選択子が解決不能(通常経路なら [§12.4](#124-構造化エラー) の `bone_selection_invalid`
     で終了コード 2)な場合のその理由: `selection_unresolved`、`section` は `null`、`message` は例外の
     文言。検査モードは現行どおり一覧表示を続けて終了コード 0 なので error ではなく warning とし、
     蓄積分(`selector_unmatched`)の後に 1 件出す。
@@ -560,7 +558,7 @@ sparsevmd 固有のイベントペイロードと `code` 値だけを定める�
     フレームの配列)、それ以外 `null`。`bones` はボーンを処理したとき初出順の
     `{name, selected, input_keys, output_keys, errors, cuts}` の配列(非選択・削減不能トラックは
     `errors`/`cuts` を `null`)、それ以外 `null`。継ぎ目書き換え・分割理由・出力後検証の反復詳細は
-    人間向け dry-run / `--verbose` に残し、inspect には載せない(必要になれば規約 §4.1 の後方互換追加で
+    人間向け dry-run / `--verbose` に残し、inspect には載せない(必要になれば規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換) の後方互換追加で
     拡張する)。
   - `mode:"list_bones"`(`--machine --list-bones`): `{type:"result", mode:"list_bones", bones}`。
     `bones` は初出順の `{name, keys, selected}` の配列。VMD は書かない。選択子が解決不能な場合も
@@ -568,9 +566,9 @@ sparsevmd 固有のイベントペイロードと `code` 値だけを定める�
     `selection_unresolved`(理由)の warning イベントを result より先に出す。非機械の `--list-bones`
     は従来どおり人間向けテキスト。
   - `mode:"describe"`(自己記述 `--describe`): `{type:"result", mode:"describe", options, presets}`
-    (§12.3)。VMD を読まないので他 mode のキーは載せない。
+    ([§12.3](#123---describe-の中身))。VMD を読まないので他 mode のキーは載せない。
 - **error**: `{type:"error", code, exit_code, field, path, message}`。`field`/`path` は対象が無ければ
-  `null`。失敗の終端イベント(§12.4)。
+  `null`。失敗の終端イベント([§12.4](#124-構造化エラー))。
 
 ### 12.3 `--describe` の中身
 
@@ -580,15 +578,15 @@ sparsevmd 固有のイベントペイロードと `code` 値だけを定める�
 `"float"`/`"int"`/`"str"`/`"flag"`/`"enum"`/`"compound"`。数値の `constraint` は
 `{min, max, exclusive_min}` の 3 キー常設(上限が無ければ `max:null`)、`enum` は `{choices:[...]}`、
 `compound` は `{format, fields}`(`fields` の各要素は `{name, type, min, max, exclusive_min}`)、
-`flag`/`str` は `null`。`help` は §2 のヘルプ文言。
+`flag`/`str` は `null`。`help` は [§2](#2-コマンドライン仕様) のヘルプ文言。
 
 - 真偽フラグの対は**肯定形の長形式 1 要素だけ**を載せる(型 `flag`。`--cut-detect`/`--no-cut-detect`
   の対は `--cut-detect` の 1 要素)。無効化の起動形は名前に `--no-` を前置した否定形とする
-  (規約 §6 の `--x/--no-x` 様式。呼び出し側は `default` が `true` のフラグを無効化するとき否定形を
+  (規約 [§6](../../docs/conventions/cli-interface.md#6-横断的な一貫性) の `--x/--no-x` 様式。呼び出し側は `default` が `true` のフラグを無効化するとき否定形を
   発行する)。否定形を別要素として重複列挙しない。
 - `--bone-group`/`--exclude-bone-group` の `enum` は自己記述上の値域であり、**argparse の `choices`
-  へは追加しない**。未知グループの検証は現行どおり選択解決時の `SelectionError`(§12.4 の
-  `bone_selection_invalid`)であり、§2.2 の検証位置・順序を変えない。
+  へは追加しない**。未知グループの検証は現行どおり選択解決時のハードエラー([§12.4](#124-構造化エラー) の
+  `bone_selection_invalid`)であり、[§2.2](#22-入出力対象) の検証位置・順序を変えない。
 
 全 31 要素を確定する:
 
@@ -631,52 +629,53 @@ compound の数値 fields は `{name, type, min, max, exclusive_min}` で、省�
 
 `presets` は各要素 `{name, values}` の配列。`name` は品質プリセット名(`precise`/`balanced`/
 `aggressive`)、`values` は `{bone_pos_tol, bone_rot_tol, camera_pos_tol, camera_rot_tol,
-camera_distance_tol, camera_fov_tol}`(§2.4 の表の値)。
+camera_distance_tol, camera_fov_tol}`([§2.4](#24-許容誤差) の表の値)。
 
 ### 12.4 構造化エラー
 
-失敗は終了コードに加え、構造化出力モード(`--machine`・`--describe`。§12.1)では error イベントで
+失敗は終了コードに加え、構造化出力モード(`--machine`・`--describe`。[§12.1](#121-チャネルと終端))では error イベントで
 「どのフィールド/パスが・なぜ」を返す。それ以外では理由を標準エラーへ最低 1 行出す(書式
-`error: <message>`。トレースバックは出さない)。検証の位置・順序は現行のまま(§2.2)。
+`error: <message>`。トレースバックは出さない)。検証の位置・順序は現行のまま([§2.2](#22-入出力対象))。
 
 | 事象 | `code` | `field` | `exit_code` |
 |---|---|---|---|
 | argparse 検出(未知オプション・型エラー・choices 外・positional 欠落・`--range`/`--keep-frame`/カット閾値の書式不正)、および解析後の単一オプション検証(`--min-segment-frames` < 1・`--max-segment-frames` < 1) | `bad_argument` | argparse が示す引数名、解析後検証は該当オプション名 | 2 |
 | `--min-segment-frames` > `--max-segment-frames` | `segment_bounds_conflict` | `null`(2 オプションにまたがる) | 2 |
-| 許容誤差の検証失敗(`presets.resolve_tolerances` の ValueError。負値・非有限・fov < 0.5) | `bad_tolerance` | `null`(起因フィールド名は例外文言として `message` に載る) | 2 |
-| 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 2 |
-| `--bone-file` パスが不在・通常ファイルでない | `bone_file_not_file` | `"--bone-file"` | 2 |
-| `--bone-file` の読み込み・解析失敗(UTF-8 デコード不能等) | `bad_bone_file` | `"--bone-file"` | 2 |
+| 許容誤差の検証失敗(負値・非有限・fov < 0.5) | `bad_tolerance` | `null`(起因フィールド名は例外文言として `message` に載る) | 2 |
+| 入力パスが不在・通常ファイルでない | `input_not_file` | `"input"` | 1 |
+| `--bone-file` パスが不在・通常ファイルでない | `bone_file_not_file` | `"--bone-file"` | 1 |
+| `--bone-file` の読み込み・解析失敗(UTF-8 デコード不能等) | `bad_bone_file` | `"--bone-file"` | 1 |
 | `--target camera` とボーン選択の同時指定 | `target_selection_conflict` | `null` | 2 |
-| 出力先が入力と同一パス・`--overwrite` 未指定 | `output_overwrites_input` | `"--output"` | 2 |
-| ボーン選択のハードエラー(空文字名・include/exclude 重複名・明示 `--bone` 名の不在・選択結果 0 件。`SelectionError`) | `bone_selection_invalid` | `null`(対象名は `message` に載る) | 2 |
-| `--range` の展開・正規化失敗(重複・省略端解決後の逆順。`ranges.RangeError`) | `range_invalid` | `"--range"` | 2 |
+| 出力先が既存のディレクトリ(`--overwrite` の有無に依らない) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
+| 出力先に既存ファイルがある・`--overwrite` 未指定 | `output_exists` | `"--output"` | 2 |
+| ボーンセクションにキーがある場合の、ボーン選択のハードエラー(空文字名・include/exclude 重複名・明示 `--bone` 名の不在・選択結果 0 件) | `bone_selection_invalid` | `null`(対象名は `message` に載る) | 2 |
+| `--range` の展開・正規化失敗(重複・省略端解決後の逆順) | `range_invalid` | `"--range"` | 2 |
 | 入力が VMD でない・破損 | `not_vmd` | `"input"` | 1 |
-| 指定 `--target` の対象セクションにキーが無い | `no_target_keys` | `"input"` | 1 |
-| `--strict` で許容誤差を満たせない(`StrictError`) | `strict_tolerance_unmet` | `null` | 4 |
+| 指定 `--target` の対象セクションにキーが無い(`--target all` でボーン選択を明示した場合は、カメラの有無によらずボーンセクションが空であることを含む) | `no_target_keys` | `"input"` | 1 |
+| `--strict` で許容誤差を満たせない | `strict_tolerance_unmet` | `null` | 4 |
 | 出力書き込み失敗 | `write_failed` | `"--output"`(+ `path`) | 3 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
 | 協調的な中断(Ctrl-C 等) | `cancelled` | `null` | 130 |
 
 - `not_vmd` は現在握り潰している例外の種別・文言を `message` に載せる。`bone_selection_invalid` の
-  送出前に、蓄積済みの不一致警告(`SelectionError.warnings`)を warning イベントとして先に出す
+  送出前に、蓄積済みの不一致警告を warning イベントとして先に出す
   (人間向け経路の順序と同じ)。
-- 構造化出力モードの argparse エラーは `cli_events.MachineArgumentParser` で `ArgumentParseError` に
-  振り替え、`argparse_error_event` で `bad_argument` イベントにする。`field` の抽出は共有ヘルパ
-  `cli_events.argparse_error_field(message)` を使う(抽出規則は
-  [cli_events.md](../../libs/cli_events/cli_events.md) §4 が正)。
-- `internal_error` は引数解析後の本体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
-  なく中断(`cancelled`/130)として手前で分岐する(§12.5)。
+- 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は
+  [cli_events.md §4](../../libs/cli_events/cli_events.md#4-argparse-エラー変換ヘルパ) が正。
+- `internal_error` は CLI 本体の全体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
+  なく中断(`cancelled`/130)として手前で分岐する([§12.5](#125-中断と出力の原子性))。
+- 出力先が既存のディレクトリの場合は `--overwrite` でも書けないため、上書きガードより前に
+  `--overwrite` の有無に依らず `output_is_directory` で拒否する(上書きの許可を促す案内を出さない)。
+  出力を書かない `--list-bones` は上書きガードと同様にこのディレクトリ検査の対象外とする。
 
 ### 12.5 中断と出力の原子性
 
-- VMD 出力は `vmd.io.write_file` の一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
+- VMD 出力は一時ファイル+原子置換で行う。書き込みは全計算後に 1 回だけ
   起きるため、途中終了で中途半端な出力ファイルは残らない。
-- `main()` は引数解析後の本体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
+- CLI は本体の全体で `KeyboardInterrupt` を捕捉し、構造化出力モードでは `cancelled` の
   error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130
-  で終える。POSIX シグナル API には依存せず、`KeyboardInterrupt`(Ctrl-C)の捕捉で畳む(sparsevmd の
-  削減は単一プロセスで走り、子プロセスは持たない)。
-- 進捗のライブ表示は中断・例外経路でも行を閉じてから終える(`_Progress` の finish を try/finally で
-  保証する)。機械モードではライブ表示自体を無効化する。
-- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 §4 の終端保証の
-  唯一の例外。§8)。出力の原子性により中途半端な出力ファイルは残らない。
+  で終える(sparsevmd の削減は単一プロセスで走り、子プロセスは持たない)。
+- **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
+  扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
+- 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める
+  終端保証の例外の 1 つ。規約 [§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性))。出力の原子性により中途半端な出力ファイルは残らない。

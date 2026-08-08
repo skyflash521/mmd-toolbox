@@ -1,4 +1,4 @@
-"""構造化警告(shakevmd.md §12.3)。
+"""構造化警告。
 
 警告を自由文字列でなく (code, message, section) の構造で持つ。機械モードでは warning
 イベント {type, code, message, section} として送出し、非機械モードでは人間向けに1行表示する。

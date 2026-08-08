@@ -1,4 +1,4 @@
-"""足IK接地安定化の統合テスト(mocapvmd.md §4.3 / §4.4)。
+"""足IK接地安定化の統合テスト。
 
 stabilize_foot_ik は、足IK・つま先IKの密トラック群に対して、左右ペアリング・接地区間検出(対応する
 相方があれば相対位置条件を併用)・接地ロック適用を束ね、トラックごとのロック後位置と診断
@@ -146,7 +146,7 @@ def test_diagnostics_change_and_ratio():
     frames = list(range(len(pos)))
     ts = footik.stabilize_foot_ik({"右足ＩＫ": ("foot_ik", frames, pos)}, _S)["右足ＩＫ"]
 
-    changes = [_euclid(p, q) for p, q in zip(pos, ts.locked_positions)]
+    changes = [_euclid(p, q) for p, q in zip(pos, ts.locked_positions, strict=True)]
     in_seg = sum(s.end - s.start + 1 for s in ts.grounding.segments)
     assert ts.max_change == pytest.approx(max(changes))
     assert ts.mean_change == pytest.approx(sum(changes) / len(changes))

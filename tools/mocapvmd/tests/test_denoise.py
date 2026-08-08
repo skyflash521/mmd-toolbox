@@ -1,4 +1,4 @@
-"""一般ノイズ軽減の検出層のテスト(mocapvmd.md §4.2)。
+"""一般ノイズ軽減の検出層のテスト。
 
 各ボーンの密サンプル(0始まり相対インデックス)から検出する。位置は各軸スカラー、回転は quaternion。
 
@@ -178,7 +178,7 @@ def test_apparent_spike_at_cut_not_corrected():
 
 
 def test_cuts_reported_separately_from_boundaries():
-    # 検出カットフレームを boundaries(両側に潰した集合)とは別に保持する(§4.4 検出カット数用)。
+    # 検出カットフレームを boundaries(両側に潰した集合)とは別に保持する。
     pos = [(0.0, 0.0, 0.0)] * 6 + [(2.0, 0.0, 0.0)] * 5
     r = detect(pos, idents(11))
     assert r.cuts == {6}

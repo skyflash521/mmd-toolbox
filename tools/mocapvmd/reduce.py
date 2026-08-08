@@ -1,4 +1,4 @@
-"""mocapvmd の疎化オーケストレーション(mocapvmd.md §3.3 / §5.3)。
+"""mocapvmd の疎化オーケストレーション。
 
 クリーニング(一般ノイズ軽減)+足IK安定化の後、全密ボーントラックを vmd.reduce の
 共通機構で疎化する。種別ごとに resolve_reduction_tolerances で解決した許容誤差を build_bone_tolerances
@@ -13,6 +13,7 @@
 
 import os
 import signal
+import sys
 from multiprocessing import get_context
 
 from vmd.reduce import build_bone_tolerances, measure_bone_errors, reduce_bone_track
@@ -74,20 +75,24 @@ def _reduce_one(item):
 
 
 def _reduce_worker_init():
-    """プロセスプールのワーカ initializer(mocapvmd.md §10.6)。ワーカに SIGINT を無視させ、中断の
+    """プロセスプールのワーカ initializer。ワーカに SIGINT/SIGBREAK を無視させ、中断の
     畳み込みを親プロセスへ一元化する。
 
     Windows の Ctrl-C(CTRL_C_EVENT)は同一コンソールの全プロセスへ配送されるため、無視しないとワーカが
-    任意の位置で KeyboardInterrupt 死し、トレースバックが標準エラーへ漏れるうえ、失われたタスク結果を
-    親が待ち続ける余地が生まれる。spawn で pickle 可能にするため module-level 関数にする。
+    任意の位置で未捕捉の KeyboardInterrupt により終了し、トレースバックが標準エラーへ漏れるうえ、
+    失われたタスク結果を親が待ち続ける余地が生まれる。CTRL_BREAK_EVENT(SIGBREAK)も同じプロセスグループ
+    の子孫へ配送され、ワーカにはハンドラが無いため無視しないと OS の既定動作で即座に終了する。spawn で
+    pickle 可能にするため module-level 関数にする。
     """
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
 
 
 def _make_pool(workers):
     """ワーカ数 workers のプロセスプールを生成する。OS 既定に依らず spawn を明示し(Windows と同条件で
-    pickle 可能性を担保)、ワーカに SIGINT を無視させる initializer(§10.6)を配線し、プール生成を1か所に
-    閉じ込める。
+    pickle 可能性を担保)、ワーカに SIGINT/SIGBREAK を無視させる initializer を配線し、プール生成を
+    1か所に閉じ込める。
     """
     return get_context("spawn").Pool(processes=workers, initializer=_reduce_worker_init)
 
@@ -103,7 +108,7 @@ def reduce_bones(
     cleaned_keys, preset, *, override_pos=None, override_rot=None, curve_mode="bezier",
     diagnostics_out=None, workers=None, progress=None,
 ):
-    """クリーニング後の全密ボーントラックを種別別許容誤差で疎化し、疎なキー列を返す(§5.3)。
+    """クリーニング後の全密ボーントラックを種別別許容誤差で疎化し、疎なキー列を返す。
 
     名前ごとにトラック化し、種別別に解決した許容誤差(プリセット基準 × 種別スケール、override で基準
     上書き)で reduce_bone_track により疎化する。各トラックの範囲はトラック実在区間 [(first, last)]。
@@ -114,7 +119,7 @@ def reduce_bones(
     各ボーンの reduce は決定論的で実行順に非依存、再結合をトラックの first-seen 順で行うため、出力は
     ワーカ数・完了順に依らずシリアル(workers=1)と完全に一致する。
 
-    diagnostics_out に dict を渡すと、レポート(§4.4)用にトラックごとの素データ
+    diagnostics_out に dict を渡すと、レポート用にトラックごとの素データ
     {input_keys, output_keys, tol_pos, tol_rot, cuts, errors} を埋める。cuts は reduce_bone_track の
     検出カット数、errors は measure_bone_errors の軸別最大再生誤差(疎化前の密 vs 疎化後)。キー1個以下の
     逐語トラックは削減なし(入出力同数・カット0・誤差0)として載せる。収集は疎化結果を変えない。
@@ -193,7 +198,6 @@ def reduce_bones(
                 progress(done, total)
         out.extend(reduced)
         if want_diag:
-            f0, f1 = ks[0].frame, ks[-1].frame
             diagnostics_out[name] = {
                 "input_keys": len(ks),
                 "output_keys": len(reduced),

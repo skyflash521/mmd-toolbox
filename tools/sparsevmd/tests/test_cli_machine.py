@@ -1,25 +1,25 @@
-"""sparsevmd CLI 機械モード骨格・構造化エラーのテスト(sparsevmd.md §9/§12)。
+"""sparsevmd CLI 機械モード骨格・構造化エラーのテスト。
 
 機械モードは stdout を JSON Lines のイベント専用にし、失敗は確定 code/field/exit_code の error
-イベントで終端する。非機械モードは失敗理由を標準エラーへ 1 行出す。既定(非機械)挙動が不変である
-こと(後方互換)も併せて検証する。
+イベントで終端する。非機械モードは失敗理由を標準エラーへ 1 行出す。非機械モードの出力ファイル・
+終了コードが機械モードと同じであることも併せて検証する。
 
 本モジュールは骨格(--version / --machine / --describe / --quiet / --cut-detect フラグ・
-MachineArgumentParser 切替・emitter・fail() 単一失敗経路・stderr の backslashreplace 再構成・
-help= 付与・input の nargs="?" 化)と §12.4 の構造化エラー全経路を対象にする。成功経路のイベント
+emitter・fail() 単一失敗経路・stderr の backslashreplace 再構成・
+help= 付与・input の nargs="?" 化)と構造化エラーの全経路を対象にする。成功経路のイベント
 (progress / warning / result)・自己記述 result・中断は本モジュールの対象外とする。
 
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テスト方針は
-../../../libs/vmd/vmd.md §4 に準ずる(決定論的・外部依存なし)。
+機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テストは
+決定論的に実行し、外部依存を使わない。
 """
 
 import json
 
 import pytest
 
+from sparsevmd import cli
 from vmd import io
 from vmd.types import BoneKey, CameraKey, VmdDocument
-from sparsevmd import cli
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 
@@ -76,18 +76,17 @@ def ramp_camera(path):
 
 
 def test_version_prints_and_exits_zero(capsys):
-    # --version は __version__ を表示して終了コード0(§2/§12.1)。番号源は __version__ 一本。
+    # --version は __version__ を表示して終了コード0。番号源は __version__ 一本。
     from sparsevmd import __version__
 
     rc = cli.main(["--version"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "sparsevmd" in out and __version__ in out
-    assert __version__ == "0.0.1"  # §2 の初期版(§10 完了条件)
 
 
 def test_machine_version_stays_human(capsys):
-    # --machine 併用でも --version は人間向けテキスト+exit 0、イベントに載せない(§12.1)。
+    # --machine 併用でも --version は人間向けテキスト+exit 0、イベントに載せない。
     rc = cli.main(["--machine", "--version"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -102,7 +101,7 @@ def test_machine_help_stays_human(capsys):
 
 
 def test_help_lists_new_flags(capsys):
-    # --help に新設フラグが現れる(規約 §6 の人間向けヘルプ)。
+    # --help に新設フラグが現れる(人間向けヘルプ)。
     rc = cli.main(["--help"])
     assert rc == 0
     text = capsys.readouterr().out
@@ -120,7 +119,7 @@ def test_machine_error_bad_argument_unknown_option(tmp_path, capsysbinary):
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["exit_code"] == 2
-    assert e["field"] == "--bogus"   # unrecognized arguments: の先頭トークン(§12.4 / cli_events §4)
+    assert e["field"] == "--bogus"   # unrecognized arguments: の先頭トークン
     assert isinstance(e["message"], str) and e["message"]
 
 
@@ -175,36 +174,7 @@ def test_machine_error_bad_tolerance(tmp_path, capsysbinary):
     assert isinstance(e["message"], str) and e["message"]
 
 
-# --- 引数エラー(パス・競合・上書き)---------------------------------------
-
-
-def test_machine_error_input_not_file(tmp_path, capsysbinary):
-    rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
-    assert rc == 2
-    e = machine_error(capsysbinary)
-    assert e["code"] == "input_not_file" and e["field"] == "input" and e["exit_code"] == 2
-
-
-def test_machine_error_bone_file_not_file(tmp_path, capsysbinary):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
-    rc = cli.main([str(src), "--machine", "--target", "bone",
-                   "--bone-file", str(tmp_path / "nope.txt")])
-    assert rc == 2
-    e = machine_error(capsysbinary)
-    assert e["code"] == "bone_file_not_file" and e["field"] == "--bone-file" and e["exit_code"] == 2
-
-
-def test_machine_error_bad_bone_file(tmp_path, capsysbinary):
-    # 存在するが UTF-8 デコード不能な --bone-file → bad_bone_file(読み込み失敗)。
-    src = tmp_path / "in.vmd"
-    write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
-    bf = tmp_path / "bones.txt"
-    bf.write_bytes(b"\xff\xfe\x00 invalid utf8")
-    rc = cli.main([str(src), "--machine", "--target", "bone", "--bone-file", str(bf)])
-    assert rc == 2
-    e = machine_error(capsysbinary)
-    assert e["code"] == "bad_bone_file" and e["field"] == "--bone-file" and e["exit_code"] == 2
+# --- 引数エラー(競合・上書き・範囲)-----------------------------------------
 
 
 def test_machine_error_target_selection_conflict(tmp_path, capsysbinary):
@@ -216,13 +186,25 @@ def test_machine_error_target_selection_conflict(tmp_path, capsysbinary):
     assert e["code"] == "target_selection_conflict" and e["field"] is None and e["exit_code"] == 2
 
 
-def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
+def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     ramp_camera(src)
     rc = cli.main([str(src), "-o", str(src), "--machine"])
     assert rc == 2
     e = machine_error(capsysbinary)
-    assert e["code"] == "output_overwrites_input" and e["field"] == "--output" and e["exit_code"] == 2
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
+
+
+def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
+    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
+    src = tmp_path / "in.vmd"
+    ramp_camera(src)
+    out = tmp_path / "out.vmd"
+    out.write_bytes(b"old content")
+    rc = cli.main([str(src), "-o", str(out), "--machine"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
 
 
 def test_machine_error_bone_selection_invalid(tmp_path, capsysbinary):
@@ -247,6 +229,35 @@ def test_machine_error_range_invalid(tmp_path, capsysbinary):
 
 
 # --- 入力不正・処理固有の失敗 ----------------------------------------------
+
+
+def test_machine_error_input_not_file(tmp_path, capsysbinary):
+    rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "input_not_file" and e["field"] == "input" and e["exit_code"] == 1
+
+
+def test_machine_error_bone_file_not_file(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
+    rc = cli.main([str(src), "--machine", "--target", "bone",
+                   "--bone-file", str(tmp_path / "nope.txt")])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bone_file_not_file" and e["field"] == "--bone-file" and e["exit_code"] == 1
+
+
+def test_machine_error_bad_bone_file(tmp_path, capsysbinary):
+    # 存在するが UTF-8 デコード不能な --bone-file → bad_bone_file(読み込み失敗)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
+    bf = tmp_path / "bones.txt"
+    bf.write_bytes(b"\xff\xfe\x00 invalid utf8")
+    rc = cli.main([str(src), "--machine", "--target", "bone", "--bone-file", str(bf)])
+    assert rc == 1
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bad_bone_file" and e["field"] == "--bone-file" and e["exit_code"] == 1
 
 
 def test_machine_error_not_vmd(tmp_path, capsysbinary):
@@ -315,7 +326,7 @@ def test_machine_error_internal_error(tmp_path, capsysbinary, monkeypatch):
 def test_machine_error_stdout_is_valid_json_lines_lf_only(tmp_path, capsysbinary):
     # エラー経路でも stdout は有効な JSON Lines・LF のみ(\r 不在)。
     rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
-    assert rc == 2
+    assert rc == 1
     raw = capsysbinary.readouterr().out
     assert raw.endswith(b"\n") and b"\r" not in raw
     for ln in raw.decode("utf-8").split("\n"):
@@ -324,7 +335,7 @@ def test_machine_error_stdout_is_valid_json_lines_lf_only(tmp_path, capsysbinary
             assert "type" in obj
 
 
-# --- 非機械モードの理由 1 行(§12.4 / §6)-----------------------------------
+# --- 非機械モードの理由 1 行-----------------------------------
 
 
 def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
@@ -345,22 +356,44 @@ def test_non_machine_missing_input_is_arg_error(capsys):
     assert "error:" in capsys.readouterr().err.lower()
 
 
-# --- 進捗のライブ表示抑制(§2.7 / §12.1)------------------------------------
+# --- 進捗のライブ表示抑制------------------------------------
 
 
-def test_quiet_disables_live_progress_even_on_tty(tmp_path, capsys, monkeypatch):
-    # --quiet は標準エラーが端末でもライブ進捗表示を抑制する(§2.7)。TTY を擬装して検証する。
-    import sys as _sys
-    monkeypatch.setattr(_sys.stderr, "isatty", lambda: True, raising=False)
+# --quiet が TTY でもライブ進捗表示を抑制することは、進捗表示の有効化フラグをコンストラクタ引数
+# から直接記録する CLI 統合テストがタイミング非依存で厳密に検証する(実際の描画結果はハートビートの
+# 再描画間隔に依存し非決定的になるため、ここでは検証しない)。
+
+
+def test_machine_error_output_is_directory(tmp_path, capsysbinary):
+    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
+    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
     src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    # 前提: TTY 扱いなら通常実行(--quiet なし)では進捗ラベルが標準エラーに出る。
-    rc = cli.main([str(src), "-o", str(tmp_path / "base.vmd"),
-                   "--target", "camera", "--curve-mode", "linear"])
+    ramp_camera(src)
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    for extra in ([], ["--overwrite"]):
+        rc = cli.main([str(src), "-o", str(outdir), "--machine", *extra])
+        assert rc == 2
+        e = machine_error(capsysbinary)
+        assert e["code"] == "output_is_directory" and e["field"] == "--output"
+        assert e["exit_code"] == 2 and e["path"] == str(outdir)
+
+
+def test_machine_list_bones_ignores_output_is_directory(tmp_path, capsysbinary):
+    # --list-bones は出力を書かないので、出力先がディレクトリでも一覧を返す(検査の対象外)。
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc(), bone=[bone("センター", 0)])
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    rc = cli.main([str(src), "-o", str(outdir), "--machine", "--list-bones"])
     assert rc == 0
-    assert "カメラ削減" in capsys.readouterr().err
-    # --quiet はそのライブ進捗を抑制する(TTY でも出さない)。
-    rc = cli.main([str(src), "-o", str(tmp_path / "quiet.vmd"),
-                   "--target", "camera", "--curve-mode", "linear", "--quiet"])
-    assert rc == 0
-    assert "カメラ削減" not in capsys.readouterr().err
+    assert machine_events(capsysbinary)[-1]["mode"] == "list_bones"
+
+
+def test_non_machine_usage_error_is_single_error_line(capsys):
+    # 非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。
+    rc = cli.main(["in.vmd", "--bogus"])
+    assert rc == 2
+    # 標準エラー全体との完全一致で、物理的に1行であること・書式・argparse 生成の本文をそのまま
+    # 載せていることを同時に固定する(用法の行が混じればここで落ちる)。
+    assert capsys.readouterr().err == "error: unrecognized arguments: --bogus\n"

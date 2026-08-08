@@ -1,6 +1,6 @@
-"""レポートの誤差診断テスト(sparsevmd.md §7.2, §2.7)。
+"""レポートの誤差診断テスト。
 
-§7.2「最終レポートには軸ごとの最大絶対誤差も出す」に対応し、出力を再サンプリングして
+最終レポートには軸ごとの最大絶対誤差も出す。そのため出力を再サンプリングして
 元サンプルとのチャンネル別・軸別の最大絶対誤差を測り、dry-run に載せる。
 
 - measure_camera_errors: pos_x/pos_y/pos_z(軸別)・distance・fov・rot_deg(軸別角度の最大)
@@ -9,10 +9,10 @@
 
 import pytest
 
+from sparsevmd import report
+from sparsevmd.reduce import measure_bone_errors, measure_camera_errors
 from vmd import interp
 from vmd.types import BoneKey, CameraKey
-from sparsevmd import presets, report
-from sparsevmd.reduce import measure_bone_errors, measure_camera_errors
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 EASE = (96, 0, 96, 30)
@@ -136,9 +136,9 @@ def test_build_report_contains_errors():
 
 def test_cli_dry_run_includes_camera_errors(tmp_path, capsys):
     # CLI 経由の dry-run が軸別最大誤差を含むことをエンドツーエンドで確認する。
+    from sparsevmd import cli
     from vmd import io
     from vmd.types import VmdDocument
-    from sparsevmd import cli
 
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"

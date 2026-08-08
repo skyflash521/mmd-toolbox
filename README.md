@@ -6,12 +6,14 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 
 | ツール | 概要 | バージョン | 詳しい使い方 |
 |---|---|---|---|
-| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.1 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
-| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.2 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
+| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.2 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
+| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.3 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
+| `song2vmd` | 日本語の歌の音声ファイルから、リップモーション VMD を自動生成する | 0.0.1 | [tools/song2vmd/README.md](tools/song2vmd/README.md) |
+| `vpr2vmd` | VOCALOID のプロジェクトファイル(vpr)から、リップモーション VMD を生成する | 0.0.1 | [tools/vpr2vmd/README.md](tools/vpr2vmd/README.md) |
 
 ## 使い方
 
-### 1. Python 3.11 以上をインストールする
+### 1. Python 3.12 以上をインストールする
 
 - [Python 公式ダウンロードページ](https://www.python.org/downloads/)
 - [Python 公式ドキュメント: Python のセットアップと利用](https://docs.python.org/ja/3/using/index.html)
@@ -19,7 +21,7 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 Python のインストール手順は AI に次のように聞いてね。
 
 ```text
-WindowsまたはmacOSでPython 3.11以上をインストールして、ターミナルでpythonコマンドが使えるようにする手順を、初心者向けに教えて。
+WindowsまたはmacOSでPython 3.12以上をインストールして、ターミナルでpythonコマンドが使えるようにする手順を、初心者向けに教えて。
 ```
 
 ### 2. mmd-toolbox をダウンロードする
@@ -35,12 +37,12 @@ Git が使える人は clone して
 git clone https://github.com/skyflash521/mmd-toolbox.git
 ```
 
-### 3. README.md が入っているフォルダへ移動する
+### 3. [README.md](README.md) が入っているフォルダへ移動する
 
 Windows では PowerShell、macOS ではターミナルを開き、この README が入っているフォルダへ移動する。
 
 1. PowerShell またはターミナルに `cd ` と入力する。`cd` の後ろには半角スペースを入れる。
-2. 展開したフォルダを開き、`README.md` が見えるフォルダを PowerShell またはターミナルへドラッグ＆ドロップする。
+2. 展開したフォルダを開き、[`README.md`](README.md) が見えるフォルダを PowerShell またはターミナルへドラッグ＆ドロップする。
 3. Enter キーを押す。
 
 Enter キーを押す前は、たとえば次のようになる。
@@ -51,9 +53,8 @@ cd "C:\Users\ユーザー名\Downloads\mmd-toolbox-main\mmd-toolbox-main"
 
 以降のコマンドは、このフォルダの中で実行する。
 
-### 4. 初回準備コマンドを実行する
+### 4. 仮想環境を作成する
 
-最後に、初回準備をする。
 Windows では PowerShell で、次のコマンドを上から順番に実行する。
 
 ```powershell
@@ -73,9 +74,9 @@ pip install .
 
 ### 5. ツールを実行する
 
-ツールは、仮想環境(.venv)を有効にしたウィンドウで実行する。手順4をした直後の同じウィンドウなら、すでに有効なのでそのまま実行できる。
+ツールは、仮想環境(.venv)を有効にしたウィンドウで実行する。[手順4](#4-仮想環境を作成する)をした直後の同じウィンドウなら、すでに有効なのでそのまま実行できる。
 
-ウィンドウを開き直したときは、手順3と同じようにフォルダへ移動してから仮想環境を有効にする。Windows では PowerShell で次を実行する。
+ウィンドウを開き直したときは、[手順3](#3-readmemd-が入っているフォルダへ移動する)と同じようにフォルダへ移動してから仮想環境を有効にする。Windows では PowerShell で次を実行する。
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
@@ -155,6 +156,79 @@ shakevmd <入力ファイル名>.vmd
 
 詳しい使い方とオプションは [tools/shakevmd/README.md](tools/shakevmd/README.md)
 
+## song2vmd: 歌声からリップモーション VMD を自動生成する
+
+`song2vmd` は、日本語の歌の音声ファイル(BGM込み可)から、ボーカル分離・音素認識・音量解析を経て、あ・い・う・え・お・(ん)によるリップモーション VMD を自動生成するツール。
+
+追加のインストール:
+
+1. NVIDIA GPU を搭載している場合は [PyTorch 公式サイト](https://pytorch.org/get-started/locally/) の `Compute Platform` で CUDA のバージョンを選び、次のコマンドの `--index-url` をそれに合わせて実行する(次は CUDA 12.6 の場合)。
+
+   ```sh
+   pip install torch --index-url https://download.pytorch.org/whl/cu126 --force-reinstall --no-deps
+   ```
+
+2. 次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを追加する)。
+
+   ```sh
+   pip install ".[vocal-analysis]"
+   ```
+
+使い方:
+
+1. 歌の音声ファイル(wav・mp3 等)を用意する。
+2. 次のコマンドを実行する。
+
+```sh
+song2vmd <入力ファイル名>.wav
+```
+
+生成したリップモーション VMD が、入力した音声ファイルと同じフォルダに `<入力ファイル名>.vmd` という名前で作られる。
+
+処理の特徴:
+
+- ボーカル分離・音素認識・音量解析は内部で行い、外部ツールを利用者が個別に実行する必要はない。
+- 声の強弱を各モーラの口の開き量に反映し、モーラごとに口形を保持するリップモーションを作る。
+
+注意事項:
+
+- 対象は日本語の歌のみ。母音認識の誤り(歌唱の崩れ・ロングトーンなど)はそのまま口形に出る。
+- 生成するのはあ・い・う・え・お・(ん)の標準口モーフのみ。「ん」はオプション。
+- 感情・表情モーフ(まばたき・眉など)の生成、日本語以外の言語、歌詞テキスト指定による高精度化には対応しない。
+- 対応する音声ファイル形式は WAV・FLAC・OGG・mp3。ffmpeg がインストール済みの環境であれば、mp4/aac など追加の形式にも対応する。
+- 初回実行時だけ、内容認識・音素アライメント・ボーカル分離の学習済みモデルをインターネットから自動取得する(既定構成の合計は約7.7GB)。取得後はキャッシュされるため2回目以降のダウンロードは発生しない。
+- GPU(CUDA)は CUDA 版の `torch` を入れてあれば自動的に使う。VRAM が不足すると大幅に遅くなり、警告が表示される。その場合は `--device cpu` を指定すると改善することがある。
+- PC の性能(GPU の有無・CPU 性能など)によっては、処理に時間がかかることがある。
+
+詳しい使い方とオプションは [tools/song2vmd/README.md](tools/song2vmd/README.md)
+
+## vpr2vmd: VOCALOID のプロジェクトファイルからリップモーション VMD を生成する
+
+`vpr2vmd` は、VOCALOID のプロジェクトファイル(vpr)から、あ・い・う・え・お・(ん)によるリップモーション VMD を自動生成するツール。
+
+使い方:
+
+1. VOCALOID で保存した vpr ファイルを用意する。
+2. 次のコマンドを実行する。
+
+```sh
+vpr2vmd <入力ファイル名>.vpr
+```
+
+生成したリップモーション VMD が、入力した vpr と同じフォルダに `<入力ファイル名>.vmd` という名前で作られる。
+
+処理の特徴:
+
+- 声の強弱を各モーラの口の開き量に反映し、モーラごとに口形を保持するリップモーションを作る。
+
+注意事項:
+
+- リップモーションの対象は歌唱トラック1つ。vpr に複数のトラックが入っている場合は、オプション `--track` で選ぶ(既定は先頭のトラック)。
+- 生成するのはあ・い・う・え・お・(ん)の標準口モーフのみ。「ん」はオプション。まばたき・眉などの表情モーフは生成しない。
+- ピッチ・ビブラートなどの歌唱表現は再現しない。生成するのは口形と開き量のみ。
+
+詳しい使い方とオプションは [tools/vpr2vmd/README.md](tools/vpr2vmd/README.md)
+
 ## 開発者向け
 
 ### リポジトリ構成
@@ -164,12 +238,19 @@ shakevmd <入力ファイル名>.vmd
 | [pyproject.toml](pyproject.toml) | 公開コマンド、依存関係、テスト対象の設定 |
 | `docs/specs/` | ツールに依存しない仕様・参照資料 |
 | `docs/conventions/` | 層タクソノミー・バージョン付けなどツール横断の規約 |
-| `libs/vmd/` | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
+| `scripts/` | CI と開発者の双方から実行するリポジトリ保守スクリプト |
+| `libs/cli_events/` | 機械モードのイベント送出の共有ドメインライブラリ |
+| `libs/cli_options/` | 引数検証と自己記述の制約公開を同一定義から導く共有ドメインライブラリ |
+| `libs/cli_progress/` | 進捗ライブ表示の共有ドメインライブラリ |
+| `libs/cli_progress_router/` | 進捗をイベント送出とライブ表示へ振り分ける共有ドメインライブラリ |
+| `libs/cli_resource_watch/` | 資源逼迫・実行構成の観測と判定の共有ドメインライブラリ |
+| `libs/lipsync/` | リップモーション生成の共有ドメインライブラリ |
 | `libs/pmx/` | PMX 読み取り・ボーン階層・FK 評価のライブラリ |
-| `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
-| `libs/lipsync/` | 口パク生成の共有ドメインライブラリ |
+| `libs/vmd/` | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
 | `libs/vocal_analysis/` | 音声解析の共有ドメインライブラリ |
-| `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は `pyproject.toml`、おもなツールの使い方は冒頭「ツール」一覧 |
+| `libs/vocal_analysis_cli/` | 音声前段の共通CLI引数の定義・検証・設定解決の共有ドメインライブラリ |
+| `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
+| `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は [pyproject.toml](pyproject.toml)、おもなツールの使い方は冒頭の [ツール](#ツール) 一覧 |
 
 ### 開発環境
 
@@ -177,31 +258,36 @@ shakevmd <入力ファイル名>.vmd
 
 | ツール | 用途 | 備考 |
 |---|---|---|
-| Python 3.11 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.11 未満のことがあるため `py -3` を使う |
+| Python 3.12 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.12 未満のことがあるため `py -3` を使う |
 | Git | バージョン管理 | Windows は Git for Windows(Git Bash 同梱)を推奨 |
 | GitHub CLI(`gh`) | リリース作業(PR 作成・マージ・Release 確認)の実行 | 任意。ツールをリリースするときだけ必要。初回に `gh auth login` で認証する |
+| lychee | ドキュメントのリンク検査 | pip では入らないため各自で導入する。設定は [lychee.toml](lychee.toml) |
+| ruff | Python コードの静的検査 | 開発依存として導入される。設定は [pyproject.toml](pyproject.toml) |
 
-`numpy`・`scipy`(実行時依存)と `pytest`(開発依存)は `pip install -e ".[dev]"` で導入される。
+`numpy`・`scipy`(実行時依存)と `pytest`・`ruff`(開発依存)は `pip install -e ".[dev,vocal-analysis]"` で導入される。
+`song2vmd`(音声認識・ボーカル分離を使う)のテスト実行には、追加で `vocal-analysis` extra
+(`torch`・`transformers`・`pyopenjtalk-plus`等)が要る。開発環境構築では両方合わせて
+`pip install -e ".[dev,vocal-analysis]"` を使う。
 
 ### 環境構築
 
 リポジトリルートで仮想環境を作成し、開発インストールする。
 
-**macOS / Linux**
+#### macOS / Linux
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,vocal-analysis]"
 ```
 
-**Windows (PowerShell)**
+#### Windows (PowerShell)
 
 ```powershell
 py -3 -m venv .venv
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+pip install -e ".[dev,vocal-analysis]"
 ```
 
 cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替える。
@@ -214,32 +300,27 @@ cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替え�
 |---|---|---|
 | Node.js 20 以上(LTS 推奨) | 公式インストーラ / nvm | Codex companion(レビューループ)の実行 |
 | Claude Code | `npm install -g @anthropic-ai/claude-code` | AI 開発ハーネス(スキル・フック・レビュー) |
-| Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**既定モデルに追従するため最新版を推奨**(古いとモデル非対応で API エラーになる) |
+| Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**既定モデルに追従するため最新バージョンを推奨**(古いとモデル非対応で API エラーになる) |
 | Codex プラグイン | Claude Code 内で `/plugin marketplace add openai/codex-plugin-cc` の後 `/plugin install codex@openai-codex` | Claude Code から Codex を呼ぶ連携(`codex-review-loop` スキルが使用) |
 
-**Windows 追加要件**: Claude Code は Bash ツール・フック・`watchdog.sh` の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
+**Windows 追加要件**: Claude Code は Bash ツール・フック・[watchdog.sh](.claude/skills/codex-watchdog/watchdog.sh) の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
 
-### テスト実行
+### 検証の実行
 
-```sh
-pytest
-pytest <パッケージまたはツールのディレクトリ>
-```
+変更を確定させる前に通す検査の一覧・コマンド・合格条件は
+[docs/conventions/verification.md](docs/conventions/verification.md) が持つ。
 
-例:
+そのうちテストと静的検査は、作業中に対象を絞って回せる。次は shakevmd だけに絞る例。
 
 ```sh
 pytest tools/shakevmd
+ruff check tools/shakevmd
 ```
 
 テストは外部サービス・ネットワーク・MMD本体を必要としない。
 
-Windows でシンボリックリンク作成権限(開発者モードまたは管理者)が無い場合、
-上書きガードの symlink テストは自動的に skip される(失敗にはならない)。
+Windows でシンボリックリンク作成権限(開発者モードまたは管理者)が無い場合、上書きガードの symlink テストは自動的に skip される(失敗にはならない)。
 
 ### MMD産テストデータについて
 
-一部のテストはMMD本体で作成したVMDファイルを使用する。これらはリポジトリに
-コミット済みで、通常は作成・配置の必要はない(`pytest` をそのまま実行できる)。
-データを作り直す場合の手順(必要なファイルと条件)は
-[libs/vmd/tests/data/README.md](libs/vmd/tests/data/README.md) を参照。
+一部のテストはMMD本体で作成したVMDファイルを使用する。これらはリポジトリにコミット済みで、通常は作成・配置の必要はない(`pytest` をそのまま実行できる)。データを作り直す場合の手順(必要なファイルと条件)は[libs/vmd/tests/data/README.md](libs/vmd/tests/data/README.md) を参照。

@@ -1,4 +1,4 @@
-"""vpr→VMD 変換パイプライン(cli._build と main)の統合テスト(vpr2vmd.md §3〜§5)。
+"""vpr→VMD 変換パイプライン(cli._build と main)の統合テスト。
 
 cli._build は vpr 解析結果(合成フィクスチャ)を入口に、トラック選択→重なり解決→口形イベント
 確定→開き量→lipsync→モーフキー生成までを束ね、main が書き込み・診断表示・警告を担う。
@@ -8,7 +8,7 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 
 import re
 
-import pytest
+from vmd import read as vmd_read
 from vpr import (
     ControllerCurve,
     ControllerEvent,
@@ -19,9 +19,7 @@ from vpr import (
     VprFormatError,
     VprProject,
 )
-
-from vmd import read as vmd_read
-from vpr2vmd import cli
+from vpr2vmd import __version__, cli
 
 
 def _note(start, dur, phonemes, *, velocity=64):
@@ -69,6 +67,13 @@ def test_convert_single_vowel_writes_morph_vmd(monkeypatch, tmp_path):
     assert rc == 0
     assert out.exists()
     assert "あ" in _morph_names(out)
+
+
+def test_convert_default_model_name_is_tool_and_version(monkeypatch, tmp_path):
+    # --model-name 未指定時、出力VMDの model_name はツール名+実行中のバージョン。
+    rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
+    assert rc == 0
+    assert _read_doc(out).model_name == f"vpr2vmd {__version__}"
 
 
 def test_convert_output_has_frame0_keys_for_used_morphs(monkeypatch, tmp_path):
@@ -202,7 +207,7 @@ def test_convert_legato_max_override_reaches_build_mouth_events(monkeypatch, tmp
 
 
 def test_convert_writes_only_morph_section(monkeypatch, tmp_path):
-    # 生成するのはモーフキーのみ。ボーン・カメラ・照明・セルフ影・IK は空(vpr2vmd.md §5)。
+    # 生成するのはモーフキーのみ。ボーン・カメラ・照明・セルフ影・IK は空。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
     assert rc == 0
     doc = _read_doc(out)
@@ -253,21 +258,30 @@ def test_convert_vpr_format_error_is_input_error(monkeypatch, tmp_path):
     assert cli.main([str(src), "-o", str(out)]) == 1
 
 
-def test_convert_moraic_nasal_uses_n_morph_by_default(monkeypatch, tmp_path):
-    # 既定は「ん」モーフを使う。撥音「ん」音符 → ん モーフキーを含む。
+def test_convert_moraic_nasal_is_silence_by_default(monkeypatch, tmp_path):
+    # 既定は無音(閉口)に倒す。撥音音符単独ではモーフキーを一切出さない(「ん」不在に加え、
+    # 誤って「あ」等へ倒さないことも固定)。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]))
     assert rc == 0
-    assert "ん" in _morph_names(out)
+    assert _morph_names(out) == []
 
 
 def test_convert_no_n_morph_drops_n_morph(monkeypatch, tmp_path):
-    # --no-n-morph 指定時、単独撥音は無音(閉口)へ倒れモーフキーを一切出さない
-    # (「ん」不在に加え、誤って「あ」等へ倒さないことも固定)。
+    # --no-n-morph を明示しても既定(無音)と変わらない。単独撥音はモーフキーを一切出さない。
     rc, out = _run(
         monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]), "--no-n-morph"
     )
     assert rc == 0
     assert _morph_names(out) == []
+
+
+def test_convert_n_morph_flag_enables_n_morph(monkeypatch, tmp_path):
+    # --n-morph 指定時、単独撥音は「ん」モーフキーを含む。
+    rc, out = _run(
+        monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]), "--n-morph"
+    )
+    assert rc == 0
+    assert "ん" in _morph_names(out)
 
 
 def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):
@@ -284,7 +298,7 @@ def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):
     assert cli.main([str(src), "-o", str(out)]) == 3
 
 
-# --- P-5 診断(--dry-run。vpr2vmd.md §4.4)。 ---
+# --- 診断(--dry-run) ---
 
 
 def _dry_run(monkeypatch, tmp_path, project, capsys, *args):
@@ -362,7 +376,7 @@ def test_dry_run_empty_track_warns_on_stderr(monkeypatch, tmp_path, capsys):
     # 採用音符列が空 → 標準エラーへ警告を出す(--dry-run でも、出力VMDは書かない・exit 0)。
     rc, _out, err = _dry_run(monkeypatch, tmp_path, _project([]), capsys)
     assert rc == 0
-    assert "警告" in err
+    assert "warning: no_adopted_notes: " in err
 
 
 def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys):
@@ -370,4 +384,12 @@ def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys
     rc, out = _run(monkeypatch, tmp_path, _project([]))
     assert rc == 0
     assert out.exists()
-    assert "警告" in capsys.readouterr().err
+    assert "warning: no_adopted_notes: " in capsys.readouterr().err
+
+
+def test_dry_run_non_event_symbols_keep_length_mark(monkeypatch, tmp_path, capsys):
+    # 診断は正規化前の生の記号で記録する(正規化後へ丸めると vpr に実際にあった記号を追えない)。
+    project = _project([_note(0, 480, ["k:", "a"])])
+    rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
+    assert rc == 0
+    assert "k:(1)" in out

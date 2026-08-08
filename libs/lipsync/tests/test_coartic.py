@@ -1,4 +1,4 @@
-"""協調調音のテスト(lipsync.md §3/§4)。
+"""協調調音のテスト。
 
 両唇閉鎖・無音を挟まず直接隣接する異母音グループの境界で、閉口を挟まず中間口形へ遷移すること、
 遷移長が基準長と区間長で決まる(口形差では短縮しない)こと、両唇閉鎖を挟む境界では協調調音を作らないことを
@@ -11,8 +11,7 @@ import math
 import pytest
 
 import lipsync
-from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
-from lipsync import generate
+from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape, generate
 
 # T=4 を得るための overlap_max=4(T=clamp(4, 1, 短い側10/2=5)=4、境界 b±2 の整数窓[8,12])。
 _WIDE = GenerationParams(coartic_overlap_max=4)
@@ -29,7 +28,7 @@ def _envelope(events, params):
 
 def _approx_envelope(actual, expected):
     assert [f for f, _ in actual] == [f for f, _ in expected]
-    for (_, aw), (_, ew) in zip(actual, expected):
+    for (_, aw), (_, ew) in zip(actual, expected, strict=True):
         assert aw == pytest.approx(ew)
 
 
@@ -109,10 +108,14 @@ def test_coartic_full_envelopes():
 
 
 def test_bilabial_between_no_coartic():
-    # あ[0,10]・両唇閉鎖[10,14]・う[14,24]: 両唇閉鎖を挟むので終端10≠次始端14 → 協調調音を作らない。
-    # あ は境界10で閉口0へ戻り、う は14で0から開く(各々 単一区間エンベロープ)。
-    # 両唇閉鎖区間は専用の閉口キーを持たず、キーは出力されない(閉口はキー不在=0で表す)。
-    # 既定 overlap_max(協調調音が起きうる設定)でも、両唇閉鎖を挟むと非協調になることを示す。
+    # あ[0,10]・両唇閉鎖[10,14]・う[14,24]: 両唇閉鎖を挟むので終端10≠次始端14 → 協調調音を作らない
+    # (各々 単一区間エンベロープ)。両唇閉鎖区間は専用の閉口キーを持たず、キーは出力されない
+    # (閉口はキー不在=0で表す)。既定 overlap_max(協調調音が起きうる設定)でも、両唇閉鎖を挟むと
+    # 非協調になることを示す。
+    # 両唇閉鎖[10,14]は先行準備・後行残しの対象(隣接区間長4、開き量比0.5/0.8=0.625)でもある:
+    # あ の後行残し R_eff=min(half_up(1×0.625)=1, floor(4/2)=2)=1 で境界10からさらに1フレーム
+    # (11)まで緩やかに閉じる。う の先行準備 A_eff は同じ計算で1、境界14の1フレーム手前(13)から
+    # 立ち上がる。
     env = _envelope(
         [
             MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
@@ -121,5 +124,5 @@ def test_bilabial_between_no_coartic():
         ],
         GenerationParams(),
     )
-    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
-    _approx_envelope(env["う"], [(14, 0.0), (16, 0.5), (22, 0.5), (24, 0.0)])
+    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (10, 0.5), (11, 0.0)])
+    _approx_envelope(env["う"], [(13, 0.0), (14, 0.5), (22, 0.5), (24, 0.0)])

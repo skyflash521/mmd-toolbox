@@ -1,4 +1,4 @@
-"""noise のテスト(shakevmd.md §6.1)。
+"""noise のテスト。
 
 検証可能な性質に落とす:
 - オクターブの帯域制限(実効周波数 ≤ 8Hz)と警告
@@ -8,16 +8,13 @@
 - C1連続性(無段差 + 微分の連続)・振幅有界
 """
 
-import math
-
 import numpy as np
 import pytest
 
 from shakevmd import noise
 
-
 # ---------------------------------------------------------------------------
-# effective_octaves: 帯域制限のオクターブ数(§6.1)
+# effective_octaves: 帯域制限のオクターブ数
 # ---------------------------------------------------------------------------
 
 
@@ -41,7 +38,7 @@ class TestEffectiveOctaves:
 
 
 # ---------------------------------------------------------------------------
-# derive_seed: 決定論+独立性(§5.3, §6.1)
+# derive_seed: 決定論+独立性
 # ---------------------------------------------------------------------------
 
 
@@ -133,7 +130,7 @@ class TestSpectralBandLimit:
     def test_negligible_energy_near_nyquist(self):
         # 連続ノイズを高レート(200Hz)で長く生成し、12Hz超のエネルギーが小さいこと。
         # 最高オクターブ基本周波数 4.8Hz の滑らかなノイズはナイキスト近傍に
-        # ほとんどエネルギーを持たない(§6.1 の帯域制限の sanity check)。
+        # ほとんどエネルギーを持たない(帯域制限の sanity check)。
         fs = 200.0
         t = np.arange(int(fs * 20)) / fs
         vals, _ = noise.band_limited_noise(7, t, 1.2, octaves=3)
@@ -173,7 +170,7 @@ class TestContinuityAndAmplitude:
 
 
 class TestOctaveComponents:
-    """プロファイルクロスフェード用の per-octave 成分(§6.2)。"""
+    """プロファイルクロスフェード用の per-octave 成分。"""
 
     def test_count_and_amplitude_bound(self):
         t = np.arange(0, 2, 1 / 30.0)
@@ -209,14 +206,14 @@ class TestOctaveComponents:
         assert np.allclose(summed, ref, atol=1e-9)
 
     def test_bandlimit_clamp_reduces_components_with_warning(self):
-        # 高 freq で帯域制限クランプ → 成分数が減り警告が出る(§6.1)。
+        # 高 freq で帯域制限クランプ → 成分数が減り警告が出る。
         t = np.arange(0, 2, 1 / 30.0)
         comps, warns = noise.octave_components(1, t, 5.0, octaves=3)
         assert len(comps) == noise.effective_octaves(5.0, 3) < 3
         assert warns
 
     def test_all_octaves_clamped_returns_empty(self):
-        # freq>8Hz は基本オクターブから帯域外 → 成分0本 + 警告(§6.1: 8Hz超は生成しない)。
+        # freq>8Hz は基本オクターブから帯域外 → 成分0本 + 警告(8Hz超は生成しない)。
         # 帯域外を1本でも強制生成する実装を排除する。
         t = np.arange(0, 2, 1 / 30.0)
         comps, warns = noise.octave_components(1, t, 10.0, octaves=3)

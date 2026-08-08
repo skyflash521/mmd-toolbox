@@ -4,31 +4,110 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmd-toolbox"
-version = "2026.7.3"
+version = "2026.8.8"
 description = "MikuMikuDance 向けユーティリティツール群"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
+# 上限は、動作実績のある版を既知の天井として次のメジャーを除く形で置く。下限は、実装が実際に
+# その版以降の API を要求する場合だけ置く(通ることを確かめていない版を下限として宣言しない)。
 dependencies = [
-    "numpy",
-    "scipy",
+    "numpy<3",
+    "scipy<2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
+    "pytest<10",
+    # ruff は 0.x のマイナー更新で規則の追加・既定の変更が入るため、上限をマイナー境界に置く
+    # (メジャー境界に置くと、検査対象を変えていないのに更新だけで CI が落ちる)。
+    "ruff<0.17",
+    # rumdl も 0.x であり、上限をマイナー境界に置く理由は ruff と同じ。
+    "rumdl<0.3",
+    "soundfile<1",
+]
+vocal-analysis = [
+    "soundfile<1",
+    # audio-separator には上限を置かない。進捗表示のためにモジュール直下の tqdm 名・
+    # Separator.download_file_if_not_exists・vendored demucs の apply_model という私的内部へ
+    # 結合しており、これらは公開 API でないため版境界の宣言では守れない(上限を置いても防護に
+    # ならず、動く版を締め出すだけになる)。
+    "audio-separator",
+    # onnxruntime はこのリポジトリのコードからは import しないが、audio-separator の
+    # separator モジュールがモジュール直下で無条件に import するため実行時に要る。
+    # audio-separator 自身は onnxruntime を extras(cpu/gpu/dml)の下でしか要求しないので、
+    # extras を付けない構成ではこの宣言が唯一の供給元になる。
+    "onnxruntime<2",
+    "torch<3",
+    # transformers は 4.56 で数値精度の引数名が torch_dtype から dtype へ変わり、それ以前は
+    # dtype を受け付けない。
+    "transformers>=4.56,<6",
+    # huggingface-hub と tqdm は、モデル取得とその進捗中継のために直接 import する
+    # (transformers・audio-separator の推移依存としても入るが、そちらの都合で外れると壊れる)。
+    "huggingface-hub<2",
+    "tqdm<5",
+    "pyopenjtalk-plus<1",
+    "nltk<4",
+    "arpakana<1",
+    "psutil<8",
 ]
 
 [project.scripts]
 mocapvmd = "mocapvmd.cli:main"
 shakevmd = "shakevmd.cli:main"
+song2vmd = "song2vmd.cli:main"
 sparsevmd = "sparsevmd.cli:main"
 vpr2vmd = "vpr2vmd.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["libs", "tools"]
-include = ["cli_events*", "lipsync*", "pmx*", "vmd*", "vpr*", "mocapvmd*", "shakevmd*", "sparsevmd*", "vpr2vmd*"]
+include = ["cli_events*", "cli_options*", "cli_progress*", "cli_progress_router*",
+           "cli_resource_watch*", "lipsync*", "pmx*", "vmd*", "vocal_analysis*",
+           "vocal_analysis_cli*", "vpr*",
+           "mocapvmd*", "shakevmd*", "song2vmd*", "sparsevmd*", "vpr2vmd*"]
+
+[tool.ruff]
+line-length = 120
+# 自作モジュールは libs/ と tools/ の下にあるため、探索起点を示さないと import 整列(I)が
+# それらをサードパーティと見なし、標準ライブラリ・サードパーティ・自作のブロック分けを併合する。
+src = ["libs", "tools"]
+
+[tool.ruff.lint]
+# 誤りを落とす規則と、ノイズの少ない整理規則(import 整列・行長)に絞る。型注釈・docstring の
+# 網羅性(ANN・D)や呼び出し規約の好み(ARG・PT)は、指摘量に対して実害が無いため入れない。
+select = ["E4", "E7", "E9", "E501", "F", "B", "I", "NPY", "TID", "RUF100", "PLE"]
+
+[tool.ruff.lint.per-file-ignores]
+# 口形種別の列挙子 A/I/U/E/O は母音そのものを表す仕様上の名前であり、E741 が禁じる
+# 紛らわしい 1 文字名にはあたらない。
+"libs/lipsync/types.py" = ["E741"]
+# B023 はループ変数を束縛しないクロージャを禁じるが、この 2 ファイルの該当箇所はクロージャを
+# 同一反復内で呼び出し先へ渡して消費しており、反復をまたいで保持しない。
+"tools/mocapvmd/pose_fit.py" = ["B023"]
+"tools/mocapvmd/tests/test_reduce.py" = ["B023"]
+# テストはモジュール後半で追加の依存を局所的に取り込むことがある。E402 はその意図を
+# 落とせないため、テストだけ外す。
+"**/tests/*" = ["E402"]
+
+[tool.rumdl]
+# 既定の規則から次の3つを外す。いずれも本リポジトリの記述方針と衝突するもので、指摘量の
+# 多寡ではなく指摘が誤りになる理由で外す。
+# - MD013(行長): 日本語散文は意味の切れ目で手動折り返ししており、機械的な上限と合わない。
+#   仕様書には1行で完結させる契約記述もあるため、上限をどこに置いても正しい行を落とす。
+# - MD038(コードスパン内の空白): 半角スペースそのものを見せるコードスパンを意図して使って
+#   おり、自動修正はその空白を落として記述を壊す。
+# - MD051(リンクアンカーの実在): 見出しがインラインリンクを含むとアンカーを誤って算出する。
+#   アンカーの実在は lychee が検査しており、こちらを外しても検査は欠けない。
+disable = ["MD013", "MD038", "MD051"]
+
+[tool.rumdl.MD041]
+# 先頭を見出しにする規則。`.claude/` のエージェント定義は表題を front matter の name が持ち、
+# 本文には表題にあたる見出しを置かないため、name を表題フィールドとして認める。
+front-matter-title-pattern = "^(title|header|name):"
 
 [tool.pytest.ini_options]
-testpaths = ["libs/cli_events", "libs/lipsync", "libs/pmx", "libs/vmd", "libs/vpr", "tools/mocapvmd", "tools/shakevmd", "tools/sparsevmd", "tools/vpr2vmd"]
+testpaths = ["libs/cli_events", "libs/cli_options", "libs/cli_progress",
+             "libs/cli_progress_router", "libs/cli_resource_watch", "libs/lipsync", "libs/pmx", "libs/vmd",
+             "libs/vocal_analysis", "libs/vocal_analysis_cli", "libs/vpr", "tools/mocapvmd", "tools/shakevmd", "tools/song2vmd",
+             "tools/sparsevmd", "tools/vpr2vmd"]
 pythonpath = ["libs", "tools"]
 # 各ツールの tests に同名テストファイル(test_cli.py 等)があるため、basename 衝突を
 # 避ける importlib インポートモードを使う(prepend 既定だと collection で衝突する)。

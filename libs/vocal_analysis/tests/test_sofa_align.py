@@ -1,0 +1,1175 @@
+"""SOFAサブプロセス呼び出しコアのテスト。
+
+SOFA(Singing-Oriented Forced Aligner)は実インストール・専用venvを要するため、通常のpytestスイート
+では subprocess をモックした決定論的単体テストで検証する。ここでは入力の書き出し・サブプロセス起動・
+終了コード/出力検証・タイムアウト時のプロセスツリーkill・HTK出力(100ナノ秒単位)の秒への変換・
+Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証と許容誤差スナップ・非ASCIIパスの拒否・
+単語単位分割(有効な単語列の確定・gapの確定)・IPA写像(SOFA出力記号のSegment化)を扱う。
+"""
+
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+
+def _make_config(tmp_path, *, timeout_sec=None):
+    """SOFA起動前の実在検証(_check_paths_exist)を通る実在パスの構成を作る。
+
+    timeout_sec を指定すると SofaAlignerConfig の既定(300秒)を上書きする(タイムアウト経路の
+    テストが実時間で長時間待たされないようにするため)。
+    """
+    from vocal_analysis import SofaAlignerConfig
+
+    sofa_python = tmp_path / "sofa-venv" / "python"
+    sofa_root = tmp_path / "SOFA"
+    checkpoint_path = tmp_path / "checkpoint.ckpt"
+    sofa_python.parent.mkdir(parents=True, exist_ok=True)
+    sofa_python.write_text("", encoding="utf-8")
+    sofa_root.mkdir(exist_ok=True)
+    (sofa_root / "infer.py").write_text("", encoding="utf-8")
+    checkpoint_path.write_text("", encoding="utf-8")
+    overrides = {} if timeout_sec is None else {"timeout_sec": timeout_sec}
+    return SofaAlignerConfig(
+        sofa_python=sofa_python,
+        sofa_root=sofa_root,
+        checkpoint_path=checkpoint_path,
+        **overrides,
+    )
+
+
+class _FakeCompletedPopen:
+    """正常終了する subprocess.Popen の代替。communicate()呼び出し時に指定コールバックを実行する。"""
+
+    def __init__(self, cmd, *, on_communicate=None, returncode=0, pid=4242, **kwargs):
+        self.cmd = cmd
+        self.kwargs = kwargs
+        self.pid = pid
+        self.returncode = returncode
+        self._on_communicate = on_communicate
+
+    def kill(self):
+        pass
+
+    def communicate(self, timeout=None):
+        if self._on_communicate is not None:
+            self._on_communicate()
+        return ("", "")
+
+
+class _FakeTimeoutPopen:
+    """communicate() を呼ぶたびに TimeoutExpired を送出し、完了しないプロセスを模す Popen の代替。
+    実装は後始末で kill() を呼んでから communicate() で回収するため、kill() 呼び出し後の
+    communicate() だけは終了済みプロセスの回収として即座に成功させる。"""
+
+    def __init__(self, cmd, *, pid=4242, **kwargs):
+        self.cmd = cmd
+        self.kwargs = kwargs
+        self.pid = pid
+        self.returncode = None
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+    def communicate(self, timeout=None):
+        if self.killed:
+            return ("", "")
+        raise subprocess.TimeoutExpired(cmd=self.cmd, timeout=timeout)
+
+
+class _FakeInterruptedPopen:
+    """communicate() を最初に呼んだ時だけ KeyboardInterrupt を送出する Popen の代替。中断待機中の
+    子プロセスを模す(kill() 呼び出し後の communicate() は後始末として成功させる)。"""
+
+    def __init__(self, cmd, *, pid=4242, **kwargs):
+        self.cmd = cmd
+        self.kwargs = kwargs
+        self.pid = pid
+        self.returncode = None
+        self.killed = False
+        self._raised = False
+
+    def kill(self):
+        self.killed = True
+
+    def communicate(self, timeout=None):
+        if self.killed:
+            return ("", "")
+        if not self._raised:
+            self._raised = True
+            raise KeyboardInterrupt()
+        return ("", "")
+
+
+class _FakeSlowThenCompletePopen:
+    """communicate() をタイムアウト付きで stall_calls 回だけ TimeoutExpired にし、以降は完了させる
+    Popen の代替。短周期ポーリング(_COMMUNICATE_POLL_SEC)が「未完了なだけ」を早すぎるタイムアウトと
+    誤判定せず、デッドライン内なら待ち直して最終的に成功させることを検証する。"""
+
+    def __init__(self, cmd, *, stall_calls, on_communicate=None, pid=4242, **kwargs):
+        self.cmd = cmd
+        self.kwargs = kwargs
+        self.pid = pid
+        self.returncode = 0
+        self._remaining_stalls = stall_calls
+        self._on_communicate = on_communicate
+        self.communicate_call_count = 0
+
+    def kill(self):
+        pass
+
+    def communicate(self, timeout=None):
+        self.communicate_call_count += 1
+        if self._remaining_stalls > 0:
+            self._remaining_stalls -= 1
+            raise subprocess.TimeoutExpired(cmd=self.cmd, timeout=timeout)
+        if self._on_communicate is not None:
+            self._on_communicate()
+        return ("", "")
+
+
+def _folder_arg(cmd):
+    """cmd(リスト形式の引数)から --folder の値を取り出す(モックはこの値へHTK出力を書く)。"""
+    return Path(cmd[cmd.index("--folder") + 1])
+
+
+def _write_htk_label(folder, basename, rows):
+    """(start_100ns, end_100ns, label) のタプル列をHTKラベル形式で書き出す。"""
+    phones_dir = folder / "htk" / "phones"
+    phones_dir.mkdir(parents=True, exist_ok=True)
+    lines = [f"{start} {end} {label}" for start, end, label in rows]
+    (phones_dir / f"{basename}.lab").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _fake_platform(monkeypatch, sofa_align, platform):
+    """sofa_align から見える sys.platform だけを差し替える。
+
+    sofa_align.sys はグローバルな sys モジュールそのものなので、その platform 属性を書き換えると
+    _align_batch が呼ぶ全モジュールが差し替え後の値を見る。確認できている波及先は soundfile で、
+    sys.platform が "win32" のときlibsndfileのワイド文字版オープン関数を引くが、この関数は
+    Windows版のlibsndfileにしか無いため他OSでは属性エラーになる。逆向き("linux" への差し替え)では、
+    実行中のOSに関わらずファイル名をバイト列へ符号化する経路へ入る。波及先を数え上げる代わりに、
+    sofa_align が sys から読むのは platform だけなので、sys への参照ごと差し替えて影響範囲を
+    sofa_align に閉じる。差し替えた実行環境の分岐そのものが参照するOS固有のシンボルは、これとは別に
+    差し替えが要る(win32 では _fake_windows)。"""
+    monkeypatch.setattr(sofa_align, "sys", SimpleNamespace(platform=platform))
+
+
+def _fake_windows(monkeypatch, sofa_align):
+    """sofa_align から見える実行環境をWindowsにし、差し替えた起動フラグの値を返す。
+
+    実装はWindows分岐で subprocess.CREATE_NEW_PROCESS_GROUP を参照する。この属性はPOSIXの標準
+    ライブラリに存在せず、しかも Popen の引数として Popen 本体の呼び出し前に評価されるため、Popen を
+    モックしても他OSでは属性エラーで止まる。実属性の有無に依らず動くよう raising=False で差し替える。
+    戻り値は差し替えた値そのもので、呼び出し側は Popen へ渡ったかを同一性で確かめられる。"""
+    _fake_platform(monkeypatch, sofa_align, "win32")
+    creationflags = object()
+    monkeypatch.setattr(
+        sofa_align.subprocess, "CREATE_NEW_PROCESS_GROUP", creationflags, raising=False
+    )
+    return creationflags
+
+
+def test_align_batch_happy_path_parses_htk_output_as_seconds(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 5000000, "pau"), (5000000, 10000000, "a")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    result = sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    # 100ナノ秒単位 → 秒: 5000000 / 1e7 = 0.5秒、10000000 / 1e7 = 1.0秒。
+    assert result == {"segment_0000": [(0.0, 0.5, "pau"), (0.5, 1.0, "a")]}
+
+
+def test_align_batch_absolutizes_relative_config_paths(tmp_path, monkeypatch):
+    """相対パスのSofaAlignerConfigは、プロセスの作業ディレクトリ基準で絶対化してから
+    サブプロセス起動に使われる(サブプロセスは作業ディレクトリ=sofa_rootで動くため、
+    相対のままではチェックポイント等がsofa_root基準へ誤解決される)。"""
+    from vocal_analysis import SofaAlignerConfig, sofa_align
+
+    _make_config(tmp_path)  # 実在検証を通すためのファイル群を tmp_path 配下に作る
+    monkeypatch.chdir(tmp_path)
+    config = SofaAlignerConfig(
+        sofa_python=Path("sofa-venv") / "python",
+        sofa_root=Path("SOFA"),
+        checkpoint_path=Path("checkpoint.ckpt"),
+    )
+
+    captured = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        folder = _folder_arg(cmd)
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "a")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    python_arg = Path(captured["cmd"][0])
+    ckpt_arg = Path(captured["cmd"][captured["cmd"].index("--ckpt") + 1])
+    cwd_arg = Path(captured["cwd"])
+    assert python_arg.is_absolute() and python_arg == tmp_path / "sofa-venv" / "python"
+    assert ckpt_arg.is_absolute() and ckpt_arg == tmp_path / "checkpoint.ckpt"
+    assert cwd_arg.is_absolute() and cwd_arg == tmp_path / "SOFA"
+
+
+def test_align_batch_writes_ascii_fixed_width_basenames_for_multiple_targets(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+    seen_basenames = []
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+        wav_files = sorted(p.stem for p in folder.glob("*.wav"))
+        seen_basenames.extend(wav_files)
+
+        def write_output():
+            for basename in wav_files:
+                _write_htk_label(folder, basename, [(0, 10000000, "pau")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    targets = [(samples, 16000, ["a"]), (samples, 16000, ["i"]), (samples, 16000, ["u"])]
+    result = sofa_align._align_batch(targets, config)
+
+    # ASCII固定名 segment_%04d(0始まりの4桁ゼロ埋め連番)を書き出す。
+    assert seen_basenames == ["segment_0000", "segment_0001", "segment_0002"]
+    assert set(result.keys()) == {"segment_0000", "segment_0001", "segment_0002"}
+
+
+def test_align_batch_writes_space_separated_phonemes_to_lab_input(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+    written_lab_texts = {}
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+        for lab_path in folder.glob("*.lab"):
+            written_lab_texts[lab_path.stem] = lab_path.read_text(encoding="utf-8")
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "pau")])
+            _write_htk_label(folder, "segment_0001", [(0, 10000000, "pau")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    targets = [(samples, 16000, ["k", "a", "sh", "i"]), (samples, 16000, ["pau"])]
+    sofa_align._align_batch(targets, config)
+
+    # 各対象のG2P音素記号列を、SOFAへ渡す.labへ空白区切りでそのまま書き出す(テキスト→音素変換を経ない)。
+    assert written_lab_texts["segment_0000"].strip() == "k a sh i"
+    assert written_lab_texts["segment_0001"].strip() == "pau"
+
+
+def test_align_batch_normalizes_devoiced_vowels_for_sofa_vocab(tmp_path, monkeypatch):
+    """SOFAの語彙(vocab.yaml)は無声化母音の専用記号(pyopenjtalk-plus由来のI/U)を持たず、
+    通常の母音記号(i/u)のみを認識する。G2P出力に含まれるI/Uをそのまま.labへ書き出すと、
+    SOFA側の語彙引き当てで該当区間がKeyErrorになる。書き出し前にI→i・U→uへ正規化しなければならない。
+    """
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+    written_lab_texts = {}
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+        for lab_path in folder.glob("*.lab"):
+            written_lab_texts[lab_path.stem] = lab_path.read_text(encoding="utf-8")
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "pau")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    targets = [(samples, 16000, ["k", "I", "sh", "U"])]
+    sofa_align._align_batch(targets, config)
+
+    assert written_lab_texts["segment_0000"].strip() == "k i sh u"
+
+
+def test_align_batch_empty_targets_does_not_start_subprocess(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("SOFA対象が0件のときサブプロセスを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+
+    assert sofa_align._align_batch([], config) == {}
+
+
+@pytest.mark.parametrize(
+    "remove, expected_label",
+    [
+        ("sofa_python", "sofa_python"),
+        ("sofa_root", "sofa_root"),
+        ("infer_py", "sofa_root配下のinfer.py"),
+        ("checkpoint", "checkpoint_path"),
+    ],
+)
+def test_align_batch_missing_environment_path_raises_recognition_error_with_path(
+    tmp_path, monkeypatch, remove, expected_label
+):
+    """SOFA実行環境のパスが存在しない場合、サブプロセスを起動せず、どのパスが無いかを明示した
+    RecognitionErrorにする(利用先が外部依存の実行失敗として分類・提示できる形)。"""
+    import shutil
+
+    from vocal_analysis import sofa_align
+    from vocal_analysis.recognizer import RecognitionError
+
+    config = _make_config(tmp_path)
+    if remove == "sofa_python":
+        config.sofa_python.unlink()
+    elif remove == "sofa_root":
+        shutil.rmtree(config.sofa_root)
+    elif remove == "infer_py":
+        (config.sofa_root / "infer.py").unlink()
+    else:
+        config.checkpoint_path.unlink()
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("実在検証で弾かれるべき構成でサブプロセスを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError, match="SOFAの実行環境パスが不正です") as exc_info:
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+    assert expected_label in str(exc_info.value)
+    assert "存在しません" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "target, expected_reason",
+    [
+        ("sofa_python_is_dir", "ファイルではありません"),
+        ("sofa_root_is_file", "ディレクトリではありません"),
+    ],
+)
+def test_align_batch_wrong_kind_environment_path_raises_recognition_error_with_reason(
+    tmp_path, monkeypatch, target, expected_reason
+):
+    """パスは存在するが期待する種別でない場合(sofa_pythonにディレクトリ等)、
+    「存在しません」ではなく種別の不一致を理由として明示する。"""
+    import shutil
+
+    from vocal_analysis import sofa_align
+    from vocal_analysis.recognizer import RecognitionError
+
+    config = _make_config(tmp_path)
+    if target == "sofa_python_is_dir":
+        config.sofa_python.unlink()
+        config.sofa_python.mkdir()
+    else:
+        shutil.rmtree(config.sofa_root)
+        config.sofa_root.write_text("", encoding="utf-8")
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("種別検証で弾かれるべき構成でサブプロセスを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError, match="SOFAの実行環境パスが不正です") as exc_info:
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+    assert expected_reason in str(exc_info.value)
+
+
+def test_align_batch_popen_file_not_found_raises_recognition_error(tmp_path, monkeypatch):
+    """事前検証の後にパスが消える競合等でPopen自体がFileNotFoundErrorを送出した場合も、
+    未捕捉例外にせず候補パスを明示したRecognitionErrorへ包む。"""
+    from vocal_analysis import sofa_align
+    from vocal_analysis.recognizer import RecognitionError
+
+    config = _make_config(tmp_path)
+
+    def raising_popen(cmd, **kwargs):
+        raise FileNotFoundError(2, "指定されたファイルが見つかりません")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", raising_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError, match="SOFAサブプロセスを起動できませんでした") as exc_info:
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+    assert str(config.sofa_python) in str(exc_info.value)
+
+
+def test_align_batch_nonzero_exit_code_raises_recognition_error(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_config(tmp_path)
+
+    def fake_popen(cmd, **kwargs):
+        return _FakeCompletedPopen(cmd, returncode=1)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+
+def test_align_batch_missing_output_file_raises_recognition_error(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_config(tmp_path)
+
+    def fake_popen(cmd, **kwargs):
+        # 終了コード0だが、htk/phones/*.lab を一切書き出さない(出力欠落)。
+        return _FakeCompletedPopen(cmd)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+
+def test_align_batch_empty_output_file_raises_recognition_error(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_config(tmp_path)
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+
+        def write_empty_output():
+            phones_dir = folder / "htk" / "phones"
+            phones_dir.mkdir(parents=True, exist_ok=True)
+            (phones_dir / "segment_0000.lab").write_text("", encoding="utf-8")
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_empty_output)
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+
+def test_align_batch_starts_new_process_group_on_windows(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+    captured = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured.update(kwargs)
+
+        def write_output():
+            folder = _folder_arg(cmd)
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "pau")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    fake_creationflags = _fake_windows(monkeypatch, sofa_align)
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    # プロセスツリーkill(taskkill /T)が効くには、子孫プロセスの受け皿として新しいプロセスグループで
+    # 起動しておく必要がある。
+    assert captured.get("creationflags") is fake_creationflags
+
+
+def test_align_batch_starts_new_session_on_posix(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path)
+    captured = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured.update(kwargs)
+
+        def write_output():
+            folder = _folder_arg(cmd)
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "pau")])
+
+        return _FakeCompletedPopen(cmd, on_communicate=write_output)
+
+    _fake_platform(monkeypatch, sofa_align, "linux")
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    # プロセスツリーkill(os.killpgでのプロセスグループ一括終了)が効くには、子孫プロセスの受け皿として
+    # 新しいセッション・プロセスグループで起動しておく必要がある。
+    assert captured.get("start_new_session") is True
+
+
+def test_align_batch_keyboard_interrupt_kills_process_tree_and_reraises(tmp_path, monkeypatch):
+    # 待機中に KeyboardInterrupt を受けた場合も、タイムアウト時と同様にプロセスツリーを終了・回収
+    # してから元の KeyboardInterrupt をそのまま再送出する(RecognitionError 等へ変換しない)。
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path, timeout_sec=10.0)
+    killed_pids = []
+
+    _fake_windows(monkeypatch, sofa_align)
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", lambda cmd, **kwargs: _FakeInterruptedPopen(cmd))
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "taskkill"
+        killed_pids.append(cmd[cmd.index("/PID") + 1])
+
+    monkeypatch.setattr(sofa_align.subprocess, "run", fake_run)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(KeyboardInterrupt):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    assert killed_pids == ["4242"]
+
+
+def test_align_batch_timeout_kills_process_tree_on_windows(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_config(tmp_path, timeout_sec=0.05)
+    killed_pids = []
+
+    _fake_windows(monkeypatch, sofa_align)
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", lambda cmd, **kwargs: _FakeTimeoutPopen(cmd))
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "taskkill"
+        assert "/F" in cmd and "/T" in cmd and "/PID" in cmd
+        killed_pids.append(cmd[cmd.index("/PID") + 1])
+
+    monkeypatch.setattr(sofa_align.subprocess, "run", fake_run)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    assert killed_pids == ["4242"]
+
+
+def test_align_batch_survives_transient_timeout_within_deadline(tmp_path, monkeypatch):
+    # 短周期ポーリングは「まだ完了していないだけ」を早すぎるタイムアウトと誤判定せず、デッドライン内
+    # なら待ち直して最終的に成功させる(kill・RecognitionErrorに至らない)。
+    from vocal_analysis import sofa_align
+
+    config = _make_config(tmp_path, timeout_sec=10.0)
+    fake = {}
+
+    def fake_popen(cmd, **kwargs):
+        folder = _folder_arg(cmd)
+
+        def write_output():
+            _write_htk_label(folder, "segment_0000", [(0, 10000000, "pau")])
+
+        p = _FakeSlowThenCompletePopen(cmd, stall_calls=2, on_communicate=write_output)
+        fake["proc"] = p
+        return p
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    # 2 回 TimeoutExpired → 3 回目で成功、の 3 回 communicate() が呼ばれている。
+    assert fake["proc"].communicate_call_count == 3
+
+
+def test_align_batch_timeout_kills_process_tree_on_posix(tmp_path, monkeypatch):
+    from vocal_analysis import sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_config(tmp_path, timeout_sec=0.05)
+    killed = []
+    fake_sigkill = object()
+
+    _fake_platform(monkeypatch, sofa_align, "linux")
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", lambda cmd, **kwargs: _FakeTimeoutPopen(cmd))
+    # os.getpgid・signal.SIGKILL はWindows開発環境の標準ライブラリに存在しないため、実属性の有無に
+    # 依らず動作するよう raising=False で差し替える(この環境非依存性はテスト側の都合であり、実装は
+    # POSIX分岐の中でのみこれらを参照する)。
+    monkeypatch.setattr(sofa_align.os, "getpgid", lambda pid: pid, raising=False)
+    monkeypatch.setattr(sofa_align.signal, "SIGKILL", fake_sigkill, raising=False)
+
+    def fake_killpg(pgid, sig):
+        killed.append((pgid, sig))
+
+    monkeypatch.setattr(sofa_align.os, "killpg", fake_killpg, raising=False)
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+    assert killed == [(4242, fake_sigkill)]
+
+
+def test_parse_htk_label_file_converts_100ns_units_to_seconds(tmp_path):
+    from vocal_analysis.sofa_align import _parse_htk_label_file
+
+    path = tmp_path / "segment_0000.lab"
+    path.write_text("0 5000000 pau\n5000000 12345000 a\n", encoding="utf-8")
+
+    assert _parse_htk_label_file(path) == [(0.0, 0.5, "pau"), (0.5, 1.2345, "a")]
+
+
+def test_validate_and_normalize_segments_passes_through_exact_input():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    segments = [(0.0, 0.5, "pau"), (0.5, 1.0, "a")]
+    assert _validate_and_normalize_segments(segments, trim_duration_sec=1.0) == segments
+
+
+def test_validate_and_normalize_segments_snaps_within_tolerance_to_exact_values():
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # 先頭・末尾・境界ともに50ミリ秒以内のずれ(SOFAの内部リサンプリングに由来する丸め誤差を模す)。
+    # 正規化は先頭のstart→0.0、末尾のend→trim_duration_sec、後続の
+    # 各startを先行のend(元の値)へそれぞれ上書きする。境界の基準は先行セグメントのend側(0.49)で
+    # あり、後続のstart側(0.52)ではない。
+    segments = [(0.01, 0.49, "pau"), (0.52, 0.98, "a")]
+    result = _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+    assert result == [(0.0, 0.49, "pau"), (0.49, 1.0, "a")]
+
+
+def test_validate_and_normalize_segments_rejects_start_after_end():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # (b)(c)(d)はいずれも許容誤差50ミリ秒以内で通過し、2件目のみ(a) start<=end に単独で違反する
+    # (0.53 > 0.51)。(b)(c)(d)しか検証しない誤実装でもこの入力を通してしまわないことを確認する。
+    segments = [(0.0, 0.5, "pau"), (0.53, 0.51, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=0.51)
+
+
+def test_validate_and_normalize_segments_rejects_non_adjacent_boundary():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # 境界の差が許容誤差50ミリ秒を超える(隙間: 次の開始が先行の終了より後ろに離れている)。
+    segments = [(0.0, 0.5, "pau"), (0.56, 1.0, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+def test_validate_and_normalize_segments_rejects_overlapping_boundary():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # 境界の差が許容誤差50ミリ秒を超える(重複: 次の開始が先行の終了より前にある)。絶対差での判定
+    # なので、隙間方向だけでなく重複方向も同じしきい値で拒否されることを確認する。
+    segments = [(0.0, 0.5, "pau"), (0.44, 1.0, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+def test_validate_and_normalize_segments_rejects_first_start_far_from_zero():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    segments = [(0.06, 0.5, "pau"), (0.5, 1.0, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+def test_validate_and_normalize_segments_rejects_last_end_far_from_trim_duration():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # 全長に不足する方向(0.93 < 1.0)。
+    segments = [(0.0, 0.5, "pau"), (0.5, 0.93, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+def test_validate_and_normalize_segments_rejects_last_end_exceeding_trim_duration():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # 全長を超過する方向(1.07 > 1.0)。絶対差での判定なので、不足方向だけでなく超過方向も同じ
+    # しきい値で拒否されることを確認する。
+    segments = [(0.0, 0.5, "pau"), (0.5, 1.07, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.0)
+
+
+def test_validate_and_normalize_segments_rejects_empty_list():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments([], trim_duration_sec=1.0)
+
+
+def test_validate_and_normalize_segments_rejects_new_violation_created_by_snapping():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _validate_and_normalize_segments
+
+    # 一次検証(許容誤差50ミリ秒)は通るが、正規化(後続の開始時刻を先行の終了時刻へ上書き)により
+    # 新たな逆順(start > end)を生む例。極端に短い2件目のセグメント(終了時刻1.02)へ、1件目の
+    # 終了時刻1.04が上書きされ、上書き後は1.04 > 1.02になる
+    # (極端に短い隣接セグメントが正規化の上書きにより新たな逆順を生む場合がある。
+    # 数値そのものはこのテストが独自に構成した)。
+    segments = [(0.0, 1.04, "pau"), (1.00, 1.02, "a")]
+    with pytest.raises(RecognitionError):
+        _validate_and_normalize_segments(segments, trim_duration_sec=1.02)
+
+
+def _make_ascii_config():
+    """`_check_ascii_paths`はパス文字列を判定するだけでファイルへアクセスしないため、実在しない
+    固定のASCII専用パスで足りる(pytestの`tmp_path`自体が非ASCIIユーザー名配下になりうる環境依存を
+    避ける)。
+    """
+    from vocal_analysis import SofaAlignerConfig
+
+    return SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "checkpoint.ckpt",
+    )
+
+
+def test_check_ascii_paths_accepts_all_ascii_paths():
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = _make_ascii_config()
+    _check_ascii_paths(Path("ascii_root") / "work_dir", config)  # 例外が出なければ合格
+
+
+def test_check_ascii_paths_rejects_non_ascii_work_dir():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = _make_ascii_config()
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "作業ディレクトリ", config)
+
+
+def test_check_ascii_paths_rejects_non_ascii_sofa_root():
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFAリポジトリ",
+        checkpoint_path=Path("ascii_root") / "checkpoint.ckpt",
+    )
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "work_dir", config)
+
+
+def test_check_ascii_paths_rejects_non_ascii_checkpoint_path():
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "チェックポイント.ckpt",
+    )
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "work_dir", config)
+
+
+def test_check_ascii_paths_rejects_non_ascii_in_intermediate_component():
+    """末端要素だけでなく、パス中間の要素の非ASCIIも拒否対象(パス文字列全体を判定する)。"""
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "日本語" / "checkpoint.ckpt",
+    )
+    with pytest.raises(RecognitionError):
+        _check_ascii_paths(Path("ascii_root") / "work_dir", config)
+
+
+def test_check_ascii_paths_does_not_check_sofa_python():
+    """sofa_pythonは非ASCII検証の対象外(確定。一時ディレクトリ・sofa_root・checkpoint_pathの3つのみ)。"""
+    from vocal_analysis import SofaAlignerConfig
+    from vocal_analysis.sofa_align import _check_ascii_paths
+
+    config = SofaAlignerConfig(
+        sofa_python=Path("ascii_root") / "専用venv" / "python",
+        sofa_root=Path("ascii_root") / "SOFA",
+        checkpoint_path=Path("ascii_root") / "checkpoint.ckpt",
+    )
+    _check_ascii_paths(Path("ascii_root") / "work_dir", config)  # 例外が出なければ合格
+
+
+class _FakeTemporaryDirectory:
+    """tempfile.TemporaryDirectory()の代替。固定パス(実在しなくてよい。ASCII検証は書き出し前に行う
+    設計なので、検証で弾かれるテストでは実際のファイルI/Oへ到達しない)を返す。
+    """
+
+    def __init__(self, path, **kwargs):
+        self._path = path
+
+    def __enter__(self):
+        return self._path
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def test_align_batch_non_ascii_checkpoint_path_does_not_start_subprocess(monkeypatch):
+    from vocal_analysis import SofaAlignerConfig, sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    ascii_config = _make_ascii_config()
+    config = SofaAlignerConfig(
+        sofa_python=ascii_config.sofa_python,
+        sofa_root=ascii_config.sofa_root,
+        checkpoint_path=Path("ascii_root") / "チェックポイント.ckpt",
+    )
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("非ASCIIパスが含まれる場合はSOFAを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+    monkeypatch.setattr(
+        sofa_align.tempfile, "TemporaryDirectory",
+        lambda **kwargs: _FakeTemporaryDirectory("ascii_root/work_dir"),
+    )
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+
+def test_align_batch_non_ascii_work_dir_does_not_start_subprocess(monkeypatch):
+    """SOFA自身が扱えないのは実行時に生成する一時ディレクトリのパスも同様。tempfile.mkdtempが
+    非ASCIIパスを返す場合(利用者環境の一時領域自体に非ASCII文字が含まれる場合)を模す。configは
+    全フィールドASCIIにし、work_dir単体の非ASCIIが検出されることを固定する。
+    """
+    from vocal_analysis import sofa_align
+    from vocal_analysis.phonemes import RecognitionError
+
+    config = _make_ascii_config()
+
+    def fail_popen(cmd, **kwargs):
+        raise AssertionError("非ASCIIパスが含まれる場合はSOFAを起動してはならない")
+
+    monkeypatch.setattr(sofa_align.subprocess, "Popen", fail_popen)
+    monkeypatch.setattr(
+        sofa_align.tempfile, "TemporaryDirectory",
+        lambda **kwargs: _FakeTemporaryDirectory("ascii_root/一時ディレクトリ"),
+    )
+
+    samples = np.zeros(16000, dtype=np.float32)
+    with pytest.raises(RecognitionError):
+        sofa_align._align_batch([(samples, 16000, ["a"])], config)
+
+
+def test_clamp_words_to_valid_list_passes_through_non_overlapping_words():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    words = [(["k", "a"], 0.5, 1.0), (["i"], 1.0, 1.5)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == words
+
+
+def test_clamp_words_to_valid_list_clamps_end_to_trim_duration():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語の終了時刻がトリム後区間の全長(1.0)を超えている(手順0の再クランプ)。
+    words = [(["a"], 0.5, 1.5)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=1.0) == [(["a"], 0.5, 1.0)]
+
+
+def test_clamp_words_to_valid_list_clamps_overlap_to_cursor():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語Bの開始(0.8)が単語Aの終了(1.0)より前で重複する。Bの開始はcursor(=Aの終了1.0)へ
+    # クランプされ、[1.0, 1.2)として有効になる(区間長0.2は最小長0.05以上)。
+    words = [(["a"], 0.5, 1.0), (["i"], 0.8, 1.2)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["i"], 1.0, 1.2),
+    ]
+
+
+def test_clamp_words_to_valid_list_invalidates_words_fully_covered_by_cursor():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語B・Cが単語Aに完全に包含される。Aが有効化されcursor=2.0(Aの終了)になった後、
+    # B(クランプ後start=2.0 > end=0.9)・C(クランプ後start=2.0 > end=1.2)とも負長になり
+    # 無効化される。無効化された単語を挟んでも、cursorはAの終了(2.0)のまま変化しない。
+    words = [(["a"], 0.5, 2.0), (["i"], 0.8, 0.9), (["u"], 1.0, 1.2)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [(["a"], 0.5, 2.0)]
+
+
+def test_clamp_words_to_valid_list_invalidates_word_already_shorter_than_minimum():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語Bは元の区間長(0.04秒)自体が既に最小長(0.05)未満で無効化される(クランプの影響を
+    # 受けない単純ケース)。cursorは更新されない(単語Aの終了1.0のまま)。
+    words = [(["a"], 0.5, 1.0), (["i"], 0.98, 1.02), (["u"], 1.05, 1.3)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["u"], 1.05, 1.3),
+    ]
+
+
+def test_clamp_words_to_valid_list_invalidates_word_shrunk_below_minimum_by_clamp():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 単語Bは元の区間長(0.06秒。最小長0.05以上)自体は無効化条件を満たさないが、クランプで
+    # start が 0.97→1.0(=cursor)へ引き上げられた結果、区間長が0.03秒に縮み無効化される。
+    # 「元の区間長」だけを見る誤実装ではこの単語は有効判定されてしまうため、クランプ後の区間長で
+    # 判定することを単独で固定する。
+    words = [(["a"], 0.5, 1.0), (["i"], 0.97, 1.03)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [(["a"], 0.5, 1.0)]
+
+
+def test_clamp_words_to_valid_list_cursor_persists_through_consecutive_invalid_words():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # A有効(cursor=1.0)→B・C連続無効→D有効、という並び。cursorが「無効化された単語のクランプ後
+    # 終了時刻」で誤って更新される実装(例: max(cursor, 無効単語のクランプ後end))だと、Bの無効化時に
+    # cursorが1.02へ、Cの無効化時に1.02のまま(1.01<1.02)進み、Dの開始は max(0.9, 1.02)=1.02 と
+    # 誤ってクランプされてしまう。正しい実装ではcursorはAの終了(1.0)のまま変化せず、Dの開始は
+    # max(0.9, 1.0)=1.0 になる。
+    words = [
+        (["a"], 0.5, 1.0),
+        (["i"], 0.9, 1.02),
+        (["u"], 0.95, 1.01),
+        (["e"], 0.9, 1.4),
+    ]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["e"], 1.0, 1.4),
+    ]
+
+
+def test_clamp_words_to_valid_list_invalidates_empty_phoneme_symbols():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    # 空の音素記号列を持つ単語はSOFA対象として意味を成さないため、区間長に関わらず無効とする
+    # cursorも他の無効化と同様に更新しない
+    # (単語Bの区間長自体は最小長以上だが、空の音素記号列だけを理由に無効化されることを確認する)。
+    words = [(["a"], 0.5, 1.0), ([], 1.0, 1.5), (["i"], 1.2, 2.0)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=2.0) == [
+        (["a"], 0.5, 1.0),
+        (["i"], 1.2, 2.0),
+    ]
+
+
+def test_clamp_words_to_valid_list_all_invalid_returns_empty():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    words = [([], 0.0, 0.01)]
+    assert _clamp_words_to_valid_list(words, trim_duration_sec=1.0) == []
+
+
+def test_clamp_words_to_valid_list_empty_input_returns_empty():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list
+
+    assert _clamp_words_to_valid_list([], trim_duration_sec=1.0) == []
+
+
+def test_determine_word_gaps_no_valid_words_covers_whole_trim_duration():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    assert _determine_word_gaps([], trim_duration_sec=1.5) == [(0.0, 1.5)]
+
+
+def test_covered_invalid_words_produce_no_gap_and_intervals_tile_whole_duration():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list, _determine_word_gaps
+
+    # 単語B・Cが単語Aに完全に包含されるとき、B・Cの元の時間範囲([0.8, 0.9)・[1.0, 1.2))へ
+    # 個別のgapが生成されないこと(Aの結果がその範囲を被覆するため。重ねて置くとSegment契約の
+    # 非重複性を破る)、および有効単語とgapを合わせた区間列がトリム後区間全体を隙間なく非重複で
+    # 被覆することを、クランプ→gap確定の連結で確認する。
+    words = [(["a"], 0.5, 2.0), (["i"], 0.8, 0.9), (["u"], 1.0, 1.2)]
+    trim_duration_sec = 2.5
+
+    valid_words = _clamp_words_to_valid_list(words, trim_duration_sec=trim_duration_sec)
+    gaps = _determine_word_gaps(valid_words, trim_duration_sec=trim_duration_sec)
+
+    assert valid_words == [(["a"], 0.5, 2.0)]
+    # gapは有効単語列の隙間(先頭〜A・A〜終端)だけ。B・Cの範囲に対応する個別gapは無い。
+    assert gaps == [(0.0, 0.5), (2.0, 2.5)]
+
+    intervals = sorted(
+        [(start, end) for _, start, end in valid_words] + gaps, key=lambda iv: iv[0])
+    assert intervals[0][0] == 0.0
+    assert intervals[-1][1] == trim_duration_sec
+    for (_, prev_end), (next_start, _) in zip(intervals, intervals[1:], strict=False):
+        assert prev_end == next_start
+
+
+def test_all_words_invalidated_confirms_whole_duration_as_single_gap():
+    from vocal_analysis.sofa_align import _clamp_words_to_valid_list, _determine_word_gaps
+
+    # 単語タイムスタンプ自体は取得できたが、短い単語が密集しcursorクランプ・最小長判定で全て
+    # 無効化され「有効な単語列」が0件になるケース。トリム後区間全体が単一のgapとして確定する
+    # 有効な単語列が0件になった場合。
+    words = [(["a"], 0.00, 0.04), (["i"], 0.02, 0.05), (["u"], 0.04, 0.07)]
+    trim_duration_sec = 1.0
+
+    valid_words = _clamp_words_to_valid_list(words, trim_duration_sec=trim_duration_sec)
+    gaps = _determine_word_gaps(valid_words, trim_duration_sec=trim_duration_sec)
+
+    assert valid_words == []
+    assert gaps == [(0.0, 1.0)]
+
+
+def test_determine_word_gaps_no_gaps_when_words_cover_whole_duration():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    words = [(["a"], 0.0, 0.5), (["i"], 0.5, 1.0)]
+    assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
+
+
+def test_determine_word_gaps_before_between_and_after():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    words = [(["a"], 0.2, 0.5), (["i"], 0.8, 1.0)]
+    assert _determine_word_gaps(words, trim_duration_sec=1.5) == [(0.0, 0.2), (0.5, 0.8), (1.0, 1.5)]
+
+
+def test_determine_word_gaps_does_not_emit_zero_length_gap():
+    from vocal_analysis.sofa_align import _determine_word_gaps
+
+    # 単語がトリム後区間の先頭からちょうど始まる場合、先頭側に長さ0のgapを生成しない。
+    words = [(["a"], 0.0, 1.0)]
+    assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
+
+
+def test_map_symbol_to_segment_fields_vowel():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "a" は音素モデル語彙でも "a"(母音)。
+    assert _map_symbol_to_segment_fields("a") == ("vowel", "a")
+
+
+def test_map_symbol_to_segment_fields_consonant():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "k" は音素モデル語彙でも "k"(子音)。
+    assert _map_symbol_to_segment_fields("k") == ("consonant", "k")
+
+
+def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_g2p_symbol_consonant():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "y" 自体はIPA母音記号の基準集合に含まれ母音判定になってしまうが、写像先の音素モデル
+    # 語彙記号 "j" は子音判定になる。分類が「写像後のIPA記号」に対して行われることを、写像前後で
+    # 判定が割れるこの記号で固定する(写像前のG2P記号を誤って分類する実装を検出する)。
+    assert _map_symbol_to_segment_fields("y") == ("consonant", "j")
+
+
+def test_map_symbol_to_segment_fields_classification_uses_mapped_symbol_not_raw_g2p_symbol_vowel():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "I"(無声化母音、大文字)自体は母音記号基準集合に無く子音判定になってしまうが、
+    # 写像先の音素モデル語彙記号 "i"(小文字)は母音判定になる。上のテストと逆方向(母音→子音では
+    # なく子音→母音)で写像順序を固定する。
+    assert _map_symbol_to_segment_fields("I") == ("vowel", "i")
+
+
+def test_map_symbol_to_segment_fields_vowel_with_ipa_conversion():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # G2P記号 "u" は音素モデル語彙で "ɯ"(母音)。写像を経ることを確認する。
+    assert _map_symbol_to_segment_fields("u") == ("vowel", "ɯ")
+
+
+def test_map_symbol_to_segment_fields_pau_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    assert _map_symbol_to_segment_fields("pau") == ("gap", None)
+
+
+def test_map_symbol_to_segment_fields_cl_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    assert _map_symbol_to_segment_fields("cl") == ("gap", None)
+
+
+def test_map_symbol_to_segment_fields_ap_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    # AP(吸気音・呼吸音)は無音ではないが、3分類に区分が無いためgapへ倒す。
+    assert _map_symbol_to_segment_fields("AP") == ("gap", None)
+
+
+def test_map_symbol_to_segment_fields_sp_is_gap():
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    assert _map_symbol_to_segment_fields("SP") == ("gap", None)
+
+
+def test_map_symbol_to_segment_fields_unmapped_symbol_raises():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
+
+    with pytest.raises(RecognitionError):
+        _map_symbol_to_segment_fields("xyz_unknown")
+
+
+def test_segments_from_raw_converts_all_fields():
+    from vocal_analysis.sofa_align import _segments_from_raw
+    from vocal_analysis.types import Segment
+
+    raw = [(0.0, 0.5, "pau"), (0.5, 0.7, "k"), (0.7, 1.0, "a")]
+    assert _segments_from_raw(raw) == [
+        Segment(type="gap", start_sec=0.0, end_sec=0.5, phoneme=None, confidence=None),
+        Segment(type="consonant", start_sec=0.5, end_sec=0.7, phoneme="k", confidence=None),
+        Segment(type="vowel", start_sec=0.7, end_sec=1.0, phoneme="a", confidence=None),
+    ]
+
+
+def test_segments_from_raw_empty_input_returns_empty():
+    from vocal_analysis.sofa_align import _segments_from_raw
+
+    assert _segments_from_raw([]) == []
+
+
+def test_segments_from_raw_propagates_unmapped_symbol_error():
+    from vocal_analysis.phonemes import RecognitionError
+    from vocal_analysis.sofa_align import _segments_from_raw
+
+    with pytest.raises(RecognitionError):
+        _segments_from_raw([(0.0, 0.5, "xyz_unknown")])

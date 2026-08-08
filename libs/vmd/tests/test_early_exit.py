@@ -71,7 +71,7 @@ def test_coeff_curve_exits_after_first_init(monkeypatch):
     targets = [interp._solve_factor(*EASE, x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     fit._fit_coeff_curve(xs, resid_at, early_exit_err=EE)
     assert calls["n"] == 1
@@ -159,7 +159,7 @@ def test_coeff_early_exit_output_identical_to_full_search(curve):
     targets = [interp._solve_factor(*curve, x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     cp_full = fit._fit_coeff_curve(xs, resid_at)
     cp_fast = fit._fit_coeff_curve(xs, resid_at, early_exit_err=EE)
@@ -172,7 +172,7 @@ def test_coeff_noisy_data_early_exit_matches_full_search():
     targets = [math.sin(math.pi * x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     cp_full = fit._fit_coeff_curve(xs, resid_at)
     cp_fast = fit._fit_coeff_curve(xs, resid_at, early_exit_err=EE)
@@ -184,8 +184,8 @@ def test_coeff_noisy_data_early_exit_matches_full_search():
 
 def _camera_reduce_source():
     """FOV(整数丸め)・位置(3軸ユークリッド)・回転を同時に動かす reduce 用ソースと許容。"""
-    from vmd.types import CameraKey
     from vmd.reduce import Tolerances
+    from vmd.types import CameraKey
 
     lin = bytes([20, 107, 20, 107]) * 6
     tols = Tolerances(
@@ -253,8 +253,16 @@ def test_early_exit_fires_during_reduce(monkeypatch):
     counter["n"] = 0
     orig_fbc = fit.fit_bezier_curve
     orig_fcc = fit._fit_coeff_curve
-    monkeypatch.setattr(fit, "fit_bezier_curve", lambda xs, ys, early_exit_err=None, category=None, skip_fastpath=False: orig_fbc(xs, ys, early_exit_err=None, category=category, skip_fastpath=skip_fastpath))
-    monkeypatch.setattr(fit, "_fit_coeff_curve", lambda xs, r, early_exit_err=None, category=None, skip_fastpath=False: orig_fcc(xs, r, early_exit_err=None, category=category, skip_fastpath=skip_fastpath))
+    monkeypatch.setattr(
+        fit, "fit_bezier_curve",
+        lambda xs, ys, early_exit_err=None, category=None, skip_fastpath=False:
+            orig_fbc(xs, ys, early_exit_err=None, category=category, skip_fastpath=skip_fastpath),
+    )
+    monkeypatch.setattr(
+        fit, "_fit_coeff_curve",
+        lambda xs, r, early_exit_err=None, category=None, skip_fastpath=False:
+            orig_fcc(xs, r, early_exit_err=None, category=category, skip_fastpath=skip_fastpath),
+    )
 
     _camera_track(source, tols, n)
     full_calls = counter["n"]

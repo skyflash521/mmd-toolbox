@@ -1,7 +1,4 @@
-"""VMD読み書き・正規化(vmd-io.md)。
-
-バイナリレイアウトの正: docs/specs/vmd/VMD_file_format.md
-"""
+"""VMD読み書き・正規化。"""
 
 import os
 import struct
@@ -82,7 +79,7 @@ def _check_name(
 
 
 def read(src: str | Path | bytes) -> tuple[VmdDocument, list[VmdWarning]]:
-    """VMDを読み込む(vmd-io.md §3)。キー配列は無加工(ソート・重複除去なし)。"""
+    """VMDを読み込む。キー配列は無加工(ソート・重複除去なし)。"""
     if isinstance(src, (str, Path)):
         data = Path(src).read_bytes()
     else:
@@ -209,7 +206,7 @@ def _fixed(raw: bytes, size: int, what: str) -> bytes:
 
 
 def write(doc: VmdDocument) -> bytes:
-    """v2形式で書き出す(vmd-io.md §4)。"""
+    """v2形式で書き出す。"""
     out = bytearray()
     out += _fixed(doc.magic_raw, 30, "magic")
     out += _fixed(doc.model_name_raw, 20, "モデル名")
@@ -252,7 +249,7 @@ def write(doc: VmdDocument) -> bytes:
 
 
 def write_file(doc: VmdDocument, path: str | Path) -> None:
-    """原子的に書き出す(vmd-io.md §4)。
+    """原子的に書き出す。
 
     同ディレクトリの一時ファイルへ書いて fsync し、`os.replace` で原子置換する。
     書き込み途中の中断・ディスクフルでも、既存の出力先(入力と同一パスへの
@@ -325,7 +322,7 @@ def _by_name_frame(k):
 def normalize(
     doc: VmdDocument, sections: list[str] | None = None
 ) -> tuple[VmdDocument, list[VmdWarning]]:
-    """フレームソート・重複キー後勝ちの正規化(vmd-io.md §5)。
+    """フレームソート・重複キー後勝ちの正規化。
 
     sections で対象セクションを限定できる。指定外セクションは無加工で保持する。
     """
@@ -376,7 +373,7 @@ _NEUTRAL_BUILDERS = {"morph": _neutral_morph, "bone": _neutral_bone}
 def ensure_frame0_neutral_keys(
     doc: VmdDocument, sections: tuple[str, ...] = ("morph",)
 ) -> VmdDocument:
-    """対象セクションの参照名へ frame=0 の中立キーを補う(無ければ挿入・あれば尊重)(vmd-io.md §5)。
+    """対象セクションの参照名へ frame=0 の中立キーを補う(無ければ挿入・あれば尊重)。
 
     出力VMDで使用モーフ(一般化でボーンも)を 0F に登録しておく MMD 互換・編集上の規約。使用名集合は対象
     セクション内のキー名から導出し、frame-0 キーを持たない名前にだけ中立キー(モーフ=weight 0.0、ボーン=

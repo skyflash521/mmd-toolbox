@@ -1,4 +1,4 @@
-"""dry-run レポートのテスト(sparsevmd.md §2.7)。
+"""dry-run レポートのテスト。
 
 report は削減の入出力キー数・削減率・選択ボーン・範囲・keep-frame をまとめ、
 dry-run のテキスト表示を提供する。
@@ -56,7 +56,7 @@ def test_format_dry_run_contains_counts_rate_selection_range_keep():
     assert "31" in text and "2" in text  # 入力/出力キー数
     assert "センター" in text and "頭" in text
     assert "%" in text or "0." in text  # 削減率
-    # 選択状態・範囲・keep-frame も表示される(§2.7)。
+    # 選択状態・範囲・keep-frame も表示される。
     low = text.lower()
     assert "select" in low or "選択" in text
     assert "12" in text  # keep-frame
@@ -64,7 +64,7 @@ def test_format_dry_run_contains_counts_rate_selection_range_keep():
 
 
 def test_build_report_note_when_not_reducible():
-    # 削減対象なし(全トラック1キー以下・範囲空)を記録する(§2.2/§3.1)。
+    # 削減対象なし(全トラック1キー以下・範囲空)を記録する。
     rep = report.build_report(
         target="camera", camera=(1, 1), bones=None, selected_bones=set(),
         ranges=[(7, 7)], keep_frames=[], reduced=False,

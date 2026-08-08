@@ -1,4 +1,4 @@
-"""雛形・データ型と vmd 連携のテスト(lipsync.md §3/§4)。
+"""雛形・データ型と vmd 連携のテスト。
 
 公開データ型(MouthShape / MouthEvent / GenerationParams)とコア関数
 generate_morph_keys の契約、および出力モーフキーが vmd の
@@ -12,8 +12,7 @@ from vmd import MorphKey, VmdDocument, read, write
 
 
 def test_mouth_shape_members():
-    """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音＋レガート間隙を持つ
-    (lipsync.md §2.1/§4.7)。
+    """MouthShape は母音5種＋撥音「ん」(N、列挙値 "n")＋両唇閉鎖＋無音＋レガート間隙を持つ。
 
     「ん」は閉口でなく母音と同じ機構を通る母音的口形。LEGATO_GAP は SILENCE と同じく非発音だが、
     生成時は完全閉口でなく谷として描く。
@@ -25,13 +24,23 @@ def test_mouth_shape_members():
 
 
 def test_consonant_class_members():
-    """ConsonantClass は NONE/NEUTRAL/ROUNDED/SPREAD を持つ(lipsync.md §2.1/§4.1)。
+    """ConsonantClass は NONE/NEUTRAL/ROUNDED/SPREAD を持つ。
 
     NONE=子音なし、NEUTRAL=唇を動かさない子音、ROUNDED=唇を丸める子音、SPREAD=い 方向へ寄せる子音。
     両唇閉鎖は MouthShape.BILABIAL で表しここには含めない。
     """
     names = {c.name for c in lipsync.ConsonantClass}
     assert names == {"NONE", "NEUTRAL", "ROUNDED", "SPREAD"}
+
+
+def test_aperture_class_members():
+    """ApertureClass は NONE/FIRM_CLOSURE/NARROW_CHANNEL/SLIGHT_CLOSURE を持つ。
+
+    ConsonantClass(唇の丸め・横引き方向)とは独立な軸で、母音合成の各モーフ最終重みを一律に
+    減衰させる。両唇閉鎖は MouthShape.BILABIAL で表しここには含めない。
+    """
+    names = {c.name for c in lipsync.ApertureClass}
+    assert names == {"NONE", "FIRM_CLOSURE", "NARROW_CHANNEL", "SLIGHT_CLOSURE"}
 
 
 def test_mouth_event_defaults():
@@ -52,8 +61,27 @@ def test_mouth_event_consonant_class_set():
     assert ev.consonant_class is lipsync.ConsonantClass.ROUNDED
 
 
+def test_mouth_event_aperture_class_default():
+    """MouthEvent は aperture_class 既定 ApertureClass.NONE を持つ。"""
+    ev = lipsync.MouthEvent(shape=lipsync.MouthShape.A, start=0.0, end=10.0)
+    assert ev.aperture_class is lipsync.ApertureClass.NONE
+
+
+def test_mouth_event_aperture_class_set():
+    """aperture_class は consonant_class の後に位置引数(既存フィールドの末尾に追加)で渡せる。"""
+    ev = lipsync.MouthEvent(
+        lipsync.MouthShape.A,
+        0.0,
+        10.0,
+        0.5,
+        lipsync.ConsonantClass.ROUNDED,
+        lipsync.ApertureClass.FIRM_CLOSURE,
+    )
+    assert ev.aperture_class is lipsync.ApertureClass.FIRM_CLOSURE
+
+
 def test_generation_params_defaults():
-    """GenerationParams の既定値が初期目安と一致する(lipsync.md §4.8)。
+    """GenerationParams の既定値が初期目安と一致する。
 
     vowel_scale は母音的口形別(a,i,u,e,o,n)の6要素で既定は全口形 1 倍。
     """
@@ -111,7 +139,7 @@ def test_generated_keys_roundtrip_through_vmd():
     assert keys
     restored, _warnings = read(write(VmdDocument(morph=keys)))
     assert len(restored.morph) == len(keys)
-    for src, dst in zip(keys, restored.morph):
+    for src, dst in zip(keys, restored.morph, strict=True):
         assert dst.name == src.name
         assert dst.frame == src.frame
         assert dst.weight == pytest.approx(src.weight)

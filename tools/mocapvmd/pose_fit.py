@@ -153,7 +153,7 @@ def fit(profile, dense_pose, smoothed_markers, *, params=DEFAULT_FIT_PARAMS):
                 w = params.w_marker * bindings[m].weight
                 res.extend((w * (p[0] - t[0]), w * (p[1] - t[1]), w * (p[2] - t[2])))
             res.extend(params.w_pose * xi for xi in xv)  # 元姿勢保持
-            res.extend(params.w_vel * (xi - pi) for xi, pi in zip(xv, _prev))  # 前フレーム差分
+            res.extend(params.w_vel * (xi - pi) for xi, pi in zip(xv, _prev, strict=True))  # 前フレーム差分
             return res
 
         sol = least_squares(
@@ -173,7 +173,7 @@ def fit(profile, dense_pose, smoothed_markers, *, params=DEFAULT_FIT_PARAMS):
             _dist(world[bindings[m].bone].position, fk0[m]) for m in marker_names
         )
         # 改善あり、かつマーカーを動かした量の大半が目標方向への改善である場合のみ採用
-        # (動かした量に対し改善が小さい=冗長な過大補正は破棄して元姿勢を使う。§8.4)。
+        # (動かした量に対し改善が小さい=冗長な過大補正は破棄して元姿勢を使う)。
         if improvement > 0.0 and improvement >= params.min_improvement_ratio * corr_effect:
             fitted.append(corrected)
             prev_x = np.asarray(x)

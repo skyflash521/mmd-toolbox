@@ -1,4 +1,4 @@
-"""初期値数のサンプル数連動テスト(vmd.md §6.3)。
+"""初期値数のサンプル数連動テスト。
 
 least_squares の試行初期値を、サンプル数(区間の内部点数)が閾値以上の高コスト区間に限って
 部分集合(線形+ease-in-out)へ絞り、呼び出し回数を減らす。少数サンプルの小区間は全初期値を試す
@@ -60,7 +60,7 @@ def test_fit_coeff_reduces_inits_for_large_segment(monkeypatch):
     targets = [math.sin(math.pi * x) for x in xs]
 
     def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets)]
+        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
 
     fit._fit_coeff_curve(xs, resid_at)
     assert len(cap) == len(fit._BEZIER_INITS_LARGE)

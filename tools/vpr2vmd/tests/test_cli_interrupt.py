@@ -1,4 +1,4 @@
-"""vpr2vmd CLI の中断(Ctrl-C 等)のテスト(vpr2vmd.md §7.5)。
+"""vpr2vmd CLI の中断(Ctrl-C 等)のテスト。
 
 変換段の KeyboardInterrupt を機械モードでは cancelled(exit 130)の終端イベント、非機械モードでは
 理由を標準エラーへ 1 行(exit 130)で畳む。書き込みは全計算後に 1 回だけなので、中断で出力ファイルは
@@ -10,7 +10,6 @@
 import json
 
 from vpr import Note, Part, TempoEvent, Track, VprProject
-
 from vpr2vmd import cli
 
 

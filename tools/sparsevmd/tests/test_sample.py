@@ -1,4 +1,4 @@
-"""サンプリング層のテスト(sparsevmd.md §3.1, §5.1)。
+"""サンプリング層のテスト。
 
 sample.build_tracks は対象セクション(camera/bone)を内部作業ビューで正規化
 (フレームソート・同一キー後勝ち)し、camera を1トラック、bone をボーン名ごとの
@@ -9,10 +9,8 @@ sample.build_tracks は対象セクション(camera/bone)を内部作業ビュ�
 import numpy as np
 import pytest
 
-from vmd.types import BoneKey, CameraKey, VmdDocument
-from sparsevmd import sample
 from sparsevmd.sample import build_tracks, sample_rotation, sample_scalar
-
+from vmd.types import BoneKey, CameraKey, VmdDocument
 
 # 真の線形補間になる制御点(各チャンネル x1==y1, x2==y2 → y=x)。
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6  # 24バイト
@@ -79,7 +77,7 @@ def test_bone_split_by_name():
         ]
     )
     tracks = build_tracks(doc, "bone")
-    # ボーン名ごとにちょうど1トラック(§4.1)。
+    # ボーン名ごとにちょうど1トラック。
     assert len(tracks) == 2
     by_name = {t.name: t for t in tracks}
     assert set(by_name) == {"センター", "頭"}
@@ -99,7 +97,7 @@ def test_normalization_sort_and_dedup_last_wins():
 
 
 def test_bone_normalization_sort_and_dedup_per_track():
-    # bone も camera 同様に正規化(同一ボーン同一フレームは後勝ち、ソート)。§3.1。
+    # bone も camera 同様に正規化(同一ボーン同一フレームは後勝ち、ソート)。
     doc = VmdDocument(
         bone=[
             bone("センター", 30, pos=(0.0, 0.0, 0.0)),
@@ -166,7 +164,7 @@ def test_sample_scalar_subrange():
 
 def test_sample_scalar_honors_interpolation_curve():
     # 非線形(ease)カーブの入力では、フレーム比例の単純線形ではなく VMD 補間曲線を
-    # 評価した値になること(§5.1 は vmd.interp へ委譲)。
+    # 評価した値になること(補間評価は vmd.interp へ委譲)。
     # pos_x: 0→10 over 0..10、ease カーブ。frame3 はカーブ評価で約 2.37523(線形なら3.0)。
     keys = [
         CameraKey(0, -30.0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), CAM_POSX_EASE, 30, 0),
@@ -181,7 +179,7 @@ def test_sample_scalar_honors_interpolation_curve():
 
 
 def test_sample_rotation_camera_euler():
-    # camera回転は軸別線形補間(§5.3)。0→(0,1,0) の中点は (0,0.5,0)。
+    # camera回転は軸別線形補間。0→(0,1,0) の中点は (0,0.5,0)。
     keys = [cam(0, rot=(0.0, 0.0, 0.0)), cam(10, rot=(0.0, 1.0, 0.0))]
     rots = sample_rotation(keys, 0, 10)
     assert len(rots) == 11

@@ -3,9 +3,6 @@
 PMXモデルファイルからボーン階層を読み取り、共通データモデルへ変換する。
 さらに、VMDローカル姿勢をボーン階層へ適用する前方運動学(FK)評価を提供する。
 
-対応モジュール: `pmx/types.py`(データモデル)・`pmx/io.py`(`read_pmx`)・
-`pmx/pose.py`(FK評価)。
-
 バイナリレイアウトの正は `../../docs/specs/pmx/PMX仕様.txt`。本書ではバイト
 レイアウトを重複記載せず、読み取り範囲・データモデル・規約・エラー・FK評価を定める。
 
@@ -17,9 +14,9 @@ PMXのうちFK評価に必要なボーン情報だけを保持する読み取り
 VMDローカル姿勢をPMXボーン階層に適用する近似FK評価を提供する。
 PMXの編集・書き出し、IK解決、付与親・物理演算の評価は対象外。
 
-`pmx` はフォーマット層モジュール([../../docs/conventions/layering.md](../../docs/conventions/layering.md) §1)で、
+`pmx` はフォーマット層モジュール([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))で、
 フォーマット層共通の設計原則(形式の事実のみを扱う・ロスレス・CLI非依存/無出力・構造化警告/エラー)は
-layering.md §3 を正本とする。
+[layering.md §3](../../docs/conventions/layering.md#3-フォーマット層共通の設計原則) を正本とする。
 
 対応バージョンは PMX 2.0 / 2.1。非対応バージョンは読み取りを中断する。
 

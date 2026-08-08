@@ -1,16 +1,12 @@
-"""削減診断の surface と dry-run レポートのテスト(sparsevmd.md §2.7, §6.3)。
+"""削減診断の surface と dry-run レポートのテスト。
 
-§2.7 はレポートに「不連続検出位置」・「分割理由」を求める。§6.3 は
-継ぎ目の補間曲線書き換えを「レポートに明示する」と求める。reduce_*_track は diagnostics
+レポートには不連続検出位置・分割理由に加え、継ぎ目の補間曲線書き換えも
+明示する。reduce_*_track は diagnostics
 out-param(dict)を受け取り、cuts(検出カット位置)・splits(分割フレームと駆動チャンネル)・
 seam_rewrites(継ぎ目で曲線を書き換えたフレーム)を埋める。build_report はこれを各トラック
 エントリに載せ、dry-run に出す。
 """
 
-import pytest
-
-from vmd import interp
-from vmd.types import BoneKey, CameraKey
 from sparsevmd import presets, report
 from sparsevmd.reduce import (
     BONE_LINEAR_INTERP,
@@ -18,6 +14,8 @@ from sparsevmd.reduce import (
     reduce_bone_track,
     reduce_camera_track,
 )
+from vmd import interp
+from vmd.types import BoneKey, CameraKey
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 EASE = (96, 0, 96, 30)
@@ -150,9 +148,9 @@ def test_format_dry_run_shows_cut_positions():
 
 def test_cli_dry_run_includes_diagnostics(tmp_path, capsys):
     # CLI 経由の dry-run が不連続検出位置を含むことをエンドツーエンドで確認する。
+    from sparsevmd import cli
     from vmd import io
     from vmd.types import VmdDocument
-    from sparsevmd import cli
 
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -189,7 +187,7 @@ def test_build_report_includes_splits_and_seams():
 
 def _force_linear_curve(monkeypatch):
     """全チャンネルの curve を線形固定にし、bezier 採否で受理した区間でも出力段で誤差を
-    起こして §7.3 出力後検証の密化ループを励起する(test_verify._bad_curve と同趣旨)。"""
+    起こして出力後検証の密化ループを励起する(test_verify._bad_curve と同趣旨)。"""
     import vmd.fit as fit
 
     linear_cp = (20, 20, 107, 107)
@@ -276,9 +274,9 @@ def test_build_report_preserves_verify_passthrough():
 
 def test_cli_dry_run_includes_verify(tmp_path, capsys):
     # CLI 経由の dry-run に verify レコードが出ることをエンドツーエンドで確認する。
+    from sparsevmd import cli
     from vmd import io
     from vmd.types import VmdDocument
-    from sparsevmd import cli
 
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -307,17 +305,30 @@ def test_format_dry_run_shows_verify():
 
 
 def test_log_diagnostics_shows_verify(capsys):
-    # verbose の stderr ログにも出力後検証の反復・追加が出る。
+    # verbose の詳細ログ(既定は標準出力)にも出力後検証の反復・追加が出る。
     from sparsevmd import cli
 
     diag = dict(_diag())
     diag["verify"] = [{"range": [0, 30], "iterations": 3,
                        "bad_counts": [5, 2, 0], "added_counts": [5, 2, 0], "added_total": 7}]
     cli._log_diagnostics(diag, None)
-    err = capsys.readouterr().err
-    assert "出力後検証" in err
-    assert "反復3" in err
-    assert "追加7" in err
+    out = capsys.readouterr().out
+    assert "出力後検証" in out
+    assert "反復3" in out
+    assert "追加7" in out
     # 反復ごとの推移(bad_counts/added_counts)も出し、総数が同じで推移が違うループを区別できる。
-    assert "bad=[5, 2, 0]" in err
-    assert "added=[5, 2, 0]" in err
+    assert "bad=[5, 2, 0]" in out
+    assert "added=[5, 2, 0]" in out
+
+
+def test_log_diagnostics_uses_given_file(capsys):
+    # 機械モードは file=sys.stderr を渡して stdout をイベント専用に保つ(呼び出し側の契約)。
+    import sys
+
+    from sparsevmd import cli
+
+    diag = dict(_diag())
+    cli._log_diagnostics(diag, None, file=sys.stderr)
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert "不連続検出位置" in cap.err

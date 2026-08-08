@@ -1,4 +1,4 @@
-"""形状(アタック・保持・リリース)のテスト(lipsync.md §3/§4)。
+"""形状(アタック・保持・リリース)のテスト。
 
 各母音区間がエンベロープ(各出力モーフに (start,0.0)・(start+attack,w_m)・
 (end-release,w_m)・(end,0.0) の4点)を出力し、短いアタックで保持値まで開き・区間の大半を
@@ -26,7 +26,7 @@ def _envelope(events, params=None):
 def _approx_envelope(actual, expected):
     """(frame, weight) リストを frame 完全一致・weight 近似で比較する。"""
     assert [f for f, _ in actual] == [f for f, _ in expected]
-    for (_, aw), (_, ew) in zip(actual, expected):
+    for (_, aw), (_, ew) in zip(actual, expected, strict=True):
         assert aw == pytest.approx(ew)
 
 

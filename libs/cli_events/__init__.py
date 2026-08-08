@@ -5,6 +5,8 @@ from .argparse_support import (
     argparse_error_field,
 )
 from .events import EVENT_TYPES, EventEmitter, StreamTerminatedError, error_event
+from .failure import emit_failure
+from .signals import install_sigbreak_handler
 
 __all__ = [
     "ArgumentParseError",
@@ -14,5 +16,7 @@ __all__ = [
     "StreamTerminatedError",
     "argparse_error_event",
     "argparse_error_field",
+    "emit_failure",
     "error_event",
+    "install_sigbreak_handler",
 ]

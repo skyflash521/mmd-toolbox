@@ -1,7 +1,8 @@
-"""vpr2vmd CLI 移植性・既定挙動回帰のテスト(vpr2vmd.md §7・規約 §10、§9 項目9・10)。
+"""vpr2vmd CLI 移植性・既定挙動回帰のテスト。
 
 非ASCIIパスの受理・生成、人間向け標準エラーの符号化安全性(ロケール符号化で表せない文字でもプロセスを
-落とさない)、機械モードが出力VMDを変えない(--machine の有無で出力バイト一致)ことを検証する。
+落とさない)、標準出力へ書けない場合に例外を漏らさないこと、機械モードが出力VMDを変えない
+(--machine の有無で出力バイト一致)ことを検証する。
 vpr.read は monkeypatch で差し替え、配線を決定論的に検証する。
 """
 
@@ -11,7 +12,6 @@ import sys
 
 from vmd import read as vmd_read
 from vpr import Note, Part, TempoEvent, Track, VprProject, VprWarning
-
 from vpr2vmd import cli
 
 # cp932(Windows のロケール符号化)で表せない文字(絵文字 U+1F3A5)。ロケール符号化外の文字を
@@ -39,14 +39,14 @@ def _cp932_stderr(monkeypatch):
     return wrapper
 
 
-# --- 非ASCIIパスの受理・生成(規約 §10、§9 項目10)----------------------------
+# --- 非ASCIIパスの受理・生成 ----------------------------------------------------
 
 
 def test_non_ascii_path_roundtrip_non_machine(tmp_path, monkeypatch):
     # 日本語ファイル名の入力を受理し、日本語ファイル名の出力 VMD を生成できる(非機械)。
     src = tmp_path / "ボーカル入力.vpr"
     src.write_bytes(b"")
-    out = tmp_path / "口パク出力.vmd"
+    out = tmp_path / "リップモーション出力.vmd"
     _stub_read(monkeypatch)
     rc = cli.main([str(src), "-o", str(out)])
     assert rc == 0
@@ -59,7 +59,7 @@ def test_non_ascii_path_machine(tmp_path, monkeypatch, capsysbinary):
     # 日本語パスでも機械モードで convert result を出し、出力を生成する。
     src = tmp_path / "ボーカル入力.vpr"
     src.write_bytes(b"")
-    out = tmp_path / "口パク出力.vmd"
+    out = tmp_path / "リップモーション出力.vmd"
     _stub_read(monkeypatch)
     rc = cli.main([str(src), "-o", str(out), "--machine"])
     assert rc == 0
@@ -69,7 +69,7 @@ def test_non_ascii_path_machine(tmp_path, monkeypatch, capsysbinary):
     assert events[-1]["output"] == str(out)
 
 
-# --- 人間向け標準エラーの符号化安全性(規約 §10、§9 項目10)-------------------
+# --- 人間向け標準エラーの符号化安全性 -------------------------------------------
 
 
 def test_stderr_safe_on_argparse_usage_error(monkeypatch):
@@ -90,7 +90,36 @@ def test_stderr_safe_on_warning(tmp_path, monkeypatch):
     assert rc == 0
 
 
-# --- 既定挙動の回帰: 機械モードは出力VMDを変えない(§9 項目9)----------------
+# --- 標準出力へ書けない場合 -----------------------------------------------------
+
+
+class _UnwritableStdout:
+    """buffer への書き込みが常に失敗する標準出力(呼び出し側がパイプを先に閉じた状況)。"""
+
+    class _Buffer:
+        def write(self, _data):
+            raise OSError("broken pipe")
+
+    def __init__(self):
+        self.buffer = self._Buffer()
+
+
+def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
+                                                                       capsys):
+    # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ
+    # 理由1行だけを出し、その時点で確定している失敗の終了コードで終える。
+    # 差し替えは CLI 呼び出しの区間だけに限り、標準エラーを読み出す前に元へ戻す。
+    with monkeypatch.context() as m:
+        m.setattr(sys, "stdout", _UnwritableStdout())
+        rc = cli.main([str(tmp_path / "nope.vpr"), "--machine"])
+    assert rc == 1  # 入力不在の終了コード(標準出力へ書けないことで変わらない)
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
+    # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
+    assert err[0].startswith("error: ") and "入力 vpr が見つかりません" in err[0]
+
+
+# --- 既定挙動の回帰: 機械モードは出力VMDを変えない ------------------------------
 
 
 def test_machine_output_equals_non_machine_output(tmp_path, monkeypatch):

@@ -1,4 +1,4 @@
-"""vpr2vmd の vpr 抽出層のテスト(vpr2vmd.md §3・§4)。
+"""vpr2vmd の vpr 抽出層のテスト。
 
 vpr の読み込み(vpr へ委譲)・対象トラック選択・音符収集(全パートの統合と安定整列)を、
 合成した `VprProject`(vpr データモデル)を入力に決定論的に検証する。重なり解決・フレーム変換・
@@ -10,6 +10,7 @@ import json
 import zipfile
 
 import pytest
+
 from vpr import (
     Note,
     Part,
@@ -19,7 +20,6 @@ from vpr import (
     rest_intervals,
 )
 from vpr import read as vpr_read
-
 from vpr2vmd import io as vio
 
 
@@ -76,7 +76,7 @@ def _project(tracks, *, tempos=None):
     )
 
 
-# --- 対象トラック選択(vpr2vmd.md §4.2、整数=0-based INDEX / 非整数=Track.name) ---
+# --- 対象トラック選択(半角数字だけ=0-based INDEX / それ以外=Track.name) ---
 
 def test_select_track_defaults_to_first():
     project = _project([_track([], name="a"), _track([], name="b")])
@@ -86,6 +86,19 @@ def test_select_track_defaults_to_first():
 def test_select_track_by_index():
     project = _project([_track([], name="a"), _track([], name="b")])
     assert vio.select_track(project, "1").name == "b"
+
+
+def test_select_track_full_width_digit_selects_by_name():
+    # 全角数字だけの名前を持つトラックは、その名前で選べる(INDEX と解釈しない)。
+    project = _project([_track([], name="１"), _track([], name="b")])
+    assert vio.select_track(project, "１").name == "１"
+
+
+def test_select_track_spaced_digit_is_treated_as_name():
+    # 空白を含む指定は数字だけではないので名前として扱う(一致しなければエラー)。
+    project = _project([_track([], name="a"), _track([], name="b")])
+    with pytest.raises(vio.TrackSelectionError):
+        vio.select_track(project, " 1")
 
 
 def test_select_track_index_out_of_range_errors():
@@ -165,7 +178,7 @@ def test_collect_notes_empty_track():
 # --- 代表 vpr からの抽出(読み込みは vpr、選択・収集は vpr2vmd)---
 
 def test_extracts_notes_tempo_rests_from_representative_vpr():
-    """代表 vpr から音符・休符・テンポが取り出せる(vpr2vmd.md §3、実装計画の受入条件)。"""
+    """代表 vpr から音符・休符・テンポが取り出せる。"""
     vpr = _make_vpr(_sequence(
         [{
             "type": 2, "name": "vocal",

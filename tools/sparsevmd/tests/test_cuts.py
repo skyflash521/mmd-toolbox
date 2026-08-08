@@ -1,4 +1,4 @@
-"""カット閾値パースのテスト(sparsevmd.md §2.6)。
+"""カット閾値パースのテスト。
 
 `POS,ROT,DIST`(camera)/ `POS,ROT`(bone)のCLI閾値文字列を解析する。
 個数違い・非数値・負値・非有限(nan/inf)・空白混入・空要素は ValueError。

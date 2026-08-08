@@ -1,4 +1,4 @@
-"""force_bezier: 共有ファストパスのオプトアウト(vmd.md §6.3)。
+"""force_bezier: 共有ファストパスのオプトアウト。
 
 線形ファストパス/cheap accept は採否・キー数を変えないが、許容内に収まる区間の出力曲線を
 線形へ寄せる。曲線形状の忠実度が要る呼び出し側向けに、各カメラチャンネルと
@@ -12,7 +12,6 @@ reduce_camera_track へ force_bezier フラグを設け、True でファスト�
 import math
 
 from vmd import interp
-from vmd.types import CameraKey
 from vmd.fit import (
     CameraRotationChannel,
     EuclideanVectorChannel,
@@ -27,6 +26,7 @@ from vmd.reduce import (
     camera_interp_bytes,
     reduce_camera_track,
 )
+from vmd.types import CameraKey
 
 EASE = (96, 0, 96, 30)
 LIN = (20, 20, 107, 107)

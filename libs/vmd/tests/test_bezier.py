@@ -1,4 +1,4 @@
-"""スカラー ベジェ曲線フィットのテスト(vmd-reduce.md §5.1, §5.3)。
+"""スカラー ベジェ曲線フィットのテスト。
 
 fit_bezier_curve(xs, ys) は、正規化時間 xs(0<x<1)と正規化値 ys に対し、VMD補間曲線
 (制御点 (x1,y1,x2,y2) を 0..127 整数で量子化)が x->y を近似するよう制御点を最小二乗で
@@ -7,11 +7,9 @@ fit_bezier_curve(xs, ys) は、正規化時間 xs(0<x<1)と正規化値 ys に�
 
 import math
 
-import numpy as np
 import pytest
 
 from vmd import interp
-from vmd import fit
 from vmd.fit import fit_bezier_curve
 
 
@@ -24,7 +22,7 @@ def test_linear_data_fits_with_zero_error():
     xs = _internal_xs()
     ys = list(xs)  # y = x(線形)
     cp, err = fit_bezier_curve(xs, ys)
-    # 線形は線形制御点(x1==y1, x2==y2)で y=x を厳密表現でき、誤差は実質0(vmd-reduce.md §10)。
+    # 線形は線形制御点(x1==y1, x2==y2)で y=x を厳密表現でき、誤差は実質0。
     assert err < 1e-6
     assert len(cp) == 4
     assert all(0 <= c <= 127 for c in cp)
@@ -51,7 +49,7 @@ def test_ease_curve_low_error():
 def test_nonmonotonic_values_have_large_error():
     # 非単調な y(中央で山→戻る)は、x:0→1 に対し y を 0→1 へ写す1本のVMD曲線では
     # 表現できず誤差が大きい。(端点同値 v0==v1 の正規化不能ケースは fit_bezier_curve では
-    # なくチャンネル側 vmd-reduce.md §5.1 の責務。ここは正規化済みの非単調 ys を渡す。)
+    # なくチャンネル側の責務。ここは正規化済みの非単調 ys を渡す。)
     xs = _internal_xs()
     ys = [math.sin(math.pi * x) for x in xs]  # 内部点で 0.31→1→0.31 の山
     cp, err = fit_bezier_curve(xs, ys)
@@ -80,5 +78,5 @@ def test_error_is_measured_on_quantized_curve():
     xs = _internal_xs()
     ys = [interp._solve_factor(30, 5, 100, 120, x) for x in xs]
     cp, err = fit_bezier_curve(xs, ys)
-    recomputed = max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys))
+    recomputed = max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys, strict=True))
     assert err == pytest.approx(recomputed, abs=1e-9)

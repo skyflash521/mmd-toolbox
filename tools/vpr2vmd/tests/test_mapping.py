@@ -1,14 +1,14 @@
-"""音符内の音素→口形イベント写像のテスト(vpr2vmd.md §3、音符内の時間配分)。
+"""音符内の音素→口形イベント写像のテスト(音符内の時間配分)。
 
 1つの採用音符(フレーム区間 [s, e))の音素列を、文脈なしで定まる口形イベントへ写像する。
 時間配分: 語頭両唇閉鎖は音符先頭に取り分 d_b = min(公称長, (e-s)×取り分上限)、残り区間の母音 k 個を等分。
-撥音「ん」(単独の鼻音)は ON で「ん」(N)、OFF(use_n_morph=False)で無音(閉口)。促音「っ」(Q)は無音(閉口)。
+撥音(単独の鼻音)は既定(use_n_morph 未指定)・OFF(use_n_morph=False)で無音(閉口)、
+ON(use_n_morph=True)で「ん」(N)。促音「っ」(Q)は無音(閉口)。
 母音を持たず撥音/促音でもない音符(継続「-」・その他子音のみ等)は直前口形に依存するため None を返し、
 組み立て段で直前口形を継続する(既定母音「あ」フォールバックは行わない)。
 """
 
-from lipsync import ConsonantClass, MouthShape
-
+from lipsync import ApertureClass, ConsonantClass, MouthShape
 from vpr2vmd import mapping
 
 
@@ -18,6 +18,10 @@ def _shapes_spans(eventlist):
 
 def _classes(eventlist):
     return [(e.shape, e.consonant_class) for e in eventlist]
+
+
+def _apertures(eventlist):
+    return [(e.shape, e.aperture_class) for e in eventlist]
 
 
 def test_single_vowel_fills_note():
@@ -91,15 +95,22 @@ def test_no_vowel_returns_none_for_hold():
     assert mapping.note_mouth_events([], 0.0, 30.0) is None
 
 
-def test_moraic_nasal_fills_note_with_n_when_on():
-    # 撥音(単独の鼻音 N\)は既定(ん ON)で音符全体を「ん」(N)にする。
+def test_moraic_nasal_is_silence_by_default():
+    # 撥音(単独の鼻音 N\)は use_n_morph 未指定(既定)では音符全体を無音(閉口)にする。
     assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0)) == [
+        (MouthShape.SILENCE, 0.0, 30.0),
+    ]
+
+
+def test_moraic_nasal_fills_note_with_n_when_on():
+    # ん ON(use_n_morph=True)では撥音(単独の鼻音 N\)を音符全体で「ん」(N)にする。
+    assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0, use_n_morph=True)) == [
         (MouthShape.N, 0.0, 30.0),
     ]
 
 
 def test_moraic_nasal_is_silence_when_off():
-    # ん OFF(use_n_morph=False)では撥音を無音(閉口)にする。口を開けた母音「あ」へ倒さない。
+    # ん OFF(use_n_morph=False)を明示しても無音(閉口)は変わらない。口を開けた母音「あ」へ倒さない。
     assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0, use_n_morph=False)) == [
         (MouthShape.SILENCE, 0.0, 30.0),
     ]
@@ -202,3 +213,61 @@ def test_open_amount_placeholder_zero_for_all_event_kinds():
         events = mapping.note_mouth_events(phonemes, 0.0, 30.0)
         assert events
         assert all(e.open_amount == 0.0 for e in events)
+
+
+def test_onset_aperture_class_attached_to_leading_vowel():
+    # 先頭母音に先頭子音の ApertureClass を付ける。た(t=FIRM_CLOSURE)・さ(s=NARROW_CHANNEL)・
+    # か(k=SLIGHT_CLOSURE)・母音単独(子音なし=NONE)。
+    assert _apertures(mapping.note_mouth_events(["t", "a"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.FIRM_CLOSURE),
+    ]
+    assert _apertures(mapping.note_mouth_events(["s", "a"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.NARROW_CHANNEL),
+    ]
+    assert _apertures(mapping.note_mouth_events(["k", "o"], 0.0, 30.0)) == [
+        (MouthShape.O, ApertureClass.SLIGHT_CLOSURE),
+    ]
+    assert _apertures(mapping.note_mouth_events(["a"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.NONE),
+    ]
+
+
+def test_onset_aperture_only_on_first_mora_vowel():
+    # 1音符に母音が複数あるとき、先頭母音にだけ ApertureClass を付け後続母音は NONE。
+    assert _apertures(mapping.note_mouth_events(["k", "a", "i"], 0.0, 30.0)) == [
+        (MouthShape.A, ApertureClass.SLIGHT_CLOSURE),
+        (MouthShape.I, ApertureClass.NONE),
+    ]
+
+
+def test_onset_aperture_priority_when_multiple_consonants():
+    # 複数の語頭子音は優先順 FIRM_CLOSURE > NARROW_CHANNEL > SLIGHT_CLOSURE > NONE で1つに決める。
+    # か+さ(k=SLIGHT_CLOSURE + s=NARROW_CHANNEL)→ NARROW_CHANNEL、さ+た(s=NARROW_CHANNEL +
+    # t=FIRM_CLOSURE)→ FIRM_CLOSURE。
+    assert mapping.note_mouth_events(["k", "s", "a"], 0.0, 30.0)[0].aperture_class is (
+        ApertureClass.NARROW_CHANNEL
+    )
+    assert mapping.note_mouth_events(["s", "t", "a"], 0.0, 30.0)[0].aperture_class is (
+        ApertureClass.FIRM_CLOSURE
+    )
+
+
+def test_onset_aperture_and_consonant_class_are_independent():
+    # ConsonantClass 優先順で勝つ子音(w=ROUNDED)と ApertureClass 優先順で勝つ子音(t=FIRM_CLOSURE)が
+    # 混在する語頭子音列で、両軸が同時に(互いに影響せず)確定する。
+    event = mapping.note_mouth_events(["w", "t", "a"], 0.0, 30.0)[0]
+    assert event.consonant_class is ConsonantClass.ROUNDED
+    assert event.aperture_class is ApertureClass.FIRM_CLOSURE
+
+
+def test_onset_aperture_class_depends_on_bilabial_position():
+    # 両唇音を挟む場合の順序依存: ConsonantClass は両唇音を除外した順序を問わない集合で判定するが、
+    # ApertureClass は「最後に現れる両唇音より後」だけを対象にするため両唇音の位置に依存する。
+    # k,m,a(両唇音 m が最後で後続の子音が無い)は NONE。
+    assert mapping.note_mouth_events(["k", "m", "a"], 0.0, 30.0)[0].aperture_class is (
+        ApertureClass.NONE
+    )
+    # m,k,a(両唇音 m の後に k がある)は SLIGHT_CLOSURE。
+    assert mapping.note_mouth_events(["m", "k", "a"], 0.0, 30.0)[1].aperture_class is (
+        ApertureClass.SLIGHT_CLOSURE
+    )

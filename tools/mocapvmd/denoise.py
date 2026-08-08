@@ -1,4 +1,4 @@
-"""一般ノイズ軽減の検出層(mocapvmd.md §4.2)。
+"""一般ノイズ軽減の検出層。
 
 各ボーンの密サンプル(0始まり相対インデックス)から、スパイク候補・スパイク(補正対象)・
 アクセント(保護)・カット/範囲端の境界を検出する。スパイクは窓基準(位置=窓中央値・回転=窓内
@@ -68,7 +68,7 @@ def _qmul(a, b):
 
 def _qangle_deg(a, b):
     """2つの quaternion 間の角度距離(度)。符号反転は同一姿勢として 0 になる。"""
-    d = abs(sum(x * y for x, y in zip(a, b)))
+    d = abs(sum(x * y for x, y in zip(a, b, strict=True)))
     d = min(1.0, d)
     return math.degrees(2.0 * math.acos(d))
 
@@ -92,7 +92,7 @@ def _vlen(v):
 
 
 def _vdot(a, b):
-    return sum(x * y for x, y in zip(a, b))
+    return sum(x * y for x, y in zip(a, b, strict=True))
 
 
 def _slerp(a, b, t):
@@ -111,7 +111,7 @@ def _slerp(a, b, t):
 
 
 def _clamp_rot(orig, target, max_deg):
-    """target を、orig からの角度が max_deg を超えないよう slerp で引き戻す(§5.5)。"""
+    """target を、orig からの角度が max_deg を超えないよう slerp で引き戻す。"""
     ang = _qangle_deg(orig, target)
     if ang <= max_deg:
         return target
@@ -271,7 +271,7 @@ def _collect_runs(signs, seg_start, axis, frames):
 
 
 def detect_noise_events(positions, rotations, *, pos_window, rot_window):
-    """密サンプルからスパイク・アクセント・境界を検出して NoiseDetection を返す(§4.2)。"""
+    """密サンプルからスパイク・アクセント・境界を検出して NoiseDetection を返す。"""
     _validate(positions, rotations, pos_window, rot_window)
     n = len(positions)
     if n == 0:
@@ -370,7 +370,7 @@ def _pos_smoothed(pos, segs, window):
 
 
 def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength, rot_strength):
-    """密サンプルに一般ノイズ軽減を適用し、平滑化済みの (位置列, 回転列) を返す(§4.2, §5.5)。
+    """密サンプルに一般ノイズ軽減を適用し、平滑化済みの (位置列, 回転列) を返す。
 
     位置は中央値フィルタ後 Savitzky-Golay を位置のブレンド率で合成、回転は窓内正規化平均を回転のブレンド率で
     合成する。アクセント run・カット境界・範囲端は保護(変更しない)。スパイクは窓基準により
@@ -396,7 +396,7 @@ def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength,
                 vals.append(float(pos[i, a]))
                 continue
             delta = pos_strength * (smoothed[i, a] - pos[i, a])
-            delta = max(-POS_SPIKE, min(POS_SPIKE, delta))  # §5.5 各軸クランプ
+            delta = max(-POS_SPIKE, min(POS_SPIKE, delta))  # 各軸クランプ
             vals.append(float(pos[i, a] + delta))
         out_pos.append(tuple(vals))
 
@@ -406,6 +406,6 @@ def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength,
             out_rot.append(rots[i])
             continue
         target = _slerp(rots[i], rot_mean[i], rot_strength)
-        out_rot.append(_clamp_rot(rots[i], target, ROT_SPIKE_DEG))  # §5.5 回転クランプ
+        out_rot.append(_clamp_rot(rots[i], target, ROT_SPIKE_DEG))  # 回転クランプ
 
     return out_pos, out_rot

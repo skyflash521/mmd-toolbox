@@ -1,4 +1,4 @@
-"""tick→秒→フレーム変換(vpr2vmd.md §3・§6)。
+"""tick→秒→フレーム変換。
 
 vpr は時刻を tick(整数、resolution=tick/四分音符)で、テンポを `TempoEvent{tick, bpm}` の列で
 渡す。秒への変換はテンポマップの区分積分で行い、30fps の float フレームへ写す。整数フレームへの
@@ -91,7 +91,9 @@ def representative_bpm(
     samples.sort(key=lambda s: s[0])
     half = sum(weight for _, weight in samples) / 2.0
     cumulative = 0.0
-    for bpm, weight in samples:
+    # 最後の1件は走査から外し、そこへ落ちた場合の戻り値にする(全件を走査すると累積重みが
+    # 最終反復で総重みに達して必ず半分以上になり、末尾の return が到達しない枝になる)。
+    for bpm, weight in samples[:-1]:
         cumulative += weight
         if cumulative >= half:
             return bpm

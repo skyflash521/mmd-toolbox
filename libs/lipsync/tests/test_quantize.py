@@ -1,4 +1,4 @@
-"""疎キー配置・30fps量子化のテスト(lipsync.md §3/§4)。
+"""疎キー配置・30fps量子化のテスト。
 
 生成側が出した float 目標位置を、四捨五入(floor(x+0.5)・0.5は切り上げ)で整数フレーム化し、同一モーフ・
 同一フレームへ潰れた目標値を量子化前 float が最も後ろの値へ統合して、量子化後に重複キーが出ないことを
@@ -24,7 +24,7 @@ def _envelope(events, params=None):
 
 def _approx_envelope(actual, expected):
     assert [f for f, _ in actual] == [f for f, _ in expected]
-    for (_, aw), (_, ew) in zip(actual, expected):
+    for (_, aw), (_, ew) in zip(actual, expected, strict=True):
         assert aw == pytest.approx(ew)
 
 

@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bash .claude/skills/codex-review-loop/watchdog.sh*)",
+      "Bash(bash .claude/skills/codex-watchdog/watchdog.sh*)",
+      "Bash(python3 scripts/trash.py *)",
       "Bash(git add *)",
       "Bash(git blame *)",
       "Bash(git branch --list *)",
@@ -48,11 +49,6 @@
       "Bash(./.venv/Scripts/python -m pytest *)",
       "Bash(.venv/Scripts/python.exe -m pytest *)",
       "Bash(./.venv/Scripts/python.exe -m pytest *)"
-    ],
-    "deny": [
-      "Bash(git -C *)",
-      "Bash(git --git-dir*)",
-      "Bash(git --work-tree*)"
     ]
   },
   "sandbox": {
@@ -67,22 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-codex.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-readonly.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-watchdog.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-cd-root.py\"",
             "shell": "bash"
           },
           {
@@ -92,12 +73,7 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-pytest-env-prefix.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-pytest-pipe.py\"",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-rm.py\"",
             "shell": "bash"
           },
           {
@@ -119,7 +95,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify-permission.py\" 2>/dev/null || true",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify-attention.py\" 2>/dev/null || true",
+            "shell": "bash",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify-attention.py\" 2>/dev/null || true",
             "shell": "bash",
             "async": true
           }

@@ -1,18 +1,18 @@
-"""shakevmd プリセット定義(shakevmd.md §2.7, §8)。
+"""shakevmd プリセット定義。
 
 各プリセットは公開引数の束(ジャンル別の既定値)に加え、CLI 非公開の内蔵パラメーター
 (現状は walking の歩調成分 gait_freq/gait_amp)を任意で持つ。`--preset NAME` 指定時、
-公開引数は未指定引数の既定として適用し個別引数の明示指定が優先する(§2.7)。内蔵
-パラメーターは CLI フラグを持たず、プリセット定義からのみ bake へ渡る(§8)。
+公開引数は未指定引数の既定として適用し個別引数の明示指定が優先する。内蔵
+パラメーターは CLI フラグを持たず、プリセット定義からのみ bake へ渡る。
 
 オクターブ構成・静止/移動プロファイルのプリセット別調整は未対応(値は暫定で、実利用での
 微調整余地がある)。
 """
 
-# 公開プリセット名(§2.7)。
+# 公開プリセット名。
 PRESET_NAMES = ("handheld", "telephoto", "walking", "earthquake")
 
-# 内蔵パラメーター名(CLI 非公開、プリセット/コアAPIのみ。§8)。bake() が受ける引数名と一致させ、
+# 内蔵パラメーター名(CLI 非公開、プリセット/コアAPIのみ)。bake() が受ける引数名と一致させ、
 # cli が明示渡しする引数とは重複させない。cli はこの名前のキーがプリセットにあれば bake へ転送する。
 # 歩調成分・静止/移動プロファイル(オクターブ重み構成)・settle収束時間・素朴な角度加算モード。
 INTERNAL_PARAM_NAMES = (
@@ -21,7 +21,7 @@ INTERNAL_PARAM_NAMES = (
 )
 
 # 各プリセット = 公開引数(amp_rot/amp_pos/rot_weights/freq/motion_damp/settle/cut_threshold)の束。
-# walking は加えて内蔵の歩調成分(gait_freq/gait_amp)を持つ(§95)。
+# walking は加えて内蔵の歩調成分(gait_freq/gait_amp)を持つ。
 # motion_damp は速度での振幅減衰(大きいほど動中に揺れが消える)。値は暫定。
 _PRESETS = {
     # 手持ち撮影: 既定に近い自然な揺れ。

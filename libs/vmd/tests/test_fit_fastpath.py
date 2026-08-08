@@ -1,11 +1,9 @@
-"""線形ファストパスのテスト(vmd.md §6.3)。
+"""線形ファストパスのテスト。
 
 線形制御点で許容内(`early_exit_err` 以内)に収まる区間は `least_squares` を呼ばず即採用し、
 最適化の呼び出し回数そのものを減らす。許容(`early_exit_err`)が無い全探索ではファストパスを
 取らない(閾値が無い)。線形で収まらない区間は従来どおり `least_squares` を回す(過剰発火しない)。
 """
-
-import pytest
 
 from vmd import fit, interp
 
@@ -66,7 +64,7 @@ def test_no_early_exit_err_takes_no_fastpath(monkeypatch):
     assert calls["n"] >= 1
 
 
-# --- skip_fastpath: ファストパスのオプトアウト(vmd.md §6.3) -----------------
+# --- skip_fastpath: ファストパスのオプトアウト -----------------
 
 # 「線形でも許容内に収まるが実際は曲がっている」サンプル(強いイージング)。
 _CURVED_XS = [(i + 1) / 12 for i in range(11)]
@@ -74,7 +72,7 @@ _CURVED_YS = [interp._solve_factor(96, 0, 96, 30, x) for x in _CURVED_XS]
 
 
 def _linear_err(xs, ys):
-    return max(abs(interp._solve_factor(*LIN, x) - y) for x, y in zip(xs, ys))
+    return max(abs(interp._solve_factor(*LIN, x) - y) for x, y in zip(xs, ys, strict=True))
 
 
 def _is_linear_curve(cp, xs):
@@ -100,7 +98,7 @@ def test_skip_fastpath_forces_real_bezier(monkeypatch):
 def test_skip_fastpath_coeff_forces_real_bezier(monkeypatch):
     # 回転の係数曲線でも、skip_fastpath=True で線形ファストパスを切り非線形制御点を返す。
     def resid_at(coeff):
-        return [coeff(x) - y for x, y in zip(_CURVED_XS, _CURVED_YS)]
+        return [coeff(x) - y for x, y in zip(_CURVED_XS, _CURVED_YS, strict=True)]
 
     lin_res = max(abs(r) for r in resid_at(lambda x: interp._solve_factor(*LIN, x)))
     thr = lin_res + 1e-6
@@ -118,7 +116,7 @@ def test_skip_fastpath_cheap_accept_also_skipped(monkeypatch):
     # 固定 ease 候補 (53,0,127,127) で生成した曲線は、線形では大きく外れるが当該 ease では誤差0。
     cand = fit._CHEAP_EASE_CPS[0]
     ys = [interp._solve_factor(*cand, x) for x in _CURVED_XS]
-    cand_err = max(abs(interp._solve_factor(*cand, x) - y) for x, y in zip(_CURVED_XS, ys))
+    cand_err = max(abs(interp._solve_factor(*cand, x) - y) for x, y in zip(_CURVED_XS, ys, strict=True))
     thr = cand_err + 1e-6
     # 既定: 線形は外れるが cheap accept が発火して固定 ease を即採用(least_squares なし)
     calls_default = _count_least_squares(monkeypatch)

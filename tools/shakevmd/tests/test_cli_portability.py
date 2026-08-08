@@ -1,8 +1,8 @@
-"""shakevmd CLI 移植性のテスト(shakevmd.md §2.8/§12, 規約 §10)。
+"""shakevmd CLI 移植性のテスト。
 
 機械モード標準出力の UTF-8・改行 LF 固定、非ASCIIパスの受理と生成、人間向け標準エラーの
-符号化安全性(ロケール符号化で表せない文字でもプロセスを落とさない)を検証する。テスト方針は
-../../../libs/vmd/vmd.md §4 に準ずる(決定論的・外部依存なし)。
+符号化安全性(ロケール符号化で表せない文字でもプロセスを落とさない)、標準出力へ書けない場合に
+例外を漏らさないことを検証する。テストは決定論的・外部依存なしで行う。
 """
 
 import io
@@ -37,7 +37,7 @@ def write_input(path, keys=KEYS, **doc_kwargs):
     return str(path)
 
 
-# --- 機械モード標準出力: UTF-8 + 改行 LF 固定(規約 §10) ---------------------
+# --- 機械モード標準出力: UTF-8 + 改行 LF 固定 ---------------------
 
 
 def test_machine_stdout_uses_lf_only(tmp_path, capsysbinary):
@@ -70,7 +70,7 @@ def test_machine_stdout_non_ascii_is_utf8(tmp_path, capsysbinary):
     assert "出力" in text and "カメラ以外" in text
 
 
-# --- 非ASCIIパスの受理・生成(規約 §10) -------------------------------------
+# --- 非ASCIIパスの受理・生成 -------------------------------------
 
 
 def test_non_ascii_path_roundtrip(tmp_path):
@@ -84,7 +84,7 @@ def test_non_ascii_path_roundtrip(tmp_path):
     assert doc.camera
 
 
-# --- 人間向け標準エラーの符号化安全性(規約 §10) ---------------------------
+# --- 人間向け標準エラーの符号化安全性 ---------------------------
 # ロケール符号化(cp932)相当へ差し替えた標準エラーの下で、表せない文字を含む人間向け出力
 # (argparse 使用法エラー・fail() の error 行・警告ループの warning 行)が UnicodeEncodeError で
 # 本体を異常終了/internal_error へ落とさないことを検証する。この符号化安全性は cli.py が標準エラーの
@@ -99,8 +99,8 @@ def _cp932_stderr(monkeypatch):
 
 
 def test_stderr_safe_argparse_usage_error(monkeypatch):
-    # (a) argparse 使用法エラー経路: 表せない文字を含む不正引数値。argparse が標準エラーへ書く
-    # 使用法エラーが符号化に失敗せず、引数エラー(2)で終える(例外を漏らさない)。
+    # (a) argparse 使用法エラー経路: 表せない文字を含む不正引数値。argparse の文言を載せたエラー行が
+    # 符号化に失敗せず、引数エラー(2)で終える(例外を漏らさない)。
     _cp932_stderr(monkeypatch)
     rc = cli.main(["in.vmd", "--seed", UNREP])
     assert rc == 2
@@ -109,9 +109,9 @@ def test_stderr_safe_argparse_usage_error(monkeypatch):
 def test_stderr_safe_fail_path(tmp_path, monkeypatch):
     # (b) fail() 経路: 表せない文字を含むパス。上書きガードの fail() メッセージが符号化に失敗せず、
     # 引数エラー(2)で終える(符号化失敗を internal_error(1)へ落とさない)。
+    p = write_input(tmp_path / (UNREP + ".vmd"))  # 出力先に既存ファイルがある状態を作る
     _cp932_stderr(monkeypatch)
-    p = str(tmp_path / (UNREP + ".vmd"))
-    rc = cli.main([p, "-o", p])   # 入力=出力・--overwrite 未指定 → output_overwrites_input(2)
+    rc = cli.main([p, "-o", p])   # 入力=出力・既存・--overwrite 未指定 → output_exists(2)
     assert rc == 2
 
 
@@ -129,3 +129,32 @@ def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--no-smooth"])
     assert rc == 0
+
+
+# --- 標準出力へ書けない場合 ---------------------------------------
+
+
+class _UnwritableStdout:
+    """buffer への書き込みが常に失敗する標準出力(呼び出し側がパイプを先に閉じた状況)。"""
+
+    class _Buffer:
+        def write(self, _data):
+            raise OSError("broken pipe")
+
+    def __init__(self):
+        self.buffer = self._Buffer()
+
+
+def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
+                                                                       capsys):
+    # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ
+    # 理由1行だけを出し、その時点で確定している失敗の終了コードで終える。
+    # 差し替えは CLI 呼び出しの区間だけに限り、標準エラーを読み出す前に元へ戻す。
+    with monkeypatch.context() as m:
+        m.setattr(sys, "stdout", _UnwritableStdout())
+        rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
+    assert rc == 1  # 入力不在の終了コード(標準出力へ書けないことで変わらない)
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
+    # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
+    assert err[0].startswith("error: ") and "入力を VMD として読めない" in err[0]

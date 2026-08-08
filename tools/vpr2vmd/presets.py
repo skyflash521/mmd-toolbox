@@ -1,4 +1,4 @@
-"""口パクスタイルプリセットの解決(vpr2vmd.md §4)。
+"""リップモーションスタイルプリセットの解決。
 
 `--style` のプリセット名と、任意の上書き(`--open-max`/`--default-open`)から、開き量写像の
 パラメータ(openness)と lipsync の生成パラメータ(GenerationParams)を決定論的に解決する。
@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from lipsync import GenerationParams
 
-GAMMA = 0.6  # ベロシティ→開き量の累乗指数(全スタイル共通の初期値)
+from .openness import GAMMA_DEFAULT
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ class OpennessParams:
 class _Preset:
     """プリセット1件の出発点値(開き量レンジ・上限・タイミング・連続感・誇張)。
 
-    末尾の連続感パラメータ(三角形下限・伸び表現・レガート谷)は既定を `lipsync` の
+    末尾の連続感パラメータ(三角形下限・伸び表現・レガート谷・モーラ境界の谷)は既定を `lipsync` の
     `GenerationParams` 既定相当に置き、視覚で詰めたスタイルだけが上書きする。これにより各スタイルが
     渡す生成パラメータが presets で完結する(`GenerationParams` 既定への暗黙依存を残さない)。
     """
@@ -50,6 +50,8 @@ class _Preset:
     legato_valley_shallow: float = 0.4
     legato_valley_deep: float = 0.2
     legato_valley_slope: float = 0.025
+    mora_valley_frames: float = 12.0
+    mora_valley_min_gap_frames: float = 4.0
 
 
 # スタイルごとの出発点値(開き量レンジ・上限・タイミング・連続感・誇張。実データで調整しうる)。
@@ -75,7 +77,7 @@ def resolve(
     open_max: float | None = None,
     default_open: float | None = None,
 ) -> tuple[OpennessParams, GenerationParams]:
-    """スタイル名と任意の上書きから開き量写像・生成パラメータを解決する(vpr2vmd.md §4)。
+    """スタイル名と任意の上書きから開き量写像・生成パラメータを解決する。
 
     `open_max` を渡すとそのスタイルの既定上限を上書きし、開き量写像の上限と lipsync の
     `open_cap` の両方に効く。`default_open` を渡すと一様ベロシティ時の既定開き量を上書きし、
@@ -91,7 +93,9 @@ def resolve(
         hi=preset.hi,
         open_max=resolved_open_max,
         default_open=resolved_default_open,
-        gamma=GAMMA,
+        # 累乗指数は全スタイル共通なので、写像側の既定をそのまま採る(同じ値をここでも
+        # 定義すると二重管理になり、片方だけ動かしたときに食い違う)。
+        gamma=GAMMA_DEFAULT,
     )
     params = GenerationParams(
         open_cap=resolved_open_max,
@@ -105,6 +109,8 @@ def resolve(
         legato_valley_shallow=preset.legato_valley_shallow,
         legato_valley_deep=preset.legato_valley_deep,
         legato_valley_slope=preset.legato_valley_slope,
+        mora_valley_frames=preset.mora_valley_frames,
+        mora_valley_min_gap_frames=preset.mora_valley_min_gap_frames,
         exaggeration=preset.exaggeration,
         vibrato_threshold=preset.vibrato_threshold,
         vibrato_amp=preset.vibrato_amp,

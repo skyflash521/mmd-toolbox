@@ -1,4 +1,4 @@
-"""母音合成プロファイルのテスト(lipsync.md §3/§4.1)。
+"""母音合成プロファイルのテスト。
 
 純母音(子音なし/唇を動かさない子音)は主モーフ単独。子音種別 ConsonantClass で唇方向を変調する
 (ROUNDED→丸めの う・お、SPREAD→横引きの い)。誇張係数・母音別倍率・保持値クランプ・合成後総量の
@@ -161,3 +161,69 @@ def test_vowel_scale_indexed_per_vowel(shape, index, main):
     scale[index] = 1.5
     p = GenerationParams(vowel_scale=tuple(scale))
     assert _peak_weights(_vowel(shape, 0.3), p) == pytest.approx({main: 0.45})
+
+
+@pytest.mark.parametrize(
+    "aperture_name,scale",
+    [
+        ("NONE", 1.0),
+        ("FIRM_CLOSURE", 0.75),
+        ("NARROW_CHANNEL", 0.85),
+        ("SLIGHT_CLOSURE", 0.92),
+    ],
+)
+def test_aperture_scale_applied_to_pure_vowel(aperture_name, scale):
+    # 純母音(ConsonantClass.NONE、比例縮小非発動)で open_amount=0.5 → hold=0.5(cap未満)。
+    # 最終重み = hold × aperture_scale。
+    aperture = getattr(lipsync.ApertureClass, aperture_name)
+    ev = MouthEvent(MouthShape.A, 0.0, 10.0, 0.5, ConsonantClass.NONE, aperture)
+    assert _peak_weights([ev]) == pytest.approx({"あ": 0.5 * scale})
+
+
+def test_aperture_decay_after_hold_clamp_not_before():
+    # pop プリセット相当(vowel_scale[お]=1.70, open_cap=0.90)。open_amount=0.75・純母音(比例縮小
+    # 非発動)・aperture_class=FIRM_CLOSURE(0.75)。hold=clamp(0.75×1.70,0,0.90)=0.90(クランプ発動)。
+    # 正しい式(クランプ後に減衰を掛ける)の最終重みは 0.90×0.75=0.675。開口減衰をクランプの内側
+    # (clamp(open_amount×vowel_scale×aperture_scale,0,open_cap))で先に掛ける誤り方式なら
+    # clamp(0.75×1.70×0.75,0,0.90)=0.90 のまま aperture_scale に依らず減衰が消える。
+    p = GenerationParams(vowel_scale=(1.0, 1.0, 1.0, 1.0, 1.70, 1.0), open_cap=0.90)
+    ev = MouthEvent(
+        MouthShape.O, 0.0, 10.0, 0.75, ConsonantClass.NONE, lipsync.ApertureClass.FIRM_CLOSURE
+    )
+    assert _peak_weights([ev], p) == pytest.approx({"お": 0.675})
+
+
+def test_aperture_decay_survives_total_clamp_shrink():
+    # SPREAD(唇形変調)併用で hold が高く合成後総量の比例縮小が発動する条件で、異なる
+    # ApertureClass の最終重みが異なる値になることを検証する回帰。
+    # あ+SPREAD open_amount=1.0 → hold=0.8。raw={あ:0.8,い:0.24}、総量1.04>cap=0.8 →
+    # factor=0.8/1.04。開口減衰(aperture_scale)を比例縮小より前に適用する誤った実装では、この
+    # 条件で両者の最終重みが一致してしまう(aperture_scale が factor の分子・分母から相殺されるため)。
+    factor = 0.8 / 1.04
+    shrunk_a, shrunk_i = 0.8 * factor, 0.24 * factor
+    w_none = _peak_weights(
+        [MouthEvent(MouthShape.A, 0.0, 10.0, 1.0, ConsonantClass.SPREAD, lipsync.ApertureClass.NONE)]
+    )
+    w_narrow = _peak_weights(
+        [
+            MouthEvent(
+                MouthShape.A, 0.0, 10.0, 1.0, ConsonantClass.SPREAD,
+                lipsync.ApertureClass.NARROW_CHANNEL,
+            )
+        ]
+    )
+    assert w_none == pytest.approx({"あ": shrunk_a, "い": shrunk_i})
+    assert w_narrow == pytest.approx({"あ": shrunk_a * 0.85, "い": shrunk_i * 0.85})
+
+
+def test_consonant_and_aperture_independent_composition():
+    # ConsonantClass(SPREAD、唇形混合)と ApertureClass(NARROW_CHANNEL、開口減衰)を同一イベントに
+    # 設定し、唇形混合(補助モーフ「い」)と開口減衰(最終重みの縮小)が両方反映されることを検証する。
+    # open_amount=0.5 → hold=0.5(cap未満で比例縮小非発動)。有効プロファイル{あ:1.0,い:0.3}、
+    # raw={あ:0.5,い:0.15}(総量0.65<0.8)。最終重み=raw×aperture_scale(NARROW_CHANNEL=0.85)。
+    ev = MouthEvent(
+        MouthShape.A, 0.0, 10.0, 0.5, ConsonantClass.SPREAD, lipsync.ApertureClass.NARROW_CHANNEL
+    )
+    w = _peak_weights([ev])
+    assert w["あ"] == pytest.approx(0.5 * 0.85)
+    assert w["い"] == pytest.approx(0.15 * 0.85)

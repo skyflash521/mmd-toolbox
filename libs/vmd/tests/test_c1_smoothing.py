@@ -1,4 +1,4 @@
-"""位置端点速度平滑化(vmd-reduce.md §8.4 位置C1近似)のテスト。
+"""位置端点速度平滑化(位置C1近似)のテスト。
 
 疎化が位置誤差だけでフィットしたベジェは内部キーで速度が不連続になりがち。C1ポストパスは
 各内部キーで両隣区間の端速度をソース中心差分速度に近づけ速度連続(C1)に寄せる。制御点を
@@ -8,12 +8,9 @@ strict では C1 が許容を破る範囲では適用せず元フィットを残
 
 import math
 
-import pytest
-
 from vmd import reduce as reducer
 from vmd.reduce import (
     BONE_LINEAR_INTERP,
-    StrictError,
     build_bone_tolerances,
     reduce_bone_track,
     verify_bone_track,

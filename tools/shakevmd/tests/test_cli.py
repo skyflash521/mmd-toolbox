@@ -1,18 +1,17 @@
-"""shakevmd CLI のテスト(shakevmd.md §2, §9)。
+"""shakevmd CLI のテスト。
 
 CLI はコアの薄いラッパー: 引数解析 → VMD読み(vmd.io)→ bake() → VMD書き。
-終了コード(§9): 0 正常 / 1 入力不正(VMDでない・カメラキーなし)/ 2 引数エラー
+終了コード: 0 正常 / 1 入力不正(VMDでない・カメラキーなし)/ 2 引数エラー
 (範囲不正・重複・上書き未許可)/ 3 出力書き込み失敗。
 
-`TestCli` はコア CLI(**§2.1-2.6 + §9**: I/O・範囲・主要揺れパラメーター・終了コード)を、
-`TestCliOps` は **§2.7 運用/プリセット系**(`--preset`・`--dry-run`・`-v/--verbose`)
+`TestCli` はコア CLI(I/O・範囲・主要揺れパラメーター・終了コード)を、
+`TestCliOps` は **運用/プリセット系**(`--preset`・`--dry-run`・`-v/--verbose`)
 を検証する。walking の歩調成分(gait_freq/gait_amp)は内蔵パラメーターとして転送・検証する。
 内蔵パラメーター(静止/移動プロファイルのオクターブ重み)のプリセット別調整値はここでは扱わない。
 """
 
 import sys
 
-import numpy as np
 import pytest
 
 from shakevmd import cli, presets
@@ -59,7 +58,7 @@ ANGLE_CUT_KEYS = [
 ]
 
 # frame30 で distance が大きく跳ぶ=ズーム(中心も角度も不動だがカメラワールド位置が移動)。
-# §2.6「カメラ中心またはカメラワールド位置」の world 側検出を確認する。
+# カット検出条件「カメラ中心またはカメラワールド位置」の world 側検出を確認する。
 ZOOM_CUT_KEYS = [
     cam(0, dist=-30.0, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
     cam(29, dist=-30.0, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0)),
@@ -99,9 +98,9 @@ def read_camera(path):
 
 
 class TestCli:
-    # --- コマンド公開(§2.1 `shakevmd INPUT.vmd [options]`) ----------------
+    # --- コマンド公開(`shakevmd INPUT.vmd [options]`) ----------------
     def test_console_script_entry_point_declared(self):
-        # §2.1 の `shakevmd` コマンドが cli:main として公開されている(pyproject 宣言)。
+        # `shakevmd` コマンドが cli:main として公開されている(pyproject 宣言)。
         # 直接 cli.main() を呼ぶだけではコマンド露出を保証できないため契約を静的に確認する。
         import tomllib
         from pathlib import Path
@@ -111,14 +110,14 @@ class TestCli:
 
     def test_main_falls_back_to_sys_argv(self, tmp_path, monkeypatch):
         # console script は main() を引数なし(argv=None)で呼ぶ。main は sys.argv[1:] へ
-        # フォールバックする(§2.1)。明示 argv だけ動いて sys.argv 経路が壊れる実装を排除。
+        # フォールバックする。明示 argv だけ動いて sys.argv 経路が壊れる実装を排除。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
         monkeypatch.setattr(sys, "argv", ["shakevmd", inp, "-o", str(out), "--no-smooth"])
         assert cli.main() == 0
         assert out.exists()
 
-    # --- 正常系(§9 コード0) ---------------------------------------------
+    # --- 正常系(コード0) ---------------------------------------------
     def test_bakes_and_writes_default_output(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
         rc = cli.main([inp, "--no-smooth"])      # 密キーの被覆を検証するため疎化は無効化
@@ -130,7 +129,7 @@ class TestCli:
         assert sorted(k.frame for k in baked) == list(range(0, 61))
 
     def test_default_output_always_vmd_extension(self, tmp_path):
-        # §2.2: 既定出力は拡張子に依らず `<入力名>_shake.vmd`。非 .vmd 入力でも .vmd で出す。
+        # 既定出力は拡張子に依らず `<入力名>_shake.vmd`。非 .vmd 入力でも .vmd で出す。
         inp = write_input(tmp_path / "take.dat")     # 中身は有効な VMD、拡張子のみ .dat
         rc = cli.main([inp, "--no-smooth"])
         assert rc == 0
@@ -144,14 +143,14 @@ class TestCli:
         rc = cli.main([inp, "-o", str(out), "--no-smooth"])
         assert rc == 0 and out.exists()
 
-    # --- 入力不正(§9 コード1) -------------------------------------------
+    # --- 入力不正(コード1) -------------------------------------------
     def test_invalid_vmd_exit1(self, tmp_path):
         bad = tmp_path / "bad.vmd"
         bad.write_bytes(b"not a vmd file at all")
         assert cli.main([str(bad)]) == 1
 
     def test_missing_input_exit1(self, tmp_path):
-        # §9 は欠落ファイルの専用コードを規定しない。「入力から有効なカメラデータを得られない」
+        # 欠落ファイル専用の終了コードは設けない。「入力から有効なカメラデータを得られない」
         # (欠落・非VMD・カメラなし)は一律 exit 1(入力不正)に括る設計とする。
         assert cli.main([str(tmp_path / "nope.vmd")]) == 1
 
@@ -159,14 +158,14 @@ class TestCli:
         inp = write_input(tmp_path / "empty.vmd", keys=[])   # カメラキーなし
         assert cli.main([inp]) == 1
 
-    # --- 引数エラー(§9 コード2) -----------------------------------------
+    # --- 引数エラー(コード2) -----------------------------------------
     def test_overwrite_guard_exit2(self, tmp_path):
         p = tmp_path / "in.vmd"
         inp = write_input(p)
         before = p.read_bytes()
         # 入力と同一パスへ出力 & --overwrite なし → エラー
         assert cli.main([inp, "-o", inp]) == 2
-        # exit2 を返すだけでなく、ガード時は入力を書き換えない(§2.2)。
+        # exit2 を返すだけでなく、ガード時は入力を書き換えない。
         # 「上書きしてから2を返す」実装を排除するため原本一致も検証する。
         assert p.read_bytes() == before
 
@@ -176,18 +175,23 @@ class TestCli:
         assert rc == 0
         assert sorted(k.frame for k in read_camera(inp)) == list(range(0, 61))
 
-    def test_existing_distinct_output_allowed(self, tmp_path):
-        # 上書きガードは「入力と同一パス」限定(§2.2)。入力と別の既存ファイルへの出力は
-        # --overwrite なしでも許可され、既存内容を上書きする。全既存出力を拒否する実装を排除。
+    def test_existing_distinct_output_blocked_without_overwrite(self, tmp_path):
+        # 別パスの既存出力も --overwrite 無しでは上書きガードで拒否する。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
-        out.write_bytes(b"old content")          # 既存だが入力とは別パス
-        assert cli.main([inp, "-o", str(out), "--no-smooth"]) == 0
+        out.write_bytes(b"old content")
+        assert cli.main([inp, "-o", str(out), "--no-smooth"]) == 2
+        assert out.read_bytes() == b"old content"  # 拒否時は書き換えない
+
+    def test_existing_distinct_output_allowed_with_overwrite(self, tmp_path):
+        inp = write_input(tmp_path / "in.vmd")
+        out = tmp_path / "out.vmd"
+        out.write_bytes(b"old content")
+        assert cli.main([inp, "-o", str(out), "--overwrite", "--no-smooth"]) == 0
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_overwrite_guard_via_symlink_exit2(self, tmp_path):
-        # 入力へのシンボリックリンク経由の出力も「同一ファイル」として上書きガードが効く
-        # (§2.2)。abspath 文字列比較だと取りこぼすので samefile/realpath で判定する。
+        # シンボリックリンク経由の出力先も、実体が存在するファイルとしてガードが効く。
         p = tmp_path / "in.vmd"
         inp = write_input(p)
         before = p.read_bytes()
@@ -209,7 +213,7 @@ class TestCli:
         assert cli.main([inp, "--range", "0:60", "--range", "30:60"]) == 2
 
     def test_output_long_alias(self, tmp_path):
-        # -o の長形式 --output(§2.2)
+        # -o の長形式 --output
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
         assert cli.main([inp, "--output", str(out), "--no-smooth"]) == 0 and out.exists()
@@ -221,12 +225,12 @@ class TestCli:
             assert cli.main([inp, "--range", bad]) == 2
 
     def test_reversed_range_exit2(self, tmp_path):
-        # START>END は不正(§2 引数エラー)
+        # START>END は不正(引数エラー)
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "--range", "60:0"]) == 2
 
     def test_open_ended_start_beyond_end_exit2(self, tmp_path):
-        # START が(省略された)END より後になる範囲は引数エラー(§2.2 START>END)。
+        # START が(省略された)END より後になる範囲は引数エラー(START>END)。
         # 末尾キー60の入力で `999:` は END=60 に解決され 999>60 → exit 2。
         # 省略端の解決「後」にも逆順検査することを保証する(parse 時は END=None で素通り)。
         inp = write_input(tmp_path / "in.vmd")
@@ -240,11 +244,11 @@ class TestCli:
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_post_snap_overlap_exit2(self, tmp_path):
-        # スナップ「後」に重複したらエラー(§5.2)。25:55 と 28:58 は共に 30:60 へスナップ→重複
+        # スナップ「後」に重複したらエラー。25:55 と 28:58 は共に 30:60 へスナップ→重複
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "--range", "25:55", "--range", "28:58"]) == 2
 
-    # --- 出力書き込み失敗(§9 コード3) -----------------------------------
+    # --- 出力書き込み失敗(コード3) -----------------------------------
     def test_output_write_failure_exit3(self, tmp_path):
         inp = write_input(tmp_path / "in.vmd")
         # 出力先の親がファイル(ディレクトリでない)→ 書き込み不可
@@ -263,7 +267,7 @@ class TestCli:
         in_keys = {k.frame: k for k in read_camera(inp)}
         # frame0 は範囲外で原本のまま、30..60 が高密度
         assert sorted(out_keys) == [0] + list(range(30, 61))
-        # 範囲外の frame0 は揺らさず原本を保持する(§2.2: --range は揺れ適用範囲)。
+        # 範囲外の frame0 は揺らさず原本を保持する(--range は揺れ適用範囲)。
         # フレーム番号だけでなく内容(原本一致)も検証し、範囲外を書き換える実装を排除する。
         assert out_keys[0] == in_keys[0]
 
@@ -301,11 +305,11 @@ class TestCli:
         assert cli.main([inp, "-o", str(o1), "--seed", "7", "--amp-rot", "5", "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(o2), "--seed", "7", "--amp-rot", "5", "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(o3), "--seed", "8", "--amp-rot", "5", "--no-smooth"]) == 0
-        assert o1.read_bytes() == o2.read_bytes()   # 同一シード→バイナリ一致(§7.5)
+        assert o1.read_bytes() == o2.read_bytes()   # 同一シード→バイナリ一致
         assert o1.read_bytes() != o3.read_bytes()   # 異なるシード→変わる(seed が効いている)
 
     def test_normalization_warning_displayed(self, tmp_path, capsys):
-        # 正規化警告(同一フレーム重複の後勝ち破棄など)はユーザーに表示する(§3.1)。
+        # 正規化警告(同一フレーム重複の後勝ち破棄など)はユーザーに表示する。
         dup = [cam(0), cam(30), cam(30, center=(9.0, 9.0, 9.0)), cam(60)]   # frame30 重複
         inp = write_input(tmp_path / "dup.vmd", dup)
         rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--no-smooth"])
@@ -315,7 +319,7 @@ class TestCli:
         assert "warning:" in (text.out + text.err).lower()
 
     def test_freq_bandlimit_clamp_warning(self, tmp_path, capsys):
-        # §6.1: 実効周波数>8Hz のオクターブは自動クランプし「警告」を出す。
+        # 実効周波数>8Hz のオクターブは自動クランプし「警告」を出す。
         # 内蔵 octaves=3 では freq×4>8(=freq>2)でクランプ発生。
         # 既定 freq=1.2(1.2/2.4/4.8≤8)はクランプなし=警告なし、--freq 3.0(→12Hz)は警告あり、
         # と判別することで「クランプ警告がユーザーに伝播される」ことを検証する(KEYS は重複なし)。
@@ -338,7 +342,7 @@ class TestCli:
             s = interp.sample_camera(KEYS, f)
             assert baked[f].rotation == pytest.approx(s["rotation"], abs=1e-5)
 
-    # --- 主要オプションの透過(§2.3-2.6) -----------------------------------
+    # --- 主要オプションの透過 -----------------------------------
     def test_public_options_affect_output(self, tmp_path):
         # 主要オプションが bake に効く(パースして無視する実装を排除=出力が既定と変わる)。
         inp = write_input(tmp_path / "in.vmd")
@@ -358,18 +362,19 @@ class TestCli:
         assert cli.main([inp, "-o", str(tmp_path / "ct.vmd"), "--cut-threshold", "4,15", "--no-smooth"]) == 0
 
     def test_impulse_option_applies_and_multiple(self, tmp_path):
-        # --impulse F:S:D が効く。複数指定可(§2.4)。base ノイズは切って衝撃だけ見る。
+        # --impulse F:S:D が効く。複数指定可。base ノイズは切って衝撃だけ見る。
         inp = write_input(tmp_path / "in.vmd")
         base, one, two = tmp_path / "b.vmd", tmp_path / "1.vmd", tmp_path / "2.vmd"
         last = tmp_path / "last.vmd"
         common = ["--amp-rot", "0", "--amp-pos", "0", "--settle", "0"]
         assert cli.main([inp, "-o", str(base), *common, "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(one), *common, "--impulse", "20:10:0.5", "--no-smooth"]) == 0
-        assert cli.main([inp, "-o", str(two), *common, "--impulse", "20:10:0.5", "--impulse", "45:10:0.5", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(two), *common,
+                         "--impulse", "20:10:0.5", "--impulse", "45:10:0.5", "--no-smooth"]) == 0
         assert cli.main([inp, "-o", str(last), *common, "--impulse", "45:10:0.5", "--no-smooth"]) == 0
         assert base.read_bytes() != one.read_bytes()    # 1つ目が効く
         assert one.read_bytes() != two.read_bytes()      # 2つ目(複数指定)も効く
-        # 加算合成(§6.3): 2指定は「45単独」とも異なる。これにより「最後の1つだけ保持」
+        # 加算合成: 2指定は「45単独」とも異なる。これにより「最後の1つだけ保持」
         # する実装(その場合 two==last になる)を排除する。
         assert two.read_bytes() != last.read_bytes()
 
@@ -390,7 +395,7 @@ class TestCli:
         assert a.read_bytes() != b.read_bytes()
 
     def test_defaults_match_spec(self, tmp_path):
-        # 既定値が spec(§2.3-2.6)どおり: 既定実行と spec 既定値の明示実行がバイナリ一致。
+        # 既定値が spec どおり: 既定実行と spec 既定値の明示実行がバイナリ一致。
         # settle/cut-threshold の既定を実際に発火させるため、停止を含む入力(PAN_STOP_KEYS:
         # frame30 で停止→settle 発火)、位置カットを含む入力(CUT_KEYS: 29→30 で位置ジャンプ
         # →cut-threshold 位置側5.0が活性)、角度カットを含む入力(ANGLE_CUT_KEYS: 34°ジャンプ
@@ -409,7 +414,7 @@ class TestCli:
             assert d.read_bytes() == e.read_bytes(), f"default != spec-explicit for {name}"
 
     def test_default_seed_is_one(self, tmp_path):
-        # 既定 seed は 1(§2.3)。既定実行と --seed 1 が一致する
+        # 既定 seed は 1。既定実行と --seed 1 が一致する
         inp = write_input(tmp_path / "in.vmd")
         d, s1 = tmp_path / "d.vmd", tmp_path / "s1.vmd"
         assert cli.main([inp, "-o", str(d), "--amp-rot", "5", "--no-smooth"]) == 0
@@ -424,7 +429,7 @@ class TestCli:
         assert cli.main([inp, "-o", str(a), *common, "--settle", "0"]) == 0
         assert cli.main([inp, "-o", str(b), *common, "--settle", "5"]) == 0
         assert a.read_bytes() != b.read_bytes()
-        # settle=0 は「無効化」(§2.5)。停止入力でも振動を加えず、原本サンプリングと一致する。
+        # settle=0 は「無効化」。停止入力でも振動を加えず、原本サンプリングと一致する。
         # これにより `args.settle or 0.3` のように 0 を既定へ落とす実装(振動が出る)を排除する。
         from vmd import interp
         baked0 = {k.frame: k for k in read_camera(a)}
@@ -441,20 +446,22 @@ class TestCli:
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cut_threshold_angle_jump(self, tmp_path):
-        # 角度ジャンプでもカット検出(§2.6 位置,角度のいずれか)。中心不動・角度のみ跳ぶ入力。
+        # 角度ジャンプでもカット検出(位置,角度のいずれか)。中心不動・角度のみ跳ぶ入力。
         inp = write_input(tmp_path / "acut.vmd", ANGLE_CUT_KEYS)
         lo, hi = tmp_path / "lo.vmd", tmp_path / "hi.vmd"
         assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0   # 角度34°>20 → カット
-        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "5,200", "--no-smooth"]) == 0  # 角度閾値200° → カットなし
+        # 角度閾値200° → カットなし
+        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "5,200", "--no-smooth"]) == 0
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cut_threshold_world_position_zoom(self, tmp_path):
         # ズーム(distance 変化)はカメラ中心不動でもカメラワールド位置が跳ぶ→位置カット
-        # (§2.6 「カメラ中心またはカメラワールド位置」)。位置側閾値で分割が変わる。
+        # (「カメラ中心またはカメラワールド位置」)。位置側閾値で分割が変わる。
         inp = write_input(tmp_path / "zcut.vmd", ZOOM_CUT_KEYS)
         lo, hi = tmp_path / "lo.vmd", tmp_path / "hi.vmd"
-        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0   # world_jump≈25>5 → カット
-        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200", "--no-smooth"]) == 0  # 位置閾値100 → カットなし
+        # world_jump≈25>5 → カット / 位置閾値100 → カットなし
+        assert cli.main([inp, "-o", str(lo), "--cut-threshold", "5,20", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", str(hi), "--cut-threshold", "100,200", "--no-smooth"]) == 0
         assert lo.read_bytes() != hi.read_bytes()
 
     def test_cli_flags_wire_to_correct_bake_params(self, tmp_path):
@@ -462,7 +469,7 @@ class TestCli:
         # 配線されることを等価比較で検証する(値が別パラメーターへ渡る誤配線を排除)。
         # CLI が実際に読む入力キーで bake し、同じ writer で round-trip して比較するため
         # float32 精度差は相殺される。motion_damp=0 / settle=0 のケースは「0で無効化」
-        # (§2.5)も兼ね、`args.x or default` のように 0 を既定へ落とす実装を排除する。
+        # も兼ね、`args.x or default` のように 0 を既定へ落とす実装を排除する。
         # 各ケースは「フラグ値が実際に出力へ効く入力」で検証する(不活性な入力だと値を
         # 無視する誤配線でも等価が成立してしまう)。settle は停止入力(PAN_STOP_KEYS)、
         # cut-threshold は閾値3で検出・既定5で非検出となる小カット入力(SMALL_CUT_KEYS)を使う。
@@ -474,9 +481,9 @@ class TestCli:
             (["--amp-pos", "0.3"], dict(amp_pos=0.3), KEYS),
             (["--fade", "0.2"], dict(fade_sec=0.2), KEYS),
             (["--motion-damp", "2.0"], dict(motion_damp=2.0), KEYS),
-            (["--motion-damp", "0"], dict(motion_damp=0.0), KEYS),     # 0で無効化(§2.5)
+            (["--motion-damp", "0"], dict(motion_damp=0.0), KEYS),     # 0で無効化
             (["--settle", "1.5"], dict(settle=1.5), PAN_STOP_KEYS),      # 停止入力で settle 発火
-            (["--settle", "0"], dict(settle=0.0), PAN_STOP_KEYS),        # 0で無効化(§2.5)
+            (["--settle", "0"], dict(settle=0.0), PAN_STOP_KEYS),        # 0で無効化
             (["--seed", "9"], dict(seed=9), KEYS),
             # 閾値3で検出・既定5で非検出の小カット入力。閾値値が効くので誤配線を判別できる。
             (["--cut-threshold", "3,10"], dict(cut_pos_threshold=3.0, cut_rot_threshold=10.0), SMALL_CUT_KEYS),
@@ -514,7 +521,7 @@ class TestCli:
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), *args]) == 2
 
     def test_range_snaps_at_cli(self, tmp_path):
-        # 非キー端点は「最近接」の既存キー(0/30/60)へスナップ(§5.2)。
+        # 非キー端点は「最近接」の既存キー(0/30/60)へスナップ。
         # 最近接を floor(常に直前キー) / ceil(常に切り上げ)の両方から区別するため、
         # 上側キーが最近接の端点と下側キーが最近接の端点を別々に使う。
         inp = write_input(tmp_path / "in.vmd")
@@ -527,7 +534,7 @@ class TestCli:
         assert sorted(k.frame for k in read_camera(b)) == list(range(0, 31)) + [60]
 
     def test_range_out_of_span_endpoint_snaps(self, tmp_path):
-        # キー範囲外の端点も「最近接の既存キー」へスナップする(§5.2)。拒否ではない。
+        # キー範囲外の端点も「最近接の既存キー」へスナップする。拒否ではない。
         # END=999 は最終キー60が最近接 → [0,60] として全域ベイク。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
@@ -535,7 +542,7 @@ class TestCli:
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_range_out_of_span_start_snaps(self, tmp_path):
-        # START 側のスナップ対称性(§5.2)。フレームは負にできないので、先頭キーが frame30 の
+        # START 側のスナップ対称性。フレームは負にできないので、先頭キーが frame30 の
         # 入力で START=10(先頭キーより前)を使い、最近接の先頭キー30へスナップすることを確認。
         keys = [cam(30), cam(45), cam(60)]
         inp = write_input(tmp_path / "off.vmd", keys)
@@ -544,12 +551,12 @@ class TestCli:
         # START 10→先頭キー30へスナップ → [30,60] 全域ベイク(30より前のフレームは無い)。
         assert sorted(k.frame for k in read_camera(out)) == list(range(30, 61))
 
-    # --- 引数エラー(§9 コード2) -----------------------------------------
+    # --- 引数エラー(コード2) -----------------------------------------
     def test_missing_input_arg_exit2(self):
         assert cli.main([]) == 2                          # INPUT 必須
 
     def test_surplus_positional_arg_exit2(self, tmp_path):
-        # §2.1: INPUT はちょうど1個。余剰ポジショナル引数は引数エラー(exit 2)。
+        # INPUT はちょうど1個。余剰ポジショナル引数は引数エラー(exit 2)。
         # 受け入れ・無視する実装(2個目を黙って捨てる)を排除する。
         inp = write_input(tmp_path / "in.vmd")
         extra = write_input(tmp_path / "extra.vmd")
@@ -560,7 +567,7 @@ class TestCli:
         assert cli.main([inp, "--seed", "abc"]) == 2      # int でない
 
     def test_invalid_numeric_scalars_exit2(self, tmp_path):
-        # §9: 数値スカラーの不正入力は引数エラー(exit 2)。float 系も --seed 同様に弾く。
+        # 数値スカラーの不正入力は引数エラー(exit 2)。float 系も --seed 同様に弾く。
         inp = write_input(tmp_path / "in.vmd")
         for opt in ("--amp-rot", "--amp-pos", "--freq", "--fade", "--motion-damp", "--settle"):
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), opt, "xyz"]) == 2
@@ -576,13 +583,13 @@ class TestCli:
 
     def test_overflowing_numeric_exit2(self, tmp_path):
         # 有限でも過大な値は下流(int(round(fade*FPS)))で OverflowError になりうる。
-        # CLI はこれも引数エラー(exit 2)として扱い、Python 例外を漏らさない(§9)。
+        # CLI はこれも引数エラー(exit 2)として扱い、Python 例外を漏らさない。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--fade", "1e308"]) == 2
 
     def test_out_of_domain_numeric_exit2(self, tmp_path):
         # 物理量の定義域違反は引数エラー(exit 2)。振幅/秒数/係数は非負、周波数は正、
-        # cut-threshold(感度)は非負、--impulse の S は非負・D は正(§2.3-2.6)。
+        # cut-threshold(感度)は非負、--impulse の S は非負・D は正。
         # 0 が有効な無効化値である項目(amp/motion-damp/settle/cut-threshold)は別途 0 許容。
         inp = write_input(tmp_path / "in.vmd")
         o = str(tmp_path / "o.vmd")
@@ -605,16 +612,16 @@ class TestCli:
         for args in (["--amp-rot", "0"], ["--amp-pos", "0"], ["--motion-damp", "0"],
                      ["--settle", "0"], ["--fade", "0"], ["--cut-threshold", "0,0"],
                      ["--impulse", "20:0:0.5"]):
-            assert cli.main([inp, "-o", o, *args, "--no-smooth"]) == 0, args
+            assert cli.main([inp, "-o", o, "--overwrite", *args, "--no-smooth"]) == 0, args
 
     def test_negative_impulse_frame_exit2(self, tmp_path):
-        # --impulse の F はフレーム=非負(§2.4)。負フレームは引数エラー(exit 2)。
+        # --impulse の F はフレーム=非負。負フレームは引数エラー(exit 2)。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--impulse=-5:10:0.5"]) == 2
 
     def test_read_warnings_propagated(self, tmp_path, capsys, monkeypatch):
         # io.read() の継続可能警告(名前デコード不可・旧版セクション欠落など)もユーザーへ
-        # 伝播する(VMD I/O は vmd へ委譲する設計、§3.1)。捨てる実装を排除する。
+        # 伝播する(VMD I/O は vmd へ委譲する設計)。捨てる実装を排除する。
         # 実トリガは write/read の round-trip 依存で脆いため、io.read に警告を注入して
         # 「CLI が io.read の警告を surface する」配線そのものを検証する。
         from vmd.types import VmdWarning
@@ -643,7 +650,7 @@ class TestCli:
     def test_non_finite_baked_output_exit2(self, tmp_path):
         # 引数は有限でも bake 内の乗算で出力が非有限化しうる(amp-rot × rot-weights が
         # radians 前に inf 化 → 回転ノイズ inf/nan)。motion_damp の値に依らず焼き後の
-        # 有限性検査(_all_finite、float32 書き出しより前)で exit 2 に倒す(§9)。
+        # 有限性検査(_all_finite、float32 書き出しより前)で exit 2 に倒す。
         inp = write_input(tmp_path / "in.vmd")
         rc = cli.main([inp, "-o", str(tmp_path / "o.vmd"),
                        "--amp-rot", "1e308", "--rot-weights", "1e308,1,1"])
@@ -652,7 +659,7 @@ class TestCli:
     def test_serialization_overflow_is_arg_error_exit2(self, tmp_path):
         # 有限でも過大な振幅は bake で巨大な回転値となり、VMD の float32 書き出しで
         # OverflowError になる。これは引数起因なので「出力書き込み失敗(3)」ではなく
-        # 引数エラー(2)に分類する(§9)。
+        # 引数エラー(2)に分類する。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--amp-rot", "1e308", "--no-smooth"]) == 2
 
@@ -663,7 +670,7 @@ class TestCli:
         assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), "--over"]) == 2
 
     def test_missing_option_operand_exit2(self, tmp_path):
-        # §9: 値を要するオプションに値が無い(オペランド欠落)も引数エラー(exit 2)。
+        # 値を要するオプションに値が無い(オペランド欠落)も引数エラー(exit 2)。
         inp = write_input(tmp_path / "in.vmd")
         for opt in ("--output", "--range", "--seed", "--amp-rot", "--amp-pos",
                     "--rot-weights", "--freq", "--fade", "--motion-damp",
@@ -672,7 +679,7 @@ class TestCli:
             assert cli.main([inp, opt]) == 2
 
     def test_rejects_internal_params_exit2(self, tmp_path):
-        # §8: 詳細内部パラメーター(オクターブ構成・persistence・settle収束時間等)は
+        # 詳細内部パラメーター(オクターブ構成・persistence・settle収束時間等)は
         # CLI 非公開 → 未知オプションとして引数エラー(exit 2)。
         # 内部フラグ名は spec で規定されないため代表確認。網羅の本質は「未知オプション
         # は一律 exit 2」で、これは argparse がすべての未知フラグに対し保証する。
@@ -681,13 +688,14 @@ class TestCli:
                     ["--gait-freq", "2.0"], ["--gait-amp", "0.2"]):
             assert cli.main([inp, "-o", str(tmp_path / "o.vmd"), *opt]) == 2
 
-    # --- 非カメラセクション透過(§3.1) -------------------------------------
+    # --- 非カメラセクション透過 -------------------------------------
     def test_non_camera_sections_passthrough_with_warning(self, tmp_path, capsys):
-        # ボーン等のセクションは無加工で透過し、警告を表示する(§3.1)。
+        # ボーン等のセクションは警告付きで無加工透過し、VMDヘッダのmodel_nameもそのまま引き継ぐ。
         bone = BoneKey(name_raw=b"bone".ljust(15, b"\x00"), frame=0,
                        position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0),
                        interpolation=bytes(64))
-        doc = VmdDocument(bone=[bone], camera=list(KEYS))
+        model_name_raw = b"TestModel".ljust(20, b"\x00")
+        doc = VmdDocument(bone=[bone], camera=list(KEYS), model_name_raw=model_name_raw)
         inp = tmp_path / "mixed.vmd"
         io.write_file(doc, str(inp))
         out = tmp_path / "out.vmd"
@@ -697,11 +705,12 @@ class TestCli:
         # ボーンキーが無傷で残る + カメラはベイクされている
         assert len(outdoc.bone) == 1 and outdoc.bone[0].name == "bone"
         assert sorted(k.frame for k in outdoc.camera) == list(range(0, 61))
+        assert outdoc.model_name_raw == model_name_raw
         text = capsys.readouterr()
         assert "warning:" in (text.out + text.err).lower()   # 非カメラ透過の警告(安定マーカー)
 
 class TestCliOps:
-    """§2.7 運用/プリセット系: --preset / --dry-run / -v,--verbose。
+    """運用/プリセット系: --preset / --dry-run / -v,--verbose。
 
     プリセットは公開引数の束(個別引数が優先)に加え、walking は内蔵の歩調成分を持つ。
     静止/移動プロファイルのプリセット別調整値はここでは扱わない(モジュール冒頭 docstring 参照)。
@@ -710,12 +719,12 @@ class TestCliOps:
     # --- プリセット定義(presets.py) -------------------------------------
     PUBLIC_PARAMS = {"amp_rot", "amp_pos", "rot_weights", "freq",
                      "motion_damp", "settle", "cut_threshold"}
-    # 内蔵パラメーター(CLI 非公開、プリセット/コアAPIのみ。§8)。許可集合は presets の
+    # 内蔵パラメーター(CLI 非公開、プリセット/コアAPIのみ)。許可集合は presets の
     # 単一の真実源から導出する(ハードコードしない。新規内蔵パラメータ追加時に自動で同期)。
     INTERNAL_PARAMS = set(presets.INTERNAL_PARAM_NAMES)
 
     def test_presets_defined_for_all_names(self):
-        # §2.7 の4プリセットが定義され、各々が公開引数の完全な束を含む(一括設定)。
+        # 4プリセットが定義され、各々が公開引数の完全な束を含む(一括設定)。
         # 余剰キーは内蔵パラメーター(歩調等)に限る。未知名は KeyError。
         assert set(presets.PRESET_NAMES) == {"handheld", "telephoto", "walking", "earthquake"}
         for name in presets.PRESET_NAMES:
@@ -727,7 +736,7 @@ class TestCliOps:
             presets.get_preset("nonexistent-preset")
 
     def test_only_walking_has_gait_component(self):
-        # §95: 歩調成分は walking のみ。walking は gait_freq>0・gait_amp>0、他は無効(0/未設定)。
+        # 歩調成分は walking のみ。walking は gait_freq>0・gait_amp>0、他は無効(0/未設定)。
         w = presets.get_preset("walking")
         assert w["gait_freq"] > 0.0 and w["gait_amp"] > 0.0
         for name in ("handheld", "telephoto", "earthquake"):
@@ -736,11 +745,12 @@ class TestCliOps:
             assert q.get("gait_amp", 0.0) == 0.0, name
 
     def test_internal_params_forwardable_and_are_bake_kwargs(self):
-        # §8: 内蔵パラメータはプリセット定義から bake へ転送可能(coreAPI かつ preset 調整可能)。
+        # 内蔵パラメータはプリセット定義から bake へ転送可能(coreAPI かつ preset 調整可能)。
         # INTERNAL_PARAM_NAMES は全て bake() のキーワード引数(転送先が実在)で、歩調に加え
         # 静止/移動プロファイル・settle収束時間・素朴な角度加算モードを含む(転送ループの実効は
         # walking 歩調の等価テストで担保済み=同一機構)。
         import inspect
+
         from shakevmd.bake import bake
         params = inspect.signature(bake).parameters
         for name in presets.INTERNAL_PARAM_NAMES:
@@ -792,7 +802,7 @@ class TestCliOps:
         assert read_camera(out) == read_camera(exp)
 
     def test_walking_preset_forwards_gait_to_bake(self, tmp_path):
-        # §95: --preset walking が gait_freq/gait_amp を bake へ配線する。CLI 出力が、同じ公開引数+
+        # --preset walking が gait_freq/gait_amp を bake へ配線する。CLI 出力が、同じ公開引数+
         # 歩調引数で直接 bake した結果と一致することで検証する(歩調を渡さない実装は不一致で落ちる)。
         from shakevmd.bake import bake
         inp = write_input(tmp_path / "in.vmd", KEYS)
@@ -831,7 +841,7 @@ class TestCliOps:
 
     def test_individual_arg_overrides_preset(self, tmp_path):
         # 個別引数はプリセットより優先。かつ「1つ明示してもプリセット全体は無効化されない」
-        # ことを判別する(§2.7)。1引数だけ上書きし、全適用とも既定とも異なることを確認。
+        # ことを判別する。1引数だけ上書きし、全適用とも既定とも異なることを確認。
         inp = write_input(tmp_path / "in.vmd")
         base, full, part = tmp_path / "base.vmd", tmp_path / "full.vmd", tmp_path / "part.vmd"
         assert cli.main([inp, "-o", str(base), "--no-smooth"]) == 0                              # 既定
@@ -855,7 +865,7 @@ class TestCliOps:
         assert d.read_bytes() == e.read_bytes()
 
     def test_preset_matches_explicit_params(self, tmp_path):
-        # CLI の --preset は presets.get_preset() の値をそのまま適用する(§8: presets.py が
+        # CLI の --preset は presets.get_preset の値をそのまま適用する(presets.py が
         # プリセット定義の境界)。公開引数のみのプリセットは「--preset NAME == その公開引数の
         # 明示指定」と一致する。内蔵パラメーター(歩調等)を持つプリセットは、公開引数だけの
         # 明示指定では内蔵分が欠けるため一致しない(=内蔵パラメーターも実際に効いている証拠)。
@@ -881,7 +891,7 @@ class TestCliOps:
                 assert a.read_bytes() == b.read_bytes(), name   # 実効する内蔵なし → 一致
 
     def test_individual_override_is_order_independent(self, tmp_path):
-        # 個別引数の優先は指定順に依らない(§2.7)。個別引数を --preset の前に置いても上書きが効く
+        # 個別引数の優先は指定順に依らない。個別引数を --preset の前に置いても上書きが効く
         # (後続 preset が先行の個別引数を潰す実装を排除)。
         inp = write_input(tmp_path / "in.vmd")
         before, after = tmp_path / "before.vmd", tmp_path / "after.vmd"
@@ -891,20 +901,20 @@ class TestCliOps:
 
     # --- --dry-run ---------------------------------------------------------
     def test_dry_run_writes_no_output(self, tmp_path):
-        # --dry-run は出力ファイルを書かない(§2.7)。exit 0。
+        # --dry-run は出力ファイルを書かない。exit 0。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
         assert cli.main([inp, "-o", str(out), "--dry-run"]) == 0
         assert not out.exists()
 
     def test_dry_run_writes_no_default_output(self, tmp_path):
-        # -o 省略時も --dry-run は既定出力(<入力>_shake.vmd)を書かない(§2.7「出力せず」)。
+        # -o 省略時も --dry-run は既定出力(<入力>_shake.vmd)を書かない。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "--dry-run"]) == 0
         assert not (tmp_path / "in_shake.vmd").exists()
 
     def test_dry_run_reports_stats(self, tmp_path, capsys):
-        # --dry-run は統計を表示する(§2.7: 適用範囲・出力キー数・最大振幅・カット位置・警告)。
+        # --dry-run は統計を表示する(適用範囲・出力キー数・最大振幅・カット位置・警告)。
         # ラベル(安定マーカー)と出力キー数(KEYS 全域=61)の双方を確認する。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
@@ -915,7 +925,7 @@ class TestCliOps:
             assert label in text, label
 
     def test_dry_run_reports_detected_cut(self, tmp_path, capsys):
-        # --dry-run はカット検出位置を報告する(§5.3, §10)。frame30 でカットする入力で
+        # --dry-run はカット検出位置を報告する。frame30 でカットする入力で
         # "cut" ラベル付きで検出フレーム "30" が現れる(偶発的な "30" を排除)。
         inp = write_input(tmp_path / "cut.vmd", CUT_KEYS)
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
@@ -924,7 +934,7 @@ class TestCliOps:
         assert "cut" in text and "30" in text
 
     def test_dry_run_reports_all_cuts(self, tmp_path, capsys):
-        # 複数カットは全位置を報告する(§5.3「検出されたカット位置は…必ず報告」)。
+        # 複数カットは全位置を必ず報告する。
         # frame21・frame41 の2カット入力で両方が現れる(先頭1個だけ報告する実装を排除)。
         inp = write_input(tmp_path / "mcut.vmd", MULTI_CUT_KEYS)
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
@@ -933,7 +943,7 @@ class TestCliOps:
         assert "21" in text and "41" in text
 
     def test_dry_run_reports_all_snapped_ranges(self, tmp_path, capsys):
-        # 複数 --range の解決後範囲を全て報告する(§5.2)。キー 0/15/30/45/60 の入力で
+        # 複数 --range の解決後範囲を全て報告する。キー 0/15/30/45/60 の入力で
         # 0:14→0:15, 44:60→45:60。両範囲端(15 と 45)が現れる。
         keys = [cam(0), cam(15), cam(30, persp=1), cam(45), cam(60)]
         inp = write_input(tmp_path / "mr.vmd", keys)
@@ -944,7 +954,7 @@ class TestCliOps:
         assert "15" in text and "45" in text     # 2範囲のスナップ後端
 
     def test_dry_run_reports_warning(self, tmp_path, capsys):
-        # --dry-run は警告も表示する(§2.7)。同一フレーム重複の正規化警告が出る入力で確認。
+        # --dry-run は警告も表示する。同一フレーム重複の正規化警告が出る入力で確認。
         dup = [cam(0), cam(30), cam(30, center=(9.0, 9.0, 9.0)), cam(60)]
         inp = write_input(tmp_path / "dup.vmd", dup)
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--dry-run"]) == 0
@@ -952,7 +962,7 @@ class TestCliOps:
         assert "warning:" in (cap.out + cap.err).lower()
 
     def test_dry_run_reports_snapped_range(self, tmp_path, capsys):
-        # --dry-run はスナップ「後」の実適用範囲を報告する(§5.2)。26:60 は 30:60 へスナップ
+        # --dry-run はスナップ「後」の実適用範囲を報告する。26:60 は 30:60 へスナップ
         # (KEYS のキーは 0/30/60)。生の入力ではなく解決後の 30・60 が現れる。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
@@ -963,7 +973,7 @@ class TestCliOps:
 
     # --- -v / --verbose ----------------------------------------------------
     def test_verbose_reports_range_and_cuts(self, tmp_path, capsys):
-        # --verbose は詳細ログ(適用範囲・カット位置等)を出す(§2.7, §5.2, §5.3)。
+        # --verbose は詳細ログ(適用範囲・カット位置等)を出す。
         # かつ非 verbose 実行ではこれら詳細を出さない(範囲/カット報告は dry-run/verbose 限定)。
         inp = write_input(tmp_path / "cut.vmd", CUT_KEYS)
         assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--no-smooth"]) == 0
@@ -977,7 +987,7 @@ class TestCliOps:
         assert "range" in verbose_text and "cut" in verbose_text and "30" in verbose_text
 
     def test_verbose_reports_snapped_range(self, tmp_path, capsys):
-        # --verbose もスナップ後の実適用範囲を報告する(§5.2)。KEYS で 26:60 → 30:60。
+        # --verbose もスナップ後の実適用範囲を報告する。KEYS で 26:60 → 30:60。
         inp = write_input(tmp_path / "in.vmd")
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
                          "--range", "26:60", "--verbose", "--no-smooth"]) == 0
@@ -986,7 +996,7 @@ class TestCliOps:
         assert "30" in text and "60" in text
 
     def test_verbose_reports_all_cuts(self, tmp_path, capsys):
-        # verbose も検出カット全件を報告する(§5.3)。frame21・frame41 の2カット入力。
+        # verbose も検出カット全件を報告する。frame21・frame41 の2カット入力。
         inp = write_input(tmp_path / "mcut.vmd", MULTI_CUT_KEYS)
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--verbose", "--no-smooth"]) == 0
         cap = capsys.readouterr()
@@ -994,7 +1004,7 @@ class TestCliOps:
         assert "21" in text and "41" in text
 
     def test_verbose_reports_all_snapped_ranges(self, tmp_path, capsys):
-        # verbose も複数 --range の解決後範囲を全て報告する(§5.2)。0:14→0:15, 44:60→45:60。
+        # verbose も複数 --range の解決後範囲を全て報告する。0:14→0:15, 44:60→45:60。
         keys = [cam(0), cam(15), cam(30, persp=1), cam(45), cam(60)]
         inp = write_input(tmp_path / "mr.vmd", keys)
         assert cli.main([inp, "-o", str(tmp_path / "out.vmd"),
@@ -1004,7 +1014,7 @@ class TestCliOps:
         assert "15" in text and "45" in text
 
     def test_verbose_still_writes_output(self, tmp_path):
-        # --verbose は通常出力(VMD)を書く。出力を抑止するのは --dry-run のみ(§2.7)。
+        # --verbose は通常出力(VMD)を書く。出力を抑止するのは --dry-run のみ。
         inp = write_input(tmp_path / "in.vmd")
         out = tmp_path / "out.vmd"
         assert cli.main([inp, "-o", str(out), "--verbose", "--no-smooth"]) == 0
@@ -1012,7 +1022,7 @@ class TestCliOps:
         assert sorted(k.frame for k in read_camera(out)) == list(range(0, 61))
 
     def test_verbose_does_not_change_vmd(self, tmp_path):
-        # --verbose はログのみで、ベイクされる VMD を変えない(§2.7)。非 verbose と一致する。
+        # --verbose はログのみで、ベイクされる VMD を変えない。非 verbose と一致する。
         inp = write_input(tmp_path / "in.vmd")
         q, v = tmp_path / "q.vmd", tmp_path / "v.vmd"
         assert cli.main([inp, "-o", str(q), "--no-smooth"]) == 0
@@ -1020,14 +1030,14 @@ class TestCliOps:
         assert v.read_bytes() == q.read_bytes()
 
     def test_verbose_short_alias_equals_long(self, tmp_path, capsys):
-        # -v は --verbose と同義(§2.7)。出力パスを同一にして(ログがパスを含んでも差が出ない)
+        # -v は --verbose と同義。出力パスを同一にして(ログがパスを含んでも差が出ない)
         # 両者の詳細ログが一致することを確認する。
         inp = write_input(tmp_path / "in.vmd")
-        out = str(tmp_path / "out.vmd")            # 同一パス(入力とは別なので上書きガード対象外)
+        out = str(tmp_path / "out.vmd")
         assert cli.main([inp, "-o", out, "-v", "--no-smooth"]) == 0
         short = capsys.readouterr()
         short_text = short.out + short.err
-        assert cli.main([inp, "-o", out, "--verbose", "--no-smooth"]) == 0
+        assert cli.main([inp, "-o", out, "--verbose", "--no-smooth", "--overwrite"]) == 0
         long = capsys.readouterr()
         assert short_text == (long.out + long.err)
 
@@ -1044,7 +1054,7 @@ SMOOTH_ROT_TOL_DEG = 0.25
 SMOOTH_DIST_TOL = 0.10
 SMOOTH_FOV_TOL = 1.00
 
-# frame30 で FOV が瞬間的に跳ぶ(=カット。§3.1 で密ベイクされる)入力。FOV チャンネルを
+# frame30 で視野角が瞬間的に跳ぶ(=カット。密ベイクされる)入力。視野角チャンネルを
 # --smooth 経由で行使するための素材(他チャンネルは既定で揺れる)。
 FOV_CUT_KEYS = [
     cam(0, fov=30), cam(29, fov=30), cam(30, fov=45), cam(60, fov=45),

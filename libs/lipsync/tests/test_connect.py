@@ -1,4 +1,4 @@
-"""同母音連結のテスト(lipsync.md §3/§4)。
+"""同母音連結のテスト。
 
 連続する同一母音イベントを1つの保持区間へ連結し、先頭にのみアタック・末尾にのみリリースを置き、
 内部境界に再アタック・閉口を入れず、各小区間の開き量を中央の強弱節点として残して節点間を線形に
@@ -28,7 +28,7 @@ def _envelope(events, params=None):
 def _approx_envelope(actual, expected):
     """(frame, weight) リストを frame 完全一致・weight 近似で比較する。"""
     assert [f for f, _ in actual] == [f for f, _ in expected]
-    for (_, aw), (_, ew) in zip(actual, expected):
+    for (_, aw), (_, ew) in zip(actual, expected, strict=True):
         assert aw == pytest.approx(ew)
 
 
@@ -128,6 +128,27 @@ def test_short_same_vowel_different_consonant_no_mid_flicker():
     assert "う" in env and "い" in env
     assert all(w > 0.0 for f, w in env["う"] if 0 < f < 8)  # 主モーフ連続=途中閉口・ちらつきなし
     assert env["い"][-1][1] == pytest.approx(0.0)  # 補助はフェードして残留しない
+
+
+def test_same_vowel_merge_preserves_per_segment_aperture_decay():
+    # 同じ母音(あ)で開き量は同じ(0.4)だが ApertureClass が異なる(FIRM_CLOSURE→NONE)2小区間を連結。
+    # 各小区間の強弱節点は開口減衰まで適用した最終重みになる: 前0.4×0.75=0.3、後0.4×1.0=0.4。
+    # 1つの連続保持区間へ統合され、内部境界(10)に再アタック・閉口を入れない。
+    env = _envelope(
+        [
+            MouthEvent(
+                MouthShape.A, 0.0, 10.0, 0.4, ConsonantClass.NONE,
+                lipsync.ApertureClass.FIRM_CLOSURE,
+            ),
+            MouthEvent(
+                MouthShape.A, 10.0, 20.0, 0.4, ConsonantClass.NONE, lipsync.ApertureClass.NONE
+            ),
+        ]
+    )
+    assert set(env) == {"あ"}
+    _approx_envelope(
+        env["あ"], [(0, 0.0), (2, 0.3), (5, 0.3), (15, 0.4), (18, 0.4), (20, 0.0)]
+    )
 
 
 def test_different_adjacent_vowels_not_merged():

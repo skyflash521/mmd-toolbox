@@ -1,17 +1,18 @@
-"""shakevmd CLI の進捗表示・バージョン配線のテスト(shakevmd.md §2.7.1, §8)。
+"""shakevmd CLI の進捗表示・バージョン配線のテスト。
 
 進捗表示は副作用専用(出力VMD・終了コード・統計・警告を変えない)で、端末(TTY)のときだけ stderr へ
 1行ライブ表示し、`--quiet` で抑制する。`--version` は `__version__` を表示して終了コード0で返る。
 
-配線の検証は、CLI が生成する ProgressReporter を差し替え可能な spy(_SpyReporter)へ monkeypatch して
-段・update・close・summary の呼ばれ方を観測する方式と、実 stderr を TTY 扱いの stream に差し替えて
-実表示を有効化し出力VMDのバイト不変を観る方式を使い分ける。
+報告先の振り分けの実体は共有の cli_progress_router が持つので、ここでは shakevmd の配線だけを見る。
+検証は、CLI が生成する振り分けを差し替え可能な spy(_SpyRouter)へ monkeypatch して段・進行・close・
+summary の呼ばれ方を観測する方式と、実 stderr を TTY 扱いの stream に差し替えて実表示を有効化し
+出力VMDのバイト不変を観る方式を使い分ける。
 """
 
 import io
 import sys
 
-from shakevmd import cli, progress
+from shakevmd import cli
 from vmd import io as vmd_io
 from vmd.types import CameraKey, VmdDocument
 
@@ -41,29 +42,26 @@ class _TTYStringIO(io.StringIO):
         return True
 
 
-class _SpyReporter:
-    """ProgressReporter の差し替え用 spy。段・update・close・summary の呼び出しを記録する。
+class _SpyRouter:
+    """進捗の振り分けの差し替え用 spy。段の報告・close・summary の呼び出しを記録する。
 
-    CLI の配線(どの段を出すか・reduce へ progress を渡すか・異常/早期 return でも close するか・
-    成功時のみ summary するか)を、実表示に依存せず観測する。常に有効として全呼び出しを記録する。
+    CLI の配線(どの段を出すか・reduce へ進行の中継を渡すか・異常/早期 return でも close するか・
+    成功時のみ summary するか)を、実表示にも送出にも依存せず観測する。
     """
 
     instances = []
 
-    def __init__(self, stream=None, *, enabled=None, now=None, interval=0.15):
-        self.stream = stream
-        self.enabled = True
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
         self.stages = []
         self.updates = []
         self.closed = 0
         self.summaries = []
-        _SpyReporter.instances.append(self)
+        _SpyRouter.instances.append(self)
 
-    def stage(self, label):
-        self.stages.append(label)
-
-    def update(self, done, total, note=""):
-        self.updates.append((done, total, note))
+    def stage(self, stage_id, *, done=0, total=None, note="", elapsed=0.0):
+        self.stages.append(stage_id)
+        self.updates.append((stage_id, done, total, note))
 
     def close(self):
         self.closed += 1
@@ -73,13 +71,13 @@ class _SpyReporter:
 
 
 def _spy(monkeypatch):
-    _SpyReporter.instances.clear()
-    monkeypatch.setattr(progress, "ProgressReporter", _SpyReporter)
+    _SpyRouter.instances.clear()
+    monkeypatch.setattr(cli, "ProgressRouter", _SpyRouter)
 
 
-# --- --version(§8) -------------------------------------------------------
+# --- --version -------------------------------------------------------
 def test_version_shows_version_and_exit0(capsys):
-    # --version は __version__ を表示して終了コード0で返る(版の番号源は __version__ 一本)。
+    # --version は __version__ を表示して終了コード0で返る(バージョンの番号源は __version__ 一本)。
     from shakevmd import __version__
     assert cli.main(["--version"]) == 0
     out = capsys.readouterr().out
@@ -87,7 +85,7 @@ def test_version_shows_version_and_exit0(capsys):
     assert __version__ in out
 
 
-# --- 副作用専用・TTY 限定・no-op(§2.7.1) --------------------------------
+# --- 副作用専用・TTY 限定・no-op --------------------------------
 def test_progress_noop_when_not_tty(tmp_path, capsys):
     # 非TTY(テスト捕捉)では進捗を1バイトも出さない(完全 no-op)。KEYS は警告を出さない入力なので
     # stderr は空でなければならない(マーカー不在だけでなく、消去シーケンス等の進捗由来バイトも出ない)。
@@ -138,14 +136,29 @@ def test_quiet_does_not_change_exit_code(tmp_path):
 
 
 # --- 段構成の配線 --------------------------------------------------------
+def test_router_receives_mode_quiet_stream_and_labels(tmp_path, monkeypatch):
+    # 段 id と利用者向けの工程名の対応表は shakevmd が持ち、構築時に振り分けへ渡す。
+    inp = write_input(tmp_path / "in.vmd")
+    _spy(monkeypatch)
+    assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--quiet", "--no-smooth"]) == 0
+    kwargs = _SpyRouter.instances[-1].kwargs
+    assert kwargs["machine"] is False and kwargs["quiet"] is True
+    assert kwargs["emitter"] is None and kwargs["stream"] is sys.stderr
+    assert kwargs["labels"] == {"bake": "ベイク", "smooth": "スムージング"}
+
+    assert cli.main([inp, "-o", str(tmp_path / "b.vmd"), "--machine", "--no-smooth"]) == 0
+    kwargs = _SpyRouter.instances[-1].kwargs
+    assert kwargs["machine"] is True and kwargs["quiet"] is False and kwargs["emitter"] is not None
+
+
 def test_no_smooth_skips_smoothing_stage(tmp_path, monkeypatch):
     # --no-smooth 時はスムージング段を出さない(ベイク段のみ)。
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--no-smooth"]) == 0
-    spy = _SpyReporter.instances[-1]
-    assert "ベイク" in spy.stages
-    assert "スムージング" not in spy.stages
+    spy = _SpyRouter.instances[-1]
+    assert "bake" in spy.stages
+    assert "smooth" not in spy.stages
 
 
 def test_smooth_emits_smoothing_stage(tmp_path, monkeypatch):
@@ -153,15 +166,15 @@ def test_smooth_emits_smoothing_stage(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     assert cli.main([inp, "-o", str(tmp_path / "a.vmd")]) == 0
-    spy = _SpyReporter.instances[-1]
-    assert "ベイク" in spy.stages
-    assert "スムージング" in spy.stages
+    spy = _SpyRouter.instances[-1]
+    assert "bake" in spy.stages
+    assert "smooth" in spy.stages
 
 
 def test_smooth_wires_progress_to_reduce(tmp_path, monkeypatch):
-    # スムージング段は reduce へ progress=reporter.update を接続する。reduce 呼び出しを差し替えて
-    # progress kwarg を捕捉し、それが reporter.update そのものであること、かつ呼ぶと spy に届くことを
-    # 直接検証する(CLI が手動で update を呼ぶだけの実装では通らない)。
+    # スムージング段は reduce へ進行の中継を接続する。reduce 呼び出しを差し替えて progress kwarg を
+    # 捕捉し、それを呼ぶとスムージング段の進行として届くことを直接検証する(CLI が手動で進行を
+    # 報告するだけの実装では通らない)。
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     captured = {}
@@ -175,13 +188,9 @@ def test_smooth_wires_progress_to_reduce(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli, "reduce_camera_track", fake_reduce)
     assert cli.main([inp, "-o", str(tmp_path / "out.vmd")]) == 0
-    spy = _SpyReporter.instances[-1]
-    # reduce へ reporter.update を接続していること。bound method は属性アクセス毎に別オブジェクトに
-    # なり `is spy.update` は偽陰性になるため、束縛先(__self__)と関数(__func__)で同一性を判定する。
-    bound = captured.get("progress")
-    assert bound is not None
-    assert bound.__self__ is spy and bound.__func__ is _SpyReporter.update
-    assert (3, 10, "") in spy.updates                 # その progress を呼ぶと spy に届く
+    spy = _SpyRouter.instances[-1]
+    assert captured.get("progress") is not None
+    assert ("smooth", 3, 10, "") in spy.updates       # その progress を呼ぶと同じ段の進行として届く
 
 
 # --- summary / close の配線 ----------------------------------------------
@@ -191,7 +200,7 @@ def test_summary_on_success(tmp_path, monkeypatch):
     out = tmp_path / "out.vmd"
     _spy(monkeypatch)
     assert cli.main([inp, "-o", str(out), "--no-smooth"]) == 0
-    spy = _SpyReporter.instances[-1]
+    spy = _SpyRouter.instances[-1]
     assert spy.summaries == [f"完了 {out}"]
 
 
@@ -200,7 +209,7 @@ def test_no_summary_on_dry_run(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     assert cli.main([inp, "--dry-run"]) == 0
-    spy = _SpyReporter.instances[-1]
+    spy = _SpyRouter.instances[-1]
     assert spy.summaries == []
 
 
@@ -209,7 +218,7 @@ def test_close_called_on_bake_error(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     assert cli.main([inp, "--range", "0:60", "--range", "30:60"]) == 2
-    spy = _SpyReporter.instances[-1]
+    spy = _SpyRouter.instances[-1]
     assert spy.closed >= 1
 
 
@@ -218,5 +227,5 @@ def test_close_called_on_dry_run(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
     _spy(monkeypatch)
     assert cli.main([inp, "--dry-run"]) == 0
-    spy = _SpyReporter.instances[-1]
+    spy = _SpyRouter.instances[-1]
     assert spy.closed >= 1

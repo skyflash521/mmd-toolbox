@@ -6,14 +6,13 @@
 
 import pytest
 
-from mocapvmd.model_profile import load_mocap_profile
-
 from mocapvmd.marker_denoise import (
     DEFAULT_PRESET,
     SmoothParams,
     SmoothResult,
     smooth,
 )
+from mocapvmd.model_profile import load_mocap_profile
 
 _CATEGORIES = {"center", "torso", "head", "arms", "wrists", "legs", "feet"}
 
@@ -32,7 +31,7 @@ def _flat(value, n):
 # ---------------------------------------------------------------------------
 
 
-# 計画§7.3 の部位別既定値 (window, strength, max_disp)。
+# 部位別既定値 (window, strength, max_disp)。
 _EXPECTED_PRESET = {
     "center": (7, 0.35, 0.15),
     "torso": (5, 0.30, 0.20),
@@ -46,7 +45,7 @@ _EXPECTED_PRESET = {
 
 def test_default_preset_covers_all_categories():
     assert set(DEFAULT_PRESET) == _CATEGORIES
-    for cat, p in DEFAULT_PRESET.items():
+    for p in DEFAULT_PRESET.values():
         assert isinstance(p, SmoothParams)
         assert p.window >= 3 and p.window % 2 == 1  # 奇数窓
         assert 0.0 < p.strength <= 1.0
@@ -71,7 +70,7 @@ def test_constant_series_unchanged():
     cats = {"head": "head"}
     res = smooth(series, cats)
     assert isinstance(res, SmoothResult)
-    for got, orig in zip(res.markers["head"], series["head"]):
+    for got, orig in zip(res.markers["head"], series["head"], strict=True):
         assert got == pytest.approx(orig, abs=1e-9)
     assert res.displacement["head"] == pytest.approx(0.0, abs=1e-9)
 
@@ -94,8 +93,8 @@ def test_max_displacement_clamped():
     cats = {"wrist_l": "wrists"}
     res = smooth(series, cats)
     md = DEFAULT_PRESET["wrists"].max_disp
-    for got, orig in zip(res.markers["wrist_l"], series["wrist_l"]):
-        disp = sum((g - o) ** 2 for g, o in zip(got, orig)) ** 0.5
+    for got, orig in zip(res.markers["wrist_l"], series["wrist_l"], strict=True):
+        disp = sum((g - o) ** 2 for g, o in zip(got, orig, strict=True)) ** 0.5
         assert disp <= md + 1e-9
 
 
@@ -114,7 +113,7 @@ def test_linear_ramp_preserved():
     series = {"wrist_l": [(float(i), 0.0, 0.0) for i in range(12)]}
     cats = {"wrist_l": "wrists"}
     res = smooth(series, cats)
-    for got, orig in zip(res.markers["wrist_l"], series["wrist_l"]):
+    for got, orig in zip(res.markers["wrist_l"], series["wrist_l"], strict=True):
         assert got[0] == pytest.approx(orig[0], abs=1e-6)
 
 
@@ -136,8 +135,8 @@ def test_displacement_is_max_change():
     cats = {"head": "head"}
     res = smooth(series, cats)
     expected = max(
-        sum((g - o) ** 2 for g, o in zip(got, orig)) ** 0.5
-        for got, orig in zip(res.markers["head"], series["head"])
+        sum((g - o) ** 2 for g, o in zip(got, orig, strict=True)) ** 0.5
+        for got, orig in zip(res.markers["head"], series["head"], strict=True)
     )
     assert res.displacement["head"] == pytest.approx(expected, abs=1e-9)
 

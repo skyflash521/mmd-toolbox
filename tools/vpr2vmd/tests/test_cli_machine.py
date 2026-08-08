@@ -1,4 +1,4 @@
-"""vpr2vmd CLI 機械モードのテスト(vpr2vmd.md §7)。
+"""vpr2vmd CLI 機械モードのテスト。
 
 --machine / --describe は標準出力を JSON Lines のイベント専用にし、result または error の
 ちょうど 1 つで終端する。失敗は確定 code/field/exit_code の error イベントで返す。自己記述
@@ -11,9 +11,21 @@ vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終�
 
 import json
 
-from vpr import Note, Part, TempoEvent, Track, VprFormatError, VprProject, VprWarning
+import pytest
 
-from vpr2vmd import cli
+from cli_options import RangeValidator
+from vpr import (
+    ControllerCurve,
+    ControllerEvent,
+    Note,
+    Part,
+    TempoEvent,
+    Track,
+    VprFormatError,
+    VprProject,
+    VprWarning,
+)
+from vpr2vmd import __version__, cli
 
 
 def _touch(path):
@@ -44,12 +56,12 @@ def _stub_read(monkeypatch, project, warnings=()):
 def _machine_events(capsysbinary):
     """capsysbinary の stdout を JSON Lines として解析しイベント配列で返す(LF のみ・UTF-8 を検証)。"""
     out = capsysbinary.readouterr().out
-    assert out.endswith(b"\n") and b"\r" not in out  # 行区切りは LF 固定(§7.1・規約 §10)
+    assert out.endswith(b"\n") and b"\r" not in out  # 行区切りは LF 固定
     return [json.loads(ln) for ln in out.decode("utf-8").split("\n") if ln]
 
 
 def _terminal_events(capsysbinary):
-    """result または error のちょうど 1 つ(末尾)で終端することを確認し、全イベントを返す(§7.1)。"""
+    """result または error のちょうど 1 つ(末尾)で終端することを確認し、全イベントを返す。"""
     events = _machine_events(capsysbinary)
     assert events, "stdout に少なくとも 1 イベントが要る"
     terminals = [e for e in events if e["type"] in ("result", "error")]
@@ -63,12 +75,10 @@ def _machine_error(capsysbinary):
     return events[-1]
 
 
-# --- メタ操作(--version / --help は機械併用でも人間向け。§7.1)-----------------
+# --- メタ操作(--version / --help は機械併用でも人間向け)-----------------------
 
 
 def test_machine_version_stays_human(capsys):
-    from vpr2vmd import __version__
-
     rc = cli.main(["--machine", "--version"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -90,7 +100,7 @@ def test_help_lists_machine_flags(capsys):
         assert flag in text
 
 
-# --- 自己記述(--describe。§7.3)------------------------------------------------
+# --- 自己記述(--describe)------------------------------------------------------
 
 
 def test_describe_without_input_returns_options_and_presets(capsysbinary):
@@ -100,7 +110,7 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
     assert res["type"] == "result" and res["mode"] == "describe"
 
     opts = res["options"]
-    assert len(opts) == 19  # §7.3 の全 19 要素
+    assert len(opts) == 19  # 自己記述が報告する全 19 要素
     names = [o["name"] for o in opts]
     assert names[0] == "input"
     # 肯定形のみ・メタ/モード操作は除外。
@@ -116,10 +126,10 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
     assert by["--style"]["type"] == "enum"
     assert by["--style"]["constraint"] == {"choices": ["pop", "ballad", "powerful", "whisper", "rap"]}
     assert by["--style"]["default"] == "pop"
-    assert by["--n-morph"]["type"] == "flag" and by["--n-morph"]["default"] is True
-    assert by["--overwrite"]["default"] is False and by["--model-name"]["default"] == ""
+    assert by["--n-morph"]["type"] == "flag" and by["--n-morph"]["default"] is False
+    assert by["--overwrite"]["default"] is False
     assert by["--output"]["default"] is None
-    # 固定既定は呼び出し先由来で報告される(§7.3)。
+    # 固定既定は呼び出し先由来で報告される。
     assert by["--legato-max"]["default"] == 8.0
     assert by["--ref-bpm"]["default"] == 120.0
     assert by["--tempo-scale-min"]["default"] == 0.5
@@ -137,15 +147,38 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
         }
 
 
+def test_numeric_constraints_are_derived_from_the_validators():
+    # 手書きの複製だと検証側だけを直したときに黙って食い違うので、公開する制約は検証子から取る。
+    parser = cli._build_parser()
+    options = {o["name"]: o for o in cli._describe_options(parser)}
+    checked = 0
+    for action in parser._actions:
+        if not isinstance(action.type, RangeValidator):
+            continue
+        name = next(s for s in action.option_strings if s.startswith("--"))
+        assert options[name]["type"] == action.type.value_type
+        assert options[name]["constraint"] == action.type.constraint
+        checked += 1
+    assert checked == 10  # 範囲付き数値のオプション全件
+
+
+def test_describe_model_name_default_is_tool_and_version(capsysbinary):
+    rc = cli.main(["--describe"])
+    assert rc == 0
+    res = _terminal_events(capsysbinary)[-1]
+    by = {o["name"]: o for o in res["options"]}
+    assert by["--model-name"]["default"] == f"vpr2vmd {__version__}"
+
+
 def test_describe_with_unknown_option_is_bad_argument(capsysbinary):
-    # --describe と未知オプションの併用も error イベント + 終了コード 2(§7.1)。
+    # --describe と未知オプションの併用も error イベント + 終了コード 2。
     rc = cli.main(["--describe", "--bogus"])
     assert rc == 2
     e = _machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["exit_code"] == 2
 
 
-# --- 入力検査(--machine --dry-run の inspect。§7.2)----------------------------
+# --- 入力検査(--machine --dry-run の inspect)----------------------------------
 
 
 def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, monkeypatch):
@@ -158,7 +191,7 @@ def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, m
     res = _terminal_events(capsysbinary)[-1]
     assert res["mode"] == "inspect" and res["output"] is None and res["input_kind"] == "vpr"
     assert res["track_index"] == 0 and res["track_name"] == "Vocal"
-    assert res["style"] == "pop" and res["n_morph"] is True and res["model_name"] == ""
+    assert res["style"] == "pop" and res["n_morph"] is False
     assert set(res["params"]) == {
         "open_max", "default_open", "legato_max", "valley_shallow", "valley_deep",
         "valley_slope", "coartic_overlap", "anticipation", "ref_bpm", "tempo_scale_min",
@@ -168,6 +201,18 @@ def test_machine_dry_run_emits_inspect_without_writing(tmp_path, capsysbinary, m
     assert isinstance(res["mouth_events"], int) and isinstance(res["morph_keys"], int)
     assert set(res["open_amounts"]) == {"min", "max", "mean"}
     assert isinstance(res["non_event_symbols"], dict)
+
+
+def test_machine_dry_run_inspect_model_name_default_is_tool_and_version(
+    tmp_path, capsysbinary, monkeypatch
+):
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"])]))
+    out = tmp_path / "out.vmd"
+    rc = cli.main([src, "-o", str(out), "--machine", "--dry-run"])
+    assert rc == 0
+    res = _terminal_events(capsysbinary)[-1]
+    assert res["model_name"] == f"vpr2vmd {__version__}"
 
 
 def test_machine_dry_run_no_adopted_warns_then_inspect(tmp_path, capsysbinary, monkeypatch):
@@ -180,7 +225,55 @@ def test_machine_dry_run_no_adopted_warns_then_inspect(tmp_path, capsysbinary, m
     assert events[-1]["mode"] == "inspect" and events[-1]["open_amounts"] is None
 
 
-# --- 通常実行(convert result。§7.2)------------------------------------------
+# --- 開き量の決定経路(open_source)----------------------------------------------
+
+
+def _project_with_dynamics(notes, points):
+    track = Track(name="Vocal", parts=[Part(
+        name="p", start_tick=0, notes=notes,
+        controllers=[ControllerCurve(name="dynamics",
+                                     events=[ControllerEvent(t, v) for t, v in points])],
+    )])
+    return VprProject(resolution=480, tempos=[TempoEvent(0, 120.0)], tracks=[track])
+
+
+@pytest.mark.parametrize("project_factory, expected", [
+    (lambda: _project_with_dynamics([_note(0, 480, ["a"]), _note(480, 480, ["i"])],
+                                    [(0, 30), (480, 100)]), "dynamics"),
+    # 曲線が平坦で開き量が一定になっても、決めたのは声量曲線である(結果の一様さで経路を決めない)。
+    (lambda: _project_with_dynamics([_note(0, 480, ["a"]), _note(480, 480, ["i"])],
+                                    [(0, 64)]), "dynamics"),
+    (lambda: _project([_note(0, 480, ["a"], velocity=40),
+                       _note(480, 480, ["i"], velocity=100)]), "velocity"),
+    (lambda: _project([_note(0, 480, ["a"], velocity=64),
+                       _note(480, 480, ["i"], velocity=64)]), "default"),
+    # 採用0件は、声量曲線があっても開き量を1件も決めていないので経路に当たらない。
+    (lambda: _project_with_dynamics([], [(0, 64)]), None),
+])
+def test_machine_dry_run_inspect_reports_open_source(
+    tmp_path, capsysbinary, monkeypatch, project_factory, expected
+):
+    # 開き量が一定に見えるとき、それが声量曲線由来か既定値かを利用者が判別できるようにする。
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, project_factory())
+    assert cli.main([src, "--machine", "--dry-run"]) == 0
+    assert _terminal_events(capsysbinary)[-1]["open_source"] == expected
+
+
+def test_machine_dry_run_inspect_caps_open_amounts_but_keeps_resolved_default_open(
+    tmp_path, capsysbinary, monkeypatch
+):
+    # 既定開き量の頭打ちは開き量を決める時点で行い、解決済みパラメータの報告値は頭打ち前のまま。
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"]), _note(480, 480, ["i"])]))
+    assert cli.main([src, "--open-max", "0.4", "--machine", "--dry-run"]) == 0
+    res = _terminal_events(capsysbinary)[-1]
+    assert res["open_source"] == "default"
+    assert res["params"]["default_open"] > res["params"]["open_max"]  # 報告値は頭打ち前
+    assert res["open_amounts"]["max"] == pytest.approx(res["params"]["open_max"])
+
+
+# --- 通常実行(convert result)--------------------------------------------------
 
 
 def test_machine_convert_result_after_write(tmp_path, capsysbinary, monkeypatch):
@@ -216,7 +309,58 @@ def test_machine_warning_overlapping_notes_passthrough(tmp_path, capsysbinary, m
     assert events[-1]["mode"] == "convert"
 
 
-# --- 構造化エラー全経路(§7.4)------------------------------------------------
+def test_machine_warning_normalize_carries_vmd_section(tmp_path, capsysbinary, monkeypatch):
+    # 出力前の正規化が返す警告は、対象の VMD セクションを載せ、vpr 内の位置キーは持たない。
+    from vmd import VmdWarning
+
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"])]))
+    original = cli.normalize
+
+    def _with_warning(document, sections=None):
+        doc, warnings = original(document, sections=sections)
+        return doc, [*warnings, VmdWarning(
+            code="normalize-duplicate", message="同一キーの重複", section="morph")]
+
+    monkeypatch.setattr(cli, "normalize", _with_warning)
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine"])
+    assert rc == 0
+    events = _terminal_events(capsysbinary)
+    warns = [e for e in events if e["type"] == "warning"]
+    assert len(warns) == 1
+    wa = warns[0]
+    assert wa["code"] == "normalize-duplicate" and wa["section"] == "morph"
+    assert wa["track_index"] is None and wa["tick"] is None
+    assert events[-1]["mode"] == "convert"
+
+
+@pytest.mark.parametrize("flag", ["--verbose", "--dry-run"])
+def test_machine_suppresses_human_plan_and_diagnostics(tmp_path, capsysbinary, monkeypatch, flag):
+    # 機械モードは標準出力をイベント専用に保つため、処理計画・診断の人間向け表示は出さない。
+    # 出力は JSON Lines だけで、人間向けの見出し行が混じらないこと。
+    src = _touch(tmp_path / "in.vpr")
+    _stub_read(monkeypatch, _project([_note(0, 480, ["a"])]))
+    rc = cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", flag])
+    assert rc == 0
+    events = _terminal_events(capsysbinary)  # 全行が JSON として解析できることを含む
+    assert all(e["type"] in ("warning", "result") for e in events)
+
+
+def test_machine_error_unreadable_input(tmp_path, capsysbinary, monkeypatch):
+    # 開けない入力(権限不足等)は internal_error でなく not_vpr(入力不正)へ寄せる。
+    src = _touch(tmp_path / "in.vpr")
+
+    def _raise(_src):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(cli, "read", _raise)
+    rc = cli.main([src, "--machine"])
+    assert rc == 1
+    e = _machine_error(capsysbinary)
+    assert e["code"] == "not_vpr" and e["field"] == "input" and e["exit_code"] == 1
+
+
+# --- 構造化エラー全経路 --------------------------------------------------------
 
 
 def test_machine_error_unknown_option(tmp_path, capsysbinary):
@@ -251,12 +395,22 @@ def test_machine_error_value_out_of_range(tmp_path, capsysbinary):
     assert e["code"] == "bad_argument" and e["field"] == "--open-max"
 
 
-def test_machine_error_output_overwrites_input(tmp_path, capsysbinary):
+def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = _touch(tmp_path / "in.vpr")
     rc = cli.main([src, "-o", src, "--machine"])
     assert rc == 2
     e = _machine_error(capsysbinary)
-    assert e["code"] == "output_overwrites_input" and e["field"] == "--output" and e["exit_code"] == 2
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
+
+
+def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
+    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
+    src = _touch(tmp_path / "in.vpr")
+    out = _touch(tmp_path / "out.vmd")
+    rc = cli.main([src, "-o", out, "--machine"])
+    assert rc == 2
+    e = _machine_error(capsysbinary)
+    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
 
 
 def test_machine_error_valley_bounds_inverted(tmp_path, capsysbinary):
@@ -348,8 +502,22 @@ def test_machine_error_stdout_is_valid_json_lines_lf_only(tmp_path, capsysbinary
 
 def test_describe_type_table_covers_non_meta_args():
     # _D_TYPE はメタ/モード操作を除く全 parser 引数を覆う。parser に引数を足して _D_TYPE への追加を
-    # 忘れると --describe から黙って抜けるため、その載せ忘れをここで検出する(§7.3)。
+    # 忘れると --describe から黙って抜けるため、その載せ忘れをここで検出する。
     parser = cli._build_parser()
     meta = {"help", "version", "machine", "describe"}
     non_meta = {a.dest for a in parser._actions if a.dest not in meta}
     assert non_meta <= set(cli._D_TYPE)
+
+
+def test_machine_error_output_is_directory(tmp_path, capsysbinary):
+    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
+    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
+    src = _touch(tmp_path / "in.vpr")
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    for extra in ([], ["--overwrite"]):
+        rc = cli.main([src, "-o", str(outdir), "--machine", *extra])
+        assert rc == 2
+        e = _machine_error(capsysbinary)
+        assert e["code"] == "output_is_directory" and e["field"] == "--output"
+        assert e["exit_code"] == 2 and e["path"] == str(outdir)

@@ -10,7 +10,7 @@ def _mmd_file(name: str) -> bytes:
     if not path.exists():
         pytest.fail(
             f"MMD産テストデータがありません: {path}\n"
-            "作成手順は libs/vmd/tests/data/README.md を参照"
+            "テストデータを作成してください"
         )
     return path.read_bytes()
 

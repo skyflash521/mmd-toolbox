@@ -1,4 +1,4 @@
-"""帯域制限付き多オクターブノイズ(shakevmd.md §6.1)。
+"""帯域制限付き多オクターブノイズ。
 
 - C1連続ノイズ(1Dグラディエント=パーリン系、quintic fade)。チャンネル/セグメント
   ごとに独立シード派生
@@ -11,7 +11,7 @@ import hashlib
 
 import numpy as np
 
-# 内蔵値(プリセット/コアAPIで変更可。shakevmd.md §2.3)
+# 内蔵値(プリセット/コアAPIで変更可)
 DEFAULT_OCTAVES = 3
 DEFAULT_PERSISTENCE = 0.5
 BANDLIMIT_HZ = 8.0
@@ -20,7 +20,7 @@ _U64 = np.uint64(0xFFFFFFFFFFFFFFFF)
 
 
 def derive_seed(base_seed: int, *parts) -> int:
-    """base_seed と parts から決定論的にシードを派生する(§5.3, §6.1)。
+    """base_seed と parts から決定論的にシードを派生する。
 
     SHA-256 で混ぜるため、実行をまたいで安定し、parts が違えば別値になる。
     """
@@ -37,7 +37,7 @@ def derive_seed(base_seed: int, *parts) -> int:
 def effective_octaves(
     freq: float, octaves: int, bandlimit_hz: float = BANDLIMIT_HZ
 ) -> int:
-    """実際に生成するオクターブ数(§6.1 帯域制限)。
+    """実際に生成するオクターブ数(帯域制限)。
 
     freq × 2^i は i について単調増加なので、bandlimit_hz 以下である先頭からの
     連続オクターブ数を返す(freq 自体が超過すれば 0)。
@@ -54,7 +54,7 @@ def effective_octaves(
 
 
 def _clamp_message(octaves: int, n: int, bandlimit_hz: float) -> str:
-    """帯域制限クランプの警告文言(§6.1)。疑似コード接頭は付けず記述のみ(コードは呼び出し側が付番)。"""
+    """帯域制限クランプの警告文言。疑似コード接頭は付けず記述のみ(コードは呼び出し側が付番)。"""
     return f"オクターブを {octaves}→{n} にクランプした(実効周波数が {bandlimit_hz}Hz を超過)"
 
 
@@ -79,7 +79,7 @@ def _seed_phase(seed: int) -> float:
     """シード由来の決定論的な位相オフセット [0, 1024)。
 
     格子(整数点)を非整数へずらし、全ストリームが整数格子点で同時にゼロに
-    なる同期アーティファクトを防ぐ(§6.1。各オクターブ/チャンネルで別位相)。
+    なる同期アーティファクトを防ぐ(各オクターブ/チャンネルで別位相)。
     """
     g = float(_gradients(seed, np.array([0], dtype=np.int64))[0])  # [-1,1)
     return (g + 1.0) * 512.0
@@ -105,7 +105,7 @@ def octave_components(
     octaves: int = DEFAULT_OCTAVES,
     bandlimit_hz: float = BANDLIMIT_HZ,
 ) -> tuple[list, list[str]]:
-    """各オクターブのノイズ成分(persistence 重み無し)のリストと警告を返す(§6.2)。
+    """各オクターブのノイズ成分(persistence 重み無し)のリストと警告を返す。
 
     band_limited_noise が固定 persistence で合成するのに対し、こちらは合成前の
     オクターブ成分を返す。プロファイルクロスフェード(motion.profile_weights)で
@@ -139,7 +139,7 @@ def band_limited_noise(
     persistence: float = DEFAULT_PERSISTENCE,
     bandlimit_hz: float = BANDLIMIT_HZ,
 ) -> tuple[np.ndarray, list[str]]:
-    """時刻列 t(秒)の帯域制限付き多オクターブノイズと警告コードを返す(§6.1)。"""
+    """時刻列 t(秒)の帯域制限付き多オクターブノイズと警告コードを返す。"""
     t = np.asarray(t, dtype=float)
     freq = abs(freq)  # Hz は大きさ
     n = effective_octaves(freq, octaves, bandlimit_hz)

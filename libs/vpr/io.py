@@ -1,10 +1,8 @@
-"""vpr 読み込み(vpr.md §3)。
-
-形式レイアウトの正: docs/specs/vpr/VPR_file_format.md
-"""
+"""vpr 読み込み。"""
 
 import io
 import json
+import math
 import zipfile
 
 from .types import (
@@ -26,7 +24,7 @@ _SINGING_TRACK_TYPE = 2
 
 
 def _require(obj, key, path, type_=None):
-    """obj[key] を返す。欠落・型不一致は構造異常 VprFormatError(§3.1)。
+    """obj[key] を返す。欠落・型不一致は構造異常 VprFormatError。
 
     type_ を与えると値の型を検証する。原因特定のため path・key・value を付与する。
     """
@@ -42,12 +40,12 @@ def _require(obj, key, path, type_=None):
 
 
 def _optional(obj, key, default):
-    """obj[key] を返す。obj が辞書でない/キーが無ければ default(許容入力。§3.1)。"""
+    """obj[key] を返す。obj が辞書でない/キーが無ければ default(許容入力)。"""
     return obj.get(key, default) if isinstance(obj, dict) else default
 
 
 def _optional_list(obj, key, path):
-    """obj[key] を返す。キーが無ければ []。値が配列でなければ VprFormatError(§3.1)。"""
+    """obj[key] を返す。キーが無ければ []。値が配列でなければ VprFormatError。"""
     if not isinstance(obj, dict) or key not in obj:
         return []
     value = obj[key]
@@ -84,15 +82,27 @@ def _ticks_per_bar(numerator: int, denominator: int) -> int:
 
 
 def _tempos(master) -> list[TempoEvent]:
-    """テンポイベントを TempoEvent(bpm = value/100)へ写像する。"""
+    """テンポイベントを TempoEvent(bpm = value/100)へ写像する。
+
+    テンポマップは tick が指す時刻を決める前提なので、1件以上あり各 BPM が正の有限値であることを
+    要求する。満たさない入力は写像自体はできても利用先が tick を時刻へ写せないため構造異常とする。
+    生の value の型検査は数値までで、小数は型不正としない(非有限値はここを通り下の条件で弾く)。
+    """
     tempo = _require(master, "tempo", "masterTrack", dict)
     events = _require(tempo, "events", "masterTrack.tempo", list)
+    if not events:
+        raise VprFormatError("テンポイベントが 1 件もありません",
+                             path="masterTrack.tempo.events", key="events", value=events)
     result: list[TempoEvent] = []
     for i, event in enumerate(events):
         path = f"masterTrack.tempo.events[{i}]"
         pos = _require(event, "pos", path, int)
         value = _require(event, "value", path, (int, float))
-        result.append(TempoEvent(tick=pos, bpm=value / 100))
+        bpm = value / 100
+        if not math.isfinite(bpm) or bpm <= 0.0:
+            raise VprFormatError("BPM は正の有限値でなければなりません",
+                                 path=path, key="value", value=value)
+        result.append(TempoEvent(tick=pos, bpm=bpm))
     return result
 
 
@@ -191,7 +201,7 @@ def _tracks(raw_tracks) -> list[Track]:
 
 
 def _overlap_warnings(tracks) -> list[VprWarning]:
-    """同一パート内で発音区間が重なる音符ペアを警告する(単音想定違反。vpr.md §3.2)。
+    """同一パート内で発音区間が重なる音符ペアを警告する(単音想定違反)。
 
     notes は start_tick 昇順。各音符について、まだ終端に達していない先行音符(active)を残し、その
     全てと重なるとみなして音符ペアごとに1件報告する。半開区間 [start, start+duration) なので終端 ==
@@ -220,7 +230,7 @@ def _overlap_warnings(tracks) -> list[VprWarning]:
 
 
 def read(src) -> tuple[VprProject, list[VprWarning]]:
-    """vpr を読み、データモデル(vpr.md §2)と警告を返す。"""
+    """vpr を読み、データモデルと警告を返す。"""
     sequence = _load_sequence(src)
     master = _require(sequence, "masterTrack", "", dict)
     raw_tracks = _require(sequence, "tracks", "", list)

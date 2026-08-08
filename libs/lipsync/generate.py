@@ -1,4 +1,4 @@
-"""lipsync コアのモーフキー生成(要求仕様 lipsync.md §4)。
+"""lipsync コアのモーフキー生成。
 
 入力(開き量を同梱した口形イベント列＋生成パラメータ)から、標準口モーフ
 (あ・い・う・え・お・ん)のモーフキー列を決定論的に生成する。VMD への組み立て・
@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from vmd import MorphKey
 
-from .types import ConsonantClass, GenerationParams, MouthEvent, MouthShape
+from .types import ApertureClass, ConsonantClass, GenerationParams, MouthEvent, MouthShape
 
 # 各母音的口形の主モーフ(目的口形と同名の標準口モーフ)。
 _MAIN_MORPH = {
@@ -43,6 +43,16 @@ _PROFILES: dict[MouthShape, dict[str, float]] = {
 _ROUNDED_U_GAIN = 0.3  # ROUNDED → う 方向の丸め
 _ROUNDED_O_GAIN = 0.0  # ROUNDED → お 方向の丸め(初期は う のみ。視覚で調整)
 _SPREAD_I_GAIN = 0.3  # SPREAD → い 方向の横引き
+
+# 開口減衰(子音がもたらす顎の狭め具合)の係数。合成後総量の比例縮小の後に全モーフへ一律に掛ける
+# (比例縮小より前に掛けると縮小の分子・分母から相殺され効果が消えるため)。視覚で詰める初期値。
+# CLI 公開はせず lipsync 内の定数として持つ。
+_APERTURE_SCALE: dict[ApertureClass, float] = {
+    ApertureClass.NONE: 1.0,
+    ApertureClass.FIRM_CLOSURE: 0.75,
+    ApertureClass.NARROW_CHANNEL: 0.85,
+    ApertureClass.SLIGHT_CLOSURE: 0.92,
+}
 
 
 def _preprofile(shape: MouthShape, consonant_class: ConsonantClass) -> dict[str, float]:
@@ -124,16 +134,25 @@ def _weights_from_hold(
 
 
 def _compose(
-    shape: MouthShape, consonant_class: ConsonantClass, open_amount: float, params: GenerationParams
+    shape: MouthShape,
+    consonant_class: ConsonantClass,
+    aperture_class: ApertureClass,
+    open_amount: float,
+    params: GenerationParams,
 ) -> dict[str, float]:
     """母音の合成プロファイルから各口モーフの重みを求める。
 
     手順: (1)母音＋子音種別のプロファイル選択 →(2)補助重みに誇張係数を乗算 →(3)保持値 hold を上限
-    クランプ →(4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小。
+    クランプ →(4)各モーフ重み = 有効プロファイル × hold →(5)合成後総量が open_cap 超過時のみ比例縮小
+    →(6)縮小後の全モーフへ一律に開口減衰係数を掛ける。開口減衰は手順5より前(hold や暫定重みへの
+    乗算)ではなく必ず手順5の後に適用する: 手順5より前に掛けると、全モーフへ一律に掛かる係数のため
+    比例縮小の分子・分母から相殺され、縮小が発動する組み合わせで開口減衰の効果が完全に消える。
     """
-    return _weights_from_hold(
+    weights = _weights_from_hold(
         shape, consonant_class, _hold_value(shape, open_amount, params), params
     )
+    scale = _APERTURE_SCALE[aperture_class]
+    return {morph: weight * scale for morph, weight in weights.items()}
 
 
 def _shape_diff(
@@ -156,7 +175,7 @@ def _shape_diff(
         return [x / norm for x in vec] if norm > 0.0 else vec
 
     ua, ub = _unit(shape_a, class_a), _unit(shape_b, class_b)
-    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ua, ub)))
+    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ua, ub, strict=True)))
     return dist / math.sqrt(2.0)
 
 
@@ -185,7 +204,7 @@ def _legato_bridge(events: Sequence[MouthEvent], gap_start: float, gap_end: floa
     """区間 [gap_start, gap_end) がレガート間隙(LEGATO_GAP のみで連続被覆)なら True。
 
     無音・両唇閉鎖を1つでも挟む間隙は閉口優先で谷を作らない(False)。間隙分類は呼び出し側が
-    LEGATO_GAP/SILENCE で確定済み(lipsync.md §6)で、本判定はその確定入力を読むだけ。
+    LEGATO_GAP/SILENCE で確定済みで、本判定はその確定入力を読むだけ。
     """
     if gap_end <= gap_start:
         return False
@@ -200,9 +219,9 @@ def _vowel_groups(events: Sequence[MouthEvent]) -> list[list[MouthEvent]]:
 
     同じ母音が続く区間は1つの連続した保持にする(子音種別が途中で変わっても分けない)。子音変調で生じる
     補助モーフ(ROUNDED の う/お、SPREAD の い)はグループ内のイベントごとに異なりうるが、補助はグループ端
-    および補助が消えるイベントの中央で 0 へフェードさせる(§4.2 のエンベロープ)ので、同母音の連続を子音種別で
+    および補助が消えるイベントの中央で 0 へフェードさせるエンベロープなので、同母音の連続を子音種別で
     分断して短いモーラを別々に立て閉口を挟む不自然さ(同じ母音なのに途中で口が閉じる)を避ける。プロファイル
-    対象外(両唇閉鎖・無音)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音のリリース/アタックの
+    対象外(両唇閉鎖・無音・レガート間隙)はグループ境界として扱い、ここでは出力しない。閉口は隣接母音のリリース/アタックの
     0.0 キーとキー不在(MMD 上 0.0)で表す(専用の閉口キーは設けない)。
     """
     groups: list[list[MouthEvent]] = []
@@ -242,9 +261,15 @@ class _Group:
 
 
 def _opening(event: MouthEvent, params: GenerationParams) -> float:
-    """境界イベントの開き量(吸収先タイブレーク用)。"""
-    scale = params.vowel_scale[_VOWEL_INDEX[event.shape]]
-    return min(max(event.open_amount * scale, 0.0), params.open_cap)
+    """境界イベントの開き量(吸収先タイブレーク用)。
+
+    唇形変調(ConsonantClass)と開口減衰(ApertureClass)の両方を適用した最終重みの最大値を返す。
+    コードベース全体で「その口形イベントがどれだけ開くか」を表す量を `_compose` の出力に一本化し、
+    同じ性質を表す複数の異なる式を持たない。
+    """
+    return max(
+        _compose(event.shape, event.consonant_class, event.aperture_class, event.open_amount, params).values()
+    )
 
 
 def _effective_attack_release(
@@ -288,7 +313,7 @@ def _normalize_groups(
     """
     groups = [_Group(g, g[0].start, g[-1].end, g[0].shape) for g in _vowel_groups(events)]
     # 長さで3分類: L<triangle_min は吸収(short)、triangle_min≤L<min_hold+2 は三角形(triangle、生存)、
-    # それ以上は通常形状。三角形は極短母音を1点ピークで残し、発声中の閉口を防ぐ(§4.9・§4.4)。
+    # それ以上は通常形状。三角形は極短母音を1点ピークで残し、発声中の閉口を防ぐ。
     for g in groups:
         L = g.end - g.start
         g.short = L < params.triangle_min_frames
@@ -311,8 +336,11 @@ def _normalize_groups(
         )
         winner = _absorb_winner(prev_anchor, nxt_anchor, params)
         if winner is prev_anchor and prev_anchor is not None:
+            # 境界イベント自身の実効 end も広げる。元のイベントは変更せず複製で差し替える。
+            prev_anchor.events[-1] = replace(prev_anchor.events[-1], end=run_end)
             prev_anchor.end = run_end
         elif winner is nxt_anchor and nxt_anchor is not None:
+            nxt_anchor.events[0] = replace(nxt_anchor.events[0], start=run_start)
             nxt_anchor.start = run_start
         i = j
     # 吸収後に直接隣接した同一母音(shape)グループを連結へ統合する(子音種別が違っても同母音は連続)。
@@ -335,6 +363,105 @@ def _normalize_groups(
     return merged
 
 
+def _lerp_morph(
+    w_prev: dict[str, float], w_next: dict[str, float], t_prev: float, t_next: float, t: float, morph: str
+) -> float:
+    """2つの小区間の最終重み(モーフ別)を結ぶ直線を時刻 t で評価する。"""
+    v_prev, v_next = w_prev.get(morph, 0.0), w_next.get(morph, 0.0)
+    if t_next == t_prev:
+        return v_prev
+    return v_prev + (v_next - v_prev) * (t - t_prev) / (t_next - t_prev)
+
+
+@dataclass
+class _Valley:
+    """モーラ境界の谷の候補。`values` はモーフ名→(左肩, 中央, 右肩) の最終重み。"""
+
+    b: float
+    hw: int
+    aperture_scale: float
+    disp: float
+    values: dict[str, tuple[float, float, float]]
+
+    @property
+    def left(self) -> float:
+        return self.b - self.hw
+
+    @property
+    def right(self) -> float:
+        return self.b + self.hw
+
+
+def _mora_valley_candidates(
+    group: _Group, gw: list[dict[str, float]], group_morphs: Sequence[str], params: GenerationParams
+) -> list[_Valley]:
+    """通常長グループの内部境界ごとに、谷の候補(ApertureClass が NONE でなく `hw>=2`)を作る。"""
+    events = group.events
+    if len(events) < 2:
+        return []
+    mids = [(ev.start + ev.end) / 2.0 for ev in events]
+    candidates: list[_Valley] = []
+    for j in range(len(events) - 1):
+        b = events[j].end
+        aperture_class = events[j + 1].aperture_class
+        if aperture_class is ApertureClass.NONE:
+            continue
+        scale = _APERTURE_SCALE[aperture_class]
+        hw = math.floor(min(params.mora_valley_frames, b - mids[j], mids[j + 1] - b))
+        if hw < 2:
+            continue
+        d = scale / 2.0
+        values: dict[str, tuple[float, float, float]] = {}
+        disp = 0.0
+        for morph in group_morphs:
+            left_val = _lerp_morph(gw[j], gw[j + 1], mids[j], mids[j + 1], b - hw, morph)
+            right_val = _lerp_morph(gw[j], gw[j + 1], mids[j], mids[j + 1], b + hw, morph)
+            center_val = d * (left_val + right_val)
+            values[morph] = (left_val, center_val, right_val)
+            disp += (1.0 - scale) * _lerp_morph(gw[j], gw[j + 1], mids[j], mids[j + 1], b, morph)
+        candidates.append(_Valley(b, hw, scale, disp, values))
+    return candidates
+
+
+def _select_valleys(candidates: Sequence[_Valley], params: GenerationParams) -> list[_Valley]:
+    """密集回避: 視覚的な変位量の総和を最大化する部分集合を動的計画法で選ぶ。
+
+    互換性判定は整数フレーム化した両端点で行う(`round(L_j) - round(R_i) - 1 ≥
+    mora_valley_min_gap_frames`)。同値の場合は必ず採用する側を選ぶ(候補を右端の昇順に処理する
+    決定論的な単一パスなので、複数の最適解が並ぶ曖昧さは生じない)。
+    """
+    ordered = sorted(candidates, key=lambda c: c.right)
+    n = len(ordered)
+    q_left = [_half_up(c.left) for c in ordered]
+    q_right = [_half_up(c.right) for c in ordered]
+    gap = params.mora_valley_min_gap_frames
+    pred: list[int] = []  # 1-indexed 互換先(0 は「候補なし」)
+    for i in range(n):
+        best = 0
+        for j in range(i):
+            if q_left[i] - q_right[j] - 1 >= gap:
+                best = j + 1
+        pred.append(best)
+    opt = [0.0] * (n + 1)
+    take_choice = [False] * (n + 1)
+    for i in range(1, n + 1):
+        take = ordered[i - 1].disp + opt[pred[i - 1]]
+        skip = opt[i - 1]
+        if take >= skip:
+            opt[i], take_choice[i] = take, True
+        else:
+            opt[i], take_choice[i] = skip, False
+    selected: list[_Valley] = []
+    i = n
+    while i > 0:
+        if take_choice[i]:
+            selected.append(ordered[i - 1])
+            i = pred[i - 1]
+        else:
+            i -= 1
+    return selected
+
+
 def _preceding_event(events: Sequence[MouthEvent], start: float) -> MouthEvent | None:
     """終端フレームが start に一致する直前イベント(連続契約により一意。無ければ None)。"""
     for ev in events:
@@ -354,11 +481,11 @@ def _following_event(events: Sequence[MouthEvent], end: float) -> MouthEvent | N
 def _lead_lag_eff(neighbor: MouthEvent | None, opening: float, params: GenerationParams) -> int:
     """先行準備(立ち上がり前倒し)/後行残し(閉じ後ろずらし)の実効量。
 
-    隣接が無音区間のときのみ働く(直前/直後が無い・母音・両唇閉鎖は 0)。基準フレーム `anticipation_frames`
+    隣接が無音区間・両唇閉鎖のときのみ働く(直前/直後が無い・母音・レガート間隙は 0)。基準フレーム `anticipation_frames`
     を開き量比 `opening/open_cap` でスケールするため、機械的な固定値にならず開きの大小で量が変動する
-    (大きく開くほど長い余韻)。隣接無音長の 1/2 上限で前/後区間を侵食しすぎない。先行準備と後行残しで対称。
+    (大きく開くほど長い余韻)。隣接区間長の 1/2 上限で前/後区間を侵食しすぎない。先行準備と後行残しで対称。
     """
-    if neighbor is None or neighbor.shape is not MouthShape.SILENCE:
+    if neighbor is None or neighbor.shape not in (MouthShape.SILENCE, MouthShape.BILABIAL):
         return 0
     ratio = opening / params.open_cap if params.open_cap > 0.0 else 0.0
     want = params.anticipation_frames * min(max(ratio, 0.0), 1.0)
@@ -408,7 +535,7 @@ def _interp_open(points: Sequence[tuple[float, float]], t: float) -> float:
         return points[0][1]
     if t >= points[-1][0]:
         return points[-1][1]
-    for (f0, v0), (f1, v1) in zip(points, points[1:]):
+    for (f0, v0), (f1, v1) in zip(points, points[1:], strict=False):
         if f0 <= t <= f1:
             return v0 if f1 == f0 else v0 + (v1 - v0) * (t - f0) / (f1 - f0)
     return points[-1][1]
@@ -428,25 +555,52 @@ def _consonant_at(events: Sequence[MouthEvent], t: float) -> ConsonantClass:
     return nearest.consonant_class
 
 
+def _suppressed_by_valley(t: float, sign: float, period: float, valleys: Sequence[_Valley]) -> bool:
+    """揺らぎ極値(時刻 t・符号 sign)が、いずれかの谷(常に負方向)との近接で間引かれるべきか。
+
+    谷と逆方向(正)の極値は `|t-b| ≤ max(hw+2, vibrato_period/2)` で、谷と同じ方向(負)の極値は
+    `|t-b| ≤ max(hw+2, vibrato_period)` で間引く。マージンは実際にクランプ済みの半幅
+    `hw` を使う(パラメータ `mora_valley_frames` そのものは使わない)。
+    """
+    return any(
+        abs(t - v.b) <= max(v.hw + 2, period if sign < 0.0 else period / 2.0) for v in valleys
+    )
+
+
 def _vibrato_targets(
-    group: _Group, plateau_start: float, plateau_end: float, params: GenerationParams
+    group: _Group,
+    plateau_start: float,
+    plateau_end: float,
+    params: GenerationParams,
+    valleys: Sequence[_Valley] = (),
 ) -> list[tuple[str, float, float]]:
     """保持プラトーに伸び表現の揺らぎ節点を生成する。
 
     公称開き量 `base_open(t)` を保持・強弱節点の線形補間で求め、正弦波で変調した実効開き量 `open_v` から
-    合成手順で各モーフ重みを出す。節点は正弦波の極値(`t_k = plateau_start + P·(1/4 + k/2)`)の
-    厳密内側のみ。返すのは float 目標 `(モーフ名, フレーム, 重み)` 列(量子化は後段)。
+    合成手順(手順1〜5相当)で各モーフ重みを出し、最後に開口減衰 `aperture_v(t)`(同じ制御点で
+    `aperture_scale` を線形補間したもの)を一律に掛ける。開口減衰を `open_v` の計算に混ぜず最後に
+    別途掛けるのは、合成後総量の比例縮小と相殺させないため(`_compose` と同じ理由)。節点は正弦波の
+    極値(`t_k = plateau_start + P·(1/4 + k/2)`)の厳密内側のみ。プラトー内にモーラ境界の谷が
+    ある場合、谷と逆方向(正)の極値は半周期、谷と同じ方向(負)の極値は1周期の間引き幅で除外する
+    (同符号の二重ディップ・谷直後の近接ディップを防ぐ)。返すのは float 目標
+    `(モーフ名, フレーム, 重み)` 列(量子化は後段)。
     """
     holds = [_hold_value(group.shape, ev.open_amount, params) for ev in group.events]
+    scales = [_APERTURE_SCALE[ev.aperture_class] for ev in group.events]
     # 公称開き量の制御点: プラトー始端(先頭 hold)・プラトー内の各イベント中央(その hold)・終端(末尾 hold)。
+    # 開口減衰の制御点も同じ位置で aperture_scale を使って作る(hold とは独立に補間する)。
     points: list[tuple[float, float]] = [(plateau_start, holds[0])]
+    aperture_points: list[tuple[float, float]] = [(plateau_start, scales[0])]
     if len(group.events) >= 2:
-        for ev, hold in zip(group.events, holds):
+        for ev, hold, scale in zip(group.events, holds, scales, strict=True):
             mid = (ev.start + ev.end) / 2.0
             if plateau_start < mid < plateau_end:
                 points.append((mid, hold))
+                aperture_points.append((mid, scale))
     points.append((plateau_end, holds[-1]))
+    aperture_points.append((plateau_end, scales[-1]))
     points.sort()
+    aperture_points.sort()
     period = params.vibrato_period
     nodes: list[tuple[str, float, float]] = []
     k = 0
@@ -458,34 +612,42 @@ def _vibrato_targets(
         base = _interp_open(points, t)
         if base <= 0.0:
             continue
+        sign = math.sin(2.0 * math.pi * (t - plateau_start) / period)
+        if valleys and _suppressed_by_valley(t, sign, period, valleys):
+            continue
         amp_eff = min(params.vibrato_amp, base)
-        offset = amp_eff * math.sin(2.0 * math.pi * (t - plateau_start) / period)
+        offset = amp_eff * sign
         open_v = min(max(base + offset, 0.0), params.open_cap)
         # 同母音グループ内で子音種別が変わりうるので、その時刻のイベントの子音種別で変調する。
         cc = _consonant_at(group.events, t)
+        aperture_v = _interp_open(aperture_points, t)
         for morph, weight in _weights_from_hold(group.shape, cc, open_v, params).items():
-            nodes.append((morph, t, weight))
+            nodes.append((morph, t, weight * aperture_v))
     return nodes
 
 
 def generate_morph_keys(
     events: Sequence[MouthEvent], params: GenerationParams
 ) -> list[MorphKey]:
-    """口形イベント列からモーフキー列を生成する(要求仕様 lipsync.md §4)。
+    """口形イベント列からモーフキー列を生成する。
 
     連続する同一母音イベントを1グループへ連結し、長さで3分類(極短は吸収/除去・短いものは三角形ピークで残す・
     通常は競合短縮で実効アタック/リリースを求める)したうえで、グループごとにエンベロープを置く: 通常グループは
     先頭にのみアタック(開始0.0・保持値)、末尾にのみリリース(保持値・終了0.0)、各小区間の中央に開き量の強弱節点を
-    置いて節点間を線形に変え、三角形グループは中央に保持値ピーク1点を置く。直接隣接する異母音グループの境界では閉口を挟まず、協調調音(境界 b を中心とした幅 T の
+    置いて節点間を線形に変え、三角形グループは中央に保持値ピーク1点を置く。直接隣接する異母音グループの
+    境界では閉口を挟まず、協調調音(境界 b を中心とした幅 T の
     窓で前母音の保持値から次母音の保持値へ線形クロスフェードし、境界に中間口形を置く)へ置き換える。
-    無音に隣接する母音は、先行準備で立ち上がりを無音側へ伸ばして緩やかに開き(音符開始で保持値へ達する)、
-    後行残しで閉じを無音側へ伸ばして緩やかに閉じる(開き量比例)。長く伸ばす母音の保持プラトーには伸び表現で
+    無音・両唇閉鎖に隣接する母音は、先行準備で立ち上がりを隣接側へ伸ばして緩やかに開き(音符開始で保持値へ
+    達する)、後行残しで閉じを隣接側へ伸ばして緩やかに閉じる(開き量比例)。長く伸ばす母音の保持プラトーには伸び表現で
     揺らぎ節点を任意に加える。両唇閉鎖・無音は隣接母音の 0.0 キーとキー不在(MMD 上 0.0)で閉口を表し、専用の
     閉口キーは置かない。整数フレームへの量子化は最後に一括して行う。返すキーは時間順。
     """
     groups = _normalize_groups(events, params)
     weights = [
-        [_compose(ev.shape, ev.consonant_class, ev.open_amount, params) for ev in g.events]
+        [
+            _compose(ev.shape, ev.consonant_class, ev.aperture_class, ev.open_amount, params)
+            for ev in g.events
+        ]
         for g in groups
     ]
     n = len(groups)
@@ -513,17 +675,30 @@ def generate_morph_keys(
     # 要所キーは (モーフ名, 目標フレーム(float), 重み) の目標値として生成順に集め、最後に一括量子化する。
     targets: list[tuple[str, float, float]] = []
     plateaus: list[tuple[float, float]] = []  # グループごとの保持プラトー [始端, 終端](伸び表現の対象)。
+    valleys_by_group: dict[int, list[_Valley]] = {}  # モーラ境界の谷。伸び表現の間引きが参照する。
     # 各グループの保持区間(アタック/リリースは協調調音しない端のみ。中央に強弱節点)。実効スパン・実効 a'/r'。
     for i, g in enumerate(groups):
         gw = weights[i]
         if g.triangle:
             # 三角形短区間: 中央に保持値ピーク1点。極短母音を吸収せず開いて見せる。有声(協調調音・レガート
             # 間隙)に接する側は端点 0 を置かず境界キー(クロスフェード/谷)へ繋ぎ、閉口/曲端に接する側だけ
-            # 0 へ閉じる(有声が続く区間内で口を閉じてフリッカーにしない)。
+            # 0 へ閉じる(有声が続く区間内で口を閉じてフリッカーにしない)。内部小区間数によらず単一ピーク
+            # へ平滑化し、モーラ境界の谷は適用しない(時間解像度が無いため)。ピーク重みは n≥2 なら各小区間の
+            # 長さによる長さ加重平均、n=1 ならその1小区間の最終重み。
             mid = (g.start + g.end) / 2.0
+            if len(g.events) >= 2:
+                lens = [ev.end - ev.start for ev in g.events]
+                total_len = sum(lens)
+                peak_morphs = sorted({morph for w in gw for morph in w})
+                peak_weight = {
+                    morph: sum(length * w.get(morph, 0.0) for length, w in zip(lens, gw, strict=True)) / total_len
+                    for morph in peak_morphs
+                }
+            else:
+                peak_weight = gw[0]
             connect_in = (i - 1) in coart_half or (i - 1) in legato_at
             connect_out = i in coart_half or i in legato_at
-            for morph, weight in gw[0].items():
+            for morph, weight in peak_weight.items():
                 if not connect_in:
                     targets.append((morph, g.start, 0.0))
                 targets.append((morph, mid, weight))
@@ -546,8 +721,8 @@ def generate_morph_keys(
             # 谷が onset を担うため先頭アタックの 0.0/到達キーは置かない。
             plateau_start = g.start
         else:
-            # 先行準備: 直前が無音なら口形を A_eff フレーム手前から緩やかに立ち上げ、音符開始で保持値へ達する
-            # (開き量比例)。先行が無ければ通常アタック。
+            # 先行準備: 直前が無音・両唇閉鎖なら口形を A_eff フレーム手前から緩やかに立ち上げ、音符開始で
+            # 保持値へ達する(開き量比例)。先行が無ければ通常アタック。
             antic = _lead_lag_eff(_preceding_event(events, g.start), max(gw[0].values()), params)
             if antic > 0:
                 f_start, f_attack = g.start - antic, g.start
@@ -563,8 +738,8 @@ def generate_morph_keys(
             # 谷が offset を担うため末尾リリースの保持/0.0 キーは置かない。
             plateau_end = g.end
         else:
-            # 後行残し: 直後が無音なら音符終了まで保持し、その後 R_eff フレームかけて緩やかに閉じる
-            # (先行準備と対称・開き量比例)。直後が無音でなければ通常リリース。
+            # 後行残し: 直後が無音・両唇閉鎖なら音符終了まで保持し、その後 R_eff フレームかけて緩やかに閉じる
+            # (先行準備と対称・開き量比例)。該当しなければ通常リリース。
             lag = _lead_lag_eff(_following_event(events, g.end), max(gw[-1].values()), params)
             if lag > 0:
                 f_hold_end, f_end = g.end, g.end + lag
@@ -575,10 +750,22 @@ def generate_morph_keys(
                 targets.append((morph, f_end, 0.0))
             plateau_end = f_hold_end
         if len(g.events) >= 2:
-            for ev, w in zip(g.events, gw):
+            for ev, w in zip(g.events, gw, strict=True):
                 f_mid = (ev.start + ev.end) / 2.0
                 for morph in group_morphs:
                     targets.append((morph, f_mid, w.get(morph, 0.0)))
+            # モーラ境界の谷: ApertureClass が NONE でなく半幅が2フレーム以上の内部境界を候補にし、
+            # 密集回避(動的計画法)で採用された谷だけを3点キーとして追加する。
+            candidates = _mora_valley_candidates(g, gw, group_morphs, params)
+            selected = _select_valleys(candidates, params)
+            if selected:
+                valleys_by_group[i] = selected
+                for valley in selected:
+                    for morph in group_morphs:
+                        left_val, center_val, right_val = valley.values[morph]
+                        targets.append((morph, valley.left, left_val))
+                        targets.append((morph, valley.b, center_val))
+                        targets.append((morph, valley.right, right_val))
         plateaus.append((plateau_start, plateau_end))
     # 隣接する異母音グループ境界の協調調音。閉口を挟まず中間口形へ線形遷移する。
     for i in range(n - 1):
@@ -597,7 +784,7 @@ def generate_morph_keys(
             targets.append((morph, f_e, b))
     # レガート間隙(あ→閉じかけ→う)の谷橋渡し: 完全閉口でなく前後母音の口形を中央で重ねる(オーバーラップ)。
     # 前母音の境界保持値 w_a から、谷値 d·(w_a+w_b)(両母音を加算で重ねた値。d で部分的な閉じ=閉じかけへ抑制)を
-    # 経て、次母音の境界保持値 w_b へ線形に繋ぐ。隣接の自然な移行(§4.3 のクロスフェード)と違い、ここでは加算で
+    # 経て、次母音の境界保持値 w_b へ線形に繋ぐ。隣接の自然な移行(クロスフェード)と違い、ここでは加算で
     # 重ねるが、d<1 が総開き量を抑えるので開きすぎない。前後母音の 0.0 リリース/アタックキーは上で抑制済み。
     for i, (gs, ge) in legato_at.items():
         wa, wb = weights[i][-1], weights[i + 1][0]
@@ -615,5 +802,9 @@ def generate_morph_keys(
         for i, g in enumerate(groups):
             plateau_start, plateau_end = plateaus[i]
             if plateau_end - plateau_start > params.vibrato_threshold:
-                targets.extend(_vibrato_targets(g, plateau_start, plateau_end, params))
+                targets.extend(
+                    _vibrato_targets(
+                        g, plateau_start, plateau_end, params, valleys_by_group.get(i, [])
+                    )
+                )
     return _quantize_targets(targets)

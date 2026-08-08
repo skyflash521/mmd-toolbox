@@ -1,4 +1,4 @@
-"""カット検出・セグメント分割(shakevmd.md §5.3)。
+"""カット検出・セグメント分割。
 
 カット = 「フレームFから新しいショットが始まる」境界。セグメント境界は F-1 と F の
 間に置く。bake/noise/motion はここが返すセグメント列を入力として受け取り、
@@ -30,7 +30,7 @@ class Segment:
 
 def _geodesic_deg(pose0, pose1) -> float:
     """2つのカメラ姿勢の間の測地角(度)。to_world の前方/上から直交基底を作り、
-    trace(R0^T R1) = 1 + 2cosθ の関係から角度を求める(§5.3)。"""
+    trace(R0^T R1) = 1 + 2cosθ の関係から角度を求める。"""
 
     def basis(p):
         f = np.asarray(p.forward, dtype=float)
@@ -48,7 +48,7 @@ def _geodesic_deg(pose0, pose1) -> float:
 def detect_cuts(keys, pos_threshold: float, rot_threshold: float) -> list[int]:
     """フレーム差1の隣接カメラキー間でカットを検出し、カットフレーム(後側)を昇順で返す。
 
-    keys はフレーム昇順前提(vmd-io.md §5 正規化済み)。
+    keys はフレーム昇順前提(読み込み時に正規化済み)。
     各隣接ペア (k0, k1) で k1.frame - k0.frame == 1 のとき:
       max(カメラ中心位置ジャンプ, カメラワールド位置ジャンプ) > pos_threshold、または
       角度ジャンプ(度) > rot_threshold なら k1.frame をカットとする(いずれも厳密超過)。

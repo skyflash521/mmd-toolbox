@@ -1,4 +1,4 @@
-"""出力のベジェ再構築テスト(vmd-reduce.md §9, §1, §5.2)。
+"""出力のベジェ再構築テスト。
 
 curve_mode="bezier" のとき、各出力区間 [前キー, 当キー] についてチャンネル別の
 ベジェ曲線を再フィットし、到達側(後側)キーの補間バイトに制御点を格納する。
@@ -12,10 +12,7 @@ bone_interp_bytes のシフトコピー 64 バイト。回転はカメラが 3 �
 
 import math
 
-import pytest
-
 from vmd import interp
-from vmd.types import BoneKey, CameraKey
 from vmd.fit import (
     BoneRotationChannel,
     CameraRotationChannel,
@@ -30,6 +27,7 @@ from vmd.reduce import (
     reduce_bone_track,
     reduce_camera_track,
 )
+from vmd.types import BoneKey, CameraKey
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 EASE = (96, 0, 96, 30)
@@ -240,7 +238,7 @@ def test_bone_position_and_rotation_bezier_reconstructs():
     for f in range(11):
         assert abs(interp.sample(bez, "pos_x", f) - pos[f]) <= TOLS.bone_pos
         got = interp.sample(bez, "rot", f)
-        ang = math.degrees(2.0 * math.acos(min(1.0, abs(sum(a * b for a, b in zip(got, quats[f]))))))
+        ang = math.degrees(2.0 * math.acos(min(1.0, abs(sum(a * b for a, b in zip(got, quats[f], strict=True))))))
         assert ang <= TOLS.bone_rot
 
 

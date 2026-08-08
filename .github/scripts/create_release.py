@@ -1,6 +1,6 @@
-"""タグ push から GitHub Release を作成する(転記の規則は docs/conventions/changelog.md §4)。
+"""タグ push から GitHub Release を作成する。
 
-タグ名 <ツール>/v<版> を受け取り、tools/<ツール>/CHANGELOG.md から該当版の節を抽出して
+タグ名 <ツール>/v<バージョン> を受け取り、tools/<ツール>/CHANGELOG.md から該当バージョンの節を抽出して
 Release の本文にする。形式逸脱・節なしの場合は失敗し、Release を作らない。
 """
 import subprocess
@@ -14,7 +14,7 @@ def main() -> None:
     tag = sys.argv[1]
     tool, _, version = tag.partition("/v")
     if not tool or not version:
-        sys.exit(f"タグ名が <構成要素>/v<版> の形式でない: {tag}")
+        sys.exit(f"タグ名が <構成要素>/v<バージョン> の形式でない: {tag}")
     if not (Path("tools") / tool / "README.md").exists():
         # 公開CLIツール以外の構成要素のタグ。Release は公開ツールのみ作る。
         print(f"{tag} は公開CLIツールのタグでないため Release を作らない")
@@ -27,7 +27,7 @@ def main() -> None:
     except FormatError as exc:
         sys.exit(f"{changelog}: {exc}")
     if version not in sections:
-        sys.exit(f"{changelog} に版 {version} の節が無い")
+        sys.exit(f"{changelog} にバージョン {version} の節が無い")
     notes_file = Path("release_notes.md")
     notes_file.write_text(sections[version] + "\n", encoding="utf-8")
     subprocess.run(

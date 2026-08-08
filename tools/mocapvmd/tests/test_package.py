@@ -1,4 +1,4 @@
-"""mocapvmd パッケージ土台のスモークテスト(mocapvmd.md §1)。
+"""mocapvmd パッケージ土台のスモークテスト。
 
 パッケージがインポート可能で、console script のエントリ(cli.main)が
 公開・登録されていることを確認する。

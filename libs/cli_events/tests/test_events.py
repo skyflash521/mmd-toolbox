@@ -1,7 +1,7 @@
-"""cli_events の単体テスト(cli_events.md §5)。
+"""cli_events の単体テスト。
 
 機械モードのイベント送出基盤(JSON Lines エミッタ・終端規則・UTF-8・argparse エラー変換)を検証する。
-テスト方針は ../../vmd/vmd.md §4 に準ずる(決定論的・外部依存・ネットワークなし)。
+決定論的に実行し、外部依存・ネットワークを使わない。
 """
 import io
 import json
@@ -25,7 +25,7 @@ def _lines(buf):
 
 
 def test_event_type_vocabulary():
-    # 規約 §4 の 4 種をこの順で公開する。
+    # イベント種別の語彙は 4 種をこの順で公開する。
     assert EVENT_TYPES == ("progress", "warning", "result", "error")
 
 
@@ -35,7 +35,7 @@ def test_emits_json_lines_with_type():
     em.progress(stage="bake", done=0, total=None)
     em.result(mode="bake", output="x.vmd")
     raw = buf.getvalue().decode("utf-8")
-    # 末尾改行で終わり、オブジェクト間に空行を挿入しない(1行1オブジェクト、cli_events.md §3)。
+    # 末尾改行で終わり、オブジェクト間に空行を挿入しない(1行1オブジェクト)。
     assert raw.endswith("\n")
     parts = raw.split("\n")
     assert parts[-1] == ""  # 末尾改行の後ろは空のみ
@@ -110,7 +110,7 @@ def test_no_raw_newline_in_line():
 
 
 def test_line_separator_is_lf_only():
-    # 行区切りは LF(\n)固定で \r を含まない(規約 §10。バイト列で検証)。バイナリストリームへ
+    # 行区切りは LF(\n)固定で \r を含まない(バイト列で検証)。バイナリストリームへ
     # 書くのでプラットフォームの改行変換(Windows の CRLF 変換)は起きない。
     buf = io.BytesIO()
     em = EventEmitter(buf)
@@ -148,7 +148,7 @@ def test_machine_parser_raises_instead_of_exit():
 
 
 def test_argparse_error_converts_to_error_event():
-    # argparse エラー(=引数エラー)を error イベントへ変換する end-to-end フロー(cli_events.md §4)。
+    # argparse エラー(=引数エラー)を error イベントへ変換する end-to-end フロー。
     p = MachineArgumentParser(prog="x")
     p.add_argument("--n", type=int)
     with pytest.raises(ArgumentParseError) as exc:
@@ -156,7 +156,7 @@ def test_argparse_error_converts_to_error_event():
     ev = argparse_error_event(exc.value, code="bad_argument", field="--n")
     assert ev["type"] == "error"
     assert ev["code"] == "bad_argument"
-    assert ev["exit_code"] == 2  # argparse エラーは基底共通 2(規約 §5、ヘルパが固定)
+    assert ev["exit_code"] == 2  # argparse エラーは基底共通 2(ヘルパが固定)
     assert ev["field"] == "--n"
     assert ev["path"] is None
     assert ev["message"]  # argparse のメッセージを載せる
@@ -195,7 +195,7 @@ def test_flushless_stream_ok():
 
 def test_help_and_version_not_converted_to_parse_error():
     # --help/--version は parser.exit 経由のメタ操作で error() を通らないため、
-    # MachineArgumentParser でも ArgumentParseError でなく SystemExit になる(cli_events.md §4)。
+    # MachineArgumentParser でも ArgumentParseError でなく SystemExit になる。
     p = MachineArgumentParser(prog="x")
     p.add_argument("--version", action="version", version="x 1.0")
     with pytest.raises(SystemExit):
@@ -205,7 +205,7 @@ def test_help_and_version_not_converted_to_parse_error():
 
 
 def test_argparse_error_field_extraction_rules():
-    # argparse の標準文言から bad_argument の field をベストエフォート抽出する規則(cli_events.md §4)。
+    # argparse の標準文言から bad_argument の field をベストエフォート抽出する規則。
     from cli_events import argparse_error_field
 
     # 「argument <引数名>: 」→ コロン前の引数名。
@@ -230,7 +230,7 @@ def test_argparse_error_field_extraction_rules():
 
 
 def test_argparse_error_field_from_real_parser():
-    # MachineArgumentParser の実エラー文言に対して end-to-end で抽出できること(cli_events.md §4)。
+    # MachineArgumentParser の実エラー文言に対して end-to-end で抽出できること。
     from cli_events import argparse_error_field
 
     p = MachineArgumentParser(prog="x", allow_abbrev=False)

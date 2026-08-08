@@ -1,4 +1,4 @@
-"""motion の確定的コアのテスト(shakevmd.md §5.1 フェード, §6.2 速度適応)。
+"""motion の確定的コアのテスト(フェード, 速度適応)。
 
 このファイルは motion の確定的コア(フェード・フレーム速度・停止検出・適応振幅・settle 過渡・
 インパルス包絡・プロファイルクロスフェード・呼吸ドリフト)を対象とする。
@@ -17,7 +17,7 @@ def _ref_smoothstep(t):
 
 
 # ---------------------------------------------------------------------------
-# fade_envelope(§5.1)
+# fade_envelope
 # ---------------------------------------------------------------------------
 
 
@@ -101,7 +101,7 @@ class TestFadeEnvelope:
 
 
 # ---------------------------------------------------------------------------
-# frame_speeds(§6.2)
+# frame_speeds
 # ---------------------------------------------------------------------------
 
 
@@ -167,7 +167,7 @@ class TestFrameSpeeds:
 
 
 # ---------------------------------------------------------------------------
-# adaptive_amplitude(§6.2)
+# adaptive_amplitude
 # ---------------------------------------------------------------------------
 
 
@@ -194,7 +194,7 @@ class TestAdaptiveAmplitude:
 
 
 # ---------------------------------------------------------------------------
-# detect_stops(§6.2 停止検出)
+# detect_stops(停止検出)
 # ---------------------------------------------------------------------------
 
 
@@ -229,7 +229,7 @@ class TestDetectStops:
 
 
 # ---------------------------------------------------------------------------
-# settle_oscillation(§6.2 停止過渡)
+# settle_oscillation(停止過渡)
 # ---------------------------------------------------------------------------
 
 
@@ -278,7 +278,7 @@ class TestSettleOscillation:
 
 
 # ---------------------------------------------------------------------------
-# impulse_envelope(§6.3)
+# impulse_envelope
 # ---------------------------------------------------------------------------
 
 
@@ -311,7 +311,7 @@ class TestImpulseEnvelope:
 
 
 class TestProfileCrossfade:
-    """静止/移動プロファイルのオクターブ重みクロスフェード(§6.2)。"""
+    """静止/移動プロファイルのオクターブ重みクロスフェード。"""
 
     def test_endpoints_and_midpoint(self):
         # s=0→still、s=1→moving、s=0.5→中点(線形ブレンド)。
@@ -343,16 +343,16 @@ class TestProfileCrossfade:
         # (移動時はより細かい=高周波の揺れ)。
         assert tuple(motion.STILL_PROFILE) != tuple(motion.MOVING_PROFILE)
         assert motion.MOVING_PROFILE[-1] > motion.STILL_PROFILE[-1]
-        # 完全静止区間も「高周波微動」を残す(§6.2)ため、静止プロファイルの高オクターブ重みは非ゼロ。
+        # 完全静止区間も「高周波微動」を残すため、静止プロファイルの高オクターブ重みは非ゼロ。
         assert motion.STILL_PROFILE[-1] > 0.0
 
 
 class TestBreathingDrift:
-    """完全静止区間の長周期ドリフト(呼吸 0.3Hz、§6.2)。"""
+    """完全静止区間の長周期ドリフト(呼吸 0.3Hz)。"""
 
     def test_frequency_and_amplitude(self):
         amp = 0.5
-        assert motion.BREATHING_HZ == pytest.approx(0.3)   # §6.2 呼吸0.3Hz相当(被検定数を固定)
+        assert motion.BREATHING_HZ == pytest.approx(0.3)   # 呼吸0.3Hz相当(被検定数を固定)
         period = 1.0 / 0.3                                 # spec 値の literal(定数由来にしない)
         t = np.linspace(0.0, 2.0 * period, 2001)
         x = np.asarray(motion.breathing_drift(t, amp))

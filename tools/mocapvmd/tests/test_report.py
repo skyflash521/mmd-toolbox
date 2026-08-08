@@ -1,4 +1,4 @@
-"""診断レポートのテスト(mocapvmd.md §4.4)。
+"""診断レポートのテスト。
 
 ボーン一覧・分類結果・キー数・フレーム範囲・足IK/つま先IK候補・フレーム間速度・
 回転角速度をまとめる。速度は連続フレーム差をキー間フレーム差で1フレームあたりへ正規化する。
@@ -23,7 +23,7 @@ def _entry(rep, name):
     return next(e for e in rep["bones"] if e["name"] == name)
 
 
-# §4.4 で foot_ik/toe_ik のボーンエントリに付く接地診断項目。
+# foot_ik/toe_ik のボーンエントリに付く接地診断項目。
 _GROUNDING_FIELDS = (
     "grounding_candidates", "grounding_segments", "max_change",
     "mean_change", "lock_applied_ratio", "clamp_warnings",
@@ -37,7 +37,7 @@ def _grounded_foot_keys(name="右足ＩＫ"):
 
 
 def test_report_adds_grounding_diagnostics_for_foot():
-    # foot_ik ボーンに接地候補・接地区間・最大/平均変更量・ロック適用率・警告数が付く(§4.4)。
+    # foot_ik ボーンに接地候補・接地区間・最大/平均変更量・ロック適用率・警告数が付く。
     rep = report.build_report(_grounded_foot_keys(), denoise=False)
     e = _entry(rep, "右足ＩＫ")
     assert e["grounding_candidates"] == 11
@@ -66,7 +66,8 @@ def test_report_adds_grounding_diagnostics_for_toe():
 
 def test_report_grounding_reflects_denoise_then_stabilize():
     # denoise on のとき接地診断は denoise 後のトラックを安定化した結果と一致する(パイプライン整合)。
-    from mocapvmd import denoise as dn, footik
+    from mocapvmd import denoise as dn
+    from mocapvmd import footik
 
     keys = _grounded_foot_keys()
     rep = report.build_report(keys, denoise=True)
@@ -121,7 +122,7 @@ def test_format_dry_run_shows_grounding_for_foot():
 
 
 def test_report_includes_resolved_cleaning_params():
-    # 各ボーンに、clean_strength で解決したクリーニングパラメータが付く(チューニング確認用、§4.5)。
+    # 各ボーンに、clean_strength で解決したクリーニングパラメータが付く(チューニング確認用)。
     keys = [bone("センター", 0), bone("右足ＩＫ", 0)]
     rep = report.build_report(keys, clean_strength=1.4)
     center = _entry(rep, "センター")
@@ -138,7 +139,7 @@ def test_report_default_clean_strength_is_unit():
 
 
 def test_format_dry_run_shows_cleaning_params():
-    # dry-run も clean_strength で解決したクリーニング強度を表示する(§4.4)。
+    # dry-run も clean_strength で解決したクリーニング強度を表示する。
     keys = [bone("センター", 0), bone("センター", 10)]
     rep = report.build_report(keys, clean_strength=1.4)
     text = report.format_dry_run(rep)
@@ -231,7 +232,7 @@ def test_report_single_key_track_zero_spikes_and_protected():
 
 
 def test_format_dry_run_shows_spike_and_protected_counts():
-    # dry-run 表示にもスパイク候補数・保護フレーム数が出る(§4.4)。
+    # dry-run 表示にもスパイク候補数・保護フレーム数が出る。
     keys = [bone("センター", f) for f in range(11)]
     keys[5] = bone("センター", 5, pos=(0.5, 0.0, 0.0))
     rep = report.build_report(keys)
@@ -308,7 +309,7 @@ def test_angular_velocity_normalized_by_frame_gap():
 
 
 def test_sign_flipped_quaternion_is_zero_angular_speed():
-    # q と -q は同じ姿勢。符号反転を見かけの大角速度にしない(§4.2)。
+    # q と -q は同じ姿勢。符号反転を見かけの大角速度にしない。
     keys = [
         bone("頭", 0, rot=(0.0, 0.0, 0.0, 1.0)),
         bone("頭", 1, rot=(0.0, 0.0, 0.0, -1.0)),
@@ -393,7 +394,7 @@ def test_bones_in_input_appearance_order():
     assert [e["name"] for e in rep["bones"]] == ["右腕", "センター"]
 
 
-# --- 疎化レポート(§4.4: キー削減率・適用許容・カット数・最大再生誤差) -------------
+# --- 疎化レポート(キー削減率・適用許容・カット数・最大再生誤差) -------------
 
 
 def _reduction(name, input_keys, output_keys, *, tol_pos=0.014, tol_rot=0.14, cuts=0, errors=None):
@@ -412,7 +413,7 @@ def _reduction(name, input_keys, output_keys, *, tol_pos=0.014, tol_rot=0.14, cu
 
 def test_report_adds_reduction_section_when_provided():
     # reduction(診断素データ)を渡すと、各ボーンに出力キー数・削減率(派生)・適用許容・カット数・
-    # 最大再生誤差が付く(§4.4)。
+    # 最大再生誤差が付く。
     keys = [bone("センター", f) for f in range(11)]
     errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
     red = _reduction("センター", 11, 3, tol_pos=0.014, tol_rot=0.14, cuts=2, errors=errors)
@@ -442,7 +443,7 @@ def test_report_reduce_flag_reflects_reduction_presence():
 
 
 def test_format_dry_run_shows_reduction():
-    # dry-run 表示にも削減率・出力キー数・カット数・最大再生誤差が出る(§4.4)。
+    # dry-run 表示にも削減率・出力キー数・カット数・最大再生誤差が出る。
     keys = [bone("センター", f) for f in range(11)]
     errors = {"pos_x": 0.012, "pos_y": 0.003, "pos_z": 0.0, "rot_deg": 0.8}
     red = _reduction("センター", 11, 3, cuts=2, errors=errors)
@@ -458,7 +459,7 @@ def test_format_dry_run_shows_reduction():
     assert "err_rot=0.8deg" in tokens            # 最大再生誤差(回転角)
 
 
-# --- 表現空間ノイズ除去レポート(§12: マーカー数・必須ボーン検証・変位・fit改善・フォールバック) ---
+# --- 表現空間ノイズ除去レポート(マーカー数・必須ボーン検証・変位・fit改善・フォールバック) ---
 
 
 def _pose_denoise_diag():
@@ -485,7 +486,7 @@ def _pose_denoise_diag():
 
 
 def test_build_report_includes_pose_denoise_block():
-    # pose_denoise 素データを渡すとトップレベルに pose_denoise セクションがそのまま載る(§12)。
+    # pose_denoise 素データを渡すとトップレベルに pose_denoise セクションがそのまま載る。
     keys = [bone("センター", 0), bone("センター", 10)]
     diag = _pose_denoise_diag()
     rep = report.build_report(keys, pose_denoise=diag)
@@ -500,7 +501,7 @@ def test_build_report_omits_pose_denoise_when_absent():
 
 
 def test_format_dry_run_shows_pose_summary():
-    # dry-run 表示に有効マーカー数・必須ボーン検証・最大マーカー変位・fit改善・フォールバック数が出る(§12)。
+    # dry-run 表示に有効マーカー数・必須ボーン検証・最大マーカー変位・fit改善・フォールバック数が出る。
     rep = report.build_report(
         [bone("センター", 0), bone("センター", 10)], pose_denoise=_pose_denoise_diag()
     )
@@ -549,7 +550,7 @@ def test_format_dry_run_err_pos_is_max_of_position_axes():
 
 
 def test_format_dry_run_shows_values_and_candidates():
-    # dry-run は分類だけでなくキー数・フレーム範囲・速度を値として表示する(§4.4)。ラベル文言には
+    # dry-run は分類だけでなくキー数・フレーム範囲・速度を値として表示する。ラベル文言には
     # 依存せず、入力から確定する値とボーン名・分類・候補名で検証する。
     keys = [
         bone("センター", 0, pos=(0.0, 0.0, 0.0)),

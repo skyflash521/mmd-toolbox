@@ -1,4 +1,4 @@
-"""機械モードのイベント送出基盤(cli_events.md §2/§3)。
+"""機械モードのイベント送出基盤。
 
 JSON Lines のイベントストリームを送出するエミッタと、error イベントの dict ビルダーを提供する。
 イベント種別の語彙(progress/warning/result/error)と終端規則だけを共通化し、各イベントの
@@ -7,17 +7,17 @@ JSON Lines のイベントストリームを送出するエミッタと、error 
 
 import json
 
-# 規約 §4 のイベント種別の語彙(この順で公開する)。
+# イベント種別の語彙(この順で公開する)。
 EVENT_TYPES = ("progress", "warning", "result", "error")
 _TERMINAL = frozenset({"result", "error"})
 
 
 class StreamTerminatedError(RuntimeError):
-    """result/error 送出後の追加送出を拒否する(終端規則、cli_events.md §3)。"""
+    """result/error 送出後の追加送出を拒否する(終端規則)。"""
 
 
 class EventEmitter:
-    """機械モードの JSON Lines イベントストリームを stream へ送出する(cli_events.md §3)。
+    """機械モードの JSON Lines イベントストリームを stream へ送出する。
 
     stream は UTF-8 バイトを書き込めるバイナリストリーム(例 sys.stdout.buffer / io.BytesIO)。
     各イベントを 1 行 1 オブジェクトで UTF-8 符号化して書き、プラットフォームのロケール符号化に
@@ -61,7 +61,7 @@ class EventEmitter:
 
 
 def error_event(*, code, message, exit_code, field=None, path=None):
-    """error イベントの dict を組む(cli_events.md §2/§4)。
+    """error イベントの dict を組む。
 
     type は "error" 固定。code/exit_code/message は呼び出し側が定める。field/path は対象が
     無ければ None。返り値はそのまま EventEmitter.error(**event) へ展開できる形。

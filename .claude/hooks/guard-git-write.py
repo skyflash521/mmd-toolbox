@@ -8,7 +8,10 @@ Only these forms pass silently:
 
 The commit subject (first line of the message) must hold at least one Hiragana/Katakana/Kanji:
 the repo's commit subjects are Japanese by convention, so an English-only (ASCII-only) subject is
-denied here and the worker redrafts in Japanese.
+denied here and the worker redrafts in Japanese. Two more subjects are denied because neither can
+be the message that was drafted: a placeholder (see _probe_subject_problem) and one opening with
+the commit command itself (see LEAKED_COMMAND_PREFIX). The message's line structure is checked too
+-- see _message_format_problem.
 
 Every recognized add/commit form other than these is denied, so the agent retries with the
 regular form instead of asking the user for permission. A form this hook does not recognize as
@@ -31,7 +34,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 CONTROL_CHARS = ";&|<>\n"
 GLOB_CHARS = "*?[]{}"
 # A commit subject counts as Japanese if it holds one Hiragana (U+3040-309F), Katakana
@@ -39,6 +41,36 @@ GLOB_CHARS = "*?[]{}"
 # alone does not qualify -- an English subject with a stray full-width comma should still be denied.
 JAPANESE_CHAR = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
 TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
+# The newline escape. Inside the single-quoted -m argument a backslash is literal, so this is what a
+# line break that never reached git looks like. Only this escape is rejected -- it is the one that
+# stands in for the message's line structure -- and it is rejected wherever it appears.
+ESCAPE_NEWLINE = "\\n"
+TRAILER_PREFIX = "co-authored-by:"
+# The whole trailer is spelled out, so that each part it can lose is refused: the model name written
+# inside angle brackets (a bracketed placeholder filled in as-is), the address dropped instead of
+# the brackets, the Claude prefix or the model name left off.
+TRAILER_SHAPE = re.compile(
+    r"co-authored-by:\s*claude\s+[^<>\s][^<>]*\s<noreply@anthropic\.com>", re.IGNORECASE
+)
+# Placeholder subjects. A commit issued to try out the command form rather than to record the
+# drafted message puts the staged work into history under a throwaway subject, and neither --amend
+# nor git reset is available to repair it. The subject is what gives such a commit away: a
+# throwaway word, optionally followed by a noun it attaches to and a number ("テスト行1"). Purely ASCII
+# placeholders (test, wip, foo) need no entry -- an ASCII-only subject is already denied by the
+# Japanese-subject rule, which runs first.
+PLACEHOLDER_SUBJECT = re.compile(
+    r"(?:テスト|てすと|ﾃｽﾄ|試験|試行|試し|動作確認|ダミー|だみー|サンプル|仮|あ+)"
+    r"(?:行|番|目|文|コミット|メッセージ)?"
+)
+# Digits, whitespace and punctuation are stripped from the subject before matching, so the counter
+# in "テスト行1" does not defeat the match. \w covers Japanese, so \W leaves only punctuation.
+SUBJECT_FILLER = re.compile(r"[\s\d\W_]+")
+# The front of the commit command itself, leaking into the -m argument while the command is
+# assembled ("git試行コミットの禁止を追加"). A drafted subject never opens with the command that
+# carries it, and the commit that results cannot be repaired, so this is denied rather than left to
+# the after-the-fact check. `git` followed by a space is left alone -- 「git のフックを見直す」 is a
+# subject about git, not a leak.
+LEAKED_COMMAND_PREFIX = re.compile(r"^(?:git\s*commit\b|git(?=[^\x00-\x7f])|-m\b)", re.IGNORECASE)
 # Process wrappers that run the FOLLOWING command. Claude Code strips a documented set of these
 # before matching a command against the allow list, so e.g. `time git commit --amend` would
 # otherwise become `git commit --amend`, match `Bash(git commit *)`, and auto-run. This set MUST
@@ -50,13 +82,46 @@ TARGET_WORD = re.compile(r"(?<![\w-])(add|commit)(?![\w-])")
 WRAPPERS = {
     "command", "builtin", "env", "exec", "time", "timeout", "nice", "ionice",
     "nohup", "setsid", "stdbuf", "xargs", "sudo", "doas", "taskset", "chrt",
+    "!", "coproc",
 }
+# Tokens that make a following `git` a genuine new command start rather than plain text: shell
+# control operators (including bare `&`, background), `cd` (a preceding directory change), and a
+# subshell open paren.
+CONTROL_OR_WRAPPER = {"cd", "&&", "||", ";", "|", "&", "("}
 GIT_VALUE_OPTIONS = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace",
     "--super-prefix", "--exec-path", "--config-env",
 }
-# Global options that move git off the current repo/worktree (never needed: cwd is the repo root).
+# Global options that move git off the current repo/worktree.
 REPOSITION_OPTIONS = {"-C", "--git-dir", "--work-tree"}
+# Subcommands with no write/state-change mode under any flag or repo-local config: a repositioned
+# git running one of these is a harmless read (e.g. inspecting a sibling clone) and is allowed.
+# diff/log/show are deliberately excluded even though mostly read-only: they run the diff engine,
+# which can invoke an externally configured textconv/ext-diff/gpg program from the TARGET repo's
+# own .gitattributes/config with no special flag required, so their safety isn't provable from the
+# command line alone. Everything not listed is denied -- an unknown or write-capable subcommand
+# outside the guarded cwd would bypass this guard's assumptions.
+REPOSITION_READONLY = {
+    "status", "blame", "grep", "cat-file", "ls-files", "ls-tree",
+    "rev-parse", "rev-list", "merge-base", "describe", "shortlog",
+}
+# Long-option flags on an otherwise-readonly subcommand that still run an external helper
+# (grep/cat-file --textconv; cat-file --filters run a configured external driver). Matched via
+# _is_unsafe_reposition_arg, which also catches git's unambiguous-abbreviation form (e.g.
+# `--textcon`), not just the exact spelling.
+REPOSITION_UNSAFE_LONG = ("--open-files-in-pager", "--filters", "--textconv")
+
+
+def _is_unsafe_reposition_arg(arg):
+    """True for -O (grep's short --open-files-in-pager, incl. glued forms like -Ovim) or any
+    (possibly abbreviated, per git's unambiguous long-option prefix matching) form of a
+    REPOSITION_UNSAFE_LONG flag."""
+    if arg.startswith("-O"):
+        return True
+    name = arg.split("=", 1)[0]
+    return name.startswith("--") and len(name) >= 3 and any(
+        long_opt.startswith(name) for long_opt in REPOSITION_UNSAFE_LONG
+    )
 
 
 def _has_shell_syntax(text):
@@ -121,7 +186,7 @@ def _mentions_target(tokens):
         if (
             index == 0
             or not _is_plain_git(token)
-            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
+            or any(item in WRAPPERS or item in CONTROL_OR_WRAPPER for item in prefix)
             or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
         ):
             return True
@@ -153,21 +218,35 @@ def _mentions_reset(tokens):
         if (
             index == 0
             or not _is_plain_git(token)
-            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
+            or any(item in WRAPPERS or item in CONTROL_OR_WRAPPER for item in prefix)
             or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
         ):
             return True
     return False
 
 
-def _mentions_repositioned_git(tokens):
-    """True when a git invocation uses a global -C/--git-dir/--work-tree reposition.
+def _mentions_repositioned_git(command, tokens):
+    """True when a repositioned git invocation is not a provably read-only subcommand.
 
-    Mirrors _mentions_target's prefix analysis. The settings `git -C *` deny only matches the
-    command start, so this closes the chained/prefixed form (`cd /f && git -C <abs> status`). A
-    subcommand-level -C (`git log -C`) sits after the subcommand, not in the global run, so it is
-    not matched.
+    The readonly carve-out only applies when the WHOLE command has no shell syntax
+    (_has_shell_syntax: no `;`/`&`/`|`/`<`/`>`/newline/`$`/backtick outside quotes) and no
+    parens -- this rules out a second, differently-reachable git invocation hiding after a
+    separator this scan wouldn't recognize, rather than trying to enumerate every separator
+    spelling. Under that gate, tokens after the subcommand cannot belong to another command, so
+    they are scanned to the end via _is_unsafe_reposition_arg with no separate boundary needed.
+
+    Unlike _mentions_target/_mentions_reset, a repositioned invocation that fails the carve-out is
+    denied UNCONDITIONALLY, without the prefix/wrapper reachability analysis those two use: that
+    analysis exists to avoid denying a git mention inside unrelated text (e.g. an echo argument),
+    but it means any prefix word it doesn't recognize (a shell keyword such as `!`/`coproc`, or one
+    not yet added to WRAPPERS/CONTROL_OR_WRAPPER) silently escapes deny. A repositioned git is
+    already a deliberate, argument-bearing invocation (not incidental text), so erring toward
+    denying it outright is safe-side and closes this class of bypass without enumerating every
+    possible shell keyword. A missing or substituted subcommand is not provably read-only and is
+    denied. A subcommand-level -C (`git log -C`) sits after the subcommand, not in the global run,
+    so it is not matched.
     """
+    single_invocation = not _has_shell_syntax(command) and "(" not in tokens and ")" not in tokens
     for index, token in enumerate(tokens):
         if not _is_git(token):
             continue
@@ -182,14 +261,11 @@ def _mentions_repositioned_git(tokens):
                 pos += 1
         if not repositioned:
             continue
-        prefix = tokens[:index]
-        if (
-            index == 0
-            or not _is_plain_git(token)
-            or any(item in WRAPPERS or item in {"cd", "&&", "||", ";", "|"} for item in prefix)
-            or any(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", item) for item in prefix)
-        ):
-            return True
+        if single_invocation and pos < len(tokens) and tokens[pos] in REPOSITION_READONLY:
+            rest = tokens[pos + 1:]
+            if not any(_is_unsafe_reposition_arg(arg) for arg in rest):
+                continue
+        return True
     return False
 
 
@@ -239,6 +315,76 @@ def _safe_commit(args):
     return len(args) == 2 and args[0] == "-m" and bool(args[1].strip())
 
 
+def _probe_subject_problem(subject):
+    """Return a deny reason when the subject is nothing but a placeholder, else None.
+
+    Matching is anchored at both ends of the subject with its digits, spaces and punctuation
+    removed, so only a subject that says nothing beyond the placeholder is caught: a real subject
+    that merely holds one of these words (「テストを追加」「テスト分割を見直す」) still passes.
+    The rule is lexical, so a probe under some other invented wording is not caught here -- the
+    prohibition itself lives in the worker definition; this only closes the plainest spelling.
+    """
+    core = SUBJECT_FILLER.sub("", subject)
+    if not core or not PLACEHOLDER_SUBJECT.fullmatch(core):
+        return None
+    return (
+        "Commit subject is a placeholder, so this reads as a commit issued to try out the command "
+        "form rather than to record the drafted message. With changes staged, every git commit is "
+        "a real commit, and neither --amend nor git reset can repair the history it leaves. Do not "
+        "probe with a commit: re-issue the message drafted from the diff, or stop and report the "
+        "deny reason you cannot get past."
+    )
+
+
+def _message_format_problem(message):
+    """Return a deny reason when the message's LINE STRUCTURE or its trailer breaks the repo
+    convention, else None.
+
+    A newline escape anywhere in the message, and a Co-Authored-By trailer that is not the final
+    line below a subject, both mean the message does not have the line structure that was drafted.
+    The escape is read as a lost line break wherever it appears rather than only in a message with
+    no real line break at all: a partly flattened message (escapes between subject and body, one
+    real break before the trailer) is the same defect, and the narrower rule would have let it
+    through. Prose that means to name the escape rather than break a line is caught by the same
+    blanket rule, and spells the sequence out in words instead.
+
+    A message with no trailer at all is denied too, so that deleting the trailer never becomes the
+    way past the other denials.
+    """
+    if ESCAPE_NEWLINE in message:
+        return (
+            "Commit message contains escape notation (backslash n). Inside the single-quoted -m "
+            "argument a backslash is literal, so those two characters are committed as text "
+            "instead of breaking the line. Re-issue the SAME message with real line breaks; do not "
+            "shorten it or drop the body or the Co-Authored-By trailer to get past this. To "
+            "describe the escape sequence in the prose itself, spell it out in words."
+        )
+    lines = [line for line in message.split("\n") if line.strip()]
+    if len(lines) >= 2 and lines[-1].lower().startswith(TRAILER_PREFIX):
+        if TRAILER_SHAPE.fullmatch(lines[-1].rstrip()):
+            return None
+        return (
+            "Co-Authored-By trailer is malformed. Re-issue the SAME message with the trailer "
+            "written as the token Co-Authored-By: followed by Claude and then your own model name "
+            "as plain text, and then the address noreply@anthropic.com in angle brackets. Every "
+            "part is required: keep the Claude prefix and the model name, and do not put the model "
+            "name in angle brackets or drop the address."
+        )
+    if TRAILER_PREFIX in message.lower():
+        return (
+            "The Co-Authored-By trailer must be the last non-empty line, must start that line, and "
+            "must sit below the subject. Here it does not: either the drafted line breaks were "
+            "lost, or the trailer is not at the end. Re-issue the SAME message with real line "
+            "breaks and the trailer as its final line."
+        )
+    return (
+        "Commit message must end with a Co-Authored-By trailer on its own line, written as the "
+        "token Co-Authored-By: followed by Claude and then your own model name as plain text, and "
+        "then the address noreply@anthropic.com in angle brackets. Add it -- dropping it is not a "
+        "way past another denial."
+    )
+
+
 def classify(command, root=None):
     """Return ("deny", reason) or ("pass", None)."""
     if not isinstance(command, str) or not command.strip():
@@ -247,16 +393,29 @@ def classify(command, root=None):
         tokens = _tokens(command)
     except ValueError:
         if re.search(r"\bgit\b", command) and re.search(r"\breset\b", command):
-            return "deny", "git reset is denied; ask the user to add an allow rule if truly needed"
+            return "deny", (
+                "git reset is denied; ask the user to add an allow rule if truly needed. Do not "
+                "work around this by using a plumbing equivalent (update-ref, symbolic-ref, "
+                "checkout-index, or editing .git/ directly) or any other command."
+            )
         if re.search(r"\bgit\b", command) and TARGET_WORD.search(command):
             return "deny", "Unparseable git add/commit; retry with the regular form"
         return "pass", None
 
     if _mentions_reset(tokens):
-        return "deny", "git reset is denied; ask the user to add an allow rule if truly needed"
+        return "deny", (
+            "git reset is denied; ask the user to add an allow rule if truly needed. Do not work "
+            "around this by using a plumbing equivalent (update-ref, symbolic-ref, checkout-index, "
+            "or editing .git/ directly) or any other command."
+        )
 
-    if _mentions_repositioned_git(tokens):
-        return "deny", "Run git from the repository cwd; drop -C/--git-dir/--work-tree"
+    if _mentions_repositioned_git(command, tokens):
+        return "deny", (
+            "Repositioned git (-C/--git-dir/--work-tree) is allowed only for read-only "
+            "subcommands. Do not work around this by cd-ing into that other repository (or any "
+            "other method) to run the write command there instead -- run write commands only in "
+            "THIS repository's cwd."
+        )
 
     plain_target = (
         len(tokens) >= 2
@@ -268,6 +427,16 @@ def classify(command, root=None):
             return "deny", "Use plain git add/commit from the repository cwd"
         return "pass", None
     if _has_shell_syntax(command):
+        # ANSI-C quoting is the near miss that turns into a flattened message: `$'...\n...'` is
+        # denied here for its `$`, and dropping the `$` leaves the escapes as literal text inside
+        # plain single quotes. Name the correct fix instead of letting the generic reason stand.
+        if "$'" in command:
+            return "deny", (
+                "ANSI-C quoting ($'...') is not allowed: the $ makes this an expansion. Pass the "
+                "message in a plain single-quoted -m argument holding real line breaks. Do NOT fix "
+                "this by deleting the $ and keeping the \\n escapes inside the quotes -- that "
+                "commits the two characters as text."
+            )
         return "deny", "Do not combine or expand git add/commit commands"
 
     args = tokens[2:]
@@ -281,6 +450,19 @@ def classify(command, root=None):
                 "Commit subject must be Japanese (repo convention): the first line has no "
                 "Japanese character. Redraft the subject in Japanese and retry."
             )
+        problem = _probe_subject_problem(subject)
+        if problem:
+            return "deny", problem
+        if LEAKED_COMMAND_PREFIX.match(subject):
+            return "deny", (
+                "Commit subject opens with the commit command itself, so the -m argument picked up "
+                "the front of the command while it was assembled. Re-issue the subject you "
+                "drafted, without the command text. Compare the argument against the draft BEFORE "
+                "running it -- once the commit exists neither --amend nor git reset can repair it."
+            )
+        problem = _message_format_problem(args[1])
+        if problem:
+            return "deny", problem
         return "pass", None
     if _safe_add(args, root):
         return "pass", None
@@ -309,6 +491,7 @@ def main():
 
 
 def selftest():
+    TRAILER = "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     cases = [
         ("git add -- .claude/hooks/guard-git-write.py", "pass"),
         ("git add .claude/hooks/guard-git-write.py", "deny"),
@@ -316,12 +499,55 @@ def selftest():
         ("git add -- ../outside.py", "deny"),
         ("git add -- C:/outside.py", "deny"),
         ("git add -- missing-file.py", "deny"),
-        ("git commit -m '件名\n\n本文 $5 `literal` > text'", "pass"),
-        ("git commit -m 'it'\\''s 修正済み'", "pass"),
-        ("git commit -m 'ガード追加\n\nadd english body'", "pass"),
-        ("git commit -m 'Add CHANGELOG validation'", "deny"),
-        ("git commit -m 'English subject\n\n日本語本文'", "deny"),
-        ("git commit -m 'v0.2.0'", "deny"),
+        (f"git commit -m '件名\n\n本文 $5 `literal` > text\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'it'\\''s 修正済み\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'ガード追加\n\nadd english body\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'Add CHANGELOG validation\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'English subject\n\n日本語本文\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'v0.2.0\n\n{TRAILER}'", "deny"),
+        # A drafted message re-typed with escapes so it fits on one line, and the partly flattened
+        # form that keeps a real break only where the earlier no-real-break rule looked.
+        (f"git commit -m '件名\\n\\n本文\\n\\n{TRAILER}'", "deny"),
+        (f"git commit -m '件名\\n\\n本文\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '件名\n\n本文\\n\\n{TRAILER}'", "deny"),
+        # A commit issued to try out the command form: the staged work would land under a
+        # throwaway subject. A subject that merely holds one of these words is left alone.
+        (f"git commit -m 'テスト行1\n\nテスト行2\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'テスト\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'ダミー2\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'あああ\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '仮\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'テストコミット\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '試行\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'テストを追加\n\n{TRAILER}'", "pass"),
+        (f"git commit -m '試行コミットの禁止を追加\n\n{TRAILER}'", "pass"),
+        # The command's own front, carried into its argument while the command was assembled.
+        (f"git commit -m 'git試行コミットの禁止を追加\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'git commit 疎化の区間分割を見直す\n\n{TRAILER}'", "deny"),
+        (f"git commit -m '-m 疎化の区間分割を見直す\n\n{TRAILER}'", "deny"),
+        (f"git commit -m 'git のフック設定を見直す\n\n{TRAILER}'", "pass"),
+        (f"git commit -m 'front_stage のテスト分割を見直す\n\n{TRAILER}'", "pass"),
+        (f"git commit -m '仮引数の既定値を見直す\n\n{TRAILER}'", "pass"),
+        # The model name filled into the bracketed placeholder instead of replacing it, and the
+        # half fix that drops the address rather than the brackets.
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <Opus 5> <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <モデル名> <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <Opus 5>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Opus 5 <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude   <noreply@anthropic.com>'", "deny"),
+        ("git commit -m '件名\n\n本文\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>'", "pass"),
+        (f"git commit -m '件名\n\n本文\n\n{TRAILER} '", "pass"),
+        (f"git commit -m '件名 {TRAILER}'", "deny"),
+        ("git commit -m '件名'", "deny"),
+        (f"git commit -m '件名\n\n本文\n {TRAILER}'", "deny"),
+        (f"git commit -m '件名\n\n{TRAILER}\n\n追記'", "deny"),
+        (f"git commit -m '{TRAILER} 件名'", "deny"),
+        # Only the newline escape stands in for the line structure; other escapes are prose. Prose
+        # naming the newline escape is denied all the same -- it spells the sequence out in words.
+        (f"git commit -m '区切りは \\t 文字\n\n{TRAILER}'", "pass"),
+        (f"git commit -m '改行を \\n で表す\n\n{TRAILER}'", "deny"),
+        (f"git commit -m $'件名\\n\\n本文\\n\\n{TRAILER}'", "deny"),
         ("git add", "deny"),
         ("git add .", "deny"),
         ("git add -A", "deny"),
@@ -358,11 +584,35 @@ def selftest():
         ("echo git reset", "pass"),
         ("echo 'git reset --hard'", "pass"),
         ("cd /f && git -C /f/Repositories/Skyflash/mmd-toolbox status --short", "deny"),
-        ("git -C repo status", "deny"),
-        ("git -C. status", "deny"),
-        ("git --git-dir=.git --work-tree=. status", "deny"),
-        ("git --work-tree /x status", "deny"),
-        ("VAR=x git -C repo status", "deny"),
+        ("git -C repo status", "pass"),
+        ("git -C. status", "pass"),
+        ("git -C ../other-clone log --oneline -5", "deny"),
+        ("git -C ../other-clone diff", "deny"),
+        ("git -C ../other-clone show HEAD", "deny"),
+        ("git --git-dir=.git --work-tree=. status", "pass"),
+        ("git --work-tree /x status", "pass"),
+        ("VAR=x git -C repo status", "pass"),
+        ("git -C repo push", "deny"),
+        ("git -C repo checkout main", "deny"),
+        ("git -C repo stash", "deny"),
+        ("git -C repo", "deny"),
+        ("git -C ../other grep --open-files-in-pager foo", "deny"),
+        ("git -C ../other grep -Ovim foo", "deny"),
+        ("git -C ../other grep --textconv foo", "deny"),
+        ("git -C ../other cat-file --filters HEAD:a.py", "deny"),
+        ("git -C ../other cat-file --textconv HEAD:a.py", "deny"),
+        ("git -C ../other cat-file --textcon HEAD:a.py", "deny"),
+        ("git -C ../other grep --filter=x foo", "deny"),
+        ("! git add a.py", "deny"),
+        ("coproc git commit -m 'x'", "deny"),
+        ("! git reset --hard", "deny"),
+        ("git -C ../other status & git -C ../other checkout main", "deny"),
+        ("git -C ../other status\ngit -C ../other checkout main", "deny"),
+        ("( git -C ../other checkout main )", "deny"),
+        ("! git -C ../other push", "deny"),
+        ("coproc git -C ../other checkout main", "deny"),
+        ("( git add a.py )", "deny"),
+        ("git status & git commit -m 'x'", "deny"),
         ("git log -C", "pass"),
         ("git -c user.name=x status", "pass"),
         ("echo git -C repo status", "pass"),

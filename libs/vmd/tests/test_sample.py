@@ -1,4 +1,4 @@
-"""perspective 直近ホールドのテスト(vmd-reduce.md §1)。
+"""perspective 直近ホールドのテスト。
 
 perspective_series は各フレームの perspective を直近キー値で保持して返す。
 当該フレーム以前にキーが無い場合は先頭キーの値を用いる(vmd-interp の境界規約に倣う)。
@@ -6,9 +6,8 @@ perspective_series は各フレームの perspective を直近キー値で保持
 
 import pytest
 
-from vmd.types import CameraKey
 from vmd.sample import perspective_series
-
+from vmd.types import CameraKey
 
 # 真の線形補間になる制御点(各チャンネル x1==y1, x2==y2 → y=x)。
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6  # 24バイト
@@ -35,7 +34,7 @@ def test_perspective_series_empty_raises():
 
 
 def test_perspective_before_first_key_uses_first():
-    # 当該フレーム以前にキーが無い場合は先頭キーの値を用いる。これは vmd-reduce.md §1 の
+    # 当該フレーム以前にキーが無い場合は先頭キーの値を用いる。これは
     # 直近ホールドの境界補完であり、vmd-interp の境界規約(最初のキー以前は端キーの
     # 値で一定)に倣う。実パイプラインの抽出はトラック extent 内なので通常は発生しない。
     keys = [cam(10, persp=1), cam(20, persp=0)]

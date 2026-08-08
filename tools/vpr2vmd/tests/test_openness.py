@@ -1,8 +1,9 @@
-"""ベロシティ→開き量写像のテスト(vpr2vmd.md §3)。
+"""ベロシティ→開き量写像のテスト。
 
 写像式 open = lo + (hi - lo) * (velocity/127) ** gamma を [lo, hi] にクランプし open_max を
 上限とする。全ノートのベロシティが一様(強弱差 0)のときは写像式が定数に退化するため、全モーラへ
-既定開き量 default_open を用いる。
+既定開き量 default_open を用いる。既定開き量にも open_max の上限が掛かる([lo, hi] のクランプは
+掛からない)。
 """
 
 import pytest
@@ -75,14 +76,29 @@ def test_open_amounts_single_note_is_uniform_default():
     ) == [pytest.approx(_DEFAULT)]
 
 
-def test_open_amounts_default_not_capped_by_open_max():
-    # uniform 経路の既定開き量は vpr2vmd 側で open_max クランプしない(写像式側だけが open_max で
-    # 頭打ち。既定開き量の最終上限は lipsync の open_cap が担う)。default_open=0.8 > open_max=0.5
-    # でも 0.8 をそのまま返す。
+def test_open_amounts_default_is_capped_by_open_max():
+    # 一様経路の既定開き量も open_max で頭打ちする(開き量の決め方によらず同じ上限を効かせる。
+    # 揃えないと、ベロシティが一様かどうかだけで開き量が上限を跨いで不連続になる)。
     result = openness.open_amounts(
         [70, 70], lo=_LO, hi=_HI, open_max=0.50, default_open=0.80
     )
-    assert result == [pytest.approx(0.80), pytest.approx(0.80)]
+    assert result == [pytest.approx(0.50), pytest.approx(0.50)]
+
+
+def test_open_amounts_default_above_hi_is_kept_below_open_max():
+    # 既定開き量に掛かるのは open_max だけで、写像式のレンジ上限 hi では切らない。
+    result = openness.open_amounts(
+        [70, 70], lo=_LO, hi=0.75, open_max=0.90, default_open=0.85
+    )
+    assert result == [pytest.approx(0.85), pytest.approx(0.85)]
+
+
+def test_open_amounts_default_below_open_max_is_unchanged():
+    # 上限を下回る既定開き量はそのまま用いる(頭打ちが常時働いて値を潰さない)。
+    result = openness.open_amounts(
+        [70, 70], lo=_LO, hi=_HI, open_max=0.90, default_open=0.40
+    )
+    assert result == [pytest.approx(0.40), pytest.approx(0.40)]
 
 
 def test_open_amounts_varying_maps_each_velocity():

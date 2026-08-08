@@ -1,4 +1,4 @@
-"""音符内の音素→口形イベント写像(vpr2vmd.md §3)。
+"""音符内の音素→口形イベント写像。
 
 1つの採用音符のフレーム区間 [s, e) の音素列を、文脈なしで定まる口形イベント(MouthEvent)へ写像する。
 母音を持たず撥音/促音でもない音符(継続「-」・その他子音のみ・未知のみ・空)は直前の口形に依存するため
@@ -6,19 +6,19 @@ None を返し、組み立て段が直前の口形を継続する(既定母音�
 開き量を付与せず(open_amount=0.0)、組み立て段の build_mouth_events が母音的口形へ開き量を刻印する。
 """
 
-from lipsync import ConsonantClass, MouthEvent, MouthShape
+from lipsync import ApertureClass, ConsonantClass, MouthEvent, MouthShape
 
-from .phonemes import PhonemeCategory, categorize, consonant_class, vowel_shape
+from .phonemes import PhonemeCategory, aperture_class, categorize, consonant_class, vowel_shape
 
-# 語頭両唇閉鎖の時間配分(vpr2vmd.md §3)。初期値で、実データ(視覚確認)で調整する。
+# 語頭両唇閉鎖の時間配分。初期値で、実データ(視覚確認)で調整する。
 _BILABIAL_NOMINAL_FRAMES = 3.0  # 公称長
 _BILABIAL_SHARE_CAP = 0.5  # 音符長に対する取り分上限
 
 
 def note_mouth_events(
-    phonemes: list[str], start: float, end: float, use_n_morph: bool = True
+    phonemes: list[str], start: float, end: float, use_n_morph: bool = False
 ) -> list[MouthEvent] | None:
-    """1採用音符 [start, end)(フレーム)の音素列を口形イベント列へ写像する(vpr2vmd.md §3)。
+    """1採用音符 [start, end)(フレーム)の音素列を口形イベント列へ写像する。
 
     文脈なしで定まる口形だけを返す。優先順は次のとおり(MMD の見た目で口を不自然に開けない):
 
@@ -44,7 +44,7 @@ def note_mouth_events(
 
 
 def _onset_consonant_class(phonemes: list[str], first_vowel_index: int) -> ConsonantClass:
-    """先頭母音の前にある子音から、先頭モーラの母音へ付ける ConsonantClass を決める(vpr2vmd.md §3)。
+    """先頭母音の前にある子音から、先頭モーラの母音へ付ける ConsonantClass を決める。
 
     両唇音は `MouthShape.BILABIAL` で別途表すので語頭子音から除く。残る子音(OTHER カテゴリ)を
     `consonant_class` で写像し、唇を丸める子音があれば ROUNDED、い 方向へ寄せる子音があれば SPREAD、
@@ -64,10 +64,38 @@ def _onset_consonant_class(phonemes: list[str], first_vowel_index: int) -> Conso
     return ConsonantClass.NONE
 
 
+def _onset_aperture_class(phonemes: list[str], first_vowel_index: int) -> ApertureClass:
+    """先頭母音の前にある子音列から、先頭モーラの母音へ付ける ApertureClass を決める。
+
+    語頭子音列のうち最後に現れる両唇音より後(両唇音が無ければ列全体)の OTHER カテゴリ子音だけを
+    対象にし、優先順 FIRM_CLOSURE > NARROW_CHANNEL > SLIGHT_CLOSURE > NONE で1つに決める。両唇音の
+    位置を区切りとして扱うため、両唇音を単に除外するだけの _onset_consonant_class とは異なり、
+    両唇音の位置に依存する(_onset_consonant_class とは独立に動作し、一方の判定が他方の結果に
+    影響しない)。
+    """
+    onset = phonemes[:first_vowel_index]
+    last_bilabial = -1
+    for i, p in enumerate(onset):
+        if categorize(p) is PhonemeCategory.BILABIAL:
+            last_bilabial = i
+    target = [
+        p for p in onset[last_bilabial + 1:]
+        if categorize(p) is PhonemeCategory.OTHER
+    ]
+    classes = [aperture_class(p) for p in target]
+    if ApertureClass.FIRM_CLOSURE in classes:
+        return ApertureClass.FIRM_CLOSURE
+    if ApertureClass.NARROW_CHANNEL in classes:
+        return ApertureClass.NARROW_CHANNEL
+    if ApertureClass.SLIGHT_CLOSURE in classes:
+        return ApertureClass.SLIGHT_CLOSURE
+    return ApertureClass.NONE
+
+
 def _vowel_events(
     phonemes: list[str], start: float, end: float, vowels: list[MouthShape]
 ) -> list[MouthEvent]:
-    """母音を含む音符の口形イベント(語頭両唇閉鎖 + 母音の等分 + 先頭母音への子音種別付与)。"""
+    """母音を含む音符の口形イベント(語頭両唇閉鎖 + 母音の等分 + 先頭母音への子音種別・開口減衰種別付与)。"""
     events: list[MouthEvent] = []
     # 語頭両唇閉鎖の取り分(語中・語末の両唇音は対象外。語頭=phonemes[0] のみ判定)。
     d_b = 0.0
@@ -75,11 +103,12 @@ def _vowel_events(
         d_b = min(_BILABIAL_NOMINAL_FRAMES, (end - start) * _BILABIAL_SHARE_CAP)
         events.append(MouthEvent(MouthShape.BILABIAL, start, start + d_b))
 
-    # 先頭母音の前の子音種別を、先頭モーラの母音にのみ付ける(後続母音は NONE)。
+    # 先頭母音の前の子音種別・開口減衰種別を、先頭モーラの母音にのみ付ける(後続母音は NONE)。
     first_vowel_index = next(
         i for i, p in enumerate(phonemes) if categorize(p) is PhonemeCategory.VOWEL
     )
     onset_class = _onset_consonant_class(phonemes, first_vowel_index)
+    onset_aperture = _onset_aperture_class(phonemes, first_vowel_index)
 
     # 残り区間を母音 k 個で均等分割する。末尾は丸め誤差を避けるため end をそのまま使う。
     region_start = start + d_b
@@ -88,5 +117,6 @@ def _vowel_events(
         seg_start = region_start + i * width
         seg_end = end if i == len(vowels) - 1 else region_start + (i + 1) * width
         cc = onset_class if i == 0 else ConsonantClass.NONE
-        events.append(MouthEvent(shape, seg_start, seg_end, consonant_class=cc))
+        ac = onset_aperture if i == 0 else ApertureClass.NONE
+        events.append(MouthEvent(shape, seg_start, seg_end, consonant_class=cc, aperture_class=ac))
     return events

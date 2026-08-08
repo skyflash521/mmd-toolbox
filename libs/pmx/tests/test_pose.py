@@ -1,4 +1,4 @@
-"""FK評価のテスト(pmx.md §7)。
+"""FK評価のテスト。
 
 PmxModel/PmxBone はデータモデルを直接組み立て、BoneKey のトラックを与えて
 ローカル姿勢サンプリングと前方運動学を検証する。
@@ -8,14 +8,13 @@ import math
 
 import pytest
 
-from vmd.types import BoneKey
-
 from pmx.pose import (
     evaluate_fk,
     evaluate_fk_range,
     sample_local_poses,
 )
 from pmx.types import PmxBone, PmxModel
+from vmd.types import BoneKey
 
 # Z軸まわり90度のクォータニオン (x,y,z,w)
 _SIN45 = math.sin(math.pi / 4)

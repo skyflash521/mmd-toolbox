@@ -10,10 +10,10 @@ agent can fetch the current time without a prompt, and deny clock changes.
 This is deliberately the only concern here; bundling extra commands with `date`
 falls through to the normal flow rather than being auto-approved.
 """
-import sys
 import json
 import re
 import shlex
+import sys
 
 # date flags that consume the next token as their (read-only) argument.
 TAKES_ARG = {"-d", "--date", "-r", "--reference", "-f", "--file"}
@@ -72,6 +72,8 @@ def main():
     if decision == "deny":
         out["permissionDecisionReason"] = (
             "date による時計変更は不可。現在時刻は読み取り専用の date を使う。"
+            "PowerShellのSet-Date・w32tm・pythonのos/time経由での時刻変更等、"
+            "別の手段で同じ変更を回避して実行しないこと。"
         )
     print(json.dumps({"hookSpecificOutput": out}))
 

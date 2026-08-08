@@ -1,4 +1,4 @@
-"""足IK接地区間検出と左右ペアリング(mocapvmd.md §4.3)。
+"""足IK接地区間検出と左右ペアリング。
 
 足IK・つま先IKの密サンプル(0始まり相対インデックス、各要素 (x,y,z))から接地区間を推定する。
 検出は denoise と同様に密入力(隣接フレーム差をそのまま速度とみなし、ギャップ正規化は行わない)を
@@ -13,9 +13,9 @@
   1フレーム変化が閾値以下。相方トラックが無い・相方キーを欠くフレームではこの条件をスキップする。
 
 接地区間は接地候補フレームの連続 run のうち、長さが最小接地長以上のもの。接地候補と接地区間は
-別々に返す(レポート §4.4 が「接地候補」と「接地区間」を別項目に挙げるため)。
+別々に返す(レポートが「接地候補」と「接地区間」を別項目に挙げるため)。
 
-左右ペアリングは、足IK・つま先IKの名前から側を推定し、同側で各1本のときだけペアにする(§4.3)。
+左右ペアリングは、足IK・つま先IKの名前から側を推定し、同側で各1本のときだけペアにする。
 """
 
 import dataclasses
@@ -31,7 +31,7 @@ VERT_VEL_THRESH = 0.04     # 垂直速度閾値(MMD単位/frame)
 LOCAL_WINDOW = 5           # 接地Y局所窓(前後フレーム数)
 GROUND_Y_TOL = 0.08        # 接地Y許容幅(局所最小に足す MMD単位)
 RELATIVE_DELTA_THRESH = 0.08  # 相対位置急変の閾値(差分ベクトルの1フレーム変化ノルム MMD単位)
-MAX_CORRECTION = 0.5       # 接地ロックの最大補正量(接地区間内の1フレーム最大変位 MMD単位。§5.5)
+MAX_CORRECTION = 0.5       # 接地ロックの最大補正量(接地区間内の1フレーム最大変位 MMD単位)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,7 +91,7 @@ class SegmentLock:
 
 @dataclasses.dataclass(frozen=True)
 class TrackStabilization:
-    """1トラックの接地安定化結果と診断(§4.4)。
+    """1トラックの接地安定化結果と診断。
 
     side はトラック名から決まる側("left"/"right"/None)、paired は相方の有無、grounding は接地検出、
     locks は接地区間ごとのロック記録、locked_positions はロック後位置列。max_change/mean_change は
@@ -141,7 +141,7 @@ def detect_grounding_segments(
     ground_y_tol=GROUND_Y_TOL,
     relative_delta_thresh=RELATIVE_DELTA_THRESH,
 ):
-    """密サンプルから接地候補フレームと接地区間を検出する(§4.3)。
+    """密サンプルから接地候補フレームと接地区間を検出する。
 
     paired_positions(相方トラックを positions と同じ相対インデックスで整列した位置列。キーを欠く
     フレームは None)を与えると、相方との相対位置が急変するフレームを接地候補から除外する。
@@ -185,7 +185,7 @@ def detect_grounding_segments(
 
 
 def relative_rejected_frames(positions, paired_positions, *, threshold=RELATIVE_DELTA_THRESH):
-    """相方トラックとの差分ベクトルが1フレームで急変するフレーム集合を返す(§4.3)。
+    """相方トラックとの差分ベクトルが1フレームで急変するフレーム集合を返す。
 
     差分ベクトル r[f] = paired[f] - positions[f] の1フレーム変化 |r[f]-r[f-1]| が threshold を超える
     フレーム f を返す。差分の絶対距離でなく変化量のみを使う。相方キーを欠くフレーム(None)は判定を
@@ -209,7 +209,7 @@ def relative_rejected_frames(positions, paired_positions, *, threshold=RELATIVE_
 
 
 def detect_side(name):
-    """ボーン名から側("left"/"right")を推定する。判定できなければ None(§4.3)。
+    """ボーン名から側("left"/"right")を推定する。判定できなければ None。
 
     優先順は 名前中の 左/右(最優先)→ 独立語 left/right → 区切りに囲まれた L/R。部分文字列
     (leftover の left、leg の l 等)は側マーカーにしない。左右が競合する名は None とする。
@@ -238,7 +238,7 @@ def detect_side(name):
 
 
 def pair_ik_tracks(tracks):
-    """(name, category) の列から足IK・つま先IKを左右で対応付ける(§4.3)。
+    """(name, category) の列から足IK・つま先IKを左右で対応付ける。
 
     同側で foot_ik と toe_ik が各1本のときだけペアにする。同側同種が複数・側不明はペアにできず
     ambiguous、側が判る単独で相方を欠くものは unpaired とする。foot_ik / toe_ik 以外は対象外。
@@ -279,11 +279,11 @@ def pair_ik_tracks(tracks):
     return PairingResult(tuple(pairs), tuple(unpaired), tuple(ambiguous))
 
 
-# --- 接地ロック適用(§5.4 / §5.5)-----------------------------------------
+# --- 接地ロック適用 ---------------------------------------------------------
 
 
 def compute_ground_anchor(positions, segment):
-    """接地区間の各IK位置の X/Y/Z 各軸独立の中央値を接地アンカーとして返す(§4.3)。
+    """接地区間の各IK位置の X/Y/Z 各軸独立の中央値を接地アンカーとして返す。
 
     中央値は外れ値に強く、片足を置いた瞬間の1フレーム跳ねに引っ張られにくい。
     """
@@ -296,7 +296,7 @@ def compute_ground_anchor(positions, segment):
 
 
 def _fade_coef(offset, length, center, edge, fade_width):
-    """区間内オフセット offset(0始まり)でのロック係数(§5.4)。
+    """区間内オフセット offset(0始まり)でのロック係数。
 
     端は edge、端から fade_width 以上内側は center、間は線形フェード。接地長が 2*fade_width 未満
     なら接地長の半分ずつに按分する(実効フェード幅 = min(fade_width, length//2))。
@@ -311,7 +311,7 @@ def _fade_coef(offset, length, center, edge, fade_width):
 
 
 def apply_foot_lock(positions, segments, strength, *, max_displacement=MAX_CORRECTION):
-    """接地区間で位置を接地アンカーへ寄せ、(ロック後位置列, SegmentLock 列)を返す(§5.4 / §5.5)。
+    """接地区間で位置を接地アンカーへ寄せ、(ロック後位置列, SegmentLock 列)を返す。
 
     strength は resolve_foot_lock の dict(xz_center/xz_edge/y_center/y_edge/fade_width)。各区間で
     アンカー(中央値)を求め、X/Z は xz 係数、Y は y 係数でフェードしながら new=orig+coef*(anchor-orig)
@@ -362,7 +362,7 @@ def apply_foot_lock(positions, segments, strength, *, max_displacement=MAX_CORRE
 
 
 def stabilize_foot_ik(tracks, suppression):
-    """足IK・つま先IKトラック群に接地安定化を適用し、トラックごとの結果と診断を返す(§4.3 / §4.4)。
+    """足IK・つま先IKトラック群に接地安定化を適用し、トラックごとの結果と診断を返す。
 
     tracks は dict name -> (category, frames, positions)。category は "foot_ik"/"toe_ik"、frames は
     昇順の絶対フレーム列、positions は frames に整列した (x,y,z) 列(foot_ik/toe_ik 以外は呼び出し側で
@@ -378,7 +378,7 @@ def stabilize_foot_ik(tracks, suppression):
         partner[pair.foot] = pair.toe
         partner[pair.toe] = pair.foot
 
-    frame_pos = {name: dict(zip(frames, positions)) for name, (_, frames, positions) in tracks.items()}
+    frame_pos = {name: dict(zip(frames, positions, strict=True)) for name, (_, frames, positions) in tracks.items()}
     det = presets.resolve_foot_detection(suppression)
 
     result = {}
@@ -397,7 +397,7 @@ def stabilize_foot_ik(tracks, suppression):
             max_displacement=det["max_displacement"],
         )
 
-        changes = [math.dist(o, l) for o, l in zip(positions, locked)]
+        changes = [math.dist(orig, locked_pos) for orig, locked_pos in zip(positions, locked, strict=True)]
         in_seg = sum(s.end - s.start + 1 for s in grounding.segments)
         result[name] = TrackStabilization(
             name=name,
