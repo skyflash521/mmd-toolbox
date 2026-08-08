@@ -1,10 +1,11 @@
 """song2vpr CLI 骨組みのテスト。
 
-範囲は CLI の起動・引数解析・検証・出力先解決・上書きガードと、処理を伴わない経路に限る。
-音声前段の呼び出し以降は後続の配線で入るため、ここでは扱わない。
+範囲は CLI の起動・引数解析・検証・出力先解決・上書きガードに限る。書き出しまでの経路そのものは
+test_cli_output.py が見る。
 
 終了コード: 0 正常 / 1 入力不正 / 2 引数エラー(未知オプション・範囲不正・上書きガード等) /
-3 出力書き込み失敗 / 4 音声前段の外部依存の失敗・追加依存の未導入 / 130 協調的な中断。
+3 出力書き込み失敗 / 4 音声前段の外部依存の失敗・歌詞のかな読みの失敗・追加依存の未導入 /
+130 協調的な中断。
 """
 
 import re
@@ -14,6 +15,8 @@ import pytest
 
 from song2vpr import cli
 
+from .support import front_stage_result
+
 
 def _touch(path):
     path.write_bytes(b"")
@@ -22,13 +25,15 @@ def _touch(path):
 
 @pytest.fixture(autouse=True)
 def _stub_pipeline_run(monkeypatch):
-    """引数解析・検証・ガードだけを対象にするため、処理経路を決定論的スタブへ差し替える。
+    """引数解析・検証・ガードだけを対象にするため、音声前段を決定論的スタブへ差し替える。
 
-    このファイルの受理系は音声の中身を持たない入力を渡すので、実処理を通すと入力不正で終わる。
+    差し替えるのは前段だけで、音符化以降は実際に走る(短い無音なので音符は0件になる)。
+    このファイルの受理系は音声の中身を持たない入力を渡すので、前段を通すと入力不正で終わる。
     差し替えはこのファイル内に閉じる(共有のフィクスチャにすると、処理経路へ入った実行の終端規則を
     見るテストにも効いてしまい、その検査が成立しなくなる)。
     """
-    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=lambda *a, **k: None))
+    monkeypatch.setattr(cli, "_pipeline",
+                        types.SimpleNamespace(run=lambda *a, **k: front_stage_result()))
 
 
 # --- 主要オプションの受理 ----------------------------------------------------
@@ -58,7 +63,7 @@ def test_parses_full_option_set(tmp_path):
 
 
 def test_dry_run_writes_no_output(tmp_path):
-    """--dry-run は出力 vpr を書かない(書き出し経路が入るまでは通常実行との差が出ない)。"""
+    """--dry-run は出力 vpr を書かない。"""
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vpr"
     assert cli.main([src, "-o", str(out), "--dry-run"]) == 0
@@ -252,7 +257,8 @@ def test_help_lists_key_flags(capsys):
     """--help だけで使い方を把握できるよう、主要な引数を列挙する。"""
     assert cli.main(["--help"]) == 0
     text = capsys.readouterr().out
-    for flag in ("--output", "--overwrite", "--dry-run", "--keep-intermediate", "--verbose",
+    for flag in ("--output", "--overwrite", "--lyrics", "--tempo", "--time-signature",
+                 "--dry-run", "--keep-intermediate", "--verbose",
                  "--quiet", "--machine", "--describe", "--version",
                  "--separate-vocals", "--separator", "--recognizer-model-id",
                  "--recognizer-model-revision", "--recognizer-retry", "--forced-aligner",

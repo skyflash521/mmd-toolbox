@@ -4,8 +4,8 @@
 標準出力が非ASCIIを UTF-8 のまま出すこと、人間向け標準エラーの符号化安全性(ロケール符号化で表せない
 文字でもプロセスを落とさない)を検証する。
 
-範囲はこの骨組みで通る経路(引数解析・出力先解決・ガード)に限る。書き出しを伴う往復は音声前段の
-配線後に検証する。
+範囲は引数解析・出力先解決・ガードに限る。非ASCII のパスへ実際に書き出す往復は test_cli_output.py が
+見る。
 """
 
 import io
@@ -17,15 +17,19 @@ import pytest
 
 from song2vpr import cli
 
+from .support import front_stage_result
+
 
 @pytest.fixture(autouse=True)
 def _stub_pipeline_run(monkeypatch):
-    """パス解決と符号化だけを対象にするため、処理経路を決定論的スタブへ差し替える。
+    """パス解決と符号化だけを対象にするため、音声前段を決定論的スタブへ差し替える。
 
+    差し替えるのは前段だけで、音符化以降は実際に走る(短い無音なので音符は0件になる)。
     差し替えはこのファイル内に閉じる(共有のフィクスチャにすると、処理経路へ入った実行の終端規則を
     見るテストにも効いてしまい、その検査が成立しなくなる)。
     """
-    monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=lambda *a, **k: None))
+    monkeypatch.setattr(cli, "_pipeline",
+                        types.SimpleNamespace(run=lambda *a, **k: front_stage_result()))
 
 # cp932(Windows のロケール符号化)で表せない文字(絵文字 U+1F3A5)。ロケール符号化外の文字を
 # 人間向け標準エラーへ書く経路を作り、符号化安全性を検証するために使う。

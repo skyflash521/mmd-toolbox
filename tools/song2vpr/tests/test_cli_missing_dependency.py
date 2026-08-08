@@ -20,7 +20,7 @@ _MISSING = ModuleNotFoundError("No module named 'soundfile'", name="soundfile")
 
 # 追加依存を要する取り込みが与える名前。取り込みが失敗した環境では未定義になる。
 _GUARDED_NAMES = (
-    "_pipeline",
+    "_pipeline", "_pitch",
     "AudioLoadError", "IntermediateReadError", "IntermediateWriteError",
     "RecognitionError", "SeparationError", "StageExecutionError",
 )

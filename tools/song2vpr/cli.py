@@ -15,6 +15,7 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import vocal_analysis_cli as _va_cli
 from cli_events import (
@@ -25,12 +26,17 @@ from cli_events import (
     emit_failure,
     install_sigbreak_handler,
 )
-from cli_options import describe_options
+from cli_options import CompoundValidator, RangeValidator, describe_options
 from cli_resource_watch import ProgressWithResourceCheck, ResourceWatch, torch_gpu_warning
+from vpr import write_file as _write_vpr
 
 from . import __version__
+from . import lyrics as _lyrics
+from . import notes as _notes
 from . import progress as _progress
-from . import resource_watch as _resource_watch
+from . import project as _project
+from . import tempo as _tempo
+from . import warning_text as _warning_text
 
 # 追加依存(vocal-analysis extra)を要する取り込みだけをここへ集める。コンソールスクリプトは追加依存
 # なしの導入でも登録されるため、依存が揃わない環境から起動されうる。取り込み失敗を例外のまま保持して
@@ -48,10 +54,28 @@ try:
     from vocal_analysis.separator import SeparationError
 
     from . import pipeline as _pipeline
+    from . import pitch as _pitch
 except ImportError as exc:
     _MISSING_DEPENDENCY = exc
 else:
     _MISSING_DEPENDENCY = None
+
+
+# --tempo の下限は、vpr が格納できる粒度(BPM×100 の整数)で表せる最小の正値。上限は設けない
+# (極端な値でも音符の要件は量子化の規則が保つ)。
+_TEMPO = RangeValidator(value_type="float", minimum=0.01)
+
+# --time-signature は「分子/分母」。分母は音価を表す2の冪で、1拍が整数の tick になる範囲に限る。
+# 全音符の tick(4 × 分解能)を割り切る2の冪の最大が上限なので、分解能から導く(値を書くと分解能の
+# 変更に追随しない)。2の冪であることは範囲の形で表せないので help に示す。
+_WHOLE_NOTE_TICKS = 4 * _tempo.RESOLUTION
+_MAX_DENOMINATOR = _WHOLE_NOTE_TICKS & -_WHOLE_NOTE_TICKS
+_TIME_SIGNATURE = CompoundValidator(
+    format="N/D",
+    separator="/",
+    elements=[("N", RangeValidator(value_type="int", minimum=1)),
+              ("D", RangeValidator(value_type="int", minimum=1, maximum=_MAX_DENOMINATOR))],
+    relation=("分母は2の冪", lambda values: values[1] & (values[1] - 1) == 0))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -63,9 +87,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p = MachineArgumentParser(prog="song2vpr", allow_abbrev=False)
     # input は nargs="?"(--describe を入力無しで成立させるため)。describe 以外の実行では main() が欠落を検査する。
     p.add_argument("input", nargs="?", help="入力音声ファイル(wav/mp3等)")
-    p.add_argument("-o", "--output", help="出力vpr(既定: <入力名>.vpr)")
+    p.add_argument("-o", "--output", metavar="PATH", help="出力vpr(既定: <入力名>.vpr)")
     p.add_argument("--overwrite", action="store_true",
                    help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
+    p.add_argument("--lyrics", metavar="PATH",
+                   help="歌詞テキストファイル(漢字かな交じり可。UTF-8 で読む)")
+    p.add_argument("--tempo", metavar="BPM", type=_TEMPO,
+                   help="テンポ(四分音符を1拍とした BPM)。未指定時は音声から推定し、"
+                        "推定できなければ 120 を仮置きする")
+    p.add_argument("--time-signature", dest="time_signature", metavar="N/D",
+                   type=_TIME_SIGNATURE,
+                   help="拍子(4/4 の形式。分母は2の冪)。未指定時は音声から推定し、"
+                        "推定できなければ 4/4 を仮置きする")
     _va_cli.add_arguments(p)
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="出力せず診断を表示する(引数検証は dry-run でも実施する)")
@@ -92,6 +125,9 @@ _D_TYPE = {
     "input": ("str", None),
     "output": ("str", None),
     "overwrite": ("flag", None),
+    "lyrics": ("str", None),
+    "tempo": (None, None),
+    "time_signature": (None, None),
     **_va_cli.describe_type_table(),
     "dry_run": ("flag", None),
     "keep_intermediate": ("flag", None),
@@ -226,7 +262,7 @@ def _run(args, emitter, fail) -> int:
         # 判定が返すのは安定コードと観測値だけなので、本文はここで組み立てる。人間向けの警告は
         # ライブ進捗行と混線しないよう、書く前に close でライブ行を消す(改行付きの1行として確定し、
         # 次の stage() でライブ行が下の行に再開する)。
-        message, human_text = _resource_watch.warning_texts(code, fields)
+        message, human_text = _warning_text.warning_texts(code, fields)
         if emitter is not None:
             emitter.warning(code=code, message=message, **fields)
         else:
@@ -245,12 +281,23 @@ def _run(args, emitter, fail) -> int:
         if torch_warning is not None:
             emit_warning(*torch_warning)
 
+        # 歌詞ファイルは音声前段を始める前に読む(誤指定が分離・認識を終えてから露見しないため)。
+        lyrics_text = None
+        if args.lyrics is not None:
+            try:
+                # 先頭のバイト順マークは読み込み時に取り除く(かな読みへ持ち込まない)。
+                lyrics_text = Path(args.lyrics).read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError) as e:
+                progress_reporter.close()
+                return fail("lyrics_unreadable", f"歌詞ファイルを読めません: {e}", 1,
+                            field="--lyrics", path=args.lyrics)
+
         # 中間生成物は出力先の隣に <出力ファイル名>.intermediate を作って保存する。--dry-run でも
         # 抑制しない(抑制するのは最終 vpr の書き出しだけ)。
         keep_intermediate_dir = f"{output}.intermediate" if args.keep_intermediate else None
 
         try:
-            _pipeline.run(
+            front = _pipeline.run(
                 args.input, separate_vocals=args.separate_vocals, separator_name=args.separator,
                 content_recognizer_model=_va_cli.resolve_recognizer_model(args),
                 retry=args.recognizer_retry, forced_aligner=args.forced_aligner,
@@ -282,7 +329,48 @@ def _run(args, emitter, fail) -> int:
             return fail("write_failed", str(e), 3, field="--keep-intermediate",
                         path=keep_intermediate_dir)
 
-        # 音符化以降の処理経路をまだ持たないため、前段を終えた実行は vpr を書かずに 0 を返す。
+        if front.forced_split:
+            emit_warning("forced_split", {})
+
+        progress.stage("f0")
+        track = _pitch.estimate(front.vocal_pcm)
+
+        progress.stage("notes")
+        try:
+            annotated = _lyrics.annotate(_notes.split(track, front.segments), front.segments,
+                                         front.rms, lyrics_text=lyrics_text)
+        except RecognitionError as e:
+            # かな読みは音符へ歌詞を割り当てる段の中で行うので、失敗が指す段は認識でなく音符化。
+            progress_reporter.close()
+            return fail("stage_failed", str(e), 4, stage="notes")
+        estimate = _tempo.estimate(front.pcm, tempo_bpm=args.tempo,
+                                   time_signature=args.time_signature)
+        if estimate.tempo_defaulted:
+            emit_warning("tempo_defaulted", {})
+        if estimate.time_signature_defaulted:
+            emit_warning("time_signature_defaulted", {})
+        if annotated.diagnostics.kana_reading_ineffective:
+            emit_warning("kana_reading_ineffective",
+                         {"unconverted_chars": annotated.diagnostics.unconverted_chars,
+                          "counted_chars": annotated.diagnostics.counted_chars})
+
+        if not annotated.notes:
+            emit_warning("no_notes", {})
+
+        built = _project.build(annotated.notes, estimate, name=Path(output).stem)
+
+        # --dry-run が抑制するのは最終 vpr の書き出しだけで、ここまでの工程は通常実行と同じに走る
+        # (診断の各件数が実測値であるため)。
+        if not args.dry_run:
+            progress.stage("write")
+            try:
+                _write_vpr(built.project, output)
+            except OSError as e:
+                progress_reporter.close()
+                return fail("write_failed", f"出力を書けません: {e}", 3,
+                            field="--output", path=output)
+            progress_reporter.close()
+            progress_reporter.summary(f"完了 {output}")
         return 0
     finally:
         progress_reporter.close()

@@ -14,6 +14,8 @@ from cli_resource_watch import watch as _watch_module
 from song2vpr import cli
 from vocal_analysis.separator import SeparationError
 
+from .support import front_stage_result
+
 _MIB = 2**20
 
 
@@ -39,7 +41,7 @@ def _stub_pipeline_reporting_stages(monkeypatch, stages=("load", "separate")):
     def fake_run(input_path, **kwargs):
         for stage in stages:
             kwargs["progress"].stage(stage)
-        return None
+        return front_stage_result()
 
     monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run))
 
@@ -144,7 +146,7 @@ def test_live_line_is_closed_on_every_exit(tmp_path, monkeypatch, outcome, expec
     def fake_run(input_path, **kwargs):
         if outcome is not None:
             raise outcome
-        return None
+        return front_stage_result()
 
     monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _Reporter())
     monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run))
@@ -202,7 +204,11 @@ def test_no_gpu_configuration_warning_when_it_does_not_hold(tmp_path, monkeypatc
     _stub_pipeline_reporting_stages(monkeypatch, stages=("load",))
 
     assert cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr")]) == 0
-    assert not [e for e in _events(capsysbinary) if e["type"] == "warning"]
+    # 前段の代役が短い無音なので、音符0件とテンポ・拍子の仮置きの警告が出る。いずれも
+    # GPU 構成の判定とは無関係なので、判定対象を GPU の2コードへ絞る。
+    gpu_codes = {"cpu_only_torch", "cuda_unavailable"}
+    assert not [e for e in _events(capsysbinary)
+                if e["type"] == "warning" and e["code"] in gpu_codes]
 
 
 def test_gpu_configuration_check_receives_the_selected_device(tmp_path, monkeypatch, capsysbinary):

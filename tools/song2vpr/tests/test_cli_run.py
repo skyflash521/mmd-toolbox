@@ -19,6 +19,8 @@ from vocal_analysis.io import AudioLoadError
 from vocal_analysis.recognizer import RecognitionError
 from vocal_analysis.separator import SeparationError
 
+from .support import front_stage_result
+
 
 def _touch(path):
     path.write_bytes(b"")
@@ -39,7 +41,7 @@ def _stub_pipeline(monkeypatch, raises=None, captured=None):
             captured["kwargs"] = kwargs
         if raises is not None:
             raise raises
-        return None
+        return front_stage_result()
 
     # モジュールごと差し替える(取り込みが追加依存のガードの内側にあるため、属性を差し替えるより
     # 取り込みの構造に左右されない)。
@@ -55,7 +57,7 @@ def _run_machine(tmp_path, monkeypatch, exc, extra=()):
 # --- 成功経路の終端 ----------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: 音符化以降を CLI へ結線していない", strict=True)
+@pytest.mark.xfail(reason="impl pending: result を組み立てる診断の段がまだ無い", strict=True)
 def test_machine_success_path_terminates_with_a_result(tmp_path, monkeypatch, capsysbinary):
     """前段を終えた実行も、ストリームを result か error のちょうど1つで終端する。
 

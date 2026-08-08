@@ -1,13 +1,13 @@
-"""song2vpr の資源逼迫・GPU 構成の警告の文言のテスト。
+"""song2vpr が出す警告の文言のテスト。
 
-何を観測しどの事実で警告が成立するかの検証は共有の cli_resource_watch が担う。ここでは
-song2vpr が組み立てる本文——公開する4コードすべてで、観測値を人間向け1行へ載せ、勧める対処を
-song2vpr のオプション名で書くこと——だけを検証する。
+資源逼迫・GPU 構成について何を観測しどの事実で警告が成立するかの検証は共有の cli_resource_watch が
+担う。ここでは song2vpr が組み立てる本文——観測値を人間向け1行へ載せ、勧める対処を song2vpr の
+オプション名で書くこと——だけを検証する。
 """
 
 import pytest
 
-from song2vpr.resource_watch import warning_texts
+from song2vpr.warning_text import warning_texts
 
 
 def test_gpu_oversubscription_texts_carry_observed_values_and_remedy():
@@ -68,3 +68,28 @@ def test_machine_message_omits_the_observed_values(code):
     """観測値は本文に重ねない(呼び出し側が同じ値を warning イベントのフィールドへ載せるため)。"""
     message, _ = warning_texts(code, _FIELDS)
     assert "MiB" not in message and "2.13.0" not in message
+
+
+# --- 処理の結果から判定する警告 ------------------------------------------------
+
+
+@pytest.mark.parametrize(("code", "fields", "expected"), [
+    ("no_notes", {}, "ボーカル分離"),
+    ("tempo_defaulted", {}, "--tempo"),
+    ("time_signature_defaulted", {}, "--time-signature"),
+    ("forced_split", {}, "境界"),
+])
+def test_result_warning_texts_tell_what_to_do(code, fields, expected):
+    """人間向け1行は、何が起きたかと、利用者が次に取れる手を書く。"""
+    message, human_text = warning_texts(code, fields)
+    assert message
+    assert message in human_text
+    assert expected in human_text
+
+
+def test_kana_reading_warning_carries_the_counts_behind_the_judgement():
+    """割合の判定に使った2つの件数を載せる(受け手が判定を再現できるようにするため)。"""
+    message, human_text = warning_texts("kana_reading_ineffective",
+                                        {"unconverted_chars": 7, "counted_chars": 20})
+    assert message
+    assert "7" in human_text and "20" in human_text

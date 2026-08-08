@@ -145,7 +145,7 @@ def _to_kana_tokens(reading, diagnostics):
     共有側が返す読みの表記に仮定を置かず、どんな文字列が来ても一意に定まる規則で畳む。かな・
     長音記号以外は読み飛ばすが、その位置に区切り(None)を残す(前後を結合させないため)。
     """
-    normalized = unicodedata.normalize("NFKC", reading.lstrip("﻿"))
+    normalized = unicodedata.normalize("NFKC", reading)
     tokens = []
     for character in normalized:
         # カタカナはひらがなへ写す(長音記号は写さずそのまま残す)。

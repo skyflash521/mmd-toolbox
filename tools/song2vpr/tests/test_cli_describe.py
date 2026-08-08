@@ -32,6 +32,15 @@ _OWN_OPTIONS = {
     "input": ("str", None, None),
     "--output": ("str", None, None),
     "--overwrite": ("flag", None, False),
+    "--lyrics": ("str", None, None),
+    "--tempo": ("float", {"min": 0.01, "max": None, "exclusive_min": False}, None),
+    "--time-signature": ("compound", {
+        "format": "N/D",
+        "fields": [
+            {"name": "N", "type": "int", "min": 1, "max": None, "exclusive_min": False},
+            {"name": "D", "type": "int", "min": 1, "max": 128, "exclusive_min": False},
+        ],
+    }, None),
     "--dry-run": ("flag", None, False),
     "--keep-intermediate": ("flag", None, False),
     "--verbose": ("flag", None, False),
@@ -39,7 +48,7 @@ _OWN_OPTIONS = {
 }
 
 # 制約を検証子から導く数値引数(共通引数群のうち範囲を持つもの)。
-_NUMERIC_NAMES = ["--sofa-timeout", "--max-duration"]
+_NUMERIC_NAMES = ["--sofa-timeout", "--max-duration", "--tempo"]
 
 
 def _describe_raw(capsysbinary, argv=("--describe",)):
