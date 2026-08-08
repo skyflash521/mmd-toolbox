@@ -55,7 +55,6 @@ def test_estimated_bpm_is_not_an_octave_off():
     assert 60.0 < result.bpm < 240.0
 
 
-@pytest.mark.xfail(reason="impl pending: 拍と感じる帯域を選ぶ重みの幅の調整", strict=True)
 def test_a_fast_beat_is_not_taken_at_half_speed():
     """帯域の重みの中心から離れた速い拍を、半分のテンポとして採らない。
 
@@ -65,8 +64,8 @@ def test_a_fast_beat_is_not_taken_at_half_speed():
     重みの中心にあり、正解の候補が重みで最も高く評価されるので、幅を狭める側では破れない。広げる側
     では破れるが、`test_a_slow_beat_is_not_taken_at_half_speed` の入力より緩いところで破れる。
 
-    16 秒にするのは長さが判定条件のため。既定の 8 秒では現行の幅でも正解を採るので、幅の違いが
-    表れない。
+    16 秒にするのは長さが判定条件のため。既定の 8 秒では狭い幅でも正解を採るので、落としたい幅が
+    通ってしまう。
     """
     result = tempo.estimate(_click_track(190.0, seconds=16.0))
     assert result.bpm == pytest.approx(190.0, rel=0.03)

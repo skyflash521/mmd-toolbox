@@ -19,11 +19,15 @@ _DEFAULT_TIME_SIGNATURE = (4, 4)
 _WINDOW_SEC = 0.046
 _HOP_SEC = 0.012
 
-# 自己相関のラグを走査する BPM の範囲と、拍と感じる帯域を選ぶ重みの中心。
+# 自己相関のラグを走査する BPM の範囲と、拍と感じる帯域を選ぶ重みの中心・幅(オクターブ)。
+# 幅は、候補どうしのタイブレークとして働く程度に取る。狭いと中心から離れた速い拍を半分の周期で採り、
+# 広いと相関が半分の周期に傾いた入力を中心へ引き戻せなくなる。
 _BPM_RANGE = (30.0, 300.0)
 _BPM_WEIGHT_CENTER = 120.0
+_BPM_WEIGHT_SIGMA = 1.5
 
-# 正規化自己相関のピークがこれ未満なら、周期が得られなかったとみなす。
+# 重みを掛けた得点がこれ未満なら、周期が得られなかったとみなす。判定に重みが入るので、中心から
+# 離れたテンポほど高い周期性が要る。幅を広げるとその要求が下がり、下がり方は中心から遠いほど大きい。
 _PERIODICITY_FLOOR = 0.1
 
 # 未指定時に探索する拍子の分子。
@@ -111,7 +115,7 @@ def _estimate_bpm(envelope, hop_sec, denominator):
             continue
         correlation = float(np.dot(envelope[:-lag], envelope[lag:])) / zero_lag
         # 同じ周期性の 1/2 倍・2 倍のピークから、人が拍と感じる帯域を選ぶ。
-        weight = np.exp(-(np.log2(bpm / _BPM_WEIGHT_CENTER) ** 2) / 2.0)
+        weight = np.exp(-(np.log2(bpm / _BPM_WEIGHT_CENTER) ** 2) / (2.0 * _BPM_WEIGHT_SIGMA ** 2))
         score = correlation * weight
         if best is None or score > best[0] + 1e-12:
             best = (score, bpm, lag)
@@ -205,6 +209,8 @@ def estimate(pcm, *, tempo_bpm=None, time_signature=None) -> TempoEstimate:
     offset_sec = _estimate_phase(envelope, hop_sec, period_sec)
 
     candidates = (numerator,) if numerator is not None else _NUMERATOR_CANDIDATES
+    # 分子は拍のグリッド上で強拍を探すので、採用テンポが変われば結果も変わる。テンポが正解へ
+    # 近づくほど分子も正しくなるとは限らない。
     adopted_numerator, bar_phase, numerator_defaulted = _estimate_numerator(
         envelope, hop_sec, offset_sec, period_sec, candidates)
 
