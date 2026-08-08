@@ -9,6 +9,7 @@ Segment契約(隙間なく連続・非重複で全時間軸を被覆)の検証�
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -141,6 +142,35 @@ def _write_htk_label(folder, basename, rows):
     phones_dir.mkdir(parents=True, exist_ok=True)
     lines = [f"{start} {end} {label}" for start, end, label in rows]
     (phones_dir / f"{basename}.lab").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _fake_platform(monkeypatch, sofa_align, platform):
+    """sofa_align から見える sys.platform だけを差し替える。
+
+    sofa_align.sys はグローバルな sys モジュールそのものなので、その platform 属性を書き換えると
+    _align_batch が呼ぶ全モジュールが差し替え後の値を見る。確認できている波及先は soundfile で、
+    sys.platform が "win32" のときlibsndfileのワイド文字版オープン関数を引くが、この関数は
+    Windows版のlibsndfileにしか無いため他OSでは属性エラーになる。逆向き("linux" への差し替え)では、
+    実行中のOSに関わらずファイル名をバイト列へ符号化する経路へ入る。波及先を数え上げる代わりに、
+    sofa_align が sys から読むのは platform だけなので、sys への参照ごと差し替えて影響範囲を
+    sofa_align に閉じる。差し替えた実行環境の分岐そのものが参照するOS固有のシンボルは、これとは別に
+    差し替えが要る(win32 では _fake_windows)。"""
+    monkeypatch.setattr(sofa_align, "sys", SimpleNamespace(platform=platform))
+
+
+def _fake_windows(monkeypatch, sofa_align):
+    """sofa_align から見える実行環境をWindowsにし、差し替えた起動フラグの値を返す。
+
+    実装はWindows分岐で subprocess.CREATE_NEW_PROCESS_GROUP を参照する。この属性はPOSIXの標準
+    ライブラリに存在せず、しかも Popen の引数として Popen 本体の呼び出し前に評価されるため、Popen を
+    モックしても他OSでは属性エラーで止まる。実属性の有無に依らず動くよう raising=False で差し替える。
+    戻り値は差し替えた値そのもので、呼び出し側は Popen へ渡ったかを同一性で確かめられる。"""
+    _fake_platform(monkeypatch, sofa_align, "win32")
+    creationflags = object()
+    monkeypatch.setattr(
+        sofa_align.subprocess, "CREATE_NEW_PROCESS_GROUP", creationflags, raising=False
+    )
+    return creationflags
 
 
 def test_align_batch_happy_path_parses_htk_output_as_seconds(tmp_path, monkeypatch):
@@ -459,7 +489,6 @@ def test_align_batch_starts_new_process_group_on_windows(tmp_path, monkeypatch):
 
     config = _make_config(tmp_path)
     captured = {}
-    fake_creationflags = object()
 
     def fake_popen(cmd, **kwargs):
         captured.update(kwargs)
@@ -470,12 +499,8 @@ def test_align_batch_starts_new_process_group_on_windows(tmp_path, monkeypatch):
 
         return _FakeCompletedPopen(cmd, on_communicate=write_output)
 
-    monkeypatch.setattr(sofa_align.sys, "platform", "win32")
+    fake_creationflags = _fake_windows(monkeypatch, sofa_align)
     monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
-    # CREATE_NEW_PROCESS_GROUP はPOSIX標準ライブラリに存在しないため、実属性の有無に依らず動作する
-    # よう raising=False で差し替える(この環境非依存性はテスト側の都合であり、実装はWindows分岐の
-    # 中でのみこれを参照する)。
-    monkeypatch.setattr(sofa_align.subprocess, "CREATE_NEW_PROCESS_GROUP", fake_creationflags, raising=False)
 
     samples = np.zeros(16000, dtype=np.float32)
     sofa_align._align_batch([(samples, 16000, ["a"])], config)
@@ -500,7 +525,7 @@ def test_align_batch_starts_new_session_on_posix(tmp_path, monkeypatch):
 
         return _FakeCompletedPopen(cmd, on_communicate=write_output)
 
-    monkeypatch.setattr(sofa_align.sys, "platform", "linux")
+    _fake_platform(monkeypatch, sofa_align, "linux")
     monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
 
     samples = np.zeros(16000, dtype=np.float32)
@@ -519,7 +544,7 @@ def test_align_batch_keyboard_interrupt_kills_process_tree_and_reraises(tmp_path
     config = _make_config(tmp_path, timeout_sec=10.0)
     killed_pids = []
 
-    monkeypatch.setattr(sofa_align.sys, "platform", "win32")
+    _fake_windows(monkeypatch, sofa_align)
     monkeypatch.setattr(sofa_align.subprocess, "Popen", lambda cmd, **kwargs: _FakeInterruptedPopen(cmd))
 
     def fake_run(cmd, **kwargs):
@@ -542,7 +567,7 @@ def test_align_batch_timeout_kills_process_tree_on_windows(tmp_path, monkeypatch
     config = _make_config(tmp_path, timeout_sec=0.05)
     killed_pids = []
 
-    monkeypatch.setattr(sofa_align.sys, "platform", "win32")
+    _fake_windows(monkeypatch, sofa_align)
     monkeypatch.setattr(sofa_align.subprocess, "Popen", lambda cmd, **kwargs: _FakeTimeoutPopen(cmd))
 
     def fake_run(cmd, **kwargs):
@@ -594,7 +619,7 @@ def test_align_batch_timeout_kills_process_tree_on_posix(tmp_path, monkeypatch):
     killed = []
     fake_sigkill = object()
 
-    monkeypatch.setattr(sofa_align.sys, "platform", "linux")
+    _fake_platform(monkeypatch, sofa_align, "linux")
     monkeypatch.setattr(sofa_align.subprocess, "Popen", lambda cmd, **kwargs: _FakeTimeoutPopen(cmd))
     # os.getpgid・signal.SIGKILL はWindows開発環境の標準ライブラリに存在しないため、実属性の有無に
     # 依らず動作するよう raising=False で差し替える(この環境非依存性はテスト側の都合であり、実装は
