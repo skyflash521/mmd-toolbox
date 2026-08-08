@@ -47,9 +47,18 @@ class TempoEstimate:
     denominator: int
     beat_offset_sec: float
     first_bar_sec: float
-    tempo_defaulted: bool
-    time_signature_defaulted: bool
+    tempo_source: str  # "option" 指定値 / "estimated" 推定値 / "default" 仮置き
+    time_signature_source: str
     resolution: int = RESOLUTION
+
+    # 仮置きへ倒したかは出どころから導く(同じ事実を2つ持つと、警告と診断が食い違いうるため)。
+    @property
+    def tempo_defaulted(self) -> bool:
+        return self.tempo_source == "default"
+
+    @property
+    def time_signature_defaulted(self) -> bool:
+        return self.time_signature_source == "default"
 
     def to_tick(self, seconds: float) -> int:
         """入力音声の時刻を tick へ写す。入力の 0 秒が tick の 0。"""
@@ -186,7 +195,8 @@ def estimate(pcm, *, tempo_bpm=None, time_signature=None) -> TempoEstimate:
             bpm=_DEFAULT_BPM,
             numerator=numerator if numerator is not None else _DEFAULT_TIME_SIGNATURE[0],
             denominator=denominator, beat_offset_sec=0.0, first_bar_sec=0.0,
-            tempo_defaulted=True, time_signature_defaulted=numerator is None)
+            tempo_source="default",
+            time_signature_source="option" if numerator is not None else "default")
 
     bpm = quantize_bpm(tempo_bpm if tempo_bpm is not None else estimated_bpm)
     # 自己相関が拾うのは拍(拍子の分母が表す音価)の周期。四分音符あたりの BPM から戻す。
@@ -198,7 +208,12 @@ def estimate(pcm, *, tempo_bpm=None, time_signature=None) -> TempoEstimate:
     adopted_numerator, bar_phase, numerator_defaulted = _estimate_numerator(
         envelope, hop_sec, offset_sec, period_sec, candidates)
 
+    if numerator is not None:
+        time_signature_source = "option"
+    else:
+        time_signature_source = "default" if numerator_defaulted else "estimated"
     return TempoEstimate(
         bpm=bpm, numerator=adopted_numerator, denominator=denominator,
         beat_offset_sec=offset_sec, first_bar_sec=offset_sec + bar_phase * period_sec,
-        tempo_defaulted=False, time_signature_defaulted=numerator_defaulted)
+        tempo_source="option" if tempo_bpm is not None else "estimated",
+        time_signature_source=time_signature_source)

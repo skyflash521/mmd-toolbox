@@ -513,8 +513,12 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
     消えた音符数、`quantized_stretched_notes` は長さを 1 tick へ引き伸ばした音符数(いずれも[§7.3](#73-テンポと拍子))、
     `no_phoneme_notes` は音素列が空になった音符数([§7.2](#72-歌詞音素強弱の付与))。
     [§4.5](#45-レポートと診断)の診断を構造化したもので、キーは常に載せる(`--lyrics` 未指定時の
-    `fallback_lyric_notes`・`dropped_morae` は `0`)。音符を数えるキーはいずれも `notes` と同じく
-    tick へ写した後の音符列を数える(写す前にあって消えた音符を数える `quantized_merged_notes` だけが例外)。`vowel_undetermined_notes`・`moraic_nasal_notes` は
+    `fallback_lyric_notes`・`dropped_morae` は `0`)。音符を数えるキーのうち、tick へ写す段が判定するもの
+    (`pitch_clamped_notes`・`quantized_stretched_notes`)は写した後の音符列を、写す前の段が判定するもの
+    (`short_notes`・`vowel_undetermined_notes`・`moraic_nasal_notes`・`fallback_lyric_notes`・
+    `no_phoneme_notes`)は判定した時点の音符列を数える(写した後の音符列からは数え直せない。
+    tick で潰れてまとめられた音符が残らず、短い音符は引き伸ばしとまとめで痕跡が消え、表示歌詞からは
+    音声由来かモーラ由来かを区別できないため)。`quantized_merged_notes` は写す前にあって消えた音符を数える。`vowel_undetermined_notes`・`moraic_nasal_notes` は
     表示歌詞を音声から決めた音符(`--lyrics` 未指定時の全音符と、指定時にモーラが尽きた音符)だけを数える。
   - `mode:"inspect"`(入力検査 `--machine --dry-run`): `mode:"run"` と同じキーをすべて持ち、加えて
     `input_kind, sample_rate, channels` を持つ。vpr を書かないので `output` は `null`。`input_kind` は常に

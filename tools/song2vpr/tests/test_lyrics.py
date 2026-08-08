@@ -251,3 +251,30 @@ def test_same_input_gives_the_same_result():
     second = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さく")
     assert [(n.lyric, n.phonemes, n.velocity) for n in first.notes] == \
            [(n.lyric, n.phonemes, n.velocity) for n in second.notes]
+
+
+# --- 診断 --------------------------------------------------------------------
+
+
+def test_moraic_nasal_notes_are_counted():
+    """撥音「ん」を入れた音符だけを数える(母音の音符は数えない)。"""
+    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4)],
+                             [_consonant(0.0, 0.2, "ɴ"), _vowel(0.2, 0.4, "a")], _flat_rms())
+    assert [note.lyric for note in result.notes] == ["ん", "あ"]
+    assert result.diagnostics.moraic_nasal_notes == 1
+
+
+def test_moraic_nasal_from_the_given_lyrics_is_not_counted():
+    """数えるのは表示歌詞を音声から決めた音符だけ(モーラ由来の「ん」は数えない)。"""
+    result = lyrics.annotate([_note(0.0, 0.2)], [_vowel(0.0, 0.2, "a")], _flat_rms(),
+                             lyrics_text="ん")
+    assert result.notes[0].lyric == "ん"
+    assert result.diagnostics.moraic_nasal_notes == 0
+
+
+def test_notes_without_phonemes_are_counted():
+    """音素列が空になった音符だけを数える(音素を持つ音符は数えない)。"""
+    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4)],
+                             [_vowel(0.0, 0.2, "a"), _gap(0.2, 0.4)], _flat_rms())
+    assert [note.phonemes for note in result.notes] == [["a"], []]
+    assert result.diagnostics.no_phoneme_notes == 1

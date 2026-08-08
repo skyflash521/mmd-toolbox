@@ -41,7 +41,7 @@ def _front_stage(pcm=None, segments=None, duration_sec=1.0):
                             confidence=1.0)]
     return PipelineResult(vocal_wav=Path("vocal.wav"), vocal_pcm=pcm, segments=segments,
                           rms=compute_rms(pcm), pcm=pcm, duration_sec=duration_sec,
-                          forced_split=False)
+                          forced_split=False, backends={})
 
 
 def _stub_pipeline(monkeypatch, front=None, calls=None):
@@ -160,6 +160,31 @@ def test_successful_run_leaves_a_completion_line(tmp_path, monkeypatch, progress
     completion = ("summary", f"完了 {output}")
     assert progress_calls.count(completion) == 1
     assert progress_calls.index("close") < progress_calls.index(completion)
+
+
+def test_dry_run_diagnostics_come_after_the_live_line_is_cleared(tmp_path, monkeypatch,
+                                                                 progress_calls):
+    """vpr を書かない実行の診断も、ライブ行を消してから標準出力へ書く。
+
+    先に消さないと、診断の1行目がライブ進捗の行へ連結される。書き出す実行の完了行と同じ順序だが、
+    ライブ表示は TTY でないと無効なので、捕捉した出力からは観測できない。
+
+    警告も消してから書くので、記録には同じ対が複数並びうる。診断は標準出力へ、警告は標準エラーへ
+    書かれる違いで見分け、診断の直前が消去であることを見る(先頭一致で見ると、警告が1件でも出た
+    実行では診断の側を戻しても通ってしまう)。
+    """
+    _stub_pipeline(monkeypatch)
+    monkeypatch.setattr("builtins.print",
+                        lambda *args, **kwargs: progress_calls.append(("print",
+                                                                       kwargs.get("file"))))
+    assert cli.main([_source(tmp_path), "-o", str(tmp_path / "song.vpr"), "--dry-run"]) == 0
+
+    diagnostics = ("print", None)  # 標準出力(既定の出力先)へ書かれたもの=診断
+    assert progress_calls.count(diagnostics) == 1
+    position = progress_calls.index(diagnostics)
+    # 位置を先に押さえる(0 のとき position-1 は末尾へ回り込み、必ず消去で終わる記録を拾ってしまう)。
+    assert position >= 1
+    assert progress_calls[position - 1] == "close"
 
 
 def test_louder_singing_gets_a_larger_velocity(tmp_path, monkeypatch):
@@ -333,3 +358,103 @@ def test_ineffective_kana_reading_reports_the_counts(tmp_path, monkeypatch, caps
     assert warnings
     # 「漢」と「A」がかなへ変換されるべきだった文字、判定に使ったのはそれと「あ」の3文字。
     assert (warnings[0]["unconverted_chars"], warnings[0]["counted_chars"]) == (2, 3)
+
+
+# --- result のペイロード -------------------------------------------------------
+
+
+def _result_of(capsysbinary):
+    events = _events(capsysbinary)
+    assert events[-1]["type"] == "result"
+    return events[-1]
+
+
+def test_run_result_reports_the_written_output_and_the_counts(tmp_path, monkeypatch,
+                                                              capsysbinary):
+    """通常実行の result は、書き出しパスと各段が数えた件数を載せる。"""
+    _stub_pipeline(monkeypatch)
+    output = tmp_path / "song.vpr"
+    assert cli.main(["--machine", _source(tmp_path), "-o", str(output),
+                     "--tempo", "96.5", "--time-signature", "3/4"]) == 0
+
+    result = _result_of(capsysbinary)
+    assert result["mode"] == "run"
+    assert result["output"] == str(output)
+    _project, notes = _notes_of(output)
+    assert result["notes"] == len(notes)
+    assert result["separated"] is True
+    assert result["backends"] == {}
+    assert result["duration_sec"] == 1.0
+    assert (result["tempo_bpm"], result["tempo_source"]) == (96.5, "option")
+    assert (result["time_signature"], result["time_signature_source"]) == ("3/4", "option")
+    assert result["resolution"] == 480
+
+
+def test_inspect_result_adds_the_input_metadata_and_writes_nothing(tmp_path, monkeypatch,
+                                                                   capsysbinary):
+    """入力検査は run の全キーに入力のメタ情報を足し、vpr を書かないので出力先は null。"""
+    _stub_pipeline(monkeypatch)
+    output = tmp_path / "song.vpr"
+    assert cli.main(["--machine", "--dry-run", _source(tmp_path), "-o", str(output)]) == 0
+
+    result = _result_of(capsysbinary)
+    assert result["mode"] == "inspect"
+    assert result["output"] is None
+    assert (result["input_kind"], result["sample_rate"], result["channels"]) == ("audio", _RATE, 1)
+    assert not output.exists()
+
+
+def test_separation_choice_is_reported(tmp_path, monkeypatch, capsysbinary):
+    _stub_pipeline(monkeypatch)
+    assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr"),
+                     "--separate-vocals", "never"]) == 0
+    assert _result_of(capsysbinary)["separated"] is False
+
+
+def test_counts_come_from_the_stages_that_judged_them(tmp_path, monkeypatch, capsysbinary):
+    """件数は判定した段の値をそのまま載せる(渡し違いを落とす)。"""
+    # 認識器が音素を割り当てなかった区間だけの入力(gap は音素列にも代表母音にも寄与しない)。
+    segments = [Segment(type="gap", start_sec=0.0, end_sec=1.0, phoneme=None, confidence=None)]
+    _stub_pipeline(monkeypatch, _front_stage(segments=segments))
+    assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
+
+    result = _result_of(capsysbinary)
+    # gap の音符は音素を持たず、母音も鼻音も得られないので既定の仮名が入る。
+    assert result["no_phoneme_notes"] == 1
+    assert result["vowel_undetermined_notes"] == 1
+    assert (result["fallback_lyric_notes"], result["dropped_morae"]) == (0, 0)
+
+
+# --- 人間向けの診断表示 --------------------------------------------------------
+
+
+def test_dry_run_shows_the_diagnostics_on_stdout(tmp_path, monkeypatch, capsys):
+    """--dry-run は診断を標準出力へ出す。"""
+    _stub_pipeline(monkeypatch)
+    assert cli.main([_source(tmp_path), "-o", str(tmp_path / "song.vpr"), "--dry-run"]) == 0
+    assert "テンポ" in capsys.readouterr().out
+
+
+def test_verbose_shows_the_same_diagnostics_after_writing(tmp_path, monkeypatch, capsys):
+    """-v は出力 vpr を書いたうえで、同じ診断を実行完了後に表示する。"""
+    _stub_pipeline(monkeypatch)
+    output = tmp_path / "song.vpr"
+    assert cli.main([_source(tmp_path), "-o", str(output), "-v"]) == 0
+    assert output.exists()
+    assert "テンポ" in capsys.readouterr().out
+
+
+def test_machine_mode_does_not_print_the_human_report(tmp_path, monkeypatch, capsysbinary):
+    """機械モードでは人間向けの表示をしない(標準出力はイベント専用)。"""
+    _stub_pipeline(monkeypatch)
+    assert cli.main(["--machine", "--dry-run", _source(tmp_path),
+                     "-o", str(tmp_path / "song.vpr")]) == 0
+    for line in capsysbinary.readouterr().out.decode("utf-8").splitlines():
+        assert line.startswith("{")
+
+
+def test_normal_run_without_verbose_stays_quiet(tmp_path, monkeypatch, capsys):
+    """診断の表示は --dry-run と -v のときだけ。"""
+    _stub_pipeline(monkeypatch)
+    assert cli.main([_source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
+    assert capsys.readouterr().out == ""

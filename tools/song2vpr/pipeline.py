@@ -28,14 +28,17 @@ class PipelineResult:
     pcm: AudioPcm
     duration_sec: float
     forced_split: bool
+    # 診断へ出す、音声前段へ渡したバックエンド選択の設定。そのまま載せ、その処理が実際に
+    # 走ったかは問わない。
+    backends: dict
 
 
-def _from_front_stage(front) -> PipelineResult:
+def _from_front_stage(front, backends) -> PipelineResult:
     analysis: AnalysisResult = front.analysis
     return PipelineResult(
         vocal_wav=analysis.vocal_wav, vocal_pcm=front.vocal_pcm, segments=analysis.segments,
         rms=analysis.rms, pcm=front.pcm, duration_sec=front.duration_sec,
-        forced_split=front.forced_split)
+        forced_split=front.forced_split, backends=backends)
 
 
 def run(input_path, *, separate_vocals, separator_name, content_recognizer_model, retry,
@@ -55,4 +58,10 @@ def run(input_path, *, separate_vocals, separator_name, content_recognizer_model
         keep_intermediate_dir=keep_intermediate_dir,
         on_progress=progress.stage if progress is not None else None)
 
-    return _from_front_stage(front)
+    return _from_front_stage(front, {
+        "separator": separator_name,
+        "recognizer": content_recognizer_model.model_id,
+        "recognizer_revision": content_recognizer_model.model_revision,
+        "forced_aligner": forced_aligner,
+        "english_katakana_method": english_katakana_method,
+    })

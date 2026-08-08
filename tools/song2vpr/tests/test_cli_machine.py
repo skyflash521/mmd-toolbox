@@ -6,7 +6,7 @@
 本モジュールは骨格(--version/--machine/--describe フラグ・単一の失敗経路・入力 positional の
 省略可能化・終端規則)と、引数解析段の構造化エラー経路(bad_argument・output_exists・
 output_is_directory)を対象にする。処理経路のイベントの中身(progress/warning/result の
-mode:"run"/"inspect" のペイロード)は音声前段の配線後に検証する。
+mode:"run"/"inspect" のペイロード)は test_cli_output.py が見る。
 
 機械モード標準出力は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。
 """

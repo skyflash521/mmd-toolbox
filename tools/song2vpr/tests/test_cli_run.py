@@ -57,7 +57,6 @@ def _run_machine(tmp_path, monkeypatch, exc, extra=()):
 # --- 成功経路の終端 ----------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: result を組み立てる診断の段がまだ無い", strict=True)
 def test_machine_success_path_terminates_with_a_result(tmp_path, monkeypatch, capsysbinary):
     """前段を終えた実行も、ストリームを result か error のちょうど1つで終端する。
 

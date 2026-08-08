@@ -14,7 +14,7 @@ from vpr import read, write_file
 def _tempo(bpm=120.0, numerator=4, denominator=4, first_bar_sec=0.0):
     return TempoEstimate(bpm=bpm, numerator=numerator, denominator=denominator,
                          beat_offset_sec=first_bar_sec, first_bar_sec=first_bar_sec,
-                         tempo_defaulted=False, time_signature_defaulted=False)
+                         tempo_source="estimated", time_signature_source="estimated")
 
 
 def _sung(start_sec, end_sec, midi=60, lyric="あ", phonemes=None, velocity=64):

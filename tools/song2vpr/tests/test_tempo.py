@@ -200,3 +200,30 @@ def test_same_input_gives_the_same_estimate():
     second = tempo.estimate(pcm)
     assert (first.bpm, first.numerator, first.denominator, first.first_bar_sec) == \
            (second.bpm, second.numerator, second.denominator, second.first_bar_sec)
+
+
+# --- 採用値の出どころ --------------------------------------------------------
+
+
+def test_given_values_are_reported_as_options():
+    result = tempo.estimate(_click_track(120.0), tempo_bpm=96.0, time_signature=(3, 4))
+    assert (result.tempo_source, result.time_signature_source) == ("option", "option")
+
+
+def test_estimated_values_are_reported_as_estimated():
+    result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))
+    assert (result.tempo_source, result.time_signature_source) == ("estimated", "estimated")
+
+
+def test_fallback_values_are_reported_as_defaults():
+    result = tempo.estimate(_silence())
+    assert (result.tempo_source, result.time_signature_source) == ("default", "default")
+
+
+def test_the_two_ways_of_telling_the_fallback_agree():
+    """出どころと仮置きの真偽は同じ事実を指す(食い違うと警告と診断がずれる)。"""
+    for result in (tempo.estimate(_silence()),
+                   tempo.estimate(_silence(), tempo_bpm=100.0),
+                   tempo.estimate(_click_track(120.0))):
+        assert result.tempo_defaulted == (result.tempo_source == "default")
+        assert result.time_signature_defaulted == (result.time_signature_source == "default")

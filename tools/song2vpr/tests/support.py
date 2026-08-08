@@ -21,4 +21,4 @@ def front_stage_result(duration_sec=0.3):
                    sample_rate=RATE)
     return PipelineResult(vocal_wav=Path("vocal.wav"), vocal_pcm=pcm, segments=[],
                           rms=compute_rms(pcm), pcm=pcm, duration_sec=duration_sec,
-                          forced_split=False)
+                          forced_split=False, backends={})

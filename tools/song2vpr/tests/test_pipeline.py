@@ -183,3 +183,27 @@ def test_run_works_without_progress_reporter(monkeypatch):
     pipeline.run("in.wav", **_common_kwargs())
 
     assert captured["kwargs"]["on_progress"] is None
+
+
+# --- バックエンド選択の設定 ----------------------------------------------------
+
+
+def test_backends_carry_the_settings_that_were_passed(monkeypatch):
+    """診断へ出すのは、前段へ渡したバックエンド選択の設定そのもの。"""
+    _stub_front_stage(monkeypatch, {})
+    result = pipeline.run("in.wav", **_common_kwargs())
+    assert result.backends == {
+        "separator": "audio-separator-htdemucs-ft",
+        "recognizer": "test-content-recognizer",
+        "recognizer_revision": None,
+        "forced_aligner": "wav2vec2-ctc-forcedalign",
+        "english_katakana_method": "arpakana",
+    }
+
+
+def test_backends_report_the_recognizer_revision_when_given(monkeypatch):
+    """リビジョンを固定した実行は、その値をそのまま載せる。"""
+    _stub_front_stage(monkeypatch, {})
+    pinned = ContentRecognizerModel(model_id="test-content-recognizer", model_revision="abc123")
+    result = pipeline.run("in.wav", **_common_kwargs(content_recognizer_model=pinned))
+    assert result.backends["recognizer_revision"] == "abc123"

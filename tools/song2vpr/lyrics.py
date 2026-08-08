@@ -69,6 +69,8 @@ class Diagnostics:
     """
 
     undetermined_vowel_notes: int = 0
+    moraic_nasal_notes: int = 0
+    no_phoneme_notes: int = 0
     notes_beyond_morae: int = 0
     discarded_morae: int = 0
     unconverted_chars: int = 0
@@ -124,6 +126,7 @@ def _lyric_from_segments(segments, start_sec, end_sec, diagnostics):
     other = sum(_overlap_sec(s, start_sec, end_sec) for s in overlapping
                 if s.type == "consonant" and s.phoneme not in _NASALS)
     if nasal > other:
+        diagnostics.moraic_nasal_notes += 1
         return _MORAIC_NASAL_KANA
 
     diagnostics.undetermined_vowel_notes += 1
@@ -243,9 +246,12 @@ def annotate(source_notes, segments, rms, *, lyrics_text=None) -> AnnotationResu
             if lyrics_text is not None:
                 diagnostics.notes_beyond_morae += 1
             lyric = _lyric_from_segments(segments, note.start_sec, note.end_sec, diagnostics)
+        phonemes = _phonemes_of(segments, note.start_sec, note.end_sec)
+        if not phonemes:
+            diagnostics.no_phoneme_notes += 1
         result.append(SungNote(
             start_sec=note.start_sec, end_sec=note.end_sec, midi=note.midi, lyric=lyric,
-            phonemes=_phonemes_of(segments, note.start_sec, note.end_sec),
+            phonemes=phonemes,
             velocity=_velocity_of(rms, note.start_sec, note.end_sec)))
 
     return AnnotationResult(notes=result, diagnostics=diagnostics)

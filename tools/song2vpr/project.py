@@ -25,6 +25,7 @@ _VOICE = VoiceBank(comp_id="BHKCEKSYNBXG3HB2", name="HATSUNE_MIKU_V6_ORIGINAL")
 class Diagnostics:
     """組み立ての過程で数えた件数。"""
 
+    note_count: int = 0  # tick へ写した後の音符数(まとめ・引き伸ばしを済ませた最終の数)
     pitch_clamped_notes: int = 0
     quantized_merged_notes: int = 0
     quantized_stretched_notes: int = 0
@@ -94,6 +95,8 @@ def build(notes, tempo, *, name: str) -> BuildResult:
                     pitch=_clamp_pitch(note.midi, diagnostics), lyric=note.lyric,
                     velocity=note.velocity, phonemes=list(note.phonemes))
                for start_tick, end_tick, note in spans]
+
+    diagnostics.note_count = len(written)
 
     # 音符が無いときも長さ 0 のパートを作らないので、1小節分を与える。
     duration_tick = spans[-1][1] if spans else _ticks_per_bar(tempo)

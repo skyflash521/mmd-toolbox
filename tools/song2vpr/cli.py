@@ -35,6 +35,7 @@ from . import lyrics as _lyrics
 from . import notes as _notes
 from . import progress as _progress
 from . import project as _project
+from . import report as _report
 from . import tempo as _tempo
 from . import warning_text as _warning_text
 
@@ -336,9 +337,10 @@ def _run(args, emitter, fail) -> int:
         track = _pitch.estimate(front.vocal_pcm)
 
         progress.stage("notes")
+        split = _notes.split(track, front.segments)
         try:
-            annotated = _lyrics.annotate(_notes.split(track, front.segments), front.segments,
-                                         front.rms, lyrics_text=lyrics_text)
+            annotated = _lyrics.annotate(split.notes, front.segments, front.rms,
+                                         lyrics_text=lyrics_text)
         except RecognitionError as e:
             # かな読みは音符へ歌詞を割り当てる段の中で行うので、失敗が指す段は認識でなく音符化。
             progress_reporter.close()
@@ -371,6 +373,26 @@ def _run(args, emitter, fail) -> int:
                             field="--output", path=output)
             progress_reporter.close()
             progress_reporter.summary(f"完了 {output}")
+
+        common = dict(tempo=estimate, duration_sec=front.duration_sec,
+                      separated=(args.separate_vocals != "never"), backends=front.backends,
+                      split=split.diagnostics, annotation=annotated.diagnostics,
+                      build=built.diagnostics)
+        if args.dry_run:
+            fields = _report.inspect_fields(sample_rate=front.pcm.sample_rate,
+                                            channels=front.pcm.samples.shape[1], **common)
+            mode = "inspect"
+        else:
+            fields = _report.run_fields(output=output, **common)
+            mode = "run"
+
+        if emitter is not None:
+            emitter.result(mode=mode, **fields)
+        elif args.dry_run or args.verbose:
+            # 人間向けの診断は標準出力へ(機械モードでは出さない。標準出力はイベント専用のため)。
+            # 書く前にライブ行を消す(消さないと診断の先頭行が進捗の行へ連結される)。
+            progress_reporter.close()
+            print(_report.report_text(fields, lyrics_given=args.lyrics is not None))
         return 0
     finally:
         progress_reporter.close()

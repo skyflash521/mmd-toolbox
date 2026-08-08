@@ -8,7 +8,7 @@
 隣接と見なされないことがあるため。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -17,6 +17,21 @@ _MIN_DURATION_SEC = 0.08
 
 # 撥音の音素記号。母音を伴わずに1つの音節をなすので、音節の核として母音と同じに扱う。
 _MORAIC_NASAL = "ɴ"
+
+
+@dataclass
+class Diagnostics:
+    """分割の過程で数えた件数。利用者向けの診断へ出す。"""
+
+    short_notes: int = 0
+
+
+@dataclass(frozen=True)
+class SplitResult:
+    """音符列と、その分割で数えた件数。"""
+
+    notes: "list[Note]" = field(default_factory=list)
+    diagnostics: Diagnostics = field(default_factory=Diagnostics)
 
 
 @dataclass(frozen=True)
@@ -147,15 +162,16 @@ def _absorb_short_spans(spans, frame_sec):
     return result
 
 
-def split(track, segments, *, frame_sec=None) -> list[Note]:
+def split(track, segments, *, frame_sec=None) -> SplitResult:
     """時刻ごとの音高と音素セグメントから音符の区間と音高を決める。
 
     frame_sec は時刻の刻み(省略時は track の時刻列から求める)。音符の区間は互いに重ならず、
-    長さは正になる。
+    長さは正になる。まとめる先が無く最小長に満たないまま残った音符は、件数を診断に出す
+    (最小長は内部の値で、呼び出し側からは数えられないため)。
     """
     times = np.asarray(track.times_sec)
     if len(times) < 2:
-        return []  # 刻みを決められない長さの入力からは音符を作らない
+        return SplitResult()  # 刻みを決められない長さの入力からは音符を作らない
     if frame_sec is None:
         frame_sec = float(times[1] - times[0])
 
@@ -166,7 +182,10 @@ def split(track, segments, *, frame_sec=None) -> list[Note]:
 
     # 終端は次のフレームの時刻をそのまま使う(切れ目なく続く音符が同じ値を共有し、後段が
     # 「前の終わり == 次の始まり」で連続を判定できる)。末尾だけは次のフレームが無いので刻みを足す。
-    return [Note(start_sec=float(times[lo]),
-                 end_sec=float(times[hi]) if hi < len(times) else float(times[hi - 1]) + frame_sec,
-                 midi=midi)
-            for lo, hi, midi in spans]
+    result = [Note(start_sec=float(times[lo]),
+                   end_sec=float(times[hi]) if hi < len(times)
+                   else float(times[hi - 1]) + frame_sec,
+                   midi=midi)
+              for lo, hi, midi in spans]
+    short = sum(1 for lo, hi, _midi in spans if (hi - lo) * frame_sec < _MIN_DURATION_SEC)
+    return SplitResult(notes=result, diagnostics=Diagnostics(short_notes=short))
