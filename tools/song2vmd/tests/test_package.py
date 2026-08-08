@@ -4,6 +4,7 @@
 console script のエントリ(cli.main)が公開・登録され、配布物に含まれること。
 """
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -14,7 +15,8 @@ from song2vmd import cli
 def test_package_imports():
     # namespace package(__init__.py 不在)ではなく実パッケージであること。
     assert song2vmd.__file__ is not None
-    assert song2vmd.__version__ == "0.0.1"
+    # バージョンは上がっていくので、番号は固定せず形式だけを見る。
+    assert re.fullmatch(r"\d+\.\d+\.\d+", song2vmd.__version__)
 
 
 def test_console_script_entry_point_callable():

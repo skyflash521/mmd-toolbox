@@ -422,7 +422,6 @@ def test_version_prints_and_exits_zero(capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "song2vmd" in out and __version__ in out
-    assert __version__ == "0.0.1"
 
 
 def test_help_lists_key_flags(capsys):
