@@ -55,6 +55,35 @@ def test_estimated_bpm_is_not_an_octave_off():
     assert 60.0 < result.bpm < 240.0
 
 
+@pytest.mark.xfail(reason="impl pending: 拍と感じる帯域を選ぶ重みの幅の調整", strict=True)
+def test_a_fast_beat_is_not_taken_at_half_speed():
+    """帯域の重みの中心から離れた速い拍を、半分のテンポとして採らない。
+
+    この入力は相関だけ見れば正解の候補が半分の候補に勝つので、覆しているのは重みになる。重みは
+    候補どうしのタイブレークなので、この優位を覆さない幅にする。狭い幅を落とす主張なので、幅の
+    下限を押さえる。同じくオクターブ誤りを見る `test_estimated_bpm_is_not_an_octave_off` は入力が
+    重みの中心にあり、正解の候補が重みで最も高く評価されるので、幅を狭める側では破れない。広げる側
+    では破れるが、`test_a_slow_beat_is_not_taken_at_half_speed` の入力より緩いところで破れる。
+
+    16 秒にするのは長さが判定条件のため。既定の 8 秒では現行の幅でも正解を採るので、幅の違いが
+    表れない。
+    """
+    result = tempo.estimate(_click_track(190.0, seconds=16.0))
+    assert result.bpm == pytest.approx(190.0, rel=0.03)
+
+
+def test_a_slow_beat_is_not_taken_at_half_speed():
+    """帯域の重みの中心から離れた遅い拍を、半分のテンポとして採らない。
+
+    この入力は相関だけ見れば半分の候補の方が高く、正解を保っているのは中心へ寄せる重みになる。
+    幅を広げるほどその働きが弱まり、広げすぎるとこの入力が半分へ倒れる。したがってこの主張は幅の
+    上限を押さえ、`test_a_fast_beat_is_not_taken_at_half_speed` が押さえる下限と対になる。
+    倍の周期には相関がほとんど無いので、倍へ倒れる側は幅を拘束しない。
+    """
+    result = tempo.estimate(_click_track(90.0, seconds=16.0))
+    assert result.bpm == pytest.approx(90.0, rel=0.03)
+
+
 def test_given_tempo_is_used_as_is():
     """--tempo 指定時はその値を曲全体で一定に使う(推定しない)。"""
     result = tempo.estimate(_click_track(90.0), tempo_bpm=140.0)
