@@ -55,7 +55,7 @@ def _run_machine(tmp_path, monkeypatch, exc, extra=()):
 # --- 成功経路の終端 ----------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="result を組み立てる後段がまだ無い", strict=True)
+@pytest.mark.xfail(reason="impl pending: 音符化以降を CLI へ結線していない", strict=True)
 def test_machine_success_path_terminates_with_a_result(tmp_path, monkeypatch, capsysbinary):
     """前段を終えた実行も、ストリームを result か error のちょうど1つで終端する。
 
