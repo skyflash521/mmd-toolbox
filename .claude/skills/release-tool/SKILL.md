@@ -42,7 +42,8 @@ description: 公開CLIツールのリリース作業(バージョン付け・利
    3. CI の結果を確認し(`gh pr checks`)、緑になったことを報告する。赤なら原因を報告して指示を待つ。
 4. マージとタグ作成・タグ push はユーザーが GitHub・手元で別途行う作業であり、スキルは実行しない。
    CI 緑の報告と合わせて、次を**残タスク**として提示して締める(タグのコマンドはコピーしやすい
-   ようにコードブロックで示す。タグの形式・種別は [versioning.md §5](../../../docs/conventions/versioning.md#5-タグ付け)):
+   ようにコードブロックで示す。タグの形式・種別は [versioning.md §5](../../../docs/conventions/versioning.md#5-タグ付け)、
+   push の刻み方は [publishing.md D. リリース確定](../../../docs/conventions/publishing.md#d-リリース確定)):
    - PR をマージする。
    - main のマージコミットへ、リリースする構成要素ごとの注釈付きタグを打って push する。
    - タグ push で CI が GitHub Release を自動作成するので、作成された Release を確認する。

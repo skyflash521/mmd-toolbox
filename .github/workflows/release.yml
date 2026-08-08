@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "*/v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release を作る対象のタグ(<構成要素>/v<バージョン>)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,9 +18,14 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # 手動起動では ref_name が起動元のブランチになるので、対象タグを明示して取り出す。
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Create GitHub Release from CHANGELOG
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/create_release.py "$GITHUB_REF_NAME"
+          # 入力を run の文字列へ展開せず環境変数で渡す(展開するとタグ名がシェルへ注入されうる)。
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: python3 .github/scripts/create_release.py "$TAG"

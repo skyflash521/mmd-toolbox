@@ -44,13 +44,13 @@
 
 1. すべて緑・収束後、develop から main への PR を作成し、CI(PR で走る検査)が緑であることを確認する。
 2. マージは明示指示で行う(自動でマージしない)。
-3. main のマージコミットへ、リリースする CLIツールごとのタグを打ち、push する(タグの形式・種別・バージョンの一致・同時リリース時の別タグは [versioning.md §5](versioning.md#5-タグ付け))。タグ付け・push は明示指示で行う(自動で打たない)。
+3. main のマージコミットへ、リリースする CLIツールごとのタグを打ち、push する(タグの形式・種別・バージョンの一致・同時リリース時の別タグは [versioning.md §5](versioning.md#5-タグ付け))。タグ付け・push は明示指示で行う(自動で打たない)。**push は1タグにつき1コマンドで行い、複数のタグをまとめて push しない。** GitHub は4つ以上のタグが一度に push されるとタグのイベントを1つも作らず、次項の Release 作成が起動しないまま成功したように見えるため。
 
    ```sh
    git push origin <tool>/v<MAJOR.MINOR.PATCH>
    ```
 
-4. タグの push をトリガに、CI が GitHub Release を作成して CHANGELOG の該当バージョンの節を本文へ転記する(転記の規則は [changelog.md §4](changelog.md#4-github-releases-への転記))。CI の workflow が成功し Release が作られたことを確認する。
+4. タグの push をトリガに、CI が GitHub Release を作成して CHANGELOG の該当バージョンの節を本文へ転記する(転記の規則は [changelog.md §4](changelog.md#4-github-releases-への転記))。CI の workflow が成功し Release が作られたことを確認する。Release が作られていない場合は、タグを消して push し直さず、release workflow を対象タグを指定して起動する。
 
 ## 順序の目安
 
