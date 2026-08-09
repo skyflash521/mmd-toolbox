@@ -151,14 +151,18 @@ def test_gap_alone_does_not_split_the_note():
 # --- 短い音符の扱い ----------------------------------------------------------
 
 
-def test_short_note_merges_into_the_neighbour_of_the_same_pitch():
-    """最小長に満たない音符は、同じ音高の隣接音符へ併合する。"""
-    # 母音の切り替わりで 69 が2つに分かれ、そのうち後ろが最小長に満たない配置。
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_short_note_is_not_absorbed_across_a_syllable():
+    """まとめる先は同じ音節に属する隣接音符だけ。別の音節しか隣に無ければそのまま残す。
+
+    音節をまたいでまとめると音節=モーラが消え、1音符が1つの発声に対応しなくなる。
+    """
+    # 中央の短い音符だけが別の音節に属し、前後の隣接はどちらも別音節になる配置。
     track = _track([(0.3, 69), (0.03, 69), (0.3, 71)])
     segments = [_vowel(0.0, 0.3, "a"), _vowel(0.3, 0.33, "i"), _vowel(0.33, 0.63, "a")]
-    result = notes.split(track, segments).notes
-    assert [note.midi for note in result] == [69, 71]
-    assert result[0].end_sec == pytest.approx(0.33, abs=FRAME)
+    result = notes.split(track, segments)
+    assert [note.syllable for note in result.notes] == [0, 1, 2]
+    assert result.diagnostics.short_notes == 1
 
 
 def test_short_note_is_absorbed_by_the_nearest_pitch():
@@ -191,6 +195,114 @@ def test_short_note_is_not_absorbed_across_a_rest():
     track = _track([(0.3, 60), (0.2, None), (0.03, 71)])
     result = notes.split(track, _one_vowel(track)).notes
     assert [note.midi for note in result] == [60, 71]
+
+
+# --- 音節の帰属 --------------------------------------------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_note_carries_its_syllable():
+    """音符は自分が属する音節を持つ(付与の段が時間の重なりで決め直さないため)。
+
+    最初の音節は音高の変わり目で2つの音符に分かれるので、音符の通し番号を入れる実装では
+    期待値に一致しない。
+    """
+    track = _track([(0.1, None), (0.3, 69), (0.2, 71), (0.3, 62)])
+    segments = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a"), _vowel(0.6, 0.9, "i")]
+    assert [note.syllable for note in notes.split(track, segments).notes] == [0, 0, 1]
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_split_result_lists_the_segments_of_each_syllable():
+    """分割結果は音節ごとのセグメント帰属を持つ。頭の子音は後続の音節に属する。"""
+    track = _track([(0.1, None), (0.3, 69), (0.3, 71)])
+    head = _consonant(0.0, 0.1, "k")
+    first = _vowel(0.1, 0.4, "a")
+    second = _vowel(0.4, 0.7, "i")
+    result = notes.split(track, [head, first, second])
+    assert result.syllable_segments == [[head, first], [second]]
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_gap_segments_are_not_assigned_to_a_syllable():
+    """gap は音素を割り当てなかった区間なので、音節のセグメント列に載せない。"""
+    track = _track([(0.3, 69), (0.3, 69)])
+    vowel = _vowel(0.0, 0.3, "a")
+    result = notes.split(track, [vowel, _gap(0.3, 0.6)])
+    assert result.syllable_segments == [[vowel]]
+
+
+# --- 音節と結びつかない音符の抑制 --------------------------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_voiced_span_belonging_to_no_syllable_is_not_output():
+    """前後に核が無く帰属を決められない有声区間は音符にしない。"""
+    track = _track([(0.3, 69), (0.2, None), (0.3, 71)])
+    result = notes.split(track, [_gap(0.0, 0.5), _vowel(0.5, 0.8, "a")])
+    assert [note.midi for note in result.notes] == [71]
+    assert result.diagnostics.suppressed_notes == 1
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_component_starting_far_from_the_nucleus_is_dropped_whole():
+    """核へ届く音符を含まない連続成分は、先頭が核の終端から離れていれば全件落とす。
+
+    分離しきれなかった伴奏が、gap の引き継ぎで核から遠く離れたまま音符化するのを抑える。
+    """
+    track = _track([(0.3, 69), (2.2, None), (0.3, 60), (0.3, 62)])
+    result = notes.split(track, [_vowel(0.0, 0.3, "a"), _gap(0.3, 3.1)])
+    assert [note.midi for note in result.notes] == [69]
+    assert result.diagnostics.suppressed_notes == 2
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_component_near_the_nucleus_end_survives_whole():
+    """核の終端の近くから始まる成分は全件残す。判定は成分の先頭だけで行い、途中では行わない。
+
+    核を長くとってあるので、核の開始から測る実装ならこの成分は落ちる(基準点が終端であることの
+    確認)。成分の2つ目の音符は核の終端から境目より遠くで始まるので、音符ごとに判定する実装でも
+    落ちる(判定の単位が成分であることの確認)。
+    """
+    track = _track([(0.3, 69), (2.7, None), (1.6, 60), (0.6, 62)])
+    result = notes.split(track, [_vowel(0.0, 2.5, "a"), _gap(2.5, 5.2)])
+    assert [note.midi for note in result.notes] == [69, 60, 62]
+    assert result.diagnostics.suppressed_notes == 0
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_component_reaching_the_nucleus_survives_however_far_it_runs():
+    """核と重なる音符を含む成分は全件残す。
+
+    3つ目の音符は核の終端から境目より遠くで始まるので、音符ごとに判定する実装なら落ちる。
+    """
+    track = _track([(0.3, 69), (2.3, 71), (0.6, 72)])
+    result = notes.split(track, [_vowel(0.0, 0.3, "a"), _gap(0.3, 3.2)])
+    assert [note.midi for note in result.notes] == [69, 71, 72]
+    assert result.diagnostics.suppressed_notes == 0
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_a_component_does_not_span_two_syllables():
+    """成分は同じ音節に属する音符の並び。切れ目が無くても音節が変われば別の成分にする。
+
+    次の音節の核へ届く音符と接しているだけで、前の音節の遠い音符まで残ってしまわないこと。
+    """
+    track = _track([(0.3, 69), (2.2, None), (0.3, 60), (0.3, 62)])
+    segments = [_vowel(0.0, 0.3, "a"), _gap(0.3, 2.8), _vowel(2.8, 3.1, "i")]
+    result = notes.split(track, segments)
+    assert [note.midi for note in result.notes] == [69, 62]
+    assert result.diagnostics.suppressed_notes == 1
+
+
+@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_suppressed_notes_are_not_counted_as_short():
+    """抑制で出力しない音符は、短いまま残った音符として数えない。"""
+    track = _track([(0.3, 69), (2.5, None), (0.03, 60), (0.2, None)])
+    result = notes.split(track, [_vowel(0.0, 0.3, "a"), _gap(0.3, 3.03)])
+    assert [note.midi for note in result.notes] == [69]
+    assert result.diagnostics.suppressed_notes == 1
+    assert result.diagnostics.short_notes == 0
 
 
 # --- 音符の並び --------------------------------------------------------------
@@ -231,10 +343,9 @@ def test_short_notes_left_alone_are_counted():
 def test_absorbed_short_notes_are_not_counted():
     """隣へ吸収された短音符は残っていないので数えない。
 
-    母音の切り替わりで同じ音高が2つに分かれ、後ろが最小長に満たない配置(吸収が実際に起きる)。
+    1つの音節の中で音高が変わり、後ろが最小長に満たない配置(同じ音節なので吸収が起きる)。
     """
-    track = _track([(0.3, 69), (0.03, 69)])
-    segments = [_vowel(0.0, 0.3, "a"), _vowel(0.3, 0.33, "i")]
-    result = notes.split(track, segments)
+    track = _track([(0.3, 69), (0.03, 71)])
+    result = notes.split(track, _one_vowel(track))
     assert len(result.notes) == 1
     assert result.diagnostics.short_notes == 0
