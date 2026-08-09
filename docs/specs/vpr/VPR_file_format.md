@@ -100,7 +100,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `lyric` | str | 表示歌詞 |
 | `phoneme` | str | 音素列。**空白区切り**(例 `"k o"`、`"t th e l"`)。`phoneme.split()` で音素の並びになる |
 | `velocity` | int | ベロシティ(0〜127) |
-| `isProtected` | bool(**省略可**) | 音素列の保護。欠落時は偽として扱う。観測した実 vpr の値はすべて `false`。真のとき編集器が表示歌詞から音素を導き直さない、という意味は編集器の仕様からの推定で、実挙動は未検証 |
+| `isProtected` | bool(**省略可**) | 音素列の保護。欠落時は偽として扱う。観測した実 vpr では大半が `false` で、真の音符は解析に用いた2ファイルのうち一方に2件だけある。その2件はいずれも表示歌詞から導かれる音素とは異なる音素列を持つ(表示歌詞 `Tell` に音素列 `t th e l`、表示歌詞「お」に音素列 `w o`)。真のとき編集器が表示歌詞から音素を導き直さない、という意味はこの観測と整合するが、編集器の実挙動そのものは未検証 |
 | `vibrato` | dict(**省略可**) | 音符ビブラート。構造は下記の [notes[] の vibrato](#notes-の-vibrato) |
 | `aiExp` | dict(**省略可**) | VOCALOID:AI の表現パラメータ。ビブラート深さの `vibratoLeadingDepth`/`vibratoFollowingDepth`(実数。観測値は約 0.2〜1.0 で、上端 1.0 は直接観測、下端 0 は未観測)を含む。それ以外のキー(`pitchFine`・`pitchDriftStart`/`End`・`pitchScalingCenter`/`Origin`・`pitchTransitionStart`/`End`・`amplitudeWhole`/`Start`/`End`)は名前以外を解析していない |
 | `isAiVibratoEnabled` | bool(**省略可**) | 音符直下の真偽値(`aiExp` の内側ではない)。観測した音符はすべて `true` で、`false` の例は未観測。意味は未確定 |
