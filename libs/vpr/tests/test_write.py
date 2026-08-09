@@ -124,6 +124,37 @@ def test_round_trip_keeps_an_empty_phoneme_list():
     assert _read_back(write(source)).tracks[0].parts[0].notes[0].phonemes == []
 
 
+@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
+@pytest.mark.parametrize("is_protected", [True, False])
+def test_round_trip_keeps_is_protected(is_protected):
+    source = _project([_note(is_protected=is_protected)])
+    written = _read_back(write(source)).tracks[0].parts[0].notes[0]
+    assert written.is_protected is is_protected
+
+
+@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
+@pytest.mark.parametrize("is_protected", [True, False])
+def test_is_protected_is_written_as_the_format_field(is_protected):
+    """公開モデルの値が、形式の音符フィールドとして真偽値で載る。
+
+    偽も検査するのは、真のときだけ書く実装を許さないため(往復だけでは、書かずに欠落させても
+    読みが偽へ倒すので通ってしまう)。
+    """
+    written = _sequence_of(write(_project([_note(is_protected=is_protected)])))
+    assert written["tracks"][0]["parts"][0]["notes"][0]["isProtected"] is is_protected
+
+
+@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
+def test_is_protected_cleared_by_the_caller_overwrites_the_raw_value():
+    """読んだ真を公開モデルで偽にしたら、書き出しも偽になる(読み書きが対称)。"""
+    raw = _raw_note(0, 480, 60, "か", "k a", 64)
+    raw["isProtected"] = True
+    project = _read_back(_make_vpr(_sequence([_singing_track([raw])])))
+    project.tracks[0].parts[0].notes[0].is_protected = False
+
+    assert _raw_note_of(write(project))["isProtected"] is False
+
+
 def test_round_trip_keeps_the_controllers():
     part = Part(name="p", start_tick=0, duration_tick=1920, notes=[_note()],
                 controllers=[ControllerCurve(name="dynamics",

@@ -174,6 +174,40 @@ def test_read_splits_multi_token_phoneme():
     assert project.tracks[0].parts[0].notes[0].phonemes == ["t", "th", "e", "l"]
 
 
+@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
+@pytest.mark.parametrize(("stored", "expected"), [(True, True), (False, False)])
+def test_read_maps_is_protected(stored, expected):
+    from vpr import read
+
+    note = _note(pos=0, duration=240, number=60, lyric="か", phoneme="k a", velocity=64)
+    note["isProtected"] = stored
+    project, _ = read(_make_vpr(_sequence([_singing_track([note])])))
+    assert project.tracks[0].parts[0].notes[0].is_protected is expected
+
+
+@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
+def test_read_missing_is_protected_is_false():
+    from vpr import read
+
+    # 形式が省略可と定めるフィールドで、欠落時は偽として扱う。
+    notes = [_note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64)]
+    project, _ = read(_make_vpr(_sequence([_singing_track(notes)])))
+    assert project.tracks[0].parts[0].notes[0].is_protected is False
+
+
+@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
+@pytest.mark.parametrize("stored", ["true", 1, None, {}])
+def test_read_non_boolean_is_protected_is_false_without_error(stored):
+    from vpr import read
+
+    # 現在読める vpr が読めなくなることを避ける寛容規則。型不正を構造異常にしない。
+    note = _note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64)
+    note["isProtected"] = stored
+    project, warnings = read(_make_vpr(_sequence([_singing_track([note])])))
+    assert project.tracks[0].parts[0].notes[0].is_protected is False
+    assert [w.code for w in warnings] == []
+
+
 def test_read_notes_sorted_by_start_tick():
     from vpr import read
 
