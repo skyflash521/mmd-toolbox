@@ -93,7 +93,8 @@ def build(notes, tempo, *, name: str) -> BuildResult:
 
     written = [Note(start_tick=start_tick, duration_tick=end_tick - start_tick,
                     pitch=_clamp_pitch(note.midi, diagnostics), lyric=note.lyric,
-                    velocity=note.velocity, phonemes=list(note.phonemes))
+                    velocity=note.velocity, phonemes=list(note.phonemes),
+                    is_protected=note.is_protected)
                for start_tick, end_tick, note in spans]
 
     diagnostics.note_count = len(written)

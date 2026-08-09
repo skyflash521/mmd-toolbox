@@ -16,7 +16,8 @@ import numpy as np
 _MIN_DURATION_SEC = 0.08
 
 # 撥音の音素記号。母音を伴わずに1つの音節をなすので、音節の核として母音と同じに扱う。
-_MORAIC_NASAL = "ɴ"
+# 付与の段も音節の核を見分けるのに使うので、同じ判定を2か所で持たないよう公開する。
+MORAIC_NASAL = "ɴ"
 
 # 核へ届く音符を含まない連続成分は、先頭がその音節の核の終端からこれを超えて離れていれば落とす。
 _MAX_START_AFTER_NUCLEUS_SEC = 2.0
@@ -56,7 +57,7 @@ class Note:
 def _is_syllable_nucleus(segment):
     """音節の核か。母音と、母音を伴わない撥音がこれに当たる。"""
     return segment.type == "vowel" or (segment.type == "consonant"
-                                       and segment.phoneme == _MORAIC_NASAL)
+                                       and segment.phoneme == MORAIC_NASAL)
 
 
 def _syllable_index_per_frame(times_sec, segments):

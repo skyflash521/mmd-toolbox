@@ -22,7 +22,6 @@ def _sung(start_sec, end_sec, midi=60, lyric="あ", phonemes=None, velocity=64):
                     phonemes=list(phonemes) if phonemes is not None else ["a"], velocity=velocity)
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属からの付与", strict=True)
 @pytest.mark.parametrize("is_protected", [True, False])
 def test_the_phoneme_protection_reaches_the_written_note(is_protected):
     """音素の保護は、組み立てた vpr の音符まで運ぶ(付与の段だけで持っていても書き出されない)。"""

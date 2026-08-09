@@ -11,6 +11,8 @@ import numpy as np
 
 from vocal_analysis.phonemes import espeak_ipa_to_vowel
 
+from .notes import MORAIC_NASAL
+
 # 認識器が音素ラベルに出しうる IPA を、vpr の音素表現(VOCALOID 日本語の X-SAMPA)へ写す表。
 # 認識器の語彙は閉じているので全被覆で持ち、取りこぼしを表の網羅で防ぐ。
 IPA_TO_VPR_PHONEME = {
@@ -25,14 +27,56 @@ IPA_TO_VPR_PHONEME = {
     "ç": "C", "v": "v",
 }
 
-# 5母音から表示歌詞の仮名へ。音素記号から5母音への写像は共有側が持つので、ここはその先だけを持つ。
-_VOWEL_KANA = {"a": "あ", "i": "い", "u": "う", "e": "え", "o": "お"}
+# 音節の頭子音(vpr の音素表現)と核の5母音から表示歌詞のかなを引く表。行は認識器の音素語彙を
+# 写した記号の全体、列は a / i / u / e / o。空文字列の行は頭子音を持たない音節。
+KANA_BY_CONSONANT = {
+    "": ("あ", "い", "う", "え", "お"),
+    "k": ("か", "き", "く", "け", "こ"),
+    "k'": ("きゃ", "き", "きゅ", "きぇ", "きょ"),
+    "g": ("が", "ぎ", "ぐ", "げ", "ご"),
+    "g'": ("ぎゃ", "ぎ", "ぎゅ", "ぎぇ", "ぎょ"),
+    "s": ("さ", "すぃ", "す", "せ", "そ"),
+    "S": ("しゃ", "し", "しゅ", "しぇ", "しょ"),
+    "z": ("ざ", "ずぃ", "ず", "ぜ", "ぞ"),
+    "dZ": ("じゃ", "じ", "じゅ", "じぇ", "じょ"),
+    "t": ("た", "てぃ", "とぅ", "て", "と"),
+    "ts": ("つぁ", "つぃ", "つ", "つぇ", "つぉ"),
+    "tS": ("ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"),
+    "d": ("だ", "でぃ", "どぅ", "で", "ど"),
+    "n": ("な", "に", "ぬ", "ね", "の"),
+    "J": ("にゃ", "に", "にゅ", "にぇ", "にょ"),
+    "h": ("は", "ひ", "ふ", "へ", "ほ"),
+    "C": ("ひゃ", "ひ", "ひゅ", "ひぇ", "ひょ"),
+    "p\\": ("ふぁ", "ふぃ", "ふ", "ふぇ", "ふぉ"),
+    "b": ("ば", "び", "ぶ", "べ", "ぼ"),
+    "b'": ("びゃ", "び", "びゅ", "びぇ", "びょ"),
+    "p": ("ぱ", "ぴ", "ぷ", "ぺ", "ぽ"),
+    "p'": ("ぴゃ", "ぴ", "ぴゅ", "ぴぇ", "ぴょ"),
+    "m": ("ま", "み", "む", "め", "も"),
+    "m'": ("みゃ", "み", "みゅ", "みぇ", "みょ"),
+    "j": ("や", "い", "ゆ", "いぇ", "よ"),
+    "4": ("ら", "り", "る", "れ", "ろ"),
+    "w": ("わ", "うぃ", "う", "うぇ", "うぉ"),
+    # ヴ表記を受理する実 vpr を確認できていないので、調音の最も近い b の行を使う。
+    "v": ("ば", "び", "ぶ", "べ", "ぼ"),
+}
 
-# 鼻音の音素記号。母音が無い音符でこれらが主体なら撥音として扱う。
-_NASALS = frozenset({"m", "mʲ", "n", "ɲ", "ɴ"})
+# 核に隣接する子音が j のとき、その前の子音から引く行。ら行の拗音だけは対応する子音の記号が
+# 認識器の語彙に無いので、行そのものを持つ。
+_PALATALIZED_ROW = {"k": "k'", "g": "g'", "b": "b'", "p": "p'", "m": "m'", "h": "C"}
+_RA_PALATALIZED = ("りゃ", "り", "りゅ", "りぇ", "りょ")
 
-# 母音も鼻音も得られない音符へ入れる仮名。
+# 列の並び。共有側が返す5母音の文字に対応する。
+_VOWEL_ORDER = "aiueo"
+
+# 半母音の音素記号。直前の子音と組んで拗音になる。
+_PALATAL_APPROXIMANT = "j"
+
+# 母音も撥音も得られない音符へ入れる仮名。
 _FALLBACK_KANA = "あ"
+
+# 1つの音節の2つ目以降の音符に入れる表記(実 vpr が用いる継続の表記)。
+CONTINUATION = "-"
 
 _LONG_MARK = "ー"
 _SOKUON = "っ"
@@ -58,6 +102,7 @@ class SungNote:
     lyric: str
     phonemes: list[str]
     velocity: int
+    is_protected: bool = False  # 音素列の保護。書き出しの段がそのまま vpr の音符へ渡す
 
 
 @dataclass
@@ -93,44 +138,53 @@ class AnnotationResult:
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
 
 
-def _overlap_sec(segment, start_sec, end_sec):
-    return max(0.0, min(segment.end_sec, end_sec) - max(segment.start_sec, start_sec))
-
-
-def _overlapping(segments, start_sec, end_sec):
-    return [s for s in segments if _overlap_sec(s, start_sec, end_sec) > 0.0]
-
-
-def _phonemes_of(segments, start_sec, end_sec):
-    """音符区間に重なる音素セグメントを時間順に並べ、vpr の音素表現へ写す。
+def _phonemes_of(segments):
+    """音節のセグメント由来の音素を時間順に並べ、vpr の音素表現へ写す。
 
     音素ラベルを持たないセグメントと gap は除外する(除外で空になっても許容する)。
     """
-    overlapping = sorted(_overlapping(segments, start_sec, end_sec), key=lambda s: s.start_sec)
-    return [IPA_TO_VPR_PHONEME[s.phoneme] for s in overlapping
+    return [IPA_TO_VPR_PHONEME[s.phoneme] for s in sorted(segments, key=lambda s: s.start_sec)
             if s.phoneme is not None and s.phoneme in IPA_TO_VPR_PHONEME]
 
 
-def _lyric_from_segments(segments, start_sec, end_sec, diagnostics):
-    """音符の代表母音から表示歌詞を決める。母音が無ければ鼻音の主体で撥音を判定する。"""
-    overlapping = _overlapping(segments, start_sec, end_sec)
+def _nucleus_of(segments):
+    """音節の核。母音と、母音を伴わない撥音がこれに当たる(分割の段と同じ判定)。"""
+    for segment in segments:
+        if segment.type == "vowel" or (segment.type == "consonant"
+                                       and segment.phoneme == MORAIC_NASAL):
+            return segment
+    return None
 
-    vowels = [s for s in overlapping
-              if s.type == "vowel" and espeak_ipa_to_vowel(s.phoneme or "") is not None]
-    if vowels:
-        longest = max(vowels, key=lambda s: _overlap_sec(s, start_sec, end_sec))
-        return _VOWEL_KANA[espeak_ipa_to_vowel(longest.phoneme)]
 
-    nasal = sum(_overlap_sec(s, start_sec, end_sec) for s in overlapping
-                if s.type == "consonant" and s.phoneme in _NASALS)
-    other = sum(_overlap_sec(s, start_sec, end_sec) for s in overlapping
-                if s.type == "consonant" and s.phoneme not in _NASALS)
-    if nasal > other:
+def _kana_row(heads):
+    """表示歌詞を引く行。核に隣接する子音で決め、それが半母音なら前の子音の拗音行を使う。"""
+    if not heads:
+        return KANA_BY_CONSONANT[""]
+    adjacent = heads[-1]
+    if adjacent == _PALATAL_APPROXIMANT and len(heads) > 1:
+        previous = heads[-2]
+        if previous == "4":
+            return _RA_PALATALIZED
+        return KANA_BY_CONSONANT[_PALATALIZED_ROW.get(previous, _PALATAL_APPROXIMANT)]
+    return KANA_BY_CONSONANT[adjacent]
+
+
+def _lyric_of(segments, diagnostics):
+    """音節の頭子音と核の母音から表示歌詞を決める。核が撥音なら撥音の仮名。"""
+    nucleus = _nucleus_of(segments)
+    if nucleus is not None and nucleus.phoneme == MORAIC_NASAL:
         diagnostics.moraic_nasal_notes += 1
         return _MORAIC_NASAL_KANA
 
-    diagnostics.undetermined_vowel_notes += 1
-    return _FALLBACK_KANA
+    vowel = espeak_ipa_to_vowel(nucleus.phoneme or "") if nucleus is not None else None
+    if vowel is None:
+        diagnostics.undetermined_vowel_notes += 1
+        return _FALLBACK_KANA
+
+    heads = [IPA_TO_VPR_PHONEME[s.phoneme] for s in sorted(segments, key=lambda s: s.start_sec)
+             if s is not nucleus and s.start_sec < nucleus.start_sec
+             and s.phoneme in IPA_TO_VPR_PHONEME]
+    return _kana_row(heads)[_VOWEL_ORDER.index(vowel)]
 
 
 def _should_have_been_kana(character):
@@ -221,13 +275,17 @@ def _velocity_of(rms, start_sec, end_sec):
     return int(np.clip(round(float(values[window].mean()) * 127), 0, 127))
 
 
-def annotate(source_notes, segments, rms, *, lyrics_text=None) -> AnnotationResult:
+def annotate(source_notes, syllable_segments, rms, *, lyrics_text=None) -> AnnotationResult:
     """音符へ表示歌詞・音素列・強弱を載せる。
 
-    lyrics_text を与えると、かな読みへ変換してモーラへ分け、先頭から 1音符=1モーラで割り当てる。
-    音符数とモーラ数が食い違うぶんは診断へ数える(下書きなので厳密な整合は求めない)。
+    表示歌詞と音素列は、音符が属する音節のセグメント(syllable_segments は音節番号で引く)から
+    決める。1つの音節が複数の音符に分かれている場合、載せるのは先頭の音符だけで、2つ目以降は
+    継続の表記にする。lyrics_text を与えると、かな読みへ変換してモーラへ分け、音節の先頭の音符へ
+    先頭から 1音符=1モーラで割り当てる。音符数とモーラ数が食い違うぶんは診断へ数える(下書きなので
+    厳密な整合は求めない)。
     """
     diagnostics = Diagnostics()
+    heads = len({note.syllable for note in source_notes})
 
     morae = []
     if lyrics_text is not None:
@@ -235,23 +293,36 @@ def annotate(source_notes, segments, rms, *, lyrics_text=None) -> AnnotationResu
         from vocal_analysis.reading import to_kana_reading
 
         morae = _split_morae(_to_kana_tokens(to_kana_reading(lyrics_text), diagnostics))
-        if len(morae) > len(source_notes):
-            diagnostics.discarded_morae = len(morae) - len(source_notes)
+        if len(morae) > heads:
+            diagnostics.discarded_morae = len(morae) - heads
 
     result = []
-    for position, note in enumerate(source_notes):
+    started = set()
+    position = 0  # 音節の先頭の音符の通し番号(モーラの割り当てに使う)
+    for note in source_notes:
+        velocity = _velocity_of(rms, note.start_sec, note.end_sec)
+        if note.syllable in started:
+            result.append(SungNote(
+                start_sec=note.start_sec, end_sec=note.end_sec, midi=note.midi,
+                lyric=CONTINUATION, phonemes=[CONTINUATION], velocity=velocity))
+            continue
+
+        started.add(note.syllable)
+        segments = syllable_segments[note.syllable]
+        phonemes = _phonemes_of(segments)
+        if not phonemes:
+            diagnostics.no_phoneme_notes += 1
         if position < len(morae):
             lyric = morae[position]
         else:
             if lyrics_text is not None:
                 diagnostics.notes_beyond_morae += 1
-            lyric = _lyric_from_segments(segments, note.start_sec, note.end_sec, diagnostics)
-        phonemes = _phonemes_of(segments, note.start_sec, note.end_sec)
-        if not phonemes:
-            diagnostics.no_phoneme_notes += 1
+            lyric = _lyric_of(segments, diagnostics)
+        position += 1
         result.append(SungNote(
             start_sec=note.start_sec, end_sec=note.end_sec, midi=note.midi, lyric=lyric,
-            phonemes=phonemes,
-            velocity=_velocity_of(rms, note.start_sec, note.end_sec)))
+            phonemes=phonemes, velocity=velocity,
+            # 音素列を載せた音符は、発音を音声由来の音素列の側で決めさせる。
+            is_protected=bool(phonemes)))
 
     return AnnotationResult(notes=result, diagnostics=diagnostics)

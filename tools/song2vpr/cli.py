@@ -339,7 +339,7 @@ def _run(args, emitter, fail) -> int:
         progress.stage("notes")
         split = _notes.split(track, front.segments)
         try:
-            annotated = _lyrics.annotate(split.notes, front.segments, front.rms,
+            annotated = _lyrics.annotate(split.notes, split.syllable_segments, front.rms,
                                          lyrics_text=lyrics_text)
         except RecognitionError as e:
             # かな読みは音符へ歌詞を割り当てる段の中で行うので、失敗が指す段は認識でなく音符化。

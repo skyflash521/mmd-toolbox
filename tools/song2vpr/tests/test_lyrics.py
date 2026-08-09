@@ -31,13 +31,19 @@ def _flat_rms(value=0.5, seconds=2.0):
     return RmsEnvelope(times_sec=times, values=np.full(len(times), value), dynamic_range_db=20.0)
 
 
+def _one_syllable(*segments):
+    """音節1つぶんのセグメント帰属(付与の段が受け取る形)。"""
+    return [list(segments)]
+
+
+def _syllable_per_note(count, seconds=0.2, phoneme="a"):
+    """音符ごとに1音節を持つ入力。音符列とセグメント帰属を返す。"""
+    source = [_note(i * seconds, (i + 1) * seconds, syllable=i) for i in range(count)]
+    segments = [[_vowel(i * seconds, (i + 1) * seconds, phoneme)] for i in range(count)]
+    return source, segments
+
+
 # --- 音素列 ------------------------------------------------------------------
-
-
-def test_phonemes_come_from_the_overlapping_segments_in_time_order():
-    result = lyrics.annotate([_note(0.0, 0.4)],
-                             [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.4, "a")], _flat_rms())
-    assert result.notes[0].phonemes == ["k", "a"]
 
 
 @pytest.mark.parametrize("ipa,xsampa", [
@@ -49,19 +55,19 @@ def test_phonemes_come_from_the_overlapping_segments_in_time_order():
 def test_ipa_is_mapped_to_the_vpr_phoneme_notation(ipa, xsampa):
     kind = "vowel" if ipa in {"a", "i", "ɯ", "e̞", "o̞"} else "consonant"
     segment = Segment(type=kind, start_sec=0.0, end_sec=0.4, phoneme=ipa, confidence=0.9)
-    result = lyrics.annotate([_note(0.0, 0.4)], [segment], _flat_rms())
+    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(segment), _flat_rms())
     assert result.notes[0].phonemes == [xsampa]
 
 
 def test_gap_and_unlabelled_segments_are_excluded_from_the_phonemes():
     result = lyrics.annotate([_note(0.0, 0.4)],
-                             [_vowel(0.0, 0.2, "a"), _gap(0.2, 0.4)], _flat_rms())
+                             _one_syllable(_vowel(0.0, 0.2, "a"), _gap(0.2, 0.4)), _flat_rms())
     assert result.notes[0].phonemes == ["a"]
 
 
 def test_phonemes_may_be_empty():
     """除外の結果として空になっても許容する。"""
-    result = lyrics.annotate([_note(0.0, 0.4)], [_gap(0.0, 0.4)], _flat_rms())
+    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_gap(0.0, 0.4)), _flat_rms())
     assert result.notes[0].phonemes == []
 
 
@@ -79,35 +85,16 @@ def test_the_mapping_covers_every_symbol_the_recognizer_can_emit():
 @pytest.mark.parametrize("ipa,kana", [
     ("a", "あ"), ("i", "い"), ("ɯ", "う"), ("e̞", "え"), ("o̞", "お"),
 ])
-def test_lyric_is_the_vowel_kana_of_the_representative_vowel(ipa, kana):
+def test_lyric_is_the_vowel_kana_of_the_nucleus(ipa, kana):
     result = lyrics.annotate([_note(0.0, 0.4)],
-                             [Segment(type="vowel", start_sec=0.0, end_sec=0.4,
-                                      phoneme=ipa, confidence=0.9)], _flat_rms())
+                             _one_syllable(Segment(type="vowel", start_sec=0.0, end_sec=0.4,
+                                                   phoneme=ipa, confidence=0.9)), _flat_rms())
     assert result.notes[0].lyric == kana
 
 
-def test_representative_vowel_is_the_longest_one_in_the_note():
-    result = lyrics.annotate([_note(0.0, 0.4)],
-                             [_vowel(0.0, 0.1, "a"), _vowel(0.1, 0.4, "i")], _flat_rms())
-    assert result.notes[0].lyric == "い"
-
-
-def test_note_of_a_moraic_nasal_gets_the_nasal_kana():
-    """母音が無く鼻音が主体の音符は撥音にする。"""
-    result = lyrics.annotate([_note(0.0, 0.3)], [_consonant(0.0, 0.3, "ɴ")], _flat_rms())
-    assert result.notes[0].lyric == "ん"
-
-
-def test_nasal_wins_only_when_it_outweighs_the_others():
-    """鼻音の重なり時間がそれ以外を上回るときだけ撥音にする。"""
-    segments = [_consonant(0.0, 0.1, "n"), _consonant(0.1, 0.3, "s")]
-    result = lyrics.annotate([_note(0.0, 0.3)], segments, _flat_rms())
-    assert result.notes[0].lyric != "ん"
-
-
-def test_note_without_a_vowel_or_nasal_falls_back_and_is_counted():
-    """母音も鼻音も得られない音符は既定の仮名を入れ、母音未確定として数える。"""
-    result = lyrics.annotate([_note(0.0, 0.3)], [_gap(0.0, 0.3)], _flat_rms())
+def test_note_without_a_nucleus_falls_back_and_is_counted():
+    """核が得られない音符は既定の仮名を入れ、母音未確定として数える。"""
+    result = lyrics.annotate([_note(0.0, 0.3)], _one_syllable(_gap(0.0, 0.3)), _flat_rms())
     assert result.notes[0].lyric == "あ"
     assert result.diagnostics.undetermined_vowel_notes == 1
 
@@ -117,10 +104,7 @@ def test_note_without_a_vowel_or_nasal_falls_back_and_is_counted():
 # 付与の段は、音符区間との時間の重なりでなく、分割の段が決めた音節の帰属で音素列と表示歌詞を決める。
 # 下の各テストは音節ごとのセグメント列を直に渡す。
 
-_PENDING = "impl pending: 音節の帰属からの付与"
 
-
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_phonemes_come_from_the_syllable_not_from_the_overlap():
     """隣の音節の子音を載せない。音符区間が隣の音節へはみ出していても帰属で決める。"""
     first = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.4, "a")]
@@ -130,7 +114,6 @@ def test_phonemes_come_from_the_syllable_not_from_the_overlap():
     assert [note.phonemes for note in result.notes] == [["k", "a"], ["d", "a"]]
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_a_continuation_note_carries_the_continuation_mark():
     """1つの音節が複数の音高に分かれたら、2つ目以降は表示歌詞も音素列も継続の表記にする。"""
     syllable = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a")]
@@ -140,7 +123,6 @@ def test_a_continuation_note_carries_the_continuation_mark():
     assert [note.phonemes for note in result.notes] == [["k", "a"], ["-"]]
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 @pytest.mark.parametrize(("head", "nucleus", "kana"), [
     ([], "a", "あ"),  # 頭子音なし
     (["k"], "a", "か"),
@@ -164,7 +146,6 @@ def test_lyric_comes_from_the_head_consonant_and_the_nucleus(head, nucleus, kana
     assert result.notes[0].lyric == kana
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_head_consonants_that_do_not_decide_the_kana_stay_in_the_phonemes():
     """かなを決めなかった頭子音も音素列には載せる(発音の情報を落とさない)。"""
     syllable = [_consonant(0.0, 0.1, "t"), _consonant(0.1, 0.2, "k"), _vowel(0.2, 0.5, "a")]
@@ -173,7 +154,6 @@ def test_head_consonants_that_do_not_decide_the_kana_stay_in_the_phonemes():
     assert result.notes[0].phonemes == ["t", "k", "a"]
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_a_moraic_nasal_nucleus_gets_the_nasal_kana():
     """核が撥音の音符は、頭子音に依らず撥音のかなにする。"""
     syllable = [_consonant(0.0, 0.1, "k"), _consonant(0.1, 0.4, "ɴ")]
@@ -181,14 +161,12 @@ def test_a_moraic_nasal_nucleus_gets_the_nasal_kana():
     assert result.notes[0].lyric == "ん"
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_the_kana_table_covers_every_consonant_the_recognizer_can_emit():
     """かな表は認識器の音素語彙と5母音の全組を覆う(取りこぼしを表の網羅で防ぐ)。"""
     consonants = set(lyrics.IPA_TO_VPR_PHONEME.values()) - set("aiMeo") - {"N\\"}
     assert consonants <= set(lyrics.KANA_BY_CONSONANT)
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_the_kana_table_holds_the_documented_cells():
     """かな表の全セルを固定する(1セルの誤りが表示歌詞をそのまま壊すため)。"""
     assert lyrics.KANA_BY_CONSONANT == {
@@ -223,7 +201,6 @@ def test_the_kana_table_holds_the_documented_cells():
     }
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_the_syllable_head_protects_its_phonemes():
     """音素列を載せた音節の先頭の音符は保護を真にする。継続と音素列が空の音符は偽のまま。"""
     first = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a")]
@@ -238,15 +215,24 @@ def test_the_syllable_head_protects_its_phonemes():
 # --- 表示歌詞(歌詞テキストの指定あり)---------------------------------------
 
 
-def test_given_lyrics_are_assigned_one_mora_per_note():
-    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4), _note(0.4, 0.6)],
-                             [_vowel(0.0, 0.6, "a")], _flat_rms(), lyrics_text="さくら")
+def test_given_lyrics_are_assigned_one_mora_per_syllable_head():
+    source, segments = _syllable_per_note(3)
+    result = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さくら")
     assert [note.lyric for note in result.notes] == ["さ", "く", "ら"]
+
+
+def test_a_continuation_note_keeps_the_continuation_mark_when_lyrics_are_given():
+    """モーラを割り当てるのは音節の先頭の音符だけで、継続の音符は継続の表記のままにする。"""
+    result = lyrics.annotate([_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=0),
+                              _note(0.4, 0.6, syllable=1)],
+                             [[_vowel(0.0, 0.4, "a")], [_vowel(0.4, 0.6, "a")]],
+                             _flat_rms(), lyrics_text="さく")
+    assert [note.lyric for note in result.notes] == ["さ", "-", "く"]
 
 
 def test_phonemes_still_come_from_the_segments_when_lyrics_are_given():
     """歌詞を与えても音素列はセグメント由来のままにする。"""
-    result = lyrics.annotate([_note(0.0, 0.4)], [_vowel(0.0, 0.4, "i")], _flat_rms(),
+    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "i")), _flat_rms(),
                              lyrics_text="さ")
     assert result.notes[0].lyric == "さ"
     assert result.notes[0].phonemes == ["i"]
@@ -266,20 +252,20 @@ def test_phonemes_still_come_from_the_segments_when_lyrics_are_given():
     ("かーん", ["かー", "ん"]),
 ])
 def test_mora_split_rules(text, expected):
-    result = lyrics.annotate([_note(i * 0.2, i * 0.2 + 0.2) for i in range(len(expected))],
-                             [_vowel(0.0, 2.0, "a")], _flat_rms(), lyrics_text=text)
+    source, segments = _syllable_per_note(len(expected))
+    result = lyrics.annotate(source, segments, _flat_rms(), lyrics_text=text)
     assert [note.lyric for note in result.notes] == expected
 
 
 def test_more_notes_than_morae_fall_back_to_the_vowel_kana():
-    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4)],
-                             [_vowel(0.0, 0.4, "i")], _flat_rms(), lyrics_text="さ")
+    source, segments = _syllable_per_note(2, phoneme="i")
+    result = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さ")
     assert [note.lyric for note in result.notes] == ["さ", "い"]
     assert result.diagnostics.notes_beyond_morae == 1
 
 
 def test_more_morae_than_notes_are_discarded_and_counted():
-    result = lyrics.annotate([_note(0.0, 0.2)], [_vowel(0.0, 0.2, "a")], _flat_rms(),
+    result = lyrics.annotate([_note(0.0, 0.2)], _one_syllable(_vowel(0.0, 0.2, "a")), _flat_rms(),
                              lyrics_text="さくら")
     assert [note.lyric for note in result.notes] == ["さ"]
     assert result.diagnostics.discarded_morae == 2
@@ -287,8 +273,8 @@ def test_more_morae_than_notes_are_discarded_and_counted():
 
 def test_layout_characters_are_skipped_without_being_counted():
     """空白や記号は体裁の文字なので読み飛ばし、変換の効きの判定には数えない。"""
-    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4)], [_vowel(0.0, 0.4, "a")],
-                             _flat_rms(), lyrics_text="あ!い?")
+    source, segments = _syllable_per_note(2)
+    result = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="あ!い?")
     assert [note.lyric for note in result.notes] == ["あ", "い"]
     assert result.diagnostics.unconverted_chars == 0
     assert result.diagnostics.counted_chars == 2  # かな2文字だけ
@@ -302,7 +288,7 @@ def _stub_reading(monkeypatch, reading):
 def test_characters_that_should_have_been_kana_are_counted(monkeypatch):
     """読みに残った漢字・英数字は、かな読みが効いていないかの判定へ数える。"""
     _stub_reading(monkeypatch, "あ漢A")
-    result = lyrics.annotate([_note(0.0, 0.2)], [_vowel(0.0, 0.2, "a")], _flat_rms(),
+    result = lyrics.annotate([_note(0.0, 0.2)], _one_syllable(_vowel(0.0, 0.2, "a")), _flat_rms(),
                              lyrics_text="どんな表記でもよい")
     assert result.diagnostics.unconverted_chars == 2
     assert result.diagnostics.counted_chars == 3
@@ -312,7 +298,7 @@ def test_characters_that_should_have_been_kana_are_counted(monkeypatch):
 def test_reading_without_any_countable_character_is_not_judged(monkeypatch):
     """かなも未変換の文字も無ければ割合を求められないので、変換の効きを判定しない。"""
     _stub_reading(monkeypatch, "!?")
-    result = lyrics.annotate([_note(0.0, 0.2)], [_vowel(0.0, 0.2, "a")], _flat_rms(),
+    result = lyrics.annotate([_note(0.0, 0.2)], _one_syllable(_vowel(0.0, 0.2, "a")), _flat_rms(),
                              lyrics_text="どんな表記でもよい")
     assert result.diagnostics.counted_chars == 0
     assert not result.diagnostics.kana_reading_ineffective
@@ -320,14 +306,14 @@ def test_reading_without_any_countable_character_is_not_judged(monkeypatch):
 
 def test_mostly_kana_reading_is_not_flagged(monkeypatch):
     _stub_reading(monkeypatch, "あいうえおかき漢")
-    result = lyrics.annotate([_note(0.0, 0.2)], [_vowel(0.0, 0.2, "a")], _flat_rms(),
+    result = lyrics.annotate([_note(0.0, 0.2)], _one_syllable(_vowel(0.0, 0.2, "a")), _flat_rms(),
                              lyrics_text="どんな表記でもよい")
     assert result.diagnostics.unconverted_chars == 1
     assert not result.diagnostics.kana_reading_ineffective
 
 
 def test_katakana_is_folded_to_hiragana():
-    result = lyrics.annotate([_note(0.0, 0.2)], [_vowel(0.0, 0.2, "a")], _flat_rms(),
+    result = lyrics.annotate([_note(0.0, 0.2)], _one_syllable(_vowel(0.0, 0.2, "a")), _flat_rms(),
                              lyrics_text="サ")
     assert result.notes[0].lyric == "さ"
 
@@ -336,13 +322,15 @@ def test_katakana_is_folded_to_hiragana():
 
 
 def test_velocity_comes_from_the_rms_of_the_note():
-    result = lyrics.annotate([_note(0.0, 0.4)], [_vowel(0.0, 0.4, "a")], _flat_rms(value=0.5))
+    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "a")),
+                             _flat_rms(value=0.5))
     assert result.notes[0].velocity == 64  # round(0.5 * 127)
 
 
 @pytest.mark.parametrize("value,expected", [(0.0, 0), (1.0, 127)])
 def test_velocity_spans_the_full_range(value, expected):
-    result = lyrics.annotate([_note(0.0, 0.4)], [_vowel(0.0, 0.4, "a")], _flat_rms(value=value))
+    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "a")),
+                             _flat_rms(value=value))
     assert result.notes[0].velocity == expected
 
 
@@ -353,7 +341,7 @@ def test_velocity_uses_the_middle_of_the_note(loud_in_middle, expected):
     middle = (times >= 0.2) & (times < 0.8)
     values = np.where(middle if loud_in_middle else ~middle, 1.0, 0.0)
     envelope = RmsEnvelope(times_sec=times, values=values, dynamic_range_db=20.0)
-    result = lyrics.annotate([_note(0.0, 1.0)], [_vowel(0.0, 1.0, "a")], envelope)
+    result = lyrics.annotate([_note(0.0, 1.0)], _one_syllable(_vowel(0.0, 1.0, "a")), envelope)
     assert result.notes[0].velocity == expected
 
 
@@ -362,14 +350,13 @@ def test_velocity_uses_the_middle_of_the_note(loud_in_middle, expected):
 
 def test_the_span_and_the_pitch_are_carried_through():
     source = _note(0.1, 0.5, midi=72)
-    result = lyrics.annotate([source], [_vowel(0.1, 0.5, "a")], _flat_rms())
+    result = lyrics.annotate([source], _one_syllable(_vowel(0.1, 0.5, "a")), _flat_rms())
     assert (result.notes[0].start_sec, result.notes[0].end_sec, result.notes[0].midi) == \
            (source.start_sec, source.end_sec, source.midi)
 
 
 def test_same_input_gives_the_same_result():
-    source = [_note(0.0, 0.2), _note(0.2, 0.4)]
-    segments = [_vowel(0.0, 0.4, "a")]
+    source, segments = _syllable_per_note(2)
     first = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さく")
     second = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さく")
     assert [(n.lyric, n.phonemes, n.velocity) for n in first.notes] == \
@@ -381,15 +368,15 @@ def test_same_input_gives_the_same_result():
 
 def test_moraic_nasal_notes_are_counted():
     """撥音「ん」を入れた音符だけを数える(母音の音符は数えない)。"""
-    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4)],
-                             [_consonant(0.0, 0.2, "ɴ"), _vowel(0.2, 0.4, "a")], _flat_rms())
+    result = lyrics.annotate([_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=1)],
+                             [[_consonant(0.0, 0.2, "ɴ")], [_vowel(0.2, 0.4, "a")]], _flat_rms())
     assert [note.lyric for note in result.notes] == ["ん", "あ"]
     assert result.diagnostics.moraic_nasal_notes == 1
 
 
 def test_moraic_nasal_from_the_given_lyrics_is_not_counted():
     """数えるのは表示歌詞を音声から決めた音符だけ(モーラ由来の「ん」は数えない)。"""
-    result = lyrics.annotate([_note(0.0, 0.2)], [_vowel(0.0, 0.2, "a")], _flat_rms(),
+    result = lyrics.annotate([_note(0.0, 0.2)], _one_syllable(_vowel(0.0, 0.2, "a")), _flat_rms(),
                              lyrics_text="ん")
     assert result.notes[0].lyric == "ん"
     assert result.diagnostics.moraic_nasal_notes == 0
@@ -397,7 +384,7 @@ def test_moraic_nasal_from_the_given_lyrics_is_not_counted():
 
 def test_notes_without_phonemes_are_counted():
     """音素列が空になった音符だけを数える(音素を持つ音符は数えない)。"""
-    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4)],
-                             [_vowel(0.0, 0.2, "a"), _gap(0.2, 0.4)], _flat_rms())
+    result = lyrics.annotate([_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=1)],
+                             [[_vowel(0.0, 0.2, "a")], [_gap(0.2, 0.4)]], _flat_rms())
     assert [note.phonemes for note in result.notes] == [["a"], []]
     assert result.diagnostics.no_phoneme_notes == 1
