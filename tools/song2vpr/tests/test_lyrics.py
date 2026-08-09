@@ -32,7 +32,7 @@ def _flat_rms(value=0.5, seconds=2.0):
 
 
 def _rms_silent_between(start, end, seconds=2.0):
-    """指定の区間だけ音量が 0 の包絡(その区間に収まる音符だけベロシティが 0 になる)。"""
+    """指定の区間だけ音量が 0 の包絡(その区間に収まる音符だけ代表値が 0 になる)。"""
     times = np.arange(0.0, seconds, 0.01)
     values = np.where((times >= start) & (times < end), 0.0, 0.5)
     return RmsEnvelope(times_sec=times, values=values, dynamic_range_db=20.0)
@@ -219,11 +219,11 @@ def test_the_syllable_head_protects_its_phonemes():
     assert [note.is_protected for note in result.notes] == [True, False, False]
 
 
-# --- ベロシティが 0 になる音符の抑制 ------------------------------------------
+# --- 音量の代表値が 0 の音符の抑制 --------------------------------------------
 
 
-def test_a_note_with_zero_velocity_is_not_output():
-    """ベロシティが 0 になる音符は出力せず、落とした件数を数える。"""
+def test_a_note_whose_volume_representative_is_zero_is_not_output():
+    """音量の代表値が 0 になる音符は出力せず、落とした件数を数える。"""
     result = lyrics.annotate([_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=1)],
                              [[_vowel(0.0, 0.2, "a")], [_vowel(0.2, 0.4, "i")]],
                              _rms_silent_between(0.2, 0.4))
@@ -361,7 +361,6 @@ def test_katakana_is_folded_to_hiragana():
 # --- ベロシティ --------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: ベロシティの中立値固定", strict=True)
 @pytest.mark.parametrize("value", [0.1, 1.0])
 def test_velocity_is_the_neutral_value_regardless_of_the_volume(value):
     """ベロシティは音量に依らず、全音符で中立値に固定する(ベロシティは音量の欄ではない)。
@@ -388,29 +387,19 @@ def test_the_volume_threshold_is_the_step_of_the_stored_scale(value, output):
     assert bool(result.notes) is output
 
 
-def test_velocity_comes_from_the_rms_of_the_note():
-    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "a")),
-                             _flat_rms(value=0.5))
-    assert result.notes[0].velocity == 64  # round(0.5 * 127)
+@pytest.mark.parametrize(("loud_in_middle", "output"), [(True, True), (False, False)])
+def test_the_volume_comes_from_the_middle_of_the_note(loud_in_middle, output):
+    """代表値は音符区間の中央だけから取る(端の立ち上がり・減衰に引かれない)。
 
-
-@pytest.mark.parametrize("value,expected", [(0.004, 1), (1.0, 127)])
-def test_velocity_spans_the_range_of_the_notes_that_are_output(value, expected):
-    """出力する音符が取りうる下端と上端(0 になる音符は出力しないので下端は 1)。"""
-    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "a")),
-                             _flat_rms(value=value))
-    assert result.notes[0].velocity == expected
-
-
-@pytest.mark.parametrize("loud_in_middle,expected", [(True, 127), (False, 64)])
-def test_velocity_uses_the_middle_of_the_note(loud_in_middle, expected):
-    """代表値は音符区間の中央だけから取る(端の立ち上がり・減衰に引かれない)。"""
+    代表値そのものは出力に現れないので、抑制されるかどうかで見る。中央だけが鳴っていれば残り、
+    中央だけが無音なら端が鳴っていても落ちる。
+    """
     times = np.arange(0.0, 1.0, 0.01)
     middle = (times >= 0.2) & (times < 0.8)
-    values = np.where(middle if loud_in_middle else ~middle, 1.0, 0.5)
+    values = np.where(middle if loud_in_middle else ~middle, 1.0, 0.0)
     envelope = RmsEnvelope(times_sec=times, values=values, dynamic_range_db=20.0)
     result = lyrics.annotate([_note(0.0, 1.0)], _one_syllable(_vowel(0.0, 1.0, "a")), envelope)
-    assert result.notes[0].velocity == expected
+    assert bool(result.notes) is output
 
 
 # --- 区間と音高は変えない ----------------------------------------------------

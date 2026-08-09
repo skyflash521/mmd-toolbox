@@ -187,8 +187,8 @@ def test_dry_run_diagnostics_come_after_the_live_line_is_cleared(tmp_path, monke
     assert progress_calls[position - 1] == "close"
 
 
-def test_louder_singing_gets_a_larger_velocity(tmp_path, monkeypatch):
-    """発声している区間どうしの強弱の差が、ベロシティの差として現れる。"""
+def test_velocity_does_not_follow_the_singing_volume(tmp_path, monkeypatch):
+    """強弱の差はベロシティに出さない(ベロシティは音量の欄ではないため、全音符で同じ値)。"""
     quiet, loud = _wave(440.0, 0.6, 0.05), _wave(523.25, 0.6, 0.45)
     segments = [Segment(type="vowel", start_sec=0.0, end_sec=0.6, phoneme="a", confidence=1.0),
                 Segment(type="vowel", start_sec=0.6, end_sec=1.2, phoneme="i", confidence=1.0)]
@@ -199,7 +199,7 @@ def test_louder_singing_gets_a_larger_velocity(tmp_path, monkeypatch):
 
     _project, notes = _notes_of(output)
     assert len(notes) >= 2
-    assert notes[0].velocity < notes[-1].velocity
+    assert {note.velocity for note in notes} == {64}
 
 
 # --- 引数の結線 --------------------------------------------------------------

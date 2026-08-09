@@ -88,8 +88,12 @@ _SMALL_KANA = frozenset("ぁぃぅぇぉゃゅょゎ")
 # 変換が効いていないおそれがあるとみなす。
 _UNCONVERTED_RATIO_THRESHOLD = 0.2
 
-# ベロシティの代表値を取る窓(音符区間の中央のこの割合)。端の立ち上がり・減衰を避ける。
-_VELOCITY_WINDOW_RATIO = 0.6
+# 音量の代表値を取る窓(音符区間の中央のこの割合)。端の立ち上がり・減衰を避ける。
+_VOLUME_WINDOW_RATIO = 0.6
+
+# 全音符へ入れるベロシティ。VOCALOID のベロシティは音量の欄ではないので、音量を写さず中立値を置く
+# (解析に用いた実 vpr も全音符がこの値だった)。
+_NEUTRAL_VELOCITY = 64
 
 
 @dataclass(frozen=True)
@@ -263,11 +267,15 @@ def _split_morae(tokens):
     return morae
 
 
-def _velocity_of(rms, start_sec, end_sec):
-    """音符区間の中央から取った相対正規化RMSの代表値を 0〜127 へ写す。"""
+def _volume_of(rms, start_sec, end_sec):
+    """音符区間の中央から取った相対正規化RMSの代表値を 0〜127 へ写す。
+
+    vpr へは載せず、音量が正規化の下端にある音符を落とす判定にだけ使う。0 は無音ではなく、
+    曲の中で最も小さい側にあってこの粒度では差を持たないことを表す。
+    """
     times = np.asarray(rms.times_sec)
     values = np.asarray(rms.values)
-    margin = (end_sec - start_sec) * (1.0 - _VELOCITY_WINDOW_RATIO) / 2.0
+    margin = (end_sec - start_sec) * (1.0 - _VOLUME_WINDOW_RATIO) / 2.0
     window = (times >= start_sec + margin) & (times < end_sec - margin)
     if not window.any():
         window = (times >= start_sec) & (times < end_sec)
@@ -287,16 +295,15 @@ def annotate(source_notes, syllable_segments, rms, *, lyrics_text=None) -> Annot
     """
     diagnostics = Diagnostics()
 
-    # ベロシティが 0 になる音符は出力しない。音節の先頭と継続の判定もモーラの割り当ても、この
+    # 音量の代表値が 0 になる音符は出力しない。音節の先頭と継続の判定もモーラの割り当ても、この
     # 除去の後に残った音符だけで決める(先頭が落ちた音節は、残った最初の音符が先頭になる)。
     kept = []
     for note in source_notes:
-        velocity = _velocity_of(rms, note.start_sec, note.end_sec)
-        if velocity == 0:
+        if _volume_of(rms, note.start_sec, note.end_sec) == 0:
             diagnostics.suppressed_notes += 1
             continue
-        kept.append((note, velocity))
-    heads = len({note.syllable for note, _velocity in kept})
+        kept.append(note)
+    heads = len({note.syllable for note in kept})
 
     morae = []
     if lyrics_text is not None:
@@ -310,11 +317,11 @@ def annotate(source_notes, syllable_segments, rms, *, lyrics_text=None) -> Annot
     result = []
     started = set()
     position = 0  # 音節の先頭の音符の通し番号(モーラの割り当てに使う)
-    for note, velocity in kept:
+    for note in kept:
         if note.syllable in started:
             result.append(SungNote(
                 start_sec=note.start_sec, end_sec=note.end_sec, midi=note.midi,
-                lyric=CONTINUATION, phonemes=[CONTINUATION], velocity=velocity))
+                lyric=CONTINUATION, phonemes=[CONTINUATION], velocity=_NEUTRAL_VELOCITY))
             continue
 
         started.add(note.syllable)
@@ -331,7 +338,7 @@ def annotate(source_notes, syllable_segments, rms, *, lyrics_text=None) -> Annot
         position += 1
         result.append(SungNote(
             start_sec=note.start_sec, end_sec=note.end_sec, midi=note.midi, lyric=lyric,
-            phonemes=phonemes, velocity=velocity,
+            phonemes=phonemes, velocity=_NEUTRAL_VELOCITY,
             # 音素列を載せた音符は、発音を音声由来の音素列の側で決めさせる。
             is_protected=bool(phonemes)))
 
