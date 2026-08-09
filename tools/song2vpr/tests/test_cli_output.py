@@ -413,9 +413,14 @@ def test_separation_choice_is_reported(tmp_path, monkeypatch, capsysbinary):
 
 def test_counts_come_from_the_stages_that_judged_them(tmp_path, monkeypatch, capsysbinary):
     """件数は判定した段の値をそのまま載せる(渡し違いを落とす)。"""
-    # 認識器が音素を割り当てなかった区間だけの入力(gap は音素列にも代表母音にも寄与しない)。
-    segments = [Segment(type="gap", start_sec=0.0, end_sec=1.0, phoneme=None, confidence=None)]
-    _stub_pipeline(monkeypatch, _front_stage(segments=segments))
+    # 核の区間は無声で、音符になるのは認識器が音素を割り当てなかった区間だけ、という入力。
+    # 音符は核を持つ音節に属するので出力され、gap は音素列にも代表母音にも寄与しない。
+    # 核は音声の先頭側の短い区間だけに置く。有声の判定は解析窓のぶん先行するので、その量が変わっても
+    # 音符が核へ重ならないよう、核の終端と音の始まりを十分に離してある。
+    pcm = _pcm(np.zeros(int(0.5 * _RATE), dtype=np.float32), _wave(440.0, 0.5, 0.5))
+    segments = [Segment(type="vowel", start_sec=0.0, end_sec=0.1, phoneme="a", confidence=1.0),
+                Segment(type="gap", start_sec=0.1, end_sec=1.0, phoneme=None, confidence=None)]
+    _stub_pipeline(monkeypatch, _front_stage(pcm=pcm, segments=segments))
     assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
 
     result = _result_of(capsysbinary)

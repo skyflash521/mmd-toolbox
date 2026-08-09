@@ -10,8 +10,8 @@ from song2vpr import lyrics, notes
 from vocal_analysis import RmsEnvelope, Segment
 
 
-def _note(start, end, midi=69):
-    return notes.Note(start_sec=start, end_sec=end, midi=midi)
+def _note(start, end, midi=69, syllable=0):
+    return notes.Note(start_sec=start, end_sec=end, midi=midi, syllable=syllable)
 
 
 def _vowel(start, end, phoneme="a"):

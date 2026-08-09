@@ -151,7 +151,6 @@ def test_gap_alone_does_not_split_the_note():
 # --- 短い音符の扱い ----------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_short_note_is_not_absorbed_across_a_syllable():
     """まとめる先は同じ音節に属する隣接音符だけ。別の音節しか隣に無ければそのまま残す。
 
@@ -200,7 +199,6 @@ def test_short_note_is_not_absorbed_across_a_rest():
 # --- 音節の帰属 --------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_note_carries_its_syllable():
     """音符は自分が属する音節を持つ(付与の段が時間の重なりで決め直さないため)。
 
@@ -212,7 +210,47 @@ def test_note_carries_its_syllable():
     assert [note.syllable for note in notes.split(track, segments).notes] == [0, 0, 1]
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
+def test_a_gap_before_the_nucleus_does_not_pull_the_head_consonant_back():
+    """頭の子音と後続の核の間に gap があっても、子音は後続の音節に属する。
+
+    音符の帰属とセグメントの帰属が食い違うと、付与の段が別の音節の音素を載せる。
+    """
+    track = _track([(0.2, 69), (0.2, 69), (0.2, 71)])
+    head = _consonant(0.2, 0.3, "k")
+    first = _vowel(0.0, 0.2, "a")
+    second = _vowel(0.4, 0.6, "i")
+    result = notes.split(track, [first, head, _gap(0.3, 0.4), second])
+    assert [note.syllable for note in result.notes] == [0, 1, 1]
+    assert result.syllable_segments == [[first], [head, second]]
+
+
+def test_a_nucleus_shorter_than_the_frame_still_takes_its_head_consonant():
+    """時刻の刻みより短くフレームを1つも覆わない核でも、その頭の子音は核と同じ音節に属する。
+
+    フレームの被覆から後続の核を数えると、この核は見つからず子音が直前の音節へ倒れる。
+    """
+    track = _track([(0.5, 69)])
+    head = _consonant(0.2, 0.3, "k")
+    first = _vowel(0.0, 0.2, "a")
+    second = _vowel(0.402, 0.408, "i")
+    result = notes.split(track, [first, head, _gap(0.3, 0.402), second, _gap(0.408, 0.5)])
+    assert [note.syllable for note in result.notes] == [0, 1]
+    assert result.syllable_segments == [[first], [head, second]]
+
+
+def test_a_gap_after_a_frame_less_nucleus_belongs_to_that_nucleus():
+    """フレームを1つも覆わない核でも、その後の gap はその核の音節を引き継ぐ。
+
+    頭の子音が無いと番号を先に置いてくれる音符が無いので、引き継ぎだけでは前の音節に留まる。
+    """
+    track = _track([(0.5, 69)])
+    first = _vowel(0.0, 0.2, "a")
+    second = _vowel(0.402, 0.408, "i")
+    result = notes.split(track, [first, _gap(0.2, 0.402), second, _gap(0.408, 0.5)])
+    assert [note.syllable for note in result.notes] == [0, 1]
+    assert result.syllable_segments == [[first], [second]]
+
+
 def test_split_result_lists_the_segments_of_each_syllable():
     """分割結果は音節ごとのセグメント帰属を持つ。頭の子音は後続の音節に属する。"""
     track = _track([(0.1, None), (0.3, 69), (0.3, 71)])
@@ -223,7 +261,6 @@ def test_split_result_lists_the_segments_of_each_syllable():
     assert result.syllable_segments == [[head, first], [second]]
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_gap_segments_are_not_assigned_to_a_syllable():
     """gap は音素を割り当てなかった区間なので、音節のセグメント列に載せない。"""
     track = _track([(0.3, 69), (0.3, 69)])
@@ -235,7 +272,6 @@ def test_gap_segments_are_not_assigned_to_a_syllable():
 # --- 音節と結びつかない音符の抑制 --------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_voiced_span_belonging_to_no_syllable_is_not_output():
     """前後に核が無く帰属を決められない有声区間は音符にしない。"""
     track = _track([(0.3, 69), (0.2, None), (0.3, 71)])
@@ -244,7 +280,6 @@ def test_voiced_span_belonging_to_no_syllable_is_not_output():
     assert result.diagnostics.suppressed_notes == 1
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_component_starting_far_from_the_nucleus_is_dropped_whole():
     """核へ届く音符を含まない連続成分は、先頭が核の終端から離れていれば全件落とす。
 
@@ -256,7 +291,6 @@ def test_component_starting_far_from_the_nucleus_is_dropped_whole():
     assert result.diagnostics.suppressed_notes == 2
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_component_near_the_nucleus_end_survives_whole():
     """核の終端の近くから始まる成分は全件残す。判定は成分の先頭だけで行い、途中では行わない。
 
@@ -270,7 +304,6 @@ def test_component_near_the_nucleus_end_survives_whole():
     assert result.diagnostics.suppressed_notes == 0
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_component_reaching_the_nucleus_survives_however_far_it_runs():
     """核と重なる音符を含む成分は全件残す。
 
@@ -282,7 +315,6 @@ def test_component_reaching_the_nucleus_survives_however_far_it_runs():
     assert result.diagnostics.suppressed_notes == 0
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_a_component_does_not_span_two_syllables():
     """成分は同じ音節に属する音符の並び。切れ目が無くても音節が変われば別の成分にする。
 
@@ -295,7 +327,6 @@ def test_a_component_does_not_span_two_syllables():
     assert result.diagnostics.suppressed_notes == 1
 
 
-@pytest.mark.xfail(reason="impl pending: 音節の帰属と抑制", strict=True)
 def test_suppressed_notes_are_not_counted_as_short():
     """抑制で出力しない音符は、短いまま残った音符として数えない。"""
     track = _track([(0.3, 69), (2.5, None), (0.03, 60), (0.2, None)])
