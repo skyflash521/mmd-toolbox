@@ -120,28 +120,46 @@ def _segments_per_syllable(segments, nuclei):
     return result
 
 
-def _voiced_spans(track, syllable_index):
-    """有声フレームを、丸めた音高と音節の切り替わりで区切る。"""
+def _voiced_spans(track, syllable_index, frame_sec):
+    """有声フレームを、音節の切り替わりと、続く音高の変化で区切る。
+
+    丸めた音高が変わっても、新しい値が最小長ぶん同じまま続かなければ区切らない。ビブラートや
+    しゃくりの瞬間的な動きは音符の切れ目ではないため。音符の音高は、丸める前の値の中央値を丸めて
+    求める(揺れをまたぐ区間でも、その音符の中心の音高になる)。
+    """
     voiced = np.asarray(track.voiced)
-    rounded = np.where(voiced, np.rint(np.nan_to_num(track.midi, nan=0.0)), np.nan)
+    # 丸めた値と中央値を同じ列から求め、欠測を 0 へ倒す寛容さを両方で揃える。
+    values = np.nan_to_num(np.asarray(track.midi, dtype=float), nan=0.0)
+    rounded = np.where(voiced, np.rint(values), np.nan)
+    # 最小長をフレーム数へ直すときは切り上げる(最小長に満たない継続で区切らないため)。
+    held_frames = max(1, int(np.ceil(_MIN_DURATION_SEC / frame_sec)))
 
     spans = []
     start = None
+    held = None
+
+    def close(stop):
+        spans.append([start, stop, int(np.rint(np.median(values[start:stop]))),
+                      int(syllable_index[start])])
+
     for i in range(len(voiced)):
         if not voiced[i]:
             if start is not None:
-                spans.append([start, i, int(rounded[start]), int(syllable_index[start])])
+                close(i)
                 start = None
             continue
-        same_run = (start is not None
-                    and rounded[i] == rounded[i - 1]
-                    and syllable_index[i] == syllable_index[i - 1])
-        if not same_run:
-            if start is not None:
-                spans.append([start, i, int(rounded[start]), int(syllable_index[start])])
-            start = i
+        if start is None:
+            start, held = i, int(rounded[i])
+            continue
+        stop = i + held_frames
+        lasts = (rounded[i] != held and stop <= len(voiced)
+                 and bool(voiced[i:stop].all())
+                 and bool((rounded[i:stop] == rounded[i]).all()))
+        if lasts or syllable_index[i] != syllable_index[i - 1]:
+            close(i)
+            start, held = i, int(rounded[i])
     if start is not None:
-        spans.append([start, len(voiced), int(rounded[start]), int(syllable_index[start])])
+        close(len(voiced))
     return spans
 
 
@@ -254,7 +272,7 @@ def split(track, segments, *, frame_sec=None) -> SplitResult:
 
     nuclei = [s for s in segments if _is_syllable_nucleus(s)]
     syllable_index, is_consonant = _syllable_index_per_frame(times, segments)
-    spans = _voiced_spans(track, syllable_index)
+    spans = _voiced_spans(track, syllable_index, frame_sec)
     spans = _extend_to_leading_consonants(spans, syllable_index, is_consonant)
     spans = _absorb_short_spans(spans, frame_sec)
     # 抑制は吸収の後に行う。短いまま残った音符の診断は、抑制を通って出力される音符だけを数える。

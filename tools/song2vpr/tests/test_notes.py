@@ -143,7 +143,6 @@ def test_pitch_change_splits_the_note():
     assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71]
 
 
-@pytest.mark.xfail(reason="impl pending: 瞬間的な音高の変化で区切らない", strict=True)
 def test_a_momentary_pitch_change_does_not_split_the_note():
     """ビブラートやしゃくりで瞬間的に半音を超えて動いても、それだけでは別の音符にしない。"""
     track = _track([(0.2, 69), (0.03, 71), (0.2, 69)])
@@ -158,7 +157,6 @@ def test_a_pitch_change_that_lasts_splits_the_note():
     assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71, 69]
 
 
-@pytest.mark.xfail(reason="impl pending: 音符の音高を中央値で求める", strict=True)
 def test_the_note_pitch_is_the_median_of_its_frames():
     """音符の音高は、その音符の中のフレームの MIDI ノート番号の中央値にする。
 
@@ -171,7 +169,6 @@ def test_the_note_pitch_is_the_median_of_its_frames():
     assert result[0].midi == 67
 
 
-@pytest.mark.xfail(reason="impl pending: 音符の音高を中央値で求める", strict=True)
 def test_the_median_is_taken_before_rounding_to_a_semitone():
     """中央値は半音へ丸める前の値で求め、その中央値を丸める。
 
