@@ -140,6 +140,7 @@ def _write_note(raw, note, part_start, path):
     raw["lyric"] = note.lyric
     raw["phoneme"] = " ".join(note.phonemes)
     raw["velocity"] = note.velocity
+    raw["isProtected"] = note.is_protected
     _write_vibrato(raw, note)
     _write_ai_expression(raw, note)
 

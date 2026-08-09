@@ -84,6 +84,10 @@ class Note:
     lyric: str  # 表示歌詞
     velocity: int  # 0〜127 の生値
     phonemes: list[str] = field(default_factory=list)  # 音符内の音素列(空可)
+    # 音素列の保護。値の意味付け・選別は利用先が持つ。既存フィールドの間に挟まる位置なので、
+    # 位置引数の並びを動かさないようキーワード専用にする(位置で渡した vibrato がここへ入ると、
+    # 真偽値でない値が形式へ書かれてしまう)。
+    is_protected: bool = field(default=False, kw_only=True)
     vibrato: NoteVibrato | None = None
     ai_expression: NoteAiExpression | None = None
 

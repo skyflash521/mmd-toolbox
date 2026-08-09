@@ -50,8 +50,12 @@ def part() -> dict:
 
 
 def note() -> dict:
-    """音符の骨組み。読み手が全音符での存在を当てにしてよい6キーだけを持つ。"""
-    return {"pos": 0, "duration": 0, "number": 60, "lyric": "", "phoneme": "", "velocity": 64}
+    """音符の骨組み。読み手が全音符での存在を当てにしてよい6キーと、音素の保護を持つ。
+
+    音素の保護は形式では省略可だが、公開モデルが必ず値を持つので骨組みにも置く。
+    """
+    return {"pos": 0, "duration": 0, "number": 60, "lyric": "", "phoneme": "", "velocity": 64,
+            "isProtected": False}
 
 
 def lang_ids() -> list:

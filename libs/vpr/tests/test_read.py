@@ -174,7 +174,6 @@ def test_read_splits_multi_token_phoneme():
     assert project.tracks[0].parts[0].notes[0].phonemes == ["t", "th", "e", "l"]
 
 
-@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
 @pytest.mark.parametrize(("stored", "expected"), [(True, True), (False, False)])
 def test_read_maps_is_protected(stored, expected):
     from vpr import read
@@ -185,7 +184,6 @@ def test_read_maps_is_protected(stored, expected):
     assert project.tracks[0].parts[0].notes[0].is_protected is expected
 
 
-@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
 def test_read_missing_is_protected_is_false():
     from vpr import read
 
@@ -195,7 +193,6 @@ def test_read_missing_is_protected_is_false():
     assert project.tracks[0].parts[0].notes[0].is_protected is False
 
 
-@pytest.mark.xfail(reason="impl pending: Note.is_protected", strict=True)
 @pytest.mark.parametrize("stored", ["true", 1, None, {}])
 def test_read_non_boolean_is_protected_is_false_without_error(stored):
     from vpr import read

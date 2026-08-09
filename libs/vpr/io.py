@@ -241,6 +241,8 @@ def _notes(raw_notes, part_pos, part_path) -> list[Note]:
                 lyric=_require(note, "lyric", path, str),
                 velocity=_require(note, "velocity", path, int),
                 phonemes=_require(note, "phoneme", path, str).split(),
+                # 欠落も真偽値でない値も偽へ倒す(型の不正で読みを失敗させない寛容規則)。
+                is_protected=_optional(note, "isProtected", False) is True,
                 vibrato=_vibrato(note, start_tick, duration_tick),
                 ai_expression=_ai_expression(note),
             )
