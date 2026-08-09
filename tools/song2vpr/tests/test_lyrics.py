@@ -112,6 +112,129 @@ def test_note_without_a_vowel_or_nasal_falls_back_and_is_counted():
     assert result.diagnostics.undetermined_vowel_notes == 1
 
 
+# --- 音節の帰属からの付与 ----------------------------------------------------
+#
+# 付与の段は、音符区間との時間の重なりでなく、分割の段が決めた音節の帰属で音素列と表示歌詞を決める。
+# 下の各テストは音節ごとのセグメント列を直に渡す。
+
+_PENDING = "impl pending: 音節の帰属からの付与"
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_phonemes_come_from_the_syllable_not_from_the_overlap():
+    """隣の音節の子音を載せない。音符区間が隣の音節へはみ出していても帰属で決める。"""
+    first = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.4, "a")]
+    second = [_consonant(0.4, 0.5, "d"), _vowel(0.5, 0.8, "a")]
+    result = lyrics.annotate([_note(0.0, 0.45, syllable=0), _note(0.45, 0.8, syllable=1)],
+                             [first, second], _flat_rms())
+    assert [note.phonemes for note in result.notes] == [["k", "a"], ["d", "a"]]
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_a_continuation_note_carries_the_continuation_mark():
+    """1つの音節が複数の音高に分かれたら、2つ目以降は表示歌詞も音素列も継続の表記にする。"""
+    syllable = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a")]
+    result = lyrics.annotate([_note(0.0, 0.3, syllable=0), _note(0.3, 0.6, midi=71, syllable=0)],
+                             [syllable], _flat_rms())
+    assert [note.lyric for note in result.notes] == ["か", "-"]
+    assert [note.phonemes for note in result.notes] == [["k", "a"], ["-"]]
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+@pytest.mark.parametrize(("head", "nucleus", "kana"), [
+    ([], "a", "あ"),  # 頭子音なし
+    (["k"], "a", "か"),
+    (["s"], "i", "すぃ"),  # 外来語音
+    (["t"], "ɯ", "とぅ"),
+    (["ɸ"], "o̞", "ふぉ"),
+    (["ɕ"], "a", "しゃ"),
+    (["kʲ"], "a", "きゃ"),  # 子音そのものが拗音
+    (["v"], "a", "ば"),  # ヴ表記は受理を確認できていないので調音の近い行を使う
+    (["k", "j"], "a", "きゃ"),  # 隣接する子音が j のときは前の子音の拗音行
+    (["ɾ", "j"], "o̞", "りょ"),
+    (["s", "j"], "a", "や"),  # 拗音行を持たない子音は j の行
+    (["t", "k"], "a", "か"),  # 頭子音が複数なら核に隣接する子音で決める
+])
+def test_lyric_comes_from_the_head_consonant_and_the_nucleus(head, nucleus, kana):
+    segments = [_consonant(0.1 * i, 0.1 * (i + 1), phoneme) for i, phoneme in enumerate(head)]
+    start = 0.1 * len(head)
+    segments.append(Segment(type="vowel", start_sec=start, end_sec=start + 0.3,
+                            phoneme=nucleus, confidence=0.9))
+    result = lyrics.annotate([_note(0.0, start + 0.3, syllable=0)], [segments], _flat_rms())
+    assert result.notes[0].lyric == kana
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_head_consonants_that_do_not_decide_the_kana_stay_in_the_phonemes():
+    """かなを決めなかった頭子音も音素列には載せる(発音の情報を落とさない)。"""
+    syllable = [_consonant(0.0, 0.1, "t"), _consonant(0.1, 0.2, "k"), _vowel(0.2, 0.5, "a")]
+    result = lyrics.annotate([_note(0.0, 0.5, syllable=0)], [syllable], _flat_rms())
+    assert result.notes[0].lyric == "か"
+    assert result.notes[0].phonemes == ["t", "k", "a"]
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_a_moraic_nasal_nucleus_gets_the_nasal_kana():
+    """核が撥音の音符は、頭子音に依らず撥音のかなにする。"""
+    syllable = [_consonant(0.0, 0.1, "k"), _consonant(0.1, 0.4, "ɴ")]
+    result = lyrics.annotate([_note(0.0, 0.4, syllable=0)], [syllable], _flat_rms())
+    assert result.notes[0].lyric == "ん"
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_the_kana_table_covers_every_consonant_the_recognizer_can_emit():
+    """かな表は認識器の音素語彙と5母音の全組を覆う(取りこぼしを表の網羅で防ぐ)。"""
+    consonants = set(lyrics.IPA_TO_VPR_PHONEME.values()) - set("aiMeo") - {"N\\"}
+    assert consonants <= set(lyrics.KANA_BY_CONSONANT)
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_the_kana_table_holds_the_documented_cells():
+    """かな表の全セルを固定する(1セルの誤りが表示歌詞をそのまま壊すため)。"""
+    assert lyrics.KANA_BY_CONSONANT == {
+        "": ("あ", "い", "う", "え", "お"),
+        "k": ("か", "き", "く", "け", "こ"),
+        "k'": ("きゃ", "き", "きゅ", "きぇ", "きょ"),
+        "g": ("が", "ぎ", "ぐ", "げ", "ご"),
+        "g'": ("ぎゃ", "ぎ", "ぎゅ", "ぎぇ", "ぎょ"),
+        "s": ("さ", "すぃ", "す", "せ", "そ"),
+        "S": ("しゃ", "し", "しゅ", "しぇ", "しょ"),
+        "z": ("ざ", "ずぃ", "ず", "ぜ", "ぞ"),
+        "dZ": ("じゃ", "じ", "じゅ", "じぇ", "じょ"),
+        "t": ("た", "てぃ", "とぅ", "て", "と"),
+        "ts": ("つぁ", "つぃ", "つ", "つぇ", "つぉ"),
+        "tS": ("ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"),
+        "d": ("だ", "でぃ", "どぅ", "で", "ど"),
+        "n": ("な", "に", "ぬ", "ね", "の"),
+        "J": ("にゃ", "に", "にゅ", "にぇ", "にょ"),
+        "h": ("は", "ひ", "ふ", "へ", "ほ"),
+        "C": ("ひゃ", "ひ", "ひゅ", "ひぇ", "ひょ"),
+        "p\\": ("ふぁ", "ふぃ", "ふ", "ふぇ", "ふぉ"),
+        "b": ("ば", "び", "ぶ", "べ", "ぼ"),
+        "b'": ("びゃ", "び", "びゅ", "びぇ", "びょ"),
+        "p": ("ぱ", "ぴ", "ぷ", "ぺ", "ぽ"),
+        "p'": ("ぴゃ", "ぴ", "ぴゅ", "ぴぇ", "ぴょ"),
+        "m": ("ま", "み", "む", "め", "も"),
+        "m'": ("みゃ", "み", "みゅ", "みぇ", "みょ"),
+        "j": ("や", "い", "ゆ", "いぇ", "よ"),
+        "4": ("ら", "り", "る", "れ", "ろ"),
+        "w": ("わ", "うぃ", "う", "うぇ", "うぉ"),
+        "v": ("ば", "び", "ぶ", "べ", "ぼ"),
+    }
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_the_syllable_head_protects_its_phonemes():
+    """音素列を載せた音節の先頭の音符は保護を真にする。継続と音素列が空の音符は偽のまま。"""
+    first = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a")]
+    second = [_gap(0.6, 0.9)]
+    result = lyrics.annotate(
+        [_note(0.0, 0.3, syllable=0), _note(0.3, 0.6, midi=71, syllable=0),
+         _note(0.6, 0.9, syllable=1)],
+        [first, second], _flat_rms())
+    assert [note.is_protected for note in result.notes] == [True, False, False]
+
+
 # --- 表示歌詞(歌詞テキストの指定あり)---------------------------------------
 
 
