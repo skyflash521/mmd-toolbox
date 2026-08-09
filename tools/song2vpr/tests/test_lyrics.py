@@ -221,10 +221,7 @@ def test_the_syllable_head_protects_its_phonemes():
 
 # --- ベロシティが 0 になる音符の抑制 ------------------------------------------
 
-_PENDING = "impl pending: ベロシティ 0 の音符の抑制"
 
-
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_a_note_with_zero_velocity_is_not_output():
     """ベロシティが 0 になる音符は出力せず、落とした件数を数える。"""
     result = lyrics.annotate([_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=1)],
@@ -234,7 +231,6 @@ def test_a_note_with_zero_velocity_is_not_output():
     assert result.diagnostics.suppressed_notes == 1
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_the_first_surviving_note_of_a_syllable_becomes_its_head():
     """先頭の音符が落ちた音節は、残った最初の音符が先頭になる(継続の表記のままにしない)。"""
     syllable = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a")]
@@ -245,7 +241,6 @@ def test_the_first_surviving_note_of_a_syllable_becomes_its_head():
     assert result.notes[0].is_protected is True
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_a_syllable_with_no_surviving_note_takes_no_mora():
     """音符が1つも残らない音節は表示に現れないので、モーラも消費しない。"""
     source = [_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=1),
@@ -372,19 +367,20 @@ def test_velocity_comes_from_the_rms_of_the_note():
     assert result.notes[0].velocity == 64  # round(0.5 * 127)
 
 
-@pytest.mark.parametrize("value,expected", [(0.0, 0), (1.0, 127)])
-def test_velocity_spans_the_full_range(value, expected):
+@pytest.mark.parametrize("value,expected", [(0.004, 1), (1.0, 127)])
+def test_velocity_spans_the_range_of_the_notes_that_are_output(value, expected):
+    """出力する音符が取りうる下端と上端(0 になる音符は出力しないので下端は 1)。"""
     result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "a")),
                              _flat_rms(value=value))
     assert result.notes[0].velocity == expected
 
 
-@pytest.mark.parametrize("loud_in_middle,expected", [(True, 127), (False, 0)])
+@pytest.mark.parametrize("loud_in_middle,expected", [(True, 127), (False, 64)])
 def test_velocity_uses_the_middle_of_the_note(loud_in_middle, expected):
     """代表値は音符区間の中央だけから取る(端の立ち上がり・減衰に引かれない)。"""
     times = np.arange(0.0, 1.0, 0.01)
     middle = (times >= 0.2) & (times < 0.8)
-    values = np.where(middle if loud_in_middle else ~middle, 1.0, 0.0)
+    values = np.where(middle if loud_in_middle else ~middle, 1.0, 0.5)
     envelope = RmsEnvelope(times_sec=times, values=values, dynamic_range_db=20.0)
     result = lyrics.annotate([_note(0.0, 1.0)], _one_syllable(_vowel(0.0, 1.0, "a")), envelope)
     assert result.notes[0].velocity == expected

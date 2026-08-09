@@ -115,6 +115,7 @@ class Diagnostics:
 
     undetermined_vowel_notes: int = 0
     moraic_nasal_notes: int = 0
+    suppressed_notes: int = 0
     no_phoneme_notes: int = 0
     notes_beyond_morae: int = 0
     discarded_morae: int = 0
@@ -285,7 +286,17 @@ def annotate(source_notes, syllable_segments, rms, *, lyrics_text=None) -> Annot
     厳密な整合は求めない)。
     """
     diagnostics = Diagnostics()
-    heads = len({note.syllable for note in source_notes})
+
+    # ベロシティが 0 になる音符は出力しない。音節の先頭と継続の判定もモーラの割り当ても、この
+    # 除去の後に残った音符だけで決める(先頭が落ちた音節は、残った最初の音符が先頭になる)。
+    kept = []
+    for note in source_notes:
+        velocity = _velocity_of(rms, note.start_sec, note.end_sec)
+        if velocity == 0:
+            diagnostics.suppressed_notes += 1
+            continue
+        kept.append((note, velocity))
+    heads = len({note.syllable for note, _velocity in kept})
 
     morae = []
     if lyrics_text is not None:
@@ -299,8 +310,7 @@ def annotate(source_notes, syllable_segments, rms, *, lyrics_text=None) -> Annot
     result = []
     started = set()
     position = 0  # 音節の先頭の音符の通し番号(モーラの割り当てに使う)
-    for note in source_notes:
-        velocity = _velocity_of(rms, note.start_sec, note.end_sec)
+    for note, velocity in kept:
         if note.syllable in started:
             result.append(SungNote(
                 start_sec=note.start_sec, end_sec=note.end_sec, midi=note.midi,

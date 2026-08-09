@@ -24,10 +24,7 @@ def _sung(start_sec, end_sec, midi=60, lyric="あ", phonemes=None, velocity=64,
                     is_protected=is_protected)
 
 
-_PENDING = "impl pending: 併合で音節の先頭の値を採る"
 
-
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_a_collapsed_continuation_does_not_replace_its_syllable_head():
     """同じ位置へ潰れた音符に音節の先頭があれば、表示歌詞・音素列・保護はその音符のものにする。
 
@@ -51,7 +48,6 @@ def test_a_collapsed_continuation_does_not_replace_its_syllable_head():
     assert (note.pitch, note.velocity) == (62, 20)
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_a_collapsed_syllable_head_without_phonemes_still_wins():
     """音素列が空の音節の先頭も先頭として扱う(保護が真かどうかで先頭を見分けない)。"""
     result = project.build([_sung(0.0, 0.0001, lyric="あ", phonemes=[]),
@@ -61,7 +57,6 @@ def test_a_collapsed_syllable_head_without_phonemes_still_wins():
     assert (note.lyric, note.phonemes, note.is_protected) == ("あ", [], False)
 
 
-@pytest.mark.xfail(reason=_PENDING, strict=True)
 def test_the_earlier_syllable_head_wins_when_two_collapse():
     """音節の先頭が複数まとまったときは先の音符のものにする(長さでは選ばない)。"""
     # 後の音符も音節の先頭。音素列が空の先頭は保護が偽なので、両方とも成立する組み合わせにする。
@@ -168,17 +163,21 @@ def test_note_that_rounds_to_zero_length_is_stretched_to_one_tick():
 
 
 def test_notes_that_collapse_to_the_same_tick_are_merged():
-    """同じ位置に潰れた音符は1つにまとめ、値は最も長い音符から採り、区間は範囲の終端まで伸ばす。"""
-    # 120 BPM では 1 tick = 1/960 秒。最も長い音符を中間に置いて、選択が並び順(先頭・最後の
-    # どちらでも)でなく長さで決まることを見る。値は4つとも同じ音符から採る。
+    """同じ位置に潰れた音符は1つにまとめ、区間は範囲の終端まで伸ばす。
+
+    音高と強弱は最も長い音符から採る。表示歌詞・音素列は音節の先頭から採るので、3つとも音節の
+    先頭であるこの並びでは先の音符のものになる。
+    """
+    # 120 BPM では 1 tick = 1/960 秒。最も長い音符を中間に置いて、音高と強弱の選択が並び順
+    # (先頭・最後のどちらでも)でなく長さで決まることを見る。
     result = project.build([_sung(0.0, 0.0001, midi=60, lyric="あ", phonemes=["a"], velocity=10),
                             _sung(0.0001, 0.0005, midi=62, lyric="い", phonemes=["i"], velocity=20),
                             _sung(0.0005, 0.0006, midi=64, lyric="う", phonemes=["M"], velocity=30)],
                            _tempo(), name="song")
     notes = result.project.tracks[0].parts[0].notes
     assert len(notes) == 1
-    assert (notes[0].pitch, notes[0].lyric, notes[0].phonemes, notes[0].velocity) == \
-           (62, "い", ["i"], 20)
+    assert (notes[0].pitch, notes[0].velocity) == (62, 20)
+    assert (notes[0].lyric, notes[0].phonemes) == ("あ", ["a"])
     assert notes[0].start_tick + notes[0].duration_tick == _tempo().to_tick(0.0006)
     assert result.diagnostics.quantized_merged_notes == 2
 

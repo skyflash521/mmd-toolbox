@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 from vpr import Note, Part, TempoEvent, TimeSignature, Track, VoiceBank, VprProject
 
+from .lyrics import CONTINUATION
+
 # 音高の格納範囲。外れた値は端へ丸めて件数を診断へ出す。
 _MIDI_RANGE = (0, 127)
 
@@ -51,19 +53,25 @@ def _clamp_pitch(midi, diagnostics):
 def _merge_collapsed(quantized, diagnostics):
     """同じ tick へ潰れた音符を1つにまとめる。
 
-    残す値は秒の区間が最も長い音符のもの(同じ長さなら先の音符)。同じ位置に潰れた音符は最後の1つ
-    以外は必ず tick 長が 0 になるので、tick で比べると区間の長短を反映しない。
+    音高と強弱は秒の区間が最も長い音符のもの(同じ長さなら先の音符)。同じ位置に潰れた音符は
+    最後の1つ以外は必ず tick 長が 0 になるので、tick で比べると区間の長短を反映しない。
+    表示歌詞・音素列・音素の保護は、まとめた中に音節の先頭の音符があればその音符(複数あれば先の
+    音符)のものにする。継続の音符は自分より前に同じ音節の音符があることを表す表記なので、先頭を
+    飲み込んだ結果としてそれだけが残ると、音素列を持つ音符が1つも無い音節ができてしまう。
+    まとめた結果を (開始 tick, 終端 tick, 最も長い音符, 音節の先頭の音符) で返す。
     """
     merged = []
     for start_tick, end_tick, note in quantized:
+        head = None if note.lyric == CONTINUATION else note
         if merged and merged[-1][0] == start_tick:
-            kept_start, kept_end, kept = merged[-1]
-            if note.end_sec - note.start_sec > kept.end_sec - kept.start_sec:
-                kept = note
-            merged[-1] = (kept_start, max(kept_end, end_tick), kept)
+            kept_start, kept_end, longest, kept_head = merged[-1]
+            if note.end_sec - note.start_sec > longest.end_sec - longest.start_sec:
+                longest = note
+            merged[-1] = (kept_start, max(kept_end, end_tick), longest,
+                          kept_head if kept_head is not None else head)
             diagnostics.quantized_merged_notes += 1
         else:
-            merged.append((start_tick, end_tick, note))
+            merged.append((start_tick, end_tick, note, head))
     return merged
 
 
@@ -73,11 +81,11 @@ def _stretch_empty(merged, diagnostics):
     まとめを済ませた後なので開始 tick は互いに異なり、次の音符は必ず 1 tick 以上先にある。
     """
     spans = []
-    for start_tick, end_tick, note in merged:
+    for start_tick, end_tick, longest, head in merged:
         if end_tick <= start_tick:
             end_tick = start_tick + 1
             diagnostics.quantized_stretched_notes += 1
-        spans.append((start_tick, end_tick, note))
+        spans.append((start_tick, end_tick, longest, head))
     return spans
 
 
@@ -92,10 +100,11 @@ def build(notes, tempo, *, name: str) -> BuildResult:
     spans = _stretch_empty(_merge_collapsed(quantized, diagnostics), diagnostics)
 
     written = [Note(start_tick=start_tick, duration_tick=end_tick - start_tick,
-                    pitch=_clamp_pitch(note.midi, diagnostics), lyric=note.lyric,
-                    velocity=note.velocity, phonemes=list(note.phonemes),
-                    is_protected=note.is_protected)
-               for start_tick, end_tick, note in spans]
+                    pitch=_clamp_pitch(longest.midi, diagnostics), velocity=longest.velocity,
+                    lyric=(head or longest).lyric,
+                    phonemes=list((head or longest).phonemes),
+                    is_protected=(head or longest).is_protected)
+               for start_tick, end_tick, longest, head in spans]
 
     diagnostics.note_count = len(written)
 
