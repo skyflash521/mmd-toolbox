@@ -96,6 +96,8 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
 - `ControllerEvent`: `tick: int`(プロジェクト絶対 tick)、`value: int`(ファイル格納の生値)。
 - `Note`: `start_tick: int`、`duration_tick: int`、`pitch: int`(MIDI ノート番号)、`lyric: str`(表示歌詞)、
   `velocity: int`(0〜127)、`phonemes: list[str]`(音符内の音素列。空可、既定は空リスト)、
+  `is_protected: bool`(音素列の保護。既定 `false`。形式の `isProtected` に対応し、読みは欠落を偽として
+  写し、書きはそのまま書く。値の意味付け・選別はフォーマット層は持たない)、
   `vibrato: NoteVibrato | None`(既定 `None`)、`ai_expression: NoteAiExpression | None`(既定 `None`)。
   `start_tick` は**プロジェクト絶対 tick**、`duration_tick` は **tick 長**で持つ(vpr がパート相対で格納する場合、
   read 時に `Part` 開始位置を `start_tick` へ加算して絶対化する)。
@@ -157,7 +159,9 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
 - `VprProject.tracks` ← `tracks` のうち歌唱トラック(`type` = 2)。`Track(name, parts)`。オーディオトラック
   (`type` = 1)は音符を持たず公開データモデルに現れない(その保持は [§3.3](#33-未解釈データのロスレス保持))。
 - `Part(name, start_tick=part.pos, notes, controllers)`。`notes` は `start_tick` 昇順。
-- `Note(start_tick=part.pos + note.pos, duration_tick=duration, pitch=number, lyric, velocity, phonemes=phoneme.split())`。
+- `Note(start_tick=part.pos + note.pos, duration_tick=duration, pitch=number, lyric, velocity, phonemes=phoneme.split(), is_protected=isProtected)`。
+  `isProtected` が欠落している音符、または真偽値でない値を持つ音符は `is_protected` を `False` とする
+  (形式仕様が省略可と定めるフィールドで、欠落時は偽として扱う)。
 - `Note.vibrato` ← `note.vibrato`、`Note.ai_expression` ← `note.aiExp` の深さ包絡2キー。ビブラートの制御点は
   区間始端(`音符終端 − 区間長`)を加算して絶対 tick 化する。区間長が正でないビブラートと、写せない形の
   構造は `None` とする(下記の寛容規則)。
@@ -202,13 +206,15 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
     `lyric`・`phoneme`・`velocity` の6フィールドを必須とする([VPR_file_format.md の音符フィールド定義](../../docs/specs/vpr/VPR_file_format.md#notes))。
 - **`VprFormatError` としない入力(許容)**:
   - 公開データモデル対象外の未知キー・未解釈キー(ロスレス保持側 [§3.3](#33-未解釈データのロスレス保持) に回す)。
-  - [VPR_file_format.md の音符フィールド定義](../../docs/specs/vpr/VPR_file_format.md#notes)が省略可とする音符フィールド(`exp`/`aiExp`/`vibrato`/`singingSkill`/`phonemePositions`)の欠如。
+  - [VPR_file_format.md の音符フィールド定義](../../docs/specs/vpr/VPR_file_format.md#notes)が省略可とする音符フィールド(`exp`/`aiExp`/`vibrato`/`isProtected`/`singingSkill`/`phonemePositions`)の欠如。
   - オーディオトラックなど公開データモデルの `Track` に写像しないトラックの存在。
   - 歌唱パートに `notes` が無い場合は空の音符列として扱う。
-  - **書き利用のために新たに読むキー**(`title`・`parts[].duration`・音符の `vibrato` と `aiExp`)が欠落して
-    いる、または公開モデルへ写せない型・構造である。いずれも読みを失敗させず、公開フィールドを既定値
-    (`title` は空文字列、パート長は `0`、ビブラートと深さ包絡は `None`)にする。形式仕様が省略可と定めて
+  - **書き利用のために新たに読むキー**(`title`・`parts[].duration`・音符の `vibrato`・`aiExp`・`isProtected`)が
+    欠落している、または公開モデルへ写せない型・構造である。いずれも読みを失敗させず、公開フィールドを既定値
+    (`title` は空文字列、パート長は `0`、ビブラートと深さ包絡は `None`、`is_protected` は `False`)にする。
+    形式仕様が省略可と定めて
     いるからではなく、**現在読める vpr が読めなくなることを避けるための寛容規則**で、受理範囲を広げない。
+    したがって上の型不正の規則は `isProtected` には及ばない。
 
 ### 3.2 続行可能な警告(`VprWarning`)
 

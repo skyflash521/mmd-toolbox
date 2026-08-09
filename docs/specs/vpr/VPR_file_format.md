@@ -100,6 +100,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `lyric` | str | 表示歌詞 |
 | `phoneme` | str | 音素列。**空白区切り**(例 `"k o"`、`"t th e l"`)。`phoneme.split()` で音素の並びになる |
 | `velocity` | int | ベロシティ(0〜127) |
+| `isProtected` | bool(**省略可**) | 音素列の保護。欠落時は偽として扱う。観測した実 vpr の値はすべて `false`。真のとき編集器が表示歌詞から音素を導き直さない、という意味は編集器の仕様からの推定で、実挙動は未検証 |
 | `vibrato` | dict(**省略可**) | 音符ビブラート。構造は下記の [notes[] の vibrato](#notes-の-vibrato) |
 | `aiExp` | dict(**省略可**) | VOCALOID:AI の表現パラメータ。ビブラート深さの `vibratoLeadingDepth`/`vibratoFollowingDepth`(実数。観測値は約 0.2〜1.0 で、上端 1.0 は直接観測、下端 0 は未観測)を含む。それ以外のキー(`pitchFine`・`pitchDriftStart`/`End`・`pitchScalingCenter`/`Origin`・`pitchTransitionStart`/`End`・`amplitudeWhole`/`Start`/`End`)は名前以外を解析していない |
 | `isAiVibratoEnabled` | bool(**省略可**) | 音符直下の真偽値(`aiExp` の内側ではない)。観測した音符はすべて `true` で、`false` の例は未観測。意味は未確定 |
@@ -107,7 +108,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `phonemePositions[]` | list(**省略可**) | 音符内の音素別タイミング。音符により存在しない(実サンプルでは一部の音符のみ)。未設定値は `-2147483648`(INT_MIN) |
 
 読み手が全音符での存在を当てにしてよいのは `pos`・`duration`・`number`・`lyric`・`phoneme`・`velocity` の
-6つで、`exp`/`aiExp`/`vibrato`/`isAiVibratoEnabled`/`singingSkill`/`phonemePositions` は省略可として扱う
+6つで、`exp`/`aiExp`/`vibrato`/`isAiVibratoEnabled`/`isProtected`/`singingSkill`/`phonemePositions` は省略可として扱う
 (欠落する音符がある前提で読む)。解析に用いた実ファイルでは、このうち `phonemePositions` だけが一部の音符に
 しか無く、残りは全音符に存在した。
 
