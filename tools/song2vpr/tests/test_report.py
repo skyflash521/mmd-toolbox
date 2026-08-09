@@ -4,7 +4,7 @@
 入力はすべて合成した診断データにする。
 """
 
-
+import pytest
 
 from song2vpr import lyrics, notes, project, report
 from song2vpr.tempo import TempoEstimate
@@ -22,10 +22,10 @@ def _fields(**overrides):
         output="out.vpr", tempo=_tempo(), duration_sec=12.5, separated=True,
         backends={"separator": "demucs", "recognizer": None, "recognizer_revision": None,
                   "forced_aligner": None, "english_katakana_method": None},
-        split=notes.Diagnostics(short_notes=1),
+        split=notes.Diagnostics(short_notes=1, suppressed_notes=10),
         annotation=lyrics.Diagnostics(undetermined_vowel_notes=2, moraic_nasal_notes=3,
                                       no_phoneme_notes=4, notes_beyond_morae=5,
-                                      discarded_morae=6),
+                                      discarded_morae=6, suppressed_notes=11),
         build=project.Diagnostics(note_count=3, pitch_clamped_notes=7,
                                   quantized_merged_notes=8, quantized_stretched_notes=9),
     )
@@ -33,15 +33,27 @@ def _fields(**overrides):
     return report.run_fields(**given)
 
 
+_RUN_KEYS = {
+    "output", "notes", "tempo_bpm", "tempo_source", "time_signature",
+    "time_signature_source", "resolution", "duration_sec", "separated", "backends",
+    "vowel_undetermined_notes", "moraic_nasal_notes", "fallback_lyric_notes", "dropped_morae",
+    "short_notes", "suppressed_notes", "pitch_clamped_notes", "quantized_merged_notes",
+    "quantized_stretched_notes", "no_phoneme_notes",
+}
+
+
+@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
 def test_run_fields_carry_every_key_the_contract_names():
-    """result(mode:"run")のキーは常に全部載せる。"""
-    assert set(_fields()) == {
-        "output", "notes", "tempo_bpm", "tempo_source", "time_signature",
-        "time_signature_source", "resolution", "duration_sec", "separated", "backends",
-        "vowel_undetermined_notes", "moraic_nasal_notes", "fallback_lyric_notes", "dropped_morae",
-        "short_notes", "pitch_clamped_notes", "quantized_merged_notes",
-        "quantized_stretched_notes", "no_phoneme_notes",
-    }
+    """result(mode:"run")のキーは常に全部載せる(件数が 0 の実行でも欠かさない)。"""
+    assert set(_fields()) == _RUN_KEYS
+    assert set(_fields(split=notes.Diagnostics(), annotation=lyrics.Diagnostics(),
+                       build=project.Diagnostics())) == _RUN_KEYS
+
+
+@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
+def test_suppressed_notes_sums_the_two_stages_that_drop_notes():
+    """抑制件数は分割の段と付与の段の合計にする(規則ごとに担当する段が違うため)。"""
+    assert _fields()["suppressed_notes"] == 21
 
 
 def test_counts_come_from_the_stage_that_judged_them():
@@ -64,13 +76,15 @@ def test_tempo_and_time_signature_are_reported_with_their_sources():
     assert fields["resolution"] == 480
 
 
+@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
 def test_inspect_fields_add_the_input_metadata_and_drop_the_output():
     """入力検査は run の全キーに入力のメタ情報を足し、vpr を書かないので出力先は null。"""
     fields = report.inspect_fields(sample_rate=44100, channels=2, tempo=_tempo(),
                                    duration_sec=12.5, separated=True, backends={},
                                    split=notes.Diagnostics(), annotation=lyrics.Diagnostics(),
                                    build=project.Diagnostics())
-    assert set(fields) - set(_fields()) == {"input_kind", "sample_rate", "channels"}
+    # 差集合でなく等価で見る(run のキーが inspect から欠けても検出できるようにするため)。
+    assert set(fields) == _RUN_KEYS | {"input_kind", "sample_rate", "channels"}
     assert (fields["input_kind"], fields["sample_rate"], fields["channels"]) == ("audio", 44100, 2)
     assert fields["output"] is None
 
@@ -84,6 +98,12 @@ def test_report_text_lists_the_same_values_as_the_result():
     for expected in ("音符数: 3", "テンポ: 120.0", "拍子: 4/4",
                      "分解能(tick/四分音符): 480", "入力の尺(秒): 12.5", "短いまま残った音符: 1"):
         assert expected in text
+
+
+@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
+def test_report_text_shows_the_suppressed_notes():
+    """抑制した件数は人間向けの表示にも出す(合計を利用者が読める形で示す)。"""
+    assert "音節と結びつかず出力しなかった音符: 21" in report.report_text(_fields())
 
 
 def test_report_text_is_written_in_japanese():
