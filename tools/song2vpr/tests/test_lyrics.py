@@ -361,6 +361,33 @@ def test_katakana_is_folded_to_hiragana():
 # --- ベロシティ --------------------------------------------------------------
 
 
+@pytest.mark.xfail(reason="impl pending: ベロシティの中立値固定", strict=True)
+@pytest.mark.parametrize("value", [0.1, 1.0])
+def test_velocity_is_the_neutral_value_regardless_of_the_volume(value):
+    """ベロシティは音量に依らず、全音符で中立値に固定する(ベロシティは音量の欄ではない)。
+
+    音節の先頭と継続では音符を作る経路が別なので、同じ音節の2音符で両方を見る。音量を写した値が
+    たまたま中立値と一致する強さ(0.5)は、区別が付かないので使わない。
+    """
+    result = lyrics.annotate(
+        [_note(0.0, 0.3, syllable=0), _note(0.3, 0.6, midi=71, syllable=0)],
+        _one_syllable(_vowel(0.0, 0.6, "a")), _flat_rms(value=value))
+    assert [note.lyric for note in result.notes] == ["あ", "-"]
+    assert [note.velocity for note in result.notes] == [64, 64]
+
+
+@pytest.mark.parametrize(("value", "output"), [(0.003, False), (0.004, True)])
+def test_the_volume_threshold_is_the_step_of_the_stored_scale(value, output):
+    """抑制の境目は、音量の代表値を 0〜127 へ写したときの最小の刻み。
+
+    正規化の下端は 0 へ写るので、そこにある音符だけが落ちる。刻みより上の音量は、どれだけ小さくても
+    音符として残す。
+    """
+    result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "a")),
+                             _flat_rms(value=value))
+    assert bool(result.notes) is output
+
+
 def test_velocity_comes_from_the_rms_of_the_note():
     result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_vowel(0.0, 0.4, "a")),
                              _flat_rms(value=0.5))
