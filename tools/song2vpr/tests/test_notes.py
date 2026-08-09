@@ -42,6 +42,16 @@ def _one_vowel(track):
     return [_vowel(0.0, float(track.times_sec[-1]) + FRAME)]
 
 
+def _flickering_voicing(first, middle, last):
+    """頭子音の中で有声の判定が途切れ、短い音符が同じ音節の音符に前後を挟まれる配置を作る。
+
+    無声で隔てられた3つの有声区間は、頭子音への開始の延長で隣り合う。有声の子音では F0 が
+    断続的にしか得られないことがあるため、この並びは実際の入力でも起こる。
+    """
+    track = _track([(0.10, first), (0.02, None), (0.03, middle), (0.02, None), (0.43, last)])
+    return track, [_consonant(0.0, 0.20), _vowel(0.20, 0.60)]
+
+
 # --- 半音丸めと無声の扱い ----------------------------------------------------
 
 
@@ -52,10 +62,11 @@ def test_steady_pitch_becomes_one_note():
     assert result[0].midi == 69
 
 
-def test_pitch_is_rounded_to_the_nearest_semitone():
+@pytest.mark.parametrize(("value", "expected"), [(69.4, 69), (69.6, 70)])
+def test_pitch_is_rounded_to_the_nearest_semitone(value, expected):
     """音高は最も近い半音へ丸める。"""
-    track = _track([(0.5, 69.4)])
-    assert notes.split(track, _one_vowel(track)).notes[0].midi == 69
+    track = _track([(0.5, value)])
+    assert notes.split(track, _one_vowel(track)).notes[0].midi == expected
 
 
 def test_unvoiced_span_produces_no_note():
@@ -132,6 +143,54 @@ def test_pitch_change_splits_the_note():
     assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71]
 
 
+@pytest.mark.xfail(reason="impl pending: 瞬間的な音高の変化で区切らない", strict=True)
+def test_a_momentary_pitch_change_does_not_split_the_note():
+    """ビブラートやしゃくりで瞬間的に半音を超えて動いても、それだけでは別の音符にしない。"""
+    track = _track([(0.2, 69), (0.03, 71), (0.2, 69)])
+    result = notes.split(track, _one_vowel(track)).notes
+    assert len(result) == 1
+    assert result[0].midi == 69
+
+
+def test_a_pitch_change_that_lasts_splits_the_note():
+    """最小長ぶん続く音高の変化は、瞬間的な揺れではないので別の音符にする。"""
+    track = _track([(0.2, 69), (0.08, 71), (0.2, 69)])
+    assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71, 69]
+
+
+@pytest.mark.xfail(reason="impl pending: 音符の音高を中央値で求める", strict=True)
+def test_the_note_pitch_is_the_median_of_its_frames():
+    """音符の音高は、その音符の中のフレームの MIDI ノート番号の中央値にする。
+
+    どの値もそれだけでは最小長ぶん続かないので1音符になる。先頭のフレームの値なら 60、平均を
+    丸めると 64、最も多い値なら 61 になる配置で、中央値の 67 になることを見る。
+    """
+    track = _track([(0.03, 60), (0.07, 61), (0.06, 67), (0.05, 68)])
+    result = notes.split(track, _one_vowel(track)).notes
+    assert len(result) == 1
+    assert result[0].midi == 67
+
+
+@pytest.mark.xfail(reason="impl pending: 音符の音高を中央値で求める", strict=True)
+def test_the_median_is_taken_before_rounding_to_a_semitone():
+    """中央値は半音へ丸める前の値で求め、その中央値を丸める。
+
+    先に各フレームを半音へ丸めてから中央値を求めると 69 と 70 の中間になり 70 へ倒れる配置で、
+    丸める前の中央値 69.1 から 69 になることを見る。
+    """
+    track = _track([(0.07, 68.6), (0.07, 69.6)])
+    result = notes.split(track, _one_vowel(track)).notes
+    assert len(result) == 1
+    assert result[0].midi == 69
+
+
+def test_the_median_pitch_is_not_truncated():
+    """中央値は切り捨てず、最も近い半音へ丸める。"""
+    # 中央値は 69.6 なので、切り捨てなら 69、丸めれば 70 になる。
+    track = _track([(0.07, 69.2), (0.07, 70.0)])
+    assert notes.split(track, _one_vowel(track)).notes[0].midi == 70
+
+
 def test_vowel_change_splits_the_note_at_the_same_pitch():
     """同じ音高が続いても、別の母音になれば別の音符にする。"""
     track = _track([(0.3, 69), (0.3, 69)])
@@ -165,20 +224,47 @@ def test_short_note_is_not_absorbed_across_a_syllable():
 
 
 def test_short_note_is_absorbed_by_the_nearest_pitch():
-    """同じ音高の隣接が無ければ、音高が最も近い隣接音符へ吸収する。"""
-    track = _track([(0.3, 60), (0.03, 71), (0.3, 72)])
-    result = notes.split(track, _one_vowel(track)).notes
+    """両隣が同じ音節にあるときは、音高が最も近い隣接音符へ吸収する。"""
+    track, segments = _flickering_voicing(60, 71, 72)
+    result = notes.split(track, segments).notes
     assert [note.midi for note in result] == [60, 72]
     # 吸収先は音高を保ち、短音符の区間を足して延びる。
-    assert result[1].start_sec == pytest.approx(0.3, abs=FRAME)
+    assert result[1].start_sec == pytest.approx(0.10, abs=FRAME)
 
 
 def test_absorption_prefers_the_earlier_side_on_a_tie():
     """音高の距離が同じなら直前側へ吸収する。"""
-    track = _track([(0.3, 67), (0.03, 69), (0.3, 71)])
-    result = notes.split(track, _one_vowel(track)).notes
+    track, segments = _flickering_voicing(67, 69, 71)
+    result = notes.split(track, segments).notes
     assert [note.midi for note in result] == [67, 71]
-    assert result[0].end_sec == pytest.approx(0.33, abs=FRAME)
+    assert result[0].end_sec == pytest.approx(0.15, abs=FRAME)
+
+
+def test_short_note_is_absorbed_by_the_preceding_note_in_the_same_syllable():
+    """最小長に満たない音符は、同じ音節の直前の音符へ吸収する。
+
+    音高の変化が続いて音符になった後、音節の切り替わりで切り詰められると最小長を割ることがある。
+    """
+    # 音高は 0.30 秒で変わって続くので音符になるが、0.36 秒の音節の境界で切り詰められる。
+    track = _track([(0.30, 69), (0.30, 71)])
+    segments = [_vowel(0.0, 0.36, "a"), _vowel(0.36, 0.60, "i")]
+    result = notes.split(track, segments).notes
+    assert [note.midi for note in result] == [69, 71]
+    # 吸収先は音高を保ち、短音符の区間を足して延びる。
+    assert result[0].end_sec == pytest.approx(0.36, abs=FRAME)
+
+
+def test_short_note_is_absorbed_by_the_following_note_in_the_same_syllable():
+    """音節の最初の音符が最小長に満たなければ、同じ音節の直後の音符へ吸収する。
+
+    吸収先の音高を保つので、最初の音節の音高は 69 ではなく 71 になる。音高の変化が続くかどうかは
+    音節の境界で区切らずに見るため、0.07 秒からの 71 は音節の先まで続いて音符になる。
+    """
+    track = _track([(0.07, 69), (0.30, 71)])
+    segments = [_vowel(0.0, 0.13, "a"), _vowel(0.13, 0.37, "i")]
+    result = notes.split(track, segments).notes
+    assert [note.midi for note in result] == [71, 71]
+    assert result[0].start_sec == pytest.approx(0.0, abs=FRAME)
 
 
 def test_isolated_short_note_survives():
@@ -374,9 +460,10 @@ def test_short_notes_left_alone_are_counted():
 def test_absorbed_short_notes_are_not_counted():
     """隣へ吸収された短音符は残っていないので数えない。
 
-    1つの音節の中で音高が変わり、後ろが最小長に満たない配置(同じ音節なので吸収が起きる)。
+    音節の最初の音符が最小長に満たず、同じ音節の直後の音符へ吸収される配置。
     """
-    track = _track([(0.3, 69), (0.03, 71)])
-    result = notes.split(track, _one_vowel(track))
-    assert len(result.notes) == 1
+    track = _track([(0.07, 69), (0.30, 71)])
+    segments = [_vowel(0.0, 0.13, "a"), _vowel(0.13, 0.37, "i")]
+    result = notes.split(track, segments)
+    assert len(result.notes) == 2
     assert result.diagnostics.short_notes == 0
