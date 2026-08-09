@@ -28,6 +28,9 @@ def run_fields(*, output, tempo, duration_sec, separated, backends,
         "fallback_lyric_notes": annotation.notes_beyond_morae,
         "dropped_morae": annotation.discarded_morae,
         "short_notes": split.short_notes,
+        # 抑制の規則は3つあり、担当する段が分かれている。利用者へ出すのはその合計。段は直列なので
+        # 同じ音符が二度数えられることはない。
+        "suppressed_notes": split.suppressed_notes + annotation.suppressed_notes,
         "pitch_clamped_notes": build.pitch_clamped_notes,
         "quantized_merged_notes": build.quantized_merged_notes,
         "quantized_stretched_notes": build.quantized_stretched_notes,
@@ -63,6 +66,7 @@ _LABELS = (
     ("vowel_undetermined_notes", "母音が得られず「あ」を入れた音符"),
     ("no_phoneme_notes", "音素列が空の音符"),
     ("short_notes", "短いまま残った音符"),
+    ("suppressed_notes", "音節と結びつかず出力しなかった音符"),
     ("pitch_clamped_notes", "音高を丸めた音符"),
     ("quantized_merged_notes", "まとめられて消えた音符"),
     ("quantized_stretched_notes", "長さを 1 tick へ伸ばした音符"),

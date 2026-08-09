@@ -4,8 +4,6 @@
 入力はすべて合成した診断データにする。
 """
 
-import pytest
-
 from song2vpr import lyrics, notes, project, report
 from song2vpr.tempo import TempoEstimate
 
@@ -42,7 +40,6 @@ _RUN_KEYS = {
 }
 
 
-@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
 def test_run_fields_carry_every_key_the_contract_names():
     """result(mode:"run")のキーは常に全部載せる(件数が 0 の実行でも欠かさない)。"""
     assert set(_fields()) == _RUN_KEYS
@@ -50,7 +47,6 @@ def test_run_fields_carry_every_key_the_contract_names():
                        build=project.Diagnostics())) == _RUN_KEYS
 
 
-@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
 def test_suppressed_notes_sums_the_two_stages_that_drop_notes():
     """抑制件数は分割の段と付与の段の合計にする(規則ごとに担当する段が違うため)。"""
     assert _fields()["suppressed_notes"] == 21
@@ -76,7 +72,6 @@ def test_tempo_and_time_signature_are_reported_with_their_sources():
     assert fields["resolution"] == 480
 
 
-@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
 def test_inspect_fields_add_the_input_metadata_and_drop_the_output():
     """入力検査は run の全キーに入力のメタ情報を足し、vpr を書かないので出力先は null。"""
     fields = report.inspect_fields(sample_rate=44100, channels=2, tempo=_tempo(),
@@ -100,7 +95,6 @@ def test_report_text_lists_the_same_values_as_the_result():
         assert expected in text
 
 
-@pytest.mark.xfail(reason="impl pending: 抑制件数の公開", strict=True)
 def test_report_text_shows_the_suppressed_notes():
     """抑制した件数は人間向けの表示にも出す(合計を利用者が読める形で示す)。"""
     assert "音節と結びつかず出力しなかった音符: 21" in report.report_text(_fields())
