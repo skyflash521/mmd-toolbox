@@ -31,6 +31,13 @@ def _flat_rms(value=0.5, seconds=2.0):
     return RmsEnvelope(times_sec=times, values=np.full(len(times), value), dynamic_range_db=20.0)
 
 
+def _rms_silent_between(start, end, seconds=2.0):
+    """指定の区間だけ音量が 0 の包絡(その区間に収まる音符だけベロシティが 0 になる)。"""
+    times = np.arange(0.0, seconds, 0.01)
+    values = np.where((times >= start) & (times < end), 0.0, 0.5)
+    return RmsEnvelope(times_sec=times, values=values, dynamic_range_db=20.0)
+
+
 def _one_syllable(*segments):
     """音節1つぶんのセグメント帰属(付与の段が受け取る形)。"""
     return [list(segments)]
@@ -210,6 +217,44 @@ def test_the_syllable_head_protects_its_phonemes():
          _note(0.6, 0.9, syllable=1)],
         [first, second], _flat_rms())
     assert [note.is_protected for note in result.notes] == [True, False, False]
+
+
+# --- ベロシティが 0 になる音符の抑制 ------------------------------------------
+
+_PENDING = "impl pending: ベロシティ 0 の音符の抑制"
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_a_note_with_zero_velocity_is_not_output():
+    """ベロシティが 0 になる音符は出力せず、落とした件数を数える。"""
+    result = lyrics.annotate([_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=1)],
+                             [[_vowel(0.0, 0.2, "a")], [_vowel(0.2, 0.4, "i")]],
+                             _rms_silent_between(0.2, 0.4))
+    assert [note.lyric for note in result.notes] == ["あ"]
+    assert result.diagnostics.suppressed_notes == 1
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_the_first_surviving_note_of_a_syllable_becomes_its_head():
+    """先頭の音符が落ちた音節は、残った最初の音符が先頭になる(継続の表記のままにしない)。"""
+    syllable = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a")]
+    result = lyrics.annotate([_note(0.0, 0.3, syllable=0), _note(0.3, 0.6, midi=71, syllable=0)],
+                             [syllable], _rms_silent_between(0.0, 0.3))
+    assert [note.lyric for note in result.notes] == ["か"]
+    assert [note.phonemes for note in result.notes] == [["k", "a"]]
+    assert result.notes[0].is_protected is True
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_a_syllable_with_no_surviving_note_takes_no_mora():
+    """音符が1つも残らない音節は表示に現れないので、モーラも消費しない。"""
+    source = [_note(0.0, 0.2, syllable=0), _note(0.2, 0.4, syllable=1),
+              _note(0.4, 0.6, syllable=2)]
+    segments = [[_vowel(0.0, 0.2, "a")], [_vowel(0.2, 0.4, "a")], [_vowel(0.4, 0.6, "a")]]
+    result = lyrics.annotate(source, segments, _rms_silent_between(0.2, 0.4),
+                             lyrics_text="さくら")
+    assert [note.lyric for note in result.notes] == ["さ", "く"]
+    assert result.diagnostics.discarded_morae == 1
 
 
 # --- 表示歌詞(歌詞テキストの指定あり)---------------------------------------

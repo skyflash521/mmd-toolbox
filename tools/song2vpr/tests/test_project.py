@@ -17,9 +17,59 @@ def _tempo(bpm=120.0, numerator=4, denominator=4, first_bar_sec=0.0):
                          tempo_source="estimated", time_signature_source="estimated")
 
 
-def _sung(start_sec, end_sec, midi=60, lyric="あ", phonemes=None, velocity=64):
+def _sung(start_sec, end_sec, midi=60, lyric="あ", phonemes=None, velocity=64,
+          is_protected=False):
     return SungNote(start_sec=start_sec, end_sec=end_sec, midi=midi, lyric=lyric,
-                    phonemes=list(phonemes) if phonemes is not None else ["a"], velocity=velocity)
+                    phonemes=list(phonemes) if phonemes is not None else ["a"], velocity=velocity,
+                    is_protected=is_protected)
+
+
+_PENDING = "impl pending: 併合で音節の先頭の値を採る"
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_a_collapsed_continuation_does_not_replace_its_syllable_head():
+    """同じ位置へ潰れた音符に音節の先頭があれば、表示歌詞・音素列・保護はその音符のものにする。
+
+    継続の音符は自分より前に同じ音節の音符があることを表す表記なので、先頭を飲み込んだ結果として
+    それだけが残ると、音素列を持つ音符が1つも無い音節ができてしまう。音高と強弱は先頭を優先せず、
+    最も長い音符のものを採る。
+    """
+    # 120 BPM では 1 tick = 1/960 秒。潰れない位置に前の音節の先頭を置き、その音節の継続を先に
+    # 長く、次の音節の先頭を後から短く潰す。最も長い音符から採る一般の規則と先頭を優先する例外が
+    # 食い違い、かつ先頭が潰れた並びの最初に無いので、最初の音符だけを見る実装も落ちる。音高・強弱も
+    # 変えて、どちらから採るかを見る。
+    result = project.build([_sung(0.0, 0.01, midi=64, lyric="さ", phonemes=["s", "a"],
+                                  velocity=30, is_protected=True),
+                            _sung(0.01, 0.0105, midi=62, lyric="-", phonemes=["-"], velocity=20),
+                            _sung(0.0105, 0.0106, midi=60, lyric="か", phonemes=["k", "a"],
+                                  velocity=10, is_protected=True)],
+                           _tempo(), name="song")
+    assert result.diagnostics.quantized_merged_notes == 1
+    note = result.project.tracks[0].parts[0].notes[1]
+    assert (note.lyric, note.phonemes, note.is_protected) == ("か", ["k", "a"], True)
+    assert (note.pitch, note.velocity) == (62, 20)
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_a_collapsed_syllable_head_without_phonemes_still_wins():
+    """音素列が空の音節の先頭も先頭として扱う(保護が真かどうかで先頭を見分けない)。"""
+    result = project.build([_sung(0.0, 0.0001, lyric="あ", phonemes=[]),
+                            _sung(0.0001, 0.0006, lyric="-", phonemes=["-"])],
+                           _tempo(), name="song")
+    note = result.project.tracks[0].parts[0].notes[0]
+    assert (note.lyric, note.phonemes, note.is_protected) == ("あ", [], False)
+
+
+@pytest.mark.xfail(reason=_PENDING, strict=True)
+def test_the_earlier_syllable_head_wins_when_two_collapse():
+    """音節の先頭が複数まとまったときは先の音符のものにする(長さでは選ばない)。"""
+    # 後の音符も音節の先頭。音素列が空の先頭は保護が偽なので、両方とも成立する組み合わせにする。
+    result = project.build([_sung(0.0, 0.0001, lyric="か", phonemes=["k", "a"], is_protected=True),
+                            _sung(0.0001, 0.0006, lyric="き", phonemes=[])],
+                           _tempo(), name="song")
+    note = result.project.tracks[0].parts[0].notes[0]
+    assert (note.lyric, note.phonemes, note.is_protected) == ("か", ["k", "a"], True)
 
 
 @pytest.mark.parametrize("is_protected", [True, False])
