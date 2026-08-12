@@ -332,7 +332,6 @@ def test_estimation_fallbacks_are_reported(tmp_path, monkeypatch, capsysbinary):
                for e in _events(capsysbinary))
 
 
-@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
 def test_the_time_signature_is_not_reported_as_a_fallback(tmp_path, monkeypatch, capsysbinary):
     """拍子は推定しないので、推定できなかったことを知らせる警告も出ない。"""
     silence = AudioPcm(samples=np.zeros((_RATE // 2, 1), dtype=np.float32), sample_rate=_RATE)

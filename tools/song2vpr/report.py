@@ -54,8 +54,10 @@ _BACKEND_LABELS = {
     "english_katakana_method": "英語カタカナ化",
 }
 
-# 採用値の出どころ。機械モードの値は契約の語なので、人間向けには日本語で出す。
-_SOURCE_LABELS = {"option": "指定値", "estimated": "推定値", "default": "仮置き"}
+# 採用値の出どころ。機械モードの値は契約の語なので、人間向けには日本語で出す。テンポと拍子で
+# 既定の意味が違う(テンポは推定できなかった結果、拍子は音声から決めないので常にこれ)。
+_TEMPO_SOURCE_LABELS = {"option": "指定値", "estimated": "推定値", "default": "仮置き"}
+_TIME_SIGNATURE_SOURCE_LABELS = {"option": "指定値", "default": "既定値"}
 
 # 人間向けの表示で使うラベル。並びは利用者向けの診断が挙げる項目の順にそろえる
 # (result のキーの並びとは別。読み手が仕様の記述と突き合わせられるようにするため)。
@@ -88,9 +90,10 @@ def report_text(fields: dict, *, lyrics_given: bool = False) -> str:
     """
     lines = [f"{_BACKEND_LABELS.get(name, name)}: {value}"
              for name, value in (fields.get("backends") or {}).items() if value is not None]
-    lines.append(f"テンポ: {fields['tempo_bpm']} ({_SOURCE_LABELS[fields['tempo_source']]})")
     lines.append(
-        f"拍子: {fields['time_signature']} ({_SOURCE_LABELS[fields['time_signature_source']]})")
+        f"テンポ: {fields['tempo_bpm']} ({_TEMPO_SOURCE_LABELS[fields['tempo_source']]})")
+    lines.append(f"拍子: {fields['time_signature']} "
+                 f"({_TIME_SIGNATURE_SOURCE_LABELS[fields['time_signature_source']]})")
     lines.append(f"分解能(tick/四分音符): {fields['resolution']}")
     lines.append(f"ボーカル分離の実施: {'あり' if fields['separated'] else 'なし'}")
     labels = _LABELS + (_LYRICS_LABELS if lyrics_given else ())

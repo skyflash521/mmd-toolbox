@@ -114,7 +114,6 @@ def test_phase_is_estimated_even_when_the_tempo_is_given():
 # --- 拍子 --------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
 def test_numerator_is_four_unless_it_is_given():
     """拍子を指定しなければ 4 を使う。3拍ごとのアクセントがあっても 3 にはしない。"""
     result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))
@@ -222,7 +221,6 @@ def test_given_values_are_reported_as_options():
     assert (result.tempo_source, result.time_signature_source) == ("option", "option")
 
 
-@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
 def test_the_unspecified_time_signature_is_reported_as_the_default():
     """テンポは音声から推定するが、拍子は指定が無ければ既定として報告する。"""
     result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))

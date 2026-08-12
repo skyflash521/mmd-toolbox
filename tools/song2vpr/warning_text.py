@@ -47,11 +47,6 @@ def _tempo_defaulted(_fields):
     return message, f"{message}。120 BPM を仮置きします。--tempo で指定できます"
 
 
-def _time_signature_defaulted(_fields):
-    message = "拍子を推定できませんでした"
-    return message, f"{message}。4/4 を仮置きします。--time-signature で指定できます"
-
-
 def _kana_reading_ineffective(fields):
     message = "歌詞のかな読みへの変換が効いていないおそれがあります"
     return message, (
@@ -68,7 +63,6 @@ def _forced_split(_fields):
 _BUILDERS = {
     "no_notes": _no_notes,
     "tempo_defaulted": _tempo_defaulted,
-    "time_signature_defaulted": _time_signature_defaulted,
     "kana_reading_ineffective": _kana_reading_ineffective,
     "forced_split": _forced_split,
     "gpu_memory_oversubscribed": _gpu_memory_oversubscribed,

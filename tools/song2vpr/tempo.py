@@ -1,7 +1,8 @@
-"""song2vpr のテンポ・拍子の推定と、秒から tick への変換。
+"""song2vpr のテンポ推定と拍子の決定、秒から tick への変換。
 
-拍を刻むのは主に伴奏側なので、推定は分離前の入力に対して行う(分離後のボーカルからは拍が取りにくい)。
-`--tempo`・`--time-signature` を指定された項目は推定せずその値を使う。
+拍を刻むのは主に伴奏側なので、テンポの推定は分離前の入力に対して行う(分離後のボーカルからは拍が
+取りにくい)。`--tempo` を指定されたときは推定せずその値を使う。拍子は音声から決めず、
+`--time-signature` の指定があればその値、無ければ既定を使う。
 """
 
 from dataclasses import dataclass
@@ -11,8 +12,9 @@ import numpy as np
 # vpr 形式が固定している分解能(tick / 四分音符)。
 RESOLUTION = 480
 
-# 周期を取り出せなかったときに仮置きするテンポと拍子。
+# 周期を取り出せなかったときに仮置きするテンポ。
 _DEFAULT_BPM = 120.0
+# 拍子の既定。指定が無ければ常にこれを使う。
 _DEFAULT_TIME_SIGNATURE = (4, 4)
 
 # オンセット強度包絡の窓長とホップ(秒)。
@@ -30,9 +32,6 @@ _BPM_WEIGHT_SIGMA = 1.5
 # 離れたテンポほど高い周期性が要る。幅を広げるとその要求が下がり、下がり方は中心から遠いほど大きい。
 _PERIODICITY_FLOOR = 0.1
 
-# 未指定時に探索する拍子の分子。
-_NUMERATOR_CANDIDATES = (2, 3, 4)
-
 
 def quantize_bpm(bpm: float) -> float:
     """テンポを vpr 形式が格納できる粒度(BPM の 1/100)へ丸める。
@@ -44,25 +43,20 @@ def quantize_bpm(bpm: float) -> float:
 
 @dataclass(frozen=True)
 class TempoEstimate:
-    """採用したテンポ・拍子と、最初の小節線の位置。"""
+    """採用したテンポと拍子。"""
 
     bpm: float
     numerator: int
     denominator: int
     beat_offset_sec: float
-    first_bar_sec: float
     tempo_source: str  # "option" 指定値 / "estimated" 推定値 / "default" 仮置き
-    time_signature_source: str
+    time_signature_source: str  # "option" 指定値 / "default" 既定値
     resolution: int = RESOLUTION
 
     # 仮置きへ倒したかは出どころから導く(同じ事実を2つ持つと、警告と診断が食い違いうるため)。
     @property
     def tempo_defaulted(self) -> bool:
         return self.tempo_source == "default"
-
-    @property
-    def time_signature_defaulted(self) -> bool:
-        return self.time_signature_source == "default"
 
     def to_tick(self, seconds: float) -> int:
         """入力音声の時刻を tick へ写す。入力の 0 秒が tick の 0。"""
@@ -153,40 +147,12 @@ def _estimate_phase(envelope, hop_sec, period_sec):
     return 0.0 if best is None else best[1]
 
 
-def _estimate_numerator(envelope, hop_sec, offset_sec, period_sec, candidates):
-    """小節内で強い拍が現れる周期から、拍子の分子と小節内オフセットを求める。
-
-    判定材料が得られなければ既定へ倒し、そのことを3つ目の戻り値で示す(分子が指定されている
-    実行では、その値を保つので倒したことにならない)。
-    """
-    values = _beat_values(envelope, hop_sec, offset_sec, period_sec)
-    overall = float(values.mean()) if len(values) else 0.0
-    if overall == 0.0:
-        if len(candidates) == 1:
-            return candidates[0], 0, False
-        return _DEFAULT_TIME_SIGNATURE[0], 0, True
-
-    best = None
-    for numerator in candidates:
-        for phase in range(numerator):
-            selected = values[phase::numerator]
-            if not len(selected):
-                continue
-            ratio = float(selected.mean()) / overall
-            # 同値なら分子が大きい方、さらに同値なら小節内オフセットが小さい方。
-            key = (ratio, numerator, -phase)
-            if best is None or key > best[0]:
-                best = (key, numerator, phase)
-    if best is None:
-        return candidates[0], 0, len(candidates) > 1
-    return best[1], best[2], False
-
-
 def estimate(pcm, *, tempo_bpm=None, time_signature=None) -> TempoEstimate:
-    """分離前の入力からテンポ・拍子・最初の小節線を求める。
+    """分離前の入力からテンポを求め、拍子を決める。
 
-    tempo_bpm・time_signature を与えられた項目は推定せずその値を使う。周期を取り出せない入力では
-    テンポを既定へ倒し、そのことを tempo_defaulted で示す(拍子の指定があればそれは保つ)。
+    tempo_bpm を与えられた実行ではテンポを推定せずその値を使う。周期を取り出せない入力では
+    テンポを既定へ倒し、そのことを tempo_defaulted で示す。拍子は音声から決めず、time_signature の
+    指定があればその値、無ければ既定を使う。
     """
     numerator, denominator = time_signature if time_signature is not None else (None, 4)
 
@@ -194,32 +160,24 @@ def estimate(pcm, *, tempo_bpm=None, time_signature=None) -> TempoEstimate:
     estimated_bpm = None if tempo_bpm is not None else _estimate_bpm(envelope, hop_sec, denominator)
 
     if tempo_bpm is None and estimated_bpm is None:
-        # 周期が得られないので既定へ倒す。位相も求められないため小節線は先頭に置く。
+        # 周期が得られないので既定へ倒す。位相も求められないため 0 を置く。
         return TempoEstimate(
             bpm=_DEFAULT_BPM,
             numerator=numerator if numerator is not None else _DEFAULT_TIME_SIGNATURE[0],
-            denominator=denominator, beat_offset_sec=0.0, first_bar_sec=0.0,
+            denominator=denominator, beat_offset_sec=0.0,
             tempo_source="default",
             time_signature_source="option" if numerator is not None else "default")
 
     bpm = quantize_bpm(tempo_bpm if tempo_bpm is not None else estimated_bpm)
     # 自己相関が拾うのは拍(拍子の分母が表す音価)の周期。四分音符あたりの BPM から戻す。
     period_sec = 60.0 / bpm * 4.0 / denominator
-    # 位相は小節線の位置だけを決めるので、テンポが指定値でも推定する。
+    # 位相はテンポと別に決まるので、テンポが指定値でも音声から求める。
     offset_sec = _estimate_phase(envelope, hop_sec, period_sec)
 
-    candidates = (numerator,) if numerator is not None else _NUMERATOR_CANDIDATES
-    # 分子は拍のグリッド上で強拍を探すので、採用テンポが変われば結果も変わる。テンポが正解へ
-    # 近づくほど分子も正しくなるとは限らない。
-    adopted_numerator, bar_phase, numerator_defaulted = _estimate_numerator(
-        envelope, hop_sec, offset_sec, period_sec, candidates)
-
-    if numerator is not None:
-        time_signature_source = "option"
-    else:
-        time_signature_source = "default" if numerator_defaulted else "estimated"
     return TempoEstimate(
-        bpm=bpm, numerator=adopted_numerator, denominator=denominator,
-        beat_offset_sec=offset_sec, first_bar_sec=offset_sec + bar_phase * period_sec,
+        bpm=bpm,
+        numerator=numerator if numerator is not None else _DEFAULT_TIME_SIGNATURE[0],
+        denominator=denominator,
+        beat_offset_sec=offset_sec,
         tempo_source="option" if tempo_bpm is not None else "estimated",
-        time_signature_source=time_signature_source)
+        time_signature_source="option" if numerator is not None else "default")

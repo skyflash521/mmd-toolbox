@@ -4,8 +4,6 @@
 入力はすべて合成した診断データにする。
 """
 
-import pytest
-
 from song2vpr import lyrics, notes, project, report
 from song2vpr.tempo import TempoEstimate
 
@@ -13,7 +11,7 @@ from song2vpr.tempo import TempoEstimate
 def _tempo(bpm=120.0, numerator=4, denominator=4, tempo_source="estimated",
            time_signature_source="default"):
     return TempoEstimate(bpm=bpm, numerator=numerator, denominator=denominator,
-                         beat_offset_sec=0.0, first_bar_sec=0.0, tempo_source=tempo_source,
+                         beat_offset_sec=0.0, tempo_source=tempo_source,
                          time_signature_source=time_signature_source)
 
 
@@ -141,7 +139,6 @@ def test_report_text_tells_where_the_tempo_came_from():
         _fields(tempo=_tempo(tempo_source="default")))
 
 
-@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
 def test_report_text_calls_the_unspecified_time_signature_a_default():
     """拍子は推定しないので、指定が無い場合は仮置きではなく既定値として出す。"""
     text = report.report_text(_fields(tempo=_tempo(time_signature_source="default")))

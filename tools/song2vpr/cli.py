@@ -98,8 +98,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         "推定できなければ 120 を仮置きする")
     p.add_argument("--time-signature", dest="time_signature", metavar="N/D",
                    type=_TIME_SIGNATURE,
-                   help="拍子(4/4 の形式。分母は2の冪)。未指定時は音声から推定し、"
-                        "推定できなければ 4/4 を仮置きする")
+                   help="拍子(4/4 の形式。分母は2の冪)。未指定時は 4/4 を使う")
     _va_cli.add_arguments(p)
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="出力せず診断を表示する(引数検証は dry-run でも実施する)")
@@ -349,8 +348,6 @@ def _run(args, emitter, fail) -> int:
                                    time_signature=args.time_signature)
         if estimate.tempo_defaulted:
             emit_warning("tempo_defaulted", {})
-        if estimate.time_signature_defaulted:
-            emit_warning("time_signature_defaulted", {})
         if annotated.diagnostics.kana_reading_ineffective:
             emit_warning("kana_reading_ineffective",
                          {"unconverted_chars": annotated.diagnostics.unconverted_chars,
