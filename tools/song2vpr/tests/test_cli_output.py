@@ -323,13 +323,23 @@ def test_byte_order_mark_is_removed_when_the_lyrics_are_read(tmp_path, monkeypat
     assert seen["text"] == "ゆき"
 
 
-@pytest.mark.parametrize("code", ["tempo_defaulted", "time_signature_defaulted"])
-def test_estimation_fallbacks_are_reported(tmp_path, monkeypatch, capsysbinary, code):
+def test_estimation_fallbacks_are_reported(tmp_path, monkeypatch, capsysbinary):
     """推定できず仮置きへ倒したことは、後段の戻り値から警告として知らせる。"""
     silence = AudioPcm(samples=np.zeros((_RATE // 2, 1), dtype=np.float32), sample_rate=_RATE)
     _stub_pipeline(monkeypatch, _front_stage(pcm=silence, segments=[], duration_sec=0.5))
     assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
-    assert any(e["type"] == "warning" and e["code"] == code for e in _events(capsysbinary))
+    assert any(e["type"] == "warning" and e["code"] == "tempo_defaulted"
+               for e in _events(capsysbinary))
+
+
+@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
+def test_the_time_signature_is_not_reported_as_a_fallback(tmp_path, monkeypatch, capsysbinary):
+    """拍子は推定しないので、推定できなかったことを知らせる警告も出ない。"""
+    silence = AudioPcm(samples=np.zeros((_RATE // 2, 1), dtype=np.float32), sample_rate=_RATE)
+    _stub_pipeline(monkeypatch, _front_stage(pcm=silence, segments=[], duration_sec=0.5))
+    assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
+    assert not any(e["type"] == "warning" and e["code"] == "time_signature_defaulted"
+                   for e in _events(capsysbinary))
 
 
 def test_forced_split_is_reported(tmp_path, monkeypatch, capsysbinary):

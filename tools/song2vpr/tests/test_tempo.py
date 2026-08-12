@@ -1,7 +1,7 @@
-"""song2vpr のテンポ・拍子の推定のテスト。
+"""song2vpr のテンポ推定と拍子の決め方のテスト。
 
-既知の拍で合成した信号から、BPM・拍位相・拍子の分子・最初の小節線が得られることと、指定値と
-推定値の組み合わせが規則どおりになることを検証する。
+既知の拍で合成した信号から BPM と拍位相が得られることと、指定値と推定値の組み合わせが規則どおりに
+なることを検証する。拍子は推定しないので、指定の有無で決まることを見る。
 """
 
 import numpy as np
@@ -90,7 +90,7 @@ def test_given_tempo_is_used_as_is():
     assert not result.tempo_defaulted
 
 
-# --- 拍位相と最初の小節線 ----------------------------------------------------
+# --- 拍位相 ------------------------------------------------------------------
 
 
 def test_beat_phase_follows_the_offset():
@@ -105,26 +105,20 @@ def test_beat_phase_follows_the_offset():
 
 
 def test_phase_is_estimated_even_when_the_tempo_is_given():
-    """位相は小節線の位置だけを決めるので、テンポを指定した実行でも求める。"""
+    """位相はテンポと別に求めるので、テンポを指定した実行でも音声から決める。"""
     aligned = tempo.estimate(_click_track(120.0, offset_sec=0.0), tempo_bpm=120.0)
     shifted = tempo.estimate(_click_track(120.0, offset_sec=0.25), tempo_bpm=120.0)
     assert shifted.beat_offset_sec != aligned.beat_offset_sec
 
 
-def test_first_bar_is_placed_at_the_head_beat_of_the_bar():
-    """最初の小節線は、小節の頭として選ばれた拍の位置に置く。"""
-    result = tempo.estimate(_click_track(120.0, seconds=16.0, offset_sec=0.25, accent_every=4),
-                            tempo_bpm=120.0)
-    assert result.first_bar_sec == pytest.approx(result.beat_offset_sec, abs=1e-9)
-
-
 # --- 拍子 --------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("numerator", [3, 4])
-def test_numerator_is_estimated_from_the_accents(numerator):
-    result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=numerator))
-    assert result.numerator == numerator
+@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
+def test_numerator_is_four_unless_it_is_given():
+    """拍子を指定しなければ 4 を使う。3拍ごとのアクセントがあっても 3 にはしない。"""
+    result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))
+    assert result.numerator == 4
 
 
 def test_denominator_is_a_quarter_note_when_not_given():
@@ -145,18 +139,15 @@ def test_silence_falls_back_to_the_default_tempo():
     result = tempo.estimate(_silence())
     assert result.bpm == 120.0
     assert (result.numerator, result.denominator) == (4, 4)
-    assert result.first_bar_sec == 0.0
     assert result.tempo_defaulted
-    assert result.time_signature_defaulted
 
 
 def test_default_keeps_the_given_time_signature():
-    """テンポが既定へ倒れても、指定された拍子はそのまま使う(倒したことにならない)。"""
+    """テンポが既定へ倒れても、指定された拍子はそのまま使う。"""
     result = tempo.estimate(_silence(), time_signature=(3, 4))
     assert result.bpm == 120.0
     assert (result.numerator, result.denominator) == (3, 4)
     assert result.tempo_defaulted
-    assert not result.time_signature_defaulted
 
 
 def test_given_tempo_is_not_defaulted_on_silence():
@@ -166,18 +157,11 @@ def test_given_tempo_is_not_defaulted_on_silence():
     assert not result.tempo_defaulted
 
 
-def test_time_signature_can_be_defaulted_while_the_tempo_is_not():
-    """テンポを指定した実行でも、拍子の判定材料が得られなければ拍子だけ既定へ倒す。"""
+def test_the_time_signature_is_the_default_even_without_a_usable_period():
+    """拍子は音声から決めないので、周期が取れない入力でも指定が無ければ 4/4 になる。"""
     result = tempo.estimate(_silence(), tempo_bpm=100.0)
     assert not result.tempo_defaulted
-    assert result.time_signature_defaulted
     assert (result.numerator, result.denominator) == (4, 4)
-
-
-def test_estimated_time_signature_is_not_reported_as_defaulted():
-    result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))
-    assert result.numerator == 3
-    assert not result.time_signature_defaulted
 
 
 # --- 秒から tick への変換 ----------------------------------------------------
@@ -226,8 +210,8 @@ def test_same_input_gives_the_same_estimate():
     pcm = _click_track(132.0)
     first = tempo.estimate(pcm)
     second = tempo.estimate(pcm)
-    assert (first.bpm, first.numerator, first.denominator, first.first_bar_sec) == \
-           (second.bpm, second.numerator, second.denominator, second.first_bar_sec)
+    assert (first.bpm, first.numerator, first.denominator, first.beat_offset_sec) == \
+           (second.bpm, second.numerator, second.denominator, second.beat_offset_sec)
 
 
 # --- 採用値の出どころ --------------------------------------------------------
@@ -238,12 +222,15 @@ def test_given_values_are_reported_as_options():
     assert (result.tempo_source, result.time_signature_source) == ("option", "option")
 
 
-def test_estimated_values_are_reported_as_estimated():
+@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
+def test_the_unspecified_time_signature_is_reported_as_the_default():
+    """テンポは音声から推定するが、拍子は指定が無ければ既定として報告する。"""
     result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))
-    assert (result.tempo_source, result.time_signature_source) == ("estimated", "estimated")
+    assert (result.tempo_source, result.time_signature_source) == ("estimated", "default")
 
 
-def test_fallback_values_are_reported_as_defaults():
+def test_values_not_taken_from_the_audio_are_reported_as_defaults():
+    """テンポは推定できなかったとき、拍子は指定が無いときに、どちらも既定として報告する。"""
     result = tempo.estimate(_silence())
     assert (result.tempo_source, result.time_signature_source) == ("default", "default")
 
@@ -254,4 +241,3 @@ def test_the_two_ways_of_telling_the_fallback_agree():
                    tempo.estimate(_silence(), tempo_bpm=100.0),
                    tempo.estimate(_click_track(120.0))):
         assert result.tempo_defaulted == (result.tempo_source == "default")
-        assert result.time_signature_defaulted == (result.time_signature_source == "default")

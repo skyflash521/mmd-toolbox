@@ -4,12 +4,14 @@
 入力はすべて合成した診断データにする。
 """
 
+import pytest
+
 from song2vpr import lyrics, notes, project, report
 from song2vpr.tempo import TempoEstimate
 
 
 def _tempo(bpm=120.0, numerator=4, denominator=4, tempo_source="estimated",
-           time_signature_source="estimated"):
+           time_signature_source="default"):
     return TempoEstimate(bpm=bpm, numerator=numerator, denominator=denominator,
                          beat_offset_sec=0.0, first_bar_sec=0.0, tempo_source=tempo_source,
                          time_signature_source=time_signature_source)
@@ -66,9 +68,9 @@ def test_counts_come_from_the_stage_that_judged_them():
 
 def test_tempo_and_time_signature_are_reported_with_their_sources():
     fields = _fields(tempo=_tempo(bpm=96.5, numerator=3, denominator=8, tempo_source="option",
-                                  time_signature_source="default"))
+                                  time_signature_source="option"))
     assert (fields["tempo_bpm"], fields["tempo_source"]) == (96.5, "option")
-    assert (fields["time_signature"], fields["time_signature_source"]) == ("3/8", "default")
+    assert (fields["time_signature"], fields["time_signature_source"]) == ("3/8", "option")
     assert fields["resolution"] == 480
 
 
@@ -132,8 +134,15 @@ def test_report_text_omits_the_backends_that_were_not_given():
 
 
 def test_report_text_tells_where_the_tempo_came_from():
-    """テンポと拍子は、指定値・推定値・仮置きの別を含める(人間向けなので日本語で出す)。"""
-    text = report.report_text(_fields(tempo=_tempo(tempo_source="option",
-                                                   time_signature_source="default")))
-    assert "テンポ: 120.0 (指定値)" in text
-    assert "拍子: 4/4 (仮置き)" in text
+    """テンポは指定値・推定値・仮置きの別を含める(人間向けなので日本語で出す)。"""
+    assert "テンポ: 120.0 (指定値)" in report.report_text(
+        _fields(tempo=_tempo(tempo_source="option")))
+    assert "テンポ: 120.0 (仮置き)" in report.report_text(
+        _fields(tempo=_tempo(tempo_source="default")))
+
+
+@pytest.mark.xfail(reason="impl pending: 未指定の拍子を推定せず 4/4 にする", strict=True)
+def test_report_text_calls_the_unspecified_time_signature_a_default():
+    """拍子は推定しないので、指定が無い場合は仮置きではなく既定値として出す。"""
+    text = report.report_text(_fields(tempo=_tempo(time_signature_source="default")))
+    assert "拍子: 4/4 (既定値)" in text

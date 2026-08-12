@@ -204,7 +204,7 @@ def test_no_gpu_configuration_warning_when_it_does_not_hold(tmp_path, monkeypatc
     _stub_pipeline_reporting_stages(monkeypatch, stages=("load",))
 
     assert cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr")]) == 0
-    # 前段の代役が短い無音なので、音符0件とテンポ・拍子の仮置きの警告が出る。いずれも
+    # 前段の代役が短い無音なので、音符0件とテンポの仮置きの警告が出る。いずれも
     # GPU 構成の判定とは無関係なので、判定対象を GPU の2コードへ絞る。
     gpu_codes = {"cpu_only_torch", "cuda_unavailable"}
     assert not [e for e in _events(capsysbinary)

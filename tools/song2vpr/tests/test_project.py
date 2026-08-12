@@ -12,9 +12,11 @@ from vpr import read, write_file
 
 
 def _tempo(bpm=120.0, numerator=4, denominator=4, first_bar_sec=0.0):
+    # 拍子は指定が無ければ 4/4 の既定になるので、それ以外の拍子は指定から来たものになる。
+    source = "default" if (numerator, denominator) == (4, 4) else "option"
     return TempoEstimate(bpm=bpm, numerator=numerator, denominator=denominator,
                          beat_offset_sec=first_bar_sec, first_bar_sec=first_bar_sec,
-                         tempo_source="estimated", time_signature_source="estimated")
+                         tempo_source="estimated", time_signature_source=source)
 
 
 def _sung(start_sec, end_sec, midi=60, lyric="あ", phonemes=None, velocity=64,
@@ -139,7 +141,7 @@ def test_note_fields_are_carried_over():
 
 def test_notes_are_not_shifted_onto_the_bar_line():
     """曲の頭が小節線に揃っていなくても、音符は入力の時刻をそのまま写した位置に置く。"""
-    tempo = _tempo(first_bar_sec=0.37)
+    tempo = _tempo()
     result = project.build([_sung(0.5, 1.0)], tempo, name="song")
     part = result.project.tracks[0].parts[0]
     assert part.start_tick == 0

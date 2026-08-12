@@ -146,7 +146,7 @@ def test_front_stage_outputs_are_available_to_the_later_stages(monkeypatch):
     assert result.vocal_pcm is vocal
     assert result.rms.dynamic_range_db == 20.0
     assert result.duration_sec == 2.0
-    # テンポ・拍子の推定は分離前の入力を使うので、波形そのものを保持する。
+    # テンポの推定は分離前の入力を使うので、波形そのものを保持する。
     assert result.pcm.sample_rate == 8000
     assert result.pcm.samples.shape[1] == 2
 

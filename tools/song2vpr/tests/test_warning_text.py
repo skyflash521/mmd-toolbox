@@ -76,7 +76,6 @@ def test_machine_message_omits_the_observed_values(code):
 @pytest.mark.parametrize(("code", "fields", "expected"), [
     ("no_notes", {}, "ボーカル分離"),
     ("tempo_defaulted", {}, "--tempo"),
-    ("time_signature_defaulted", {}, "--time-signature"),
     ("forced_split", {}, "境界"),
 ])
 def test_result_warning_texts_tell_what_to_do(code, fields, expected):
