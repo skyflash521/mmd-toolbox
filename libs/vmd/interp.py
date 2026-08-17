@@ -186,6 +186,100 @@ def sample_range(keys, channel: str, frame_start: int, frame_end: int):
     return np.array(vals, dtype=float)
 
 
+def _bake_segment(k0, k1, fa, fb, frame_start, positions, rotations):
+    """区間 [k0, k1] 内のフレーム fa..fb(両端含む)を評価して出力へ書き込む。"""
+    span = k1.frame - k0.frame
+    count = fb - fa + 1
+    cps = k1.control_points()
+    xs = [(f - k0.frame) / span for f in range(fa, fb + 1)]
+    factor_cache = {}
+
+    def _factors(cp):
+        ys = factor_cache.get(cp)
+        if ys is None:
+            x1, y1, x2, y2 = cp
+            if x1 == y1 and x2 == y2:
+                ys = xs  # 線形ファストパス: y = x
+            else:
+                ys = [_solve_factor(x1, y1, x2, y2, x) for x in xs]
+            factor_cache[cp] = ys
+        return ys
+
+    axes = []
+    for i, ch in enumerate(("X", "Y", "Z")):
+        v0, v1 = k0.position[i], k1.position[i]
+        if v0 == v1:
+            axes.append([v0] * count)  # 定数ファストパス
+        else:
+            ys = _factors(cps[ch])
+            axes.append([v0 + (v1 - v0) * y for y in ys])
+    if k0.rotation == k1.rotation:
+        # 定数ファストパス(正規化後の端値。一般解も同じ値を返す)
+        rot = _slerp(k0.rotation, k0.rotation, 0.0)
+        rots = [rot] * count
+    else:
+        rots = [_slerp(k0.rotation, k1.rotation, y) for y in _factors(cps["R"])]
+
+    base = fa - frame_start
+    for j in range(count):
+        positions[base + j] = (axes[0][j], axes[1][j], axes[2][j])
+        rotations[base + j] = rots[j]
+
+
+def bake_bone_track(keys, frame_start: int, frame_end: int):
+    """ボーントラック全チャンネルを [frame_start, frame_end] で密ベイクする。
+
+    1フレーム間隔・両端含む。positions は (x, y, z) のリスト、rotations は
+    クォータニオン (x, y, z, w) のリストを返す。評価は sample と同一意味論
+    (境界規約・到達側キーの補間曲線・回転は正規化して返す)。区間を単調に
+    掃引し、フレームごとの区間探索を避ける。
+    """
+    if not keys:
+        raise ValueError("キー列が空")
+    total = frame_end - frame_start + 1
+    if total <= 0:
+        return [], []
+    positions = [None] * total
+    rotations = [None] * total
+
+    def _fill(i0, i1, key):
+        pos = key.position
+        rot = _slerp(key.rotation, key.rotation, 0.0)
+        for i in range(i0, i1):
+            positions[i] = pos
+            rotations[i] = rot
+
+    # 単一キーは全域で端値一定(境界規約)
+    if len(keys) == 1:
+        _fill(0, total, keys[0])
+        return positions, rotations
+
+    first_f = keys[0].frame
+    last_f = keys[-1].frame
+    f = frame_start
+
+    # 最初のキー以前(最初のキー自身を含む)は端キーの値で一定
+    if f <= first_f:
+        upto = min(first_f, frame_end)
+        _fill(0, upto - frame_start + 1, keys[0])
+        f = upto + 1
+
+    # 区間掃引(first_f < f < last_f)
+    seg = 0
+    while f <= frame_end and f < last_f:
+        while keys[seg + 1].frame <= f:
+            seg += 1
+        k0, k1 = keys[seg], keys[seg + 1]
+        fb = min(k1.frame - 1, frame_end)
+        _bake_segment(k0, k1, f, fb, frame_start, positions, rotations)
+        f = fb + 1
+
+    # 最後のキー以後は端キーの値で一定
+    if f <= frame_end:
+        _fill(f - frame_start, total, keys[-1])
+    return positions, rotations
+
+
 def sample_camera(keys, frame: int) -> dict:
     """カメラ全チャンネルを1フレームで評価する。"""
     return {

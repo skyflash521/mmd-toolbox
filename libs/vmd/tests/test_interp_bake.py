@@ -11,8 +11,6 @@ import pytest
 from vmd import interp
 from vmd.types import BoneKey
 
-pytestmark = pytest.mark.xfail(reason="impl pending: vmd.interp ベイクAPI", strict=True)
-
 # 制御点 (x1,y1,x2,y2)。LINEAR は MMD デフォルトの線形。
 LINEAR = (20, 20, 107, 107)
 
