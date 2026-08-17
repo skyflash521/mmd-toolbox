@@ -14,6 +14,7 @@ from mocapvmd import report as mocap_report
 from vmd import io
 
 from .helpers import (
+    BONE_LINEAR_INTERP,
     BONE_NONLINEAR,
     CAM_NONLINEAR,
     bone,
@@ -240,8 +241,11 @@ def test_nonbone_sections_passthrough_with_denoise(tmp_path):
     assert out_doc.model_name_raw == in_doc.model_name_raw
 
 
-def test_no_denoise_keeps_bones_verbatim(tmp_path):
-    # 一般ノイズ軽減・足IK安定化をともに無効化するとボーンは逐語透過する(非線形補間バイトも保持)。
+@pytest.mark.xfail(reason="impl pending: mocapvmd 密化段", strict=True)
+def test_no_denoise_keeps_bone_values(tmp_path):
+    # 一般ノイズ軽減・足IK安定化をともに無効化しても前段密化は行われる。キー2個以上の
+    # トラックはフレームとキー値(位置は厳密・回転は正規化差以内)が保たれ、補間バイトは
+    # 線形化される(入力の補間曲線は密化で消費される)。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
@@ -249,8 +253,14 @@ def test_no_denoise_keeps_bones_verbatim(tmp_path):
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
-    assert out_doc.bone == in_doc.bone
-    assert out_doc.bone[0].interpolation == BONE_NONLINEAR
+    for name in ("センター", "右足ＩＫ"):
+        in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
+        out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
+        assert [k.frame for k in out_keys] == [k.frame for k in in_keys]  # gap=1 の密入力
+        for ki, ko in zip(in_keys, out_keys, strict=True):
+            assert ko.position == ki.position
+            assert ko.rotation == pytest.approx(ki.rotation, abs=1e-6)
+            assert ko.interpolation == BONE_LINEAR_INTERP
 
 
 # --- dry-run ----------------------------------------------------------------
@@ -616,8 +626,6 @@ def test_default_output_is_reduced(tmp_path):
 
 def test_no_reduce_keeps_dense_linear(tmp_path):
     # --no-reduce ではクリーニング後の密キー(全フレーム・線形補間)を出力する。
-    from vmd.reduce import BONE_LINEAR_INTERP
-
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _ramp_doc(src)
@@ -658,8 +666,6 @@ def test_reduce_error_override_validation(tmp_path):
 
 def test_denoise_output_is_dense_linear(tmp_path):
     # クリーニング後は連続フレームの密キーで、補間ブロックは線形(クリーニング後の密キー形式)。
-    from vmd.reduce import BONE_LINEAR_INTERP
-
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _jitter_doc(src)
