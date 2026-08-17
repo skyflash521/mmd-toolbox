@@ -42,7 +42,7 @@ def test_pose_mode_default_profile(tmp_path):
     doc, _ = io.read(str(out))
     names = {k.name for k in doc.bone}
     assert "センター" in names and "頭" in names
-    # pose 経路は密キー(全フレーム)を出す(bone 経路は入力フレームのまま=0,10)。
+    # pose 経路は密キー(全フレーム)を出す(前段密化により bone 経路も --no-reduce では密キーを出す)。
     center_frames = sorted(k.frame for k in doc.bone if k.name == "センター")
     assert center_frames == list(range(0, 11))
 

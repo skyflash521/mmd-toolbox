@@ -241,11 +241,23 @@ def test_nonbone_sections_passthrough_with_denoise(tmp_path):
     assert out_doc.model_name_raw == in_doc.model_name_raw
 
 
-@pytest.mark.xfail(reason="impl pending: mocapvmd 密化段", strict=True)
+def _assert_bone_values_preserved_linearized(in_doc, out_doc, names):
+    """クリーニング無効時の密入力(gap=1)の検証: 前段密化のみが行われ、フレームとキー値
+    (位置は厳密・回転は正規化差以内)が保たれ、補間バイトは線形化される。"""
+    for name in names:
+        in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
+        out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
+        assert [k.frame for k in out_keys] == [k.frame for k in in_keys]
+        for ki, ko in zip(in_keys, out_keys, strict=True):
+            assert ko.position == ki.position
+            assert ko.rotation == pytest.approx(ki.rotation, abs=1e-6)
+            assert ko.interpolation == BONE_LINEAR_INTERP
+
+
 def test_no_denoise_keeps_bone_values(tmp_path):
     # 一般ノイズ軽減・足IK安定化をともに無効化しても前段密化は行われる。キー2個以上の
-    # トラックはフレームとキー値(位置は厳密・回転は正規化差以内)が保たれ、補間バイトは
-    # 線形化される(入力の補間曲線は密化で消費される)。
+    # トラックはフレームとキー値が保たれ、補間バイトは線形化される(入力の補間曲線は
+    # 密化で消費される)。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _full_doc(src)
@@ -253,14 +265,7 @@ def test_no_denoise_keeps_bone_values(tmp_path):
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
-    for name in ("センター", "右足ＩＫ"):
-        in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
-        out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
-        assert [k.frame for k in out_keys] == [k.frame for k in in_keys]  # gap=1 の密入力
-        for ki, ko in zip(in_keys, out_keys, strict=True):
-            assert ko.position == ki.position
-            assert ko.rotation == pytest.approx(ki.rotation, abs=1e-6)
-            assert ko.interpolation == BONE_LINEAR_INTERP
+    _assert_bone_values_preserved_linearized(in_doc, out_doc, ("センター", "右足ＩＫ"))
 
 
 # --- dry-run ----------------------------------------------------------------
@@ -396,7 +401,7 @@ _JITTER_BONES = (
 def _jitter_doc(path):
     """X に微小ジッタを載せた密トラックを、全カテゴリの代表ボーンに対して書き出す(連続フレーム0-10)。
 
-    補間は非線形にしておき、クリーニングで線形へ組み直されたかを検出できるようにする。
+    補間は非線形にしておき、前段密化で消費されて線形へ組み直されることを検出できるようにする。
     """
     xs = [0.0, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, 0.0]
     keys = []
@@ -436,9 +441,10 @@ def test_explicit_denoise_smooths_jitter(tmp_path):
         assert _x_variation(out_doc.bone, name) < _x_variation(in_doc.bone, name)
 
 
-def test_no_denoise_keeps_bones_verbatim_all_categories(tmp_path):
-    # 一般ノイズ軽減・足IK安定化をともに無効化すると、全カテゴリのボーンがキー列そのまま(値・フレーム・
-    # 補間)逐語保持される(総変動量だけ一致させて中身を変える実装を排除)。foot_ik/toe_ik も含む。
+def test_no_denoise_keeps_bone_values_all_categories(tmp_path):
+    # 一般ノイズ軽減・足IK安定化をともに無効化すると、全カテゴリのボーンでキー値・フレームが
+    # 保たれる(総変動量だけ一致させて中身を変える実装を排除)。foot_ik/toe_ik も含む。
+    # 補間バイトは前段密化で線形化される。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _jitter_doc(src)
@@ -446,10 +452,7 @@ def test_no_denoise_keeps_bones_verbatim_all_categories(tmp_path):
     assert code == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
-    for name in _JITTER_BONES:
-        in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
-        out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
-        assert out_keys == in_keys
+    _assert_bone_values_preserved_linearized(in_doc, out_doc, _JITTER_BONES)
 
 
 def test_no_denoise_preserves_nonbone_sections(tmp_path):
@@ -475,8 +478,8 @@ def _foot_jitter_doc(path):
     """右足ＩＫ・右つま先ＩＫ(接地中の遅い水平ぐらつき)とセンター(同じ揺れ)を密トラックで書き出す。
 
     足IK・つま先IK は X が ±0.05 で揺れる(各ステップ <= 0.08 で接地・Y=0)。足IK安定化でアンカー
-    (中央値0)へ寄り、水平変動が減るべき対象。センターは足IK安定化の対象外で、--no-denoise なら逐語の
-    まま。補間は非線形にし、安定化で線形へ組み直されたかを検出できるようにする。
+    (中央値0)へ寄り、水平変動が減るべき対象。センターは足IK安定化の対象外で、--no-denoise なら
+    キー値が保たれる。補間は非線形にし、前段密化で消費されて線形へ組み直されることを検出できるようにする。
     """
     xs = [0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0]
     keys = []
@@ -487,7 +490,7 @@ def _foot_jitter_doc(path):
 
 def test_foot_ik_stabilize_default_reduces_grounded_foot_drift(tmp_path):
     # 既定 on の足IK安定化は、一般平滑化を切った(--no-denoise)状態でも接地中の足IK水平ぐらつきを抑える。
-    # 足IK安定化の対象外であるセンターは --no-denoise なので逐語(変動不変)。
+    # 足IK安定化の対象外であるセンターは --no-denoise なのでキー値が保たれる(変動不変)。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _foot_jitter_doc(src)
@@ -497,10 +500,9 @@ def test_foot_ik_stabilize_default_reduces_grounded_foot_drift(tmp_path):
     # 足IK・つま先IK とも接地中の水平変動が減る。
     for name in ("右足ＩＫ", "右つま先ＩＫ"):
         assert _x_variation(out_doc.bone, name) < _x_variation(in_doc.bone, name)
-    # センターは足IK安定化の対象外で、--no-denoise なのでキー列そのまま(値・フレーム・補間)逐語保持。
-    in_center = sorted((k for k in in_doc.bone if k.name == "センター"), key=lambda k: k.frame)
-    out_center = sorted((k for k in out_doc.bone if k.name == "センター"), key=lambda k: k.frame)
-    assert out_center == in_center
+    # センターは足IK安定化の対象外で、--no-denoise なのでキー値・フレームが保たれる
+    # (補間バイトは前段密化で線形化される)。
+    _assert_bone_values_preserved_linearized(in_doc, out_doc, ("センター",))
 
 
 def test_foot_ik_stabilize_runs_after_denoise(tmp_path):
@@ -542,18 +544,16 @@ def test_explicit_foot_ik_stabilize_matches_default(tmp_path):
     assert io.read(str(out_explicit))[0].bone == io.read(str(out_default))[0].bone
 
 
-def test_no_foot_ik_stabilize_keeps_foot_and_toe_verbatim(tmp_path):
-    # --no-denoise --no-foot-ik-stabilize では足IK・つま先IKも逐語保持(値・フレーム・非線形補間)。
+def test_no_foot_ik_stabilize_keeps_foot_and_toe_values(tmp_path):
+    # --no-denoise --no-foot-ik-stabilize では足IK・つま先IKもキー値・フレームが保たれる
+    # (補間バイトは前段密化で線形化される)。
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     _foot_jitter_doc(src)
     assert cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"]) == 0
     in_doc, _ = io.read(str(src))
     out_doc, _ = io.read(str(out))
-    for name in ("右足ＩＫ", "右つま先ＩＫ"):
-        in_keys = sorted((k for k in in_doc.bone if k.name == name), key=lambda k: k.frame)
-        out_keys = sorted((k for k in out_doc.bone if k.name == name), key=lambda k: k.frame)
-        assert out_keys == in_keys
+    _assert_bone_values_preserved_linearized(in_doc, out_doc, ("右足ＩＫ", "右つま先ＩＫ"))
 
 
 def test_foot_slide_suppression_out_of_range_is_arg_error(tmp_path):

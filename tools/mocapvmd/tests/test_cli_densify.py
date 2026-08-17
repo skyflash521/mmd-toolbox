@@ -17,10 +17,6 @@ from vmd.reduce import BONE_LINEAR_INTERP, bone_interp_bytes
 
 from .helpers import bone, write_vmd
 
-# 前段密化の未実装ぶんに付ける印。gap=1 の値ジャンプ保持は現行実装(疎化が原曲線を
-# 評価する)でも成立するため印を付けない。
-_impl_pending = pytest.mark.xfail(reason="impl pending: mocapvmd 密化段", strict=True)
-
 # 非線形の補間曲線(x1,y1,x2,y2)。到達側キーに載せる。
 _STEEP = (5, 122, 122, 5)
 _EASE = (0, 64, 127, 64)
@@ -54,7 +50,6 @@ def _bake_input_tracks(doc):
 # --- 等価性: 疎入力と事前ベイク済み密入力の処理結果が一致する ----------------
 
 
-@_impl_pending
 def test_full_pipeline_equivalence_sparse_vs_prebaked_dense(tmp_path):
     # 線形曲線+二進で正確な値なら事前ベイクは量子化誤差なしで書き戻せるため、
     # 全段(ノイズ軽減・足IK安定化・疎化)の結果が疎入力とバイト単位で一致する。
@@ -80,7 +75,6 @@ def test_full_pipeline_equivalence_sparse_vs_prebaked_dense(tmp_path):
     assert doc_a.bone == doc_b.bone
 
 
-@_impl_pending
 def test_cleaning_equivalence_nonlinear_curves(tmp_path):
     # 非線形曲線+不等間隔(gap 1・2・10・30)では事前ベイクの書き戻しに float32 量子化が
     # 乗るため、クリーニング(既定)+ --no-reduce の結果を許容差付きで比較する。
@@ -112,7 +106,6 @@ def test_cleaning_equivalence_nonlinear_curves(tmp_path):
 # --- --no-reduce: 疎入力からトラック実在区間ぶんの密キー(線形補間)が出る ----
 
 
-@_impl_pending
 def test_no_reduce_outputs_dense_linear_keys(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -167,10 +160,33 @@ def test_gap1_value_jump_survives_reduce(tmp_path):
     assert keys[6].position == pytest.approx((3.0, 0.0, 0.0))
 
 
+# --- 重複キー: 同一フレームは後に現れたキーを採用する ------------------------
+
+
+def test_duplicate_frame_keys_take_last_occurrence(tmp_path):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    # フレーム0が3件重複(先頭フレームの重複も含む)。採用されるのは各フレームの最後の1件。
+    write_vmd(src, bone=[
+        bone("センター", 0, pos=(9.0, 0.0, 0.0)),
+        bone("センター", 0, pos=(5.0, 0.0, 0.0)),
+        bone("センター", 0, pos=(0.0, 0.0, 0.0)),
+        bone("センター", 4, pos=(1.0, 0.0, 0.0)),
+        bone("センター", 4, pos=(2.0, 0.0, 0.0)),
+    ])
+    code = cli.main([str(src), "-o", str(out),
+                     "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"])
+    assert code == 0
+    out_doc, _ = io.read(str(out))
+    keys = _track_keys(out_doc, "センター")
+    assert [k.frame for k in keys] == list(range(5))  # 重複が潰れて各フレーム1キー
+    assert keys[0].position == pytest.approx((0.0, 0.0, 0.0))  # 後勝ち(9.0/5.0 でない)
+    assert keys[4].position == pytest.approx((2.0, 0.0, 0.0))  # 後勝ち(1.0 でない)
+
+
 # --- inspect 診断: reduction の input_keys は疎化に渡した密サンプル数 --------
 
 
-@_impl_pending
 def test_machine_inspect_reduction_input_keys_is_dense_count(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[

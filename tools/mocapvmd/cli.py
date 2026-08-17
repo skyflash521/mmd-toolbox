@@ -1,10 +1,11 @@
 """mocapvmd CLI。
 
-引数解析 → VMD読み(vmd.io)→ 全ボーンの一般ノイズ軽減(クリーニング)→
-足IK・つま先IKの接地安定化 → 共通機構による疎化 → VMD書き。ボーン選択は持たず、一般ノイズ軽減と
-疎化は全ボーン、足IK安定化は分類 foot_ik / toe_ik のボーンに適用する。対象外セクション(モーフ・
-カメラ・照明・セルフ影)は無加工で透過する。既定では疎なキーとベジェ補間を出力し、--no-reduce 時のみ
-クリーニング後の密キー(線形補間)を出力する。
+引数解析 → VMD読み(vmd.io)→ 前段密化(MMD互換の補間評価で全トラックを密キー化)→
+全ボーンの一般ノイズ軽減(クリーニング)→ 足IK・つま先IKの接地安定化 → 共通機構による疎化 →
+VMD書き。入力は密キーのほか補間曲線を持つ疎なキー(不等間隔可)でもよい。ボーン選択は持たず、
+一般ノイズ軽減と疎化は全ボーン、足IK安定化は分類 foot_ik / toe_ik のボーンに適用する。
+対象外セクション(モーフ・カメラ・照明・セルフ影)は無加工で透過する。既定では疎なキーと
+ベジェ補間を出力し、--no-reduce 時のみクリーニング後の密キー(線形補間)を出力する。
 
 --machine 指定時は標準出力を JSON Lines のイベントストリーム(progress / warning / result / error)に
 切り替える。既定(非機械)の人間向け表示・出力ファイル・終了コードは変えない。
@@ -30,7 +31,7 @@ from cli_events import (
 )
 from cli_progress_router import ProgressRouter
 from pmx.types import PmxFormatError
-from vmd import io
+from vmd import interp, io
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey
 
@@ -224,6 +225,38 @@ def _validate_bones(bone_keys):
     不正があれば ValueError を送出する。
     """
     denoise.validate_bone_values([k.position for k in bone_keys], [k.rotation for k in bone_keys])
+
+
+def _densify_bones(bone_keys):
+    """全ボーントラックをMMD互換の補間評価で30fps整数フレームの密キー(線形補間)へ密化する。
+
+    トラック(名前)ごとにフレーム昇順へ整列し、キー2個以上のトラックを各自の実在区間
+    [first, last] でベイクする。同一フレームの重複キーはファイル内で後に現れたキーを採用する
+    (ベイクはフレーム昇順・重複なしのキー列を前提とする)。キー1個以下のトラックは逐語保持する
+    (各工程と同じ扱い)。入力の補間曲線はここで消費され、以後のパイプラインは密キー前提のまま動く。
+    値の健全性は呼び出し前に _validate_bones で検証済みとする。
+    """
+    order = []
+    groups = {}
+    for k in bone_keys:
+        if k.name not in groups:
+            groups[k.name] = {}
+            order.append(k.name)
+        groups[k.name][k.frame] = k  # 同一フレームは後に現れたキーで置き換える
+
+    out = []
+    for name in order:
+        by_frame = groups[name]
+        ks = [by_frame[f] for f in sorted(by_frame)]
+        if len(ks) < 2:
+            out.extend(ks)
+            continue
+        positions, rotations = interp.bake_bone_track(ks, ks[0].frame, ks[-1].frame)
+        name_raw = ks[0].name_raw
+        for i, f in enumerate(range(ks[0].frame, ks[-1].frame + 1)):
+            out.append(BoneKey(name_raw, f, positions[i], rotations[i], BONE_LINEAR_INTERP))
+    out.sort(key=lambda k: (k.name_raw, k.frame))
+    return out
 
 
 def _clean_bones(bone_keys, clean_strength):
@@ -460,7 +493,7 @@ def main(argv=None):
 
 
 def _run(args, machine, emitter, fail):
-    """引数解析済みの本体処理(検証 → クリーニング → 足IK安定化 → 疎化 → 書き込み)。
+    """引数解析済みの本体処理(検証 → 密化 → クリーニング → 足IK安定化 → 疎化 → 書き込み)。
 
     失敗は fail() 経由で終了コードを返す。機械モードは emitter で progress / warning / result を送出する。
     """
@@ -535,6 +568,11 @@ def _run(args, machine, emitter, fail):
         return fail("invalid_bone_values",
                     f"ボーン値が不正(非有限・ゼロノルム quaternion): {e}", 1, field="input")
 
+    # 前段密化。疎キー+補間曲線の入力も、以後のクリーニング・疎化・診断が密キー前提のまま正しく
+    # 処理できる形へ揃える(クリーニング・疎化の有効無効に依らず常に行う)。入力の記述(inspect の
+    # keys/bones/frame_range と process result の input_keys)には引き続き doc.bone を使う。
+    dense_bone = _densify_bones(doc.bone)
+
     # クリーニング → 足IK安定化 → 疎化のパイプライン。dry-run でも疎化レポートの素データを得るため
     # 実行し、出力の書き出しだけを dry-run で省く。
     # 例外時も進捗を終えるため try/finally で囲む。
@@ -550,16 +588,16 @@ def _run(args, machine, emitter, fail):
             if args.denoise_mode == "pose":
                 # 表現空間ノイズ除去。PMX形式不正・モデルプロファイル不正は入力不正。
                 try:
-                    new_bone = apply_pose_denoise(doc.bone, pmx_path=args.pmx, diagnostics_out=pose_diag)
+                    new_bone = apply_pose_denoise(dense_bone, pmx_path=args.pmx, diagnostics_out=pose_diag)
                 except PmxFormatError as e:
                     return fail("not_pmx", f"PMX 形式が不正: {type(e).__name__}: {e}", 1, field="--pmx")
                 except MocapModelProfileError as e:
                     field = "--pmx" if args.pmx is not None else None
                     return fail("model_profile_invalid", f"モデルプロファイルが不正: {e}", 1, field=field)
             else:
-                new_bone = _clean_bones(doc.bone, args.clean_strength)
+                new_bone = _clean_bones(dense_bone, args.clean_strength)
         else:
-            new_bone = doc.bone
+            new_bone = dense_bone
         if args.foot_ik_stabilize:
             reporter.stage("foot_ik")
             new_bone = _stabilize_bones(new_bone, args.foot_slide_suppression)
@@ -585,9 +623,10 @@ def _run(args, machine, emitter, fail):
 
     # 人間向け診断レポート(非機械の dry-run / verbose)。機械モードは stdout をイベント専用にするので
     # 人間向けレポートは出さない(入力検査は inspect result で返す)。
+    # レポートの検出再実行は、実際のパイプラインが処理した密化後の信号に対して行う。
     if not machine and want_report:
         rep = report.build_report(
-            doc.bone,
+            dense_bone,
             args.preset,
             clean_strength=args.clean_strength,
             denoise=args.denoise,
