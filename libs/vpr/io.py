@@ -5,22 +5,23 @@ import json
 import math
 import zipfile
 
+from .constants import RESOLUTION, SEQUENCE_PATH, SINGING_TRACK_TYPE
 from .types import (
     ControllerCurve,
     ControllerEvent,
     Note,
+    NoteAiExpression,
+    NoteVibrato,
     Part,
     TempoEvent,
     TimeSignature,
     Track,
+    VibratoPoint,
+    VoiceBank,
     VprFormatError,
     VprProject,
     VprWarning,
 )
-
-_RESOLUTION = 480  # tick/四分音符(vpr に格納されない固定値)
-_SEQUENCE_PATH = "Project/sequence.json"
-_SINGING_TRACK_TYPE = 2
 
 
 def _require(obj, key, path, type_=None):
@@ -56,29 +57,42 @@ def _optional_list(obj, key, path):
 
 
 def _load_sequence(src):
-    """vpr(ZIP)から Project/sequence.json を読み JSON として返す。構造異常は VprFormatError。"""
+    """vpr(ZIP)から Project/sequence.json と、それ以外のエントリを読む。
+
+    エントリは書き出しがそのまま書き戻せるように保持する(波形データを落とさないため)。
+    構造異常は VprFormatError。
+    """
     source = io.BytesIO(src) if isinstance(src, bytes) else src
     try:
         with zipfile.ZipFile(source) as archive:
             try:
-                data = archive.read(_SEQUENCE_PATH)
+                data = archive.read(SEQUENCE_PATH)
             except KeyError as e:
                 raise VprFormatError(
-                    f"{_SEQUENCE_PATH} がありません", path=_SEQUENCE_PATH
+                    f"{SEQUENCE_PATH} がありません", path=SEQUENCE_PATH
                 ) from e
+            entries = {name: archive.read(name) for name in archive.namelist()
+                       if name != SEQUENCE_PATH}
     except zipfile.BadZipFile as e:
         raise VprFormatError("ZIP アーカイブとして読み込めません") from e
     try:
-        return json.loads(data)
+        return json.loads(data), entries
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
         raise VprFormatError(
-            f"{_SEQUENCE_PATH} を UTF-8 JSON として解析できません", path=_SEQUENCE_PATH
+            f"{SEQUENCE_PATH} を UTF-8 JSON として解析できません", path=SEQUENCE_PATH
         ) from e
 
 
-def _ticks_per_bar(numerator: int, denominator: int) -> int:
-    """拍子の1小節あたりの tick 長。"""
-    return numerator * _RESOLUTION * 4 // denominator
+def _ticks_per_bar(numerator: int, denominator: int, path=None) -> int:
+    """拍子の1小節あたりの tick 長。
+
+    分母 0 は小節長を定義できない。素通しにするとゼロ除算で落ち、構造異常を構造化エラーで返す
+    フォーマット層の約束から外れるので、ここで弾く。
+    """
+    if denominator < 1:
+        raise VprFormatError("拍子の分母は 1 以上でなければなりません",
+                             path=path, key="denom", value=denominator)
+    return numerator * RESOLUTION * 4 // denominator
 
 
 def _tempos(master) -> list[TempoEvent]:
@@ -118,6 +132,7 @@ def _time_signatures(master) -> list[TimeSignature]:
                 _require(event, "bar", path, int),
                 _require(event, "numer", path, int),
                 _require(event, "denom", path, int),
+                path,
             )
         )
 
@@ -126,12 +141,89 @@ def _time_signatures(master) -> list[TimeSignature]:
     prev_bar = 0
     # 最初の明示イベントより前の小節は VOCALOID 既定の 4/4 とみなして積算する。
     prev_ticks_per_bar = _ticks_per_bar(4, 4)
-    for bar, numerator, denominator in sorted(indexed, key=lambda x: x[0]):
+    for bar, numerator, denominator, path in sorted(indexed, key=lambda x: x[0]):
         tick += (bar - prev_bar) * prev_ticks_per_bar
         result.append(TimeSignature(tick=tick, numerator=numerator, denominator=denominator))
-        prev_ticks_per_bar = _ticks_per_bar(numerator, denominator)
+        prev_ticks_per_bar = _ticks_per_bar(numerator, denominator, path)
         prev_bar = bar
     return result
+
+
+def _is_int(value) -> bool:
+    """JSON の true/false を整数として通さない整数判定。"""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def accepts_vibrato(raw) -> bool:
+    """読みがビブラートを公開モデルへ写せる形か。
+
+    書き出しが同じ判定を使って対称性を保つ(写せなかった生の構造を、公開モデルの側が空だからと
+    いって消さないため)ので、判定はここにだけ置く。区間長が正でない場合も「写せる形」に含む
+    (公開モデルでは None になるが、それは値の解釈であって構造の不備ではない)。
+    """
+    if not isinstance(raw, dict):
+        return False
+    if not _is_int(raw.get("type")) or not _is_int(raw.get("duration")):
+        return False
+    for key in ("depths", "rates"):
+        points = raw.get(key, [])
+        if not isinstance(points, list):
+            return False
+        for point in points:
+            if not isinstance(point, dict) or not _is_int(point.get("pos")) \
+                    or not _is_int(point.get("value")):
+                return False
+    return True
+
+
+def accepts_depth_envelope(raw) -> bool:
+    """読みが深さ包絡を公開モデルへ写せる形か(書き出しも同じ判定を使う)。
+
+    2つの値は両方そろっているときだけ写す。片方だけを持つ状態を公開モデルへ作らないことで、
+    書き出しとの対称性(読みが立てた音符には書きが同じ2つを戻す)を保つ。
+    """
+    if not isinstance(raw, dict):
+        return False
+    return all(isinstance(value, (int, float)) and not isinstance(value, bool)
+               for value in (raw.get("vibratoLeadingDepth"), raw.get("vibratoFollowingDepth")))
+
+
+def _vibrato_points(raw_points, span_start) -> list[VibratoPoint]:
+    """ビブラートの自動化曲線を絶対 tick 化して写像する。
+
+    格納値はビブラート区間始端からの相対位置なので、区間始端を足して他のコントローラ点と同じ
+    プロジェクト絶対 tick で公開する。キー自体が無い音符があるので欠落は空とする。
+    """
+    return [VibratoPoint(pos=span_start + point["pos"], value=point["value"])
+            for point in raw_points]
+
+
+def _vibrato(note, note_start, note_duration) -> NoteVibrato | None:
+    """音符のビブラートを写像する。写せない形の音符は None(読みを失敗させない)。
+
+    区間は音符の末尾側に付く(形式仕様)ので、区間始端は音符終端から区間長を引いた位置になる。
+    区間長 0 はビブラート無しを表すので、キーがある音符でも None とする(正でない区間長も同じ。
+    区間始端を音符の開始前へ置く区間は形式が持たない)。
+    """
+    raw = _optional(note, "vibrato", None)
+    if not accepts_vibrato(raw) or raw["duration"] <= 0:
+        return None
+    span_start = note_start + note_duration - raw["duration"]
+    return NoteVibrato(
+        type=raw["type"],
+        duration=raw["duration"],
+        depths=_vibrato_points(raw.get("depths", []), span_start),
+        rates=_vibrato_points(raw.get("rates", []), span_start),
+    )
+
+
+def _ai_expression(note) -> NoteAiExpression | None:
+    """音符の表現パラメータのうち、ビブラートの深さ包絡だけを写像する。"""
+    raw = _optional(note, "aiExp", None)
+    if not accepts_depth_envelope(raw):
+        return None
+    return NoteAiExpression(vibrato_leading_depth=float(raw["vibratoLeadingDepth"]),
+                            vibrato_following_depth=float(raw["vibratoFollowingDepth"]))
 
 
 def _notes(raw_notes, part_pos, part_path) -> list[Note]:
@@ -139,14 +231,20 @@ def _notes(raw_notes, part_pos, part_path) -> list[Note]:
     notes: list[Note] = []
     for i, note in enumerate(raw_notes):
         path = f"{part_path}.notes[{i}]"
+        start_tick = part_pos + _require(note, "pos", path, int)
+        duration_tick = _require(note, "duration", path, int)
         notes.append(
             Note(
-                start_tick=part_pos + _require(note, "pos", path, int),
-                duration_tick=_require(note, "duration", path, int),
+                start_tick=start_tick,
+                duration_tick=duration_tick,
                 pitch=_require(note, "number", path, int),
                 lyric=_require(note, "lyric", path, str),
                 velocity=_require(note, "velocity", path, int),
                 phonemes=_require(note, "phoneme", path, str).split(),
+                # 欠落も真偽値でない値も偽へ倒す(型の不正で読みを失敗させない寛容規則)。
+                is_protected=_optional(note, "isProtected", False) is True,
+                vibrato=_vibrato(note, start_tick, duration_tick),
+                ai_expression=_ai_expression(note),
             )
         )
     notes.sort(key=lambda note: note.start_tick)
@@ -175,11 +273,29 @@ def _controllers(raw_controllers, part_pos, part_path) -> list[ControllerCurve]:
     return curves
 
 
-def _tracks(raw_tracks) -> list[Track]:
+def _voice(part, voices) -> VoiceBank | None:
+    """パートが参照するボイスバンクを、トップレベルの定義から解決する。
+
+    参照だけあって定義が無い場合は、名前を決められないので None とする(利用先が値を選ぶ)。
+    """
+    reference = _optional(part, "aiVoice", None)
+    if not isinstance(reference, dict):
+        return None
+    comp_id = _optional(reference, "compID", None)
+    if not isinstance(comp_id, str):
+        return None
+    for definition in voices:
+        if isinstance(definition, dict) and definition.get("compID") == comp_id:
+            name = definition.get("name")
+            return VoiceBank(comp_id=comp_id, name=name if isinstance(name, str) else "")
+    return None
+
+
+def _tracks(raw_tracks, voices) -> list[Track]:
     """歌唱トラック(type==2)のみをデータモデルへ写像する。"""
     tracks: list[Track] = []
     for i, track in enumerate(raw_tracks):
-        if _optional(track, "type", None) != _SINGING_TRACK_TYPE:
+        if _optional(track, "type", None) != SINGING_TRACK_TYPE:
             continue
         path = f"tracks[{i}]"
         parts: list[Part] = []
@@ -190,6 +306,8 @@ def _tracks(raw_tracks) -> list[Track]:
                 Part(
                     name=_require(part, "name", part_path, str),
                     start_tick=part_pos,
+                    duration_tick=_optional(part, "duration", 0),
+                    voice=_voice(part, voices),
                     notes=_notes(_optional_list(part, "notes", part_path), part_pos, part_path),
                     controllers=_controllers(
                         _optional_list(part, "controllers", part_path), part_pos, part_path
@@ -231,15 +349,18 @@ def _overlap_warnings(tracks) -> list[VprWarning]:
 
 def read(src) -> tuple[VprProject, list[VprWarning]]:
     """vpr を読み、データモデルと警告を返す。"""
-    sequence = _load_sequence(src)
+    sequence, entries = _load_sequence(src)
     master = _require(sequence, "masterTrack", "", dict)
     raw_tracks = _require(sequence, "tracks", "", list)
+    title = _optional(sequence, "title", "")
 
     project = VprProject(
-        resolution=_RESOLUTION,
+        resolution=RESOLUTION,
         tempos=_tempos(master),
         time_signatures=_time_signatures(master),
-        tracks=_tracks(raw_tracks),
+        tracks=_tracks(raw_tracks, _optional(sequence, "voices", [])),
+        title=title if isinstance(title, str) else "",
         raw_sequence=sequence,
+        entries=entries,
     )
     return project, _overlap_warnings(project.tracks)

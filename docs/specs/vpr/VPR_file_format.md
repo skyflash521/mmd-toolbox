@@ -67,6 +67,15 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `parts[]` | list | パート(歌唱区間/オーディオ区間) |
 | その他 | — | `color`/`busNo`/`volume`/`panpot`/`isMuted` 等 |
 
+### voices[]
+
+歌唱に使うボイスバンクの定義。パートはここへ識別子で参照する(下記 [`parts[]`](#parts歌唱トラック) の `aiVoice`)。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `compID` | str | ボイスバンクの識別子。パートの `aiVoice.compID` と一致するものが対応する |
+| `name` | str | ボイスバンク名(例 `HATSUNE_MIKU_V6_ORIGINAL`) |
+
 ### `parts[]`(歌唱トラック)
 
 | フィールド | 型 | 説明 |
@@ -76,7 +85,8 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `duration` | int | パート長(tick) |
 | `notes[]` | list | 音符 |
 | `controllers[]` | list | パート単位の連続コントローラ曲線(下記の [parts[] の controllers[]](#parts-の-controllers)) |
-| その他 | — | `styleName`/`aiVoice` 等 |
+| `aiVoice` | dict | 使うボイスバンクの参照。`compID`(str。[`voices[]`](#voices) の同じ値を持つ要素が定義)と `langIDs`(list。各要素 `{langID: int}`)を持つ |
+| `styleName` | str | 歌い方スタイルの名前(例 `Silk`)。`voices[]` とは対応せず、`stylePresetID`(str)と対で持つ |
 
 オーディオトラックのパートは `{name, pos, wav, region}` を持ち `notes` を持たない。
 
@@ -90,6 +100,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `lyric` | str | 表示歌詞 |
 | `phoneme` | str | 音素列。**空白区切り**(例 `"k o"`、`"t th e l"`)。`phoneme.split()` で音素の並びになる |
 | `velocity` | int | ベロシティ(0〜127) |
+| `isProtected` | bool(**省略可**) | 音素列の保護。欠落時は偽として扱う。観測した実 vpr では大半が `false` で、真の音符は解析に用いた2ファイルのうち一方に2件だけある。その2件はいずれも表示歌詞から導かれる音素とは異なる音素列を持つ(表示歌詞 `Tell` に音素列 `t th e l`、表示歌詞「お」に音素列 `w o`)。真のとき編集器が表示歌詞から音素を導き直さない、という意味はこの観測と整合するが、編集器の実挙動そのものは未検証 |
 | `vibrato` | dict(**省略可**) | 音符ビブラート。構造は下記の [notes[] の vibrato](#notes-の-vibrato) |
 | `aiExp` | dict(**省略可**) | VOCALOID:AI の表現パラメータ。ビブラート深さの `vibratoLeadingDepth`/`vibratoFollowingDepth`(実数。観測値は約 0.2〜1.0 で、上端 1.0 は直接観測、下端 0 は未観測)を含む。それ以外のキー(`pitchFine`・`pitchDriftStart`/`End`・`pitchScalingCenter`/`Origin`・`pitchTransitionStart`/`End`・`amplitudeWhole`/`Start`/`End`)は名前以外を解析していない |
 | `isAiVibratoEnabled` | bool(**省略可**) | 音符直下の真偽値(`aiExp` の内側ではない)。観測した音符はすべて `true` で、`false` の例は未観測。意味は未確定 |
@@ -97,7 +108,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
 | `phonemePositions[]` | list(**省略可**) | 音符内の音素別タイミング。音符により存在しない(実サンプルでは一部の音符のみ)。未設定値は `-2147483648`(INT_MIN) |
 
 読み手が全音符での存在を当てにしてよいのは `pos`・`duration`・`number`・`lyric`・`phoneme`・`velocity` の
-6つで、`exp`/`aiExp`/`vibrato`/`isAiVibratoEnabled`/`singingSkill`/`phonemePositions` は省略可として扱う
+6つで、`exp`/`aiExp`/`vibrato`/`isAiVibratoEnabled`/`isProtected`/`singingSkill`/`phonemePositions` は省略可として扱う
 (欠落する音符がある前提で読む)。解析に用いた実ファイルでは、このうち `phonemePositions` だけが一部の音符に
 しか無く、残りは全音符に存在した。
 
@@ -166,6 +177,7 @@ Project/Audio/<uuid>.wav           ← オーディオトラックの実体(0個
   直接観測したが下端 `0` は未観測で、値域が 0〜1 であることと、`0.5` が「変化なし」の中立値であることは、
   いずれも公式文書に明記が無く観測パターンからの推定にとどまる。
 - **未解析の領域:** `exp`/`singingSkill` および `aiExp` のビブラート深さ2キー以外の内部構造、
-  `isAiVibratoEnabled` の意味、オーディオトラックの詳細、`Project/sequence.json` 以外の ZIP エントリ
+  `isAiVibratoEnabled` の意味、`aiVoice.langIDs` の値の意味、`stylePresetID` の値の意味、
+  オーディオトラックの詳細、`Project/sequence.json` 以外の ZIP エントリ
   (`Project/Audio/*.wav` 等)は、本書で詳細レイアウトを解析していない(確証が低い領域)。実ファイルで
   確定でき次第、本書を更新する。

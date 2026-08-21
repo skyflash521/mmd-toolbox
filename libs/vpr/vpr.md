@@ -31,7 +31,7 @@ CLI間依存になる)。
 |---|---|---|
 | 読み利用(リップモーション変換) | 音符の時刻・歌詞/音素(→口形イベント)・強弱(→開き量)・休符を読む | 読み |
 | S-1認識測定のラベル生成 | 音符の時刻・音素(→母音/子音/休符の自動ラベル)を読む | 読み |
-| 書き利用(採譜) | 音符(時刻・ピッチ・歌詞/音素・強弱)・テンポを vpr へ書き出す | 書き |
+| 書き利用(採譜) | 音符(時刻・ピッチ・歌詞/音素・強弱)・テンポを vpr へ書き出す(書き出しが要求する項目は[§4](#4-書き出しwrite)) | 書き |
 
 読みはリップモーション変換・S-1認識測定で先に必要になり、書きは採譜の着手時に必要になる(実装は読みを先行する)。
 
@@ -79,22 +79,43 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
 時刻は vpr ネイティブの **tick(整数)** で保持し、秒/フレーム/拍への変換は持たない([§6](#6-フォーマット層との関係時間軸))。
 
 - `VprProject`: `resolution: int`(tick/四分音符)、`tempos: list[TempoEvent]`、
-  `time_signatures: list[TimeSignature]`、`tracks: list[Track]`、
+  `time_signatures: list[TimeSignature]`、`tracks: list[Track]`、`title: str`(曲名。既定は空文字列)、
   `raw_sequence: dict | None`(未解釈データのロスレス保持。[§3](#3-読み込みread)。`read` は `sequence.json` 全体を保持し、
-  手組みの `VprProject` では `None`)。
+  手組みの `VprProject` では `None`)、`entries: dict[str, bytes] | None`(`Project/sequence.json` 以外の
+  ZIP エントリ。読みが保持し、書きがそのまま書き戻す。手組みでは `None`)。
 - `TempoEvent`: `tick: int`、`bpm: float`。
 - `TimeSignature`: `tick: int`、`numerator: int`、`denominator: int`。
 - `Track`: `name: str`、`parts: list[Part]`。
 - `Part`: `name: str`、`start_tick: int`(プロジェクト絶対 tick。パートの開始位置)、
+  `duration_tick: int`(パート長。既定 `0`)、`voice: VoiceBank | None`(このパートが使うボイスバンク。
+  既定 `None`)、
   `notes: list[Note]`(`start_tick` の昇順)、`controllers: list[ControllerCurve]`(連続コントローラ曲線。既定は空)。
 - `ControllerCurve`: `name: str`(vpr の controller 名。例 `"dynamics"`/`"s5Expression"`)、
   `events: list[ControllerEvent]`(`tick` の昇順)。声量の選別・正規化は利用先の責務で、ここでは全コントローラを
   生値で公開する。
 - `ControllerEvent`: `tick: int`(プロジェクト絶対 tick)、`value: int`(ファイル格納の生値)。
 - `Note`: `start_tick: int`、`duration_tick: int`、`pitch: int`(MIDI ノート番号)、`lyric: str`(表示歌詞)、
-  `velocity: int`(0〜127)、`phonemes: list[str]`(音符内の音素列。空可、既定は空リスト)。
+  `velocity: int`(0〜127)、`phonemes: list[str]`(音符内の音素列。空可、既定は空リスト)、
+  `is_protected: bool`(音素列の保護。既定 `false`。形式の `isProtected` に対応し、読みは欠落を偽として
+  写し、書きはそのまま書く。値の意味付け・選別はフォーマット層は持たない)、
+  `vibrato: NoteVibrato | None`(既定 `None`)、`ai_expression: NoteAiExpression | None`(既定 `None`)。
   `start_tick` は**プロジェクト絶対 tick**、`duration_tick` は **tick 長**で持つ(vpr がパート相対で格納する場合、
   read 時に `Part` 開始位置を `start_tick` へ加算して絶対化する)。
+- `NoteVibrato`: 音符のビブラート。`type: int`、`duration: int`、`depths: list[VibratoPoint]`、
+  `rates: list[VibratoPoint]`(後2つの既定は空)。各値の意味は
+  [VPR_file_format.md の音符ビブラート定義](../../docs/specs/vpr/VPR_file_format.md#notes-の-vibrato)が定める。
+  形式が区間長 `0` で表すビブラート無しは、公開モデルでは `Note.vibrato` が `None` であることで表す
+  (`duration` が `0` の `NoteVibrato` は作らない)。
+- `VibratoPoint`: ビブラートの自動化曲線の1点。`pos: int`(**プロジェクト絶対 tick**。他のコントローラ点と
+  同じ持ち方にそろえる。形式はビブラート区間始端からの相対位置で格納するので、読みは区間始端を足し、
+  書きは引く)、`value: int`(格納の生値)。
+- `VoiceBank`: 歌唱に使うボイスバンクの指定。`comp_id: str`、`name: str`。値を選ぶのは利用先で、
+  `vpr` は与えられたものを直列化するだけとする(どの歌手を使うかは形式の事実でなく利用先の判断のため。
+  [layering.md §3](../../docs/conventions/layering.md#3-フォーマット層共通の設計原則))。
+- `NoteAiExpression`: 音符単位の表現パラメータのうち、ビブラートの深さ包絡の2つ
+  (`vibrato_leading_depth: float`、`vibrato_following_depth: float`)。**どちらも必須**とし、値の不在は
+  外側の `Note.ai_expression` が `None` であることだけで表す(片方だけを持つ状態を作れないようにして、
+  読みと書きの対称性を保つ)。
 - **休符**: 専用型を持たせない。同一 `Track` 内の発音区間 `[start_tick, start_tick+duration_tick)` の和集合の
   補集合を休符とする([§2](#2-データモデルvpr-が公開する抽象)のとおり)。
 - **警告/エラー**: `VprWarning`(`code: str`、`message: str`。続行可能事象の構造化報告)、
@@ -138,7 +159,12 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
 - `VprProject.tracks` ← `tracks` のうち歌唱トラック(`type` = 2)。`Track(name, parts)`。オーディオトラック
   (`type` = 1)は音符を持たず公開データモデルに現れない(その保持は [§3.3](#33-未解釈データのロスレス保持))。
 - `Part(name, start_tick=part.pos, notes, controllers)`。`notes` は `start_tick` 昇順。
-- `Note(start_tick=part.pos + note.pos, duration_tick=duration, pitch=number, lyric, velocity, phonemes=phoneme.split())`。
+- `Note(start_tick=part.pos + note.pos, duration_tick=duration, pitch=number, lyric, velocity, phonemes=phoneme.split(), is_protected=isProtected)`。
+  `isProtected` が欠落している音符、または真偽値でない値を持つ音符は `is_protected` を `False` とする
+  (形式仕様が省略可と定めるフィールドで、欠落時は偽として扱う)。
+- `Note.vibrato` ← `note.vibrato`、`Note.ai_expression` ← `note.aiExp` の深さ包絡2キー。ビブラートの制御点は
+  区間始端(`音符終端 − 区間長`)を加算して絶対 tick 化する。区間長が正でないビブラートと、写せない形の
+  構造は `None` とする(下記の寛容規則)。
 - `Part.controllers` ← `part.controllers`。各 `ControllerCurve(name, events)` で、`events` は
   `ControllerEvent(tick=part.pos + event.pos, value=event.value)`(音符と同じく part 開始位置を加算して絶対化)を
   `tick` 昇順に整列。声量に限らず全コントローラを生値で公開する(選別・正規化は利用先)。
@@ -180,9 +206,15 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
     `lyric`・`phoneme`・`velocity` の6フィールドを必須とする([VPR_file_format.md の音符フィールド定義](../../docs/specs/vpr/VPR_file_format.md#notes))。
 - **`VprFormatError` としない入力(許容)**:
   - 公開データモデル対象外の未知キー・未解釈キー(ロスレス保持側 [§3.3](#33-未解釈データのロスレス保持) に回す)。
-  - [VPR_file_format.md の音符フィールド定義](../../docs/specs/vpr/VPR_file_format.md#notes)が省略可とする音符フィールド(`exp`/`aiExp`/`vibrato`/`singingSkill`/`phonemePositions`)の欠如。
+  - [VPR_file_format.md の音符フィールド定義](../../docs/specs/vpr/VPR_file_format.md#notes)が省略可とする音符フィールド(`exp`/`aiExp`/`vibrato`/`isProtected`/`singingSkill`/`phonemePositions`)の欠如。
   - オーディオトラックなど公開データモデルの `Track` に写像しないトラックの存在。
   - 歌唱パートに `notes` が無い場合は空の音符列として扱う。
+  - **書き利用のために新たに読むキー**(`title`・`parts[].duration`・音符の `vibrato`・`aiExp`・`isProtected`)が
+    欠落している、または公開モデルへ写せない型・構造である。いずれも読みを失敗させず、公開フィールドを既定値
+    (`title` は空文字列、パート長は `0`、ビブラートと深さ包絡は `None`、`is_protected` は `False`)にする。
+    形式仕様が省略可と定めて
+    いるからではなく、**現在読める vpr が読めなくなることを避けるための寛容規則**で、受理範囲を広げない。
+    したがって上の型不正の規則は `isProtected` には及ばない。
 
 ### 3.2 続行可能な警告(`VprWarning`)
 
@@ -204,9 +236,45 @@ vpr の音楽情報のうち、利用先([§1.3](#13-利用先))が必要とす�
 
 ## 4. 書き出し(write)
 
-- データモデル([§2](#2-データモデルvpr-が公開する抽象))を vpr へ直列化する。
-- 初期実装では読みを先行させ、書き出しは書き利用の着手時に拡張する。書き出しは、対応する
-  vpr で読み戻せ(往復)、かつ VOCALOID で正しく開ける妥当な vpr を生成することを要件とする。
+- データモデル([§2](#2-データモデルvpr-が公開する抽象))を vpr へ直列化する。書き出しは、対応する読みで読み戻せ(往復)、
+  かつ VOCALOID で正しく開ける妥当な vpr を生成することを要件とする。
+- 書き利用([§1.3](#13-利用先))が要求する項目(音符・テンポ・拍子・曲名・パート長・音符のビブラート・
+  ボイスバンクの指定)は、いずれも[§2.1](#21-公開する具体型と関数)の公開型が持つ。
+
+### 4.1 書き出しの基礎
+
+- `raw_sequence` を持つプロジェクトでは**それを基礎**にし、持たない(手組みの)プロジェクトでは
+  形式を成立させる最小限の骨組みから組み立てる。前者では未解釈キーと、公開モデルに写さないトラック
+  (オーディオトラック)が `sequence.json` の中で保たれる(フォーマット層のロスレス原則)。
+- `entries` を持つプロジェクトでは、`Project/sequence.json` 以外の ZIP エントリをそのまま書き戻す。
+- **公開モデルと生 JSON の対応付けは、読みが使う並べ替えを書き出しでも再現して一意に定める**
+  (どの生要素がどの公開要素に当たるかを決めないと、未解釈の要素別キーを保てないため)。対応付けの
+  具体的な手順は実装の詳細で、本書は下記の契約と不変条件だけを定める。
+
+### 4.2 書き出しの検査と正規化
+
+- **検査**: 形式へ落とせない値(固定値と異なる分解能・範囲外の音高・負の長さ・表現できないテンポ・
+  空白を含む音素・音符長を超えるビブラート区間など)を持つモデルは、構造化エラーで拒否する
+  (黙って丸めない)。読みの受理範囲は広い側のまま変えない。
+- **正規化**: テンポは形式の格納粒度へ丸め、テンポ・拍子・音符・コントローラ点は位置の昇順へ並べ替える。
+- **不変条件**: 拍子イベントの tick は小節境界に一致する。一致しない位置の拍子は書き出せない。
+- **写せなかった生の値**: 公開モデルの値が空のとき、生の構造を消してよいのは**読みがその構造を写せた
+  場合だけ**とする。欠落・型不正で写せなかった構造はそのまま残す(公開モデルの空が「元から無い」と
+  「利用側が消した」のどちらなのかを、生の側の形で判別する)。公開モデルの値が空でなければ、生の形に
+  関わらずその値で上書きする。
+- **ボイスバンクの解決**: 書き出した vpr では、全パートのボイスバンク参照がプロジェクトのボイスバンク
+  定義のいずれかに解決する。既にある定義は置き換えない。
+
+### 4.3 往復の保証範囲
+
+- **保証する**: 書いた vpr を読み戻すと、`raw_sequence` を除いて同じ公開モデルが得られる。
+- **保証しない**: バイト一致・JSON の字句差(空白・キー順・数値表記)・`raw_sequence` の同一性。
+- 読んだ vpr を無加工で書き戻したとき、`sequence.json` の未解釈キーと公開モデルに写さないトラックは
+  失われない。ただし読みの受理範囲は書きより広い([§4.2](#42-書き出しの検査と正規化))ので、読めるが書けない vpr がある
+  (音符長を超えるビブラート区間など、形式が持たない値を含むファイル)。書き戻せるのは書きの検査を
+  通る範囲で、それを外れる入力は書きが構造化エラーで拒否する。
+- **深さ包絡の対称性**: 読みが `ai_expression` を立てた音符は、書きが同じ2つの値を書き戻す。読みが
+  `None` とした音符へ書きが値を作らない。
 
 ---
 
