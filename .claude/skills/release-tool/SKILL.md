@@ -30,9 +30,9 @@ description: 公開CLIツールのリリース作業(バージョン付け・利
    ブランチが develop でない場合は、その状態を提示してユーザーに確認を取る**(勝手に stash・破棄・
    切り替えをしない)。問題がなければ develop に切り替え、その上で [publishing.md](../../../docs/conventions/publishing.md) の A → B → C を
    順に実行する。
-   - B(公開前検証)の実行・計測は run-and-bench スキルの規律で行う。
+   - B(公開前検証)の実行・計測は flow:run-and-bench スキルの規律で行う。
    - C(ドキュメント)の CHANGELOG 更新は [CHANGELOG の生成手順](#changelog-の生成手順)で行う。
-2. 各まとまりの編集が終わるごとに codex-review-loop で収束させ、commit スキルでコミットする。
+2. 各まとまりの編集が終わるごとに flow:codex-review-loop で収束させ、flow:commit スキルでコミットする。
 3. D(リリース確定)は PR の作成までをスキルが実行する(gh の利用開始時のアカウント確認と、
    gh が使えないときの代替は [gh の利用とフォールバック](#gh-の利用とフォールバック)に従う):
    1. [PR案のひな形](#pr案のひな形)で PR案(タイトル・本文)を作成して提示し、ユーザーの確認(修正があれば反映して

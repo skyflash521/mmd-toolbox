@@ -11,7 +11,7 @@
 |---|---|---|
 | 静的検査 | `ruff check` | リポジトリ内の Python 全体(gitignore 済みのパスは ruff が自動で外す) |
 | 記法検査 | `rumdl check` | Markdown の一般的な記法(見出し・リスト・コードブロックまわりの体裁)。gitignore 済みのパスは rumdl が自動で外す |
-| 節参照検査 | `python scripts/check_section_references.py` | 平文の節参照・裸のファイル参照が残っていないこと([cross-references.md](cross-references.md) の記法) |
+| 節参照検査 | `python scripts/check_section_references.py` | 平文の節参照・裸のファイル参照が残っていないこと(共有規約 cross-references(harness の flow プラグイン同梱)の記法) |
 | リンク検査 | `lychee --config lychee.toml . .claude` | Markdown のリンク先の実在 |
 | テスト | `pytest` | [pyproject.toml](../../pyproject.toml) の `testpaths` が指す全パッケージ・全ツール |
 

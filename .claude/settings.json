@@ -1,8 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bash .claude/skills/codex-watchdog/watchdog.sh*)",
-      "Bash(python3 scripts/trash.py *)",
       "Bash(git add *)",
       "Bash(git blame *)",
       "Bash(git branch --list *)",
@@ -21,6 +19,7 @@
       "Bash(git ls-tree *)",
       "Bash(git log --oneline -10)",
       "Bash(git log --oneline -1)",
+      "Bash(git log -1 --format=%B)",
       "Bash(git merge-base *)",
       "Bash(git reflog show *)",
       "Bash(git reflog)",
@@ -56,64 +55,8 @@
       "node \"*codex-companion.mjs\"*"
     ]
   },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-approve-watchdog.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git-write.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-rm.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-sed-inplace.py\"",
-            "shell": "bash"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-time.py\"",
-            "shell": "bash"
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify-attention.py\" 2>/dev/null || true",
-            "shell": "bash",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify-attention.py\" 2>/dev/null || true",
-            "shell": "bash",
-            "async": true
-          }
-        ]
-      }
-    ]
+  "enabledPlugins": {
+    "guard@harness": true,
+    "flow@harness": true
   }
 }

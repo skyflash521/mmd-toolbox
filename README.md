@@ -294,16 +294,17 @@ cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替え�
 
 ### AI 支援開発ワークフロー(任意)
 
-本リポジトリの開発プロセス(TDD・Codex によるレビューループ・コミット委譲)は Claude Code と Codex を併用する(`.claude/` 配下のスキル・フック)。これらを使う場合は以下も導入する。
+本リポジトリの開発プロセス(TDD・Codex によるレビューループ・コミット委譲)は Claude Code と Codex を併用する。スキル・エージェント・フックは harness リポジトリのプラグイン(guard・flow)が提供する。これらを使う場合は以下も導入する。
 
 | ツール | インストール | 用途 |
 |---|---|---|
 | Node.js 20 以上(LTS 推奨) | 公式インストーラ / nvm | Codex companion(レビューループ)の実行 |
 | Claude Code | `npm install -g @anthropic-ai/claude-code` | AI 開発ハーネス(スキル・フック・レビュー) |
 | Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**既定モデルに追従するため最新バージョンを推奨**(古いとモデル非対応で API エラーになる) |
-| Codex プラグイン | Claude Code 内で `/plugin marketplace add openai/codex-plugin-cc` の後 `/plugin install codex@openai-codex` | Claude Code から Codex を呼ぶ連携(`codex-review-loop` スキルが使用) |
+| Codex プラグイン | Claude Code 内で `/plugin marketplace add openai/codex-plugin-cc` の後 `/plugin install codex@openai-codex` | Claude Code から Codex を呼ぶ連携(`flow:codex-review-loop` スキルが使用) |
+| harness プラグイン(guard・flow) | [harness リポジトリ](https://github.com/skyflash521/harness)の README の導入手順に従う | 本リポジトリの開発プロセスを構成するスキル・エージェント・フック |
 
-**Windows 追加要件**: Claude Code は Bash ツール・フック・[watchdog.sh](.claude/skills/codex-watchdog/watchdog.sh) の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
+**Windows 追加要件**: Claude Code は Bash ツール・フック・flow プラグイン同梱の watchdog スクリプトの実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
 
 ### 検証の実行
 

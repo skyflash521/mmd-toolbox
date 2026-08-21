@@ -102,11 +102,6 @@ select = ["E4", "E7", "E9", "E501", "F", "B", "I", "NPY", "TID", "RUF100", "PLE"
 #   アンカーの実在は lychee が検査しており、こちらを外しても検査は欠けない。
 disable = ["MD013", "MD038", "MD051"]
 
-[tool.rumdl.MD041]
-# 先頭を見出しにする規則。`.claude/` のエージェント定義は表題を front matter の name が持ち、
-# 本文には表題にあたる見出しを置かないため、name を表題フィールドとして認める。
-front-matter-title-pattern = "^(title|header|name):"
-
 [tool.pytest.ini_options]
 testpaths = ["libs/cli_events", "libs/cli_options", "libs/cli_progress",
              "libs/cli_progress_router", "libs/cli_resource_watch", "libs/lipsync", "libs/pmx", "libs/vmd",
