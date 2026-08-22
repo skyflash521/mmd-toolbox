@@ -1707,9 +1707,6 @@ def test_recognize_sofa_path_silent_input_does_not_call_align_batch_with_targets
     assert segments[0].type == "gap"
 
 
-@pytest.mark.xfail(
-    reason="impl pending: 音素数に対して短すぎる単語タイムスタンプの実時間を広げる処理",
-    strict=True)
 def test_recognize_widens_cramped_word_before_alignment(tmp_path, monkeypatch):
     """音素数に対して短すぎる単語は、窓の割り当て・最小滞在の算出より前に実時間が広がる。
 

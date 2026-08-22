@@ -349,6 +349,41 @@ def _assemble_phoneme_sequence(chunk_phonemes: list[list[str]]) -> list[str]:
     return sequence
 
 
+# 逼迫した単語の実時間の引き上げ。1音素あたりの実時間がしきい値を下回る単語タイムスタンプは
+# 実際の発声を覆えていないとみなし、1音素あたり引き上げ幅まで広げる。引き上げ幅は最小滞在制約の
+# 下限2フレーム相当。
+_CRAMPED_WORD_THRESHOLD_SEC = 0.03
+_CRAMPED_WORD_TARGET_SEC = 0.04
+# しきい値の判定はタイムスタンプの差の浮動小数点誤差を吸収して行う(数学的にちょうど
+# しきい値の単語が、差の丸めだけで対象になったり外れたりしないようにする)。
+_CRAMPED_WORD_EPSILON_SEC = 1e-9
+
+
+def _widen_cramped_words(
+    words_phonemes: list[tuple[list[str], float, float]], duration_sec: float
+) -> list[tuple[list[str], float, float]]:
+    """音素数に対して実時間が短すぎる単語の実時間を、窓の割り当ての前に広げる。
+
+    終了時刻を保って開始時刻を手前へ動かし、0秒を下回る分は終了時刻を後ろへ送る(トリムした
+    入力範囲でクランプ。単調化が終了時刻を入力範囲の終端より後ろへ押し出している場合は、先に
+    終端へ収めてから広げる)。広げた単語の開始時刻が直前の単語の開始時刻より手前になることは
+    許す(以降の窓の割り当て・最小滞在の算出は単語の並び順を保ったまま行い、開始時刻の順序に
+    依存しない)。音素記号列は変えない。引き上げないと、局所適応(_expand_min_stay_local)が
+    その単語の最小滞在を1フレームへ切り詰め、各音素へ20msしか与えない経路が最尤になって
+    フレーム時間へ張り付いた音素の並びが生じる。
+    """
+    widened = []
+    for phonemes, start, end in words_phonemes:
+        threshold = len(phonemes) * _CRAMPED_WORD_THRESHOLD_SEC - _CRAMPED_WORD_EPSILON_SEC
+        if phonemes and (end - start) < threshold:
+            needed = len(phonemes) * _CRAMPED_WORD_TARGET_SEC
+            end = min(end, duration_sec)
+            start = max(0.0, end - needed)
+            end = min(duration_sec, start + needed)
+        widened.append((phonemes, start, end))
+    return widened
+
+
 def _assemble_with_word_windows(
     words_phonemes: list[tuple[list[str], float, float]], margin_sec: float, duration_sec: float
 ) -> tuple[list[str], list[tuple[float, float]]]:
@@ -970,9 +1005,11 @@ def recognize(
             continue
 
         if forced_aligner == "wav2vec2-ctc-forcedalign":
-            # 手順5: 単語タイムスタンプがあれば単語窓を対応付けて組み立て、無ければ
-            # (単語分割していない一括の)音素記号列の前後にpauを補うだけにする。
+            # 手順5: 単語タイムスタンプがあれば、逼迫した単語の実時間を広げてから単語窓を
+            # 対応付けて組み立てる。無ければ(単語分割していない一括の)音素記号列の前後に
+            # pauを補うだけにする。
             if words_phonemes is not None:
+                words_phonemes = _widen_cramped_words(words_phonemes, trim_duration_sec)
                 seq, windows_sec = _assemble_with_word_windows(
                     words_phonemes, _WORD_WINDOW_MARGIN_SEC, trim_duration_sec
                 )
