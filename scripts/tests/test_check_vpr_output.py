@@ -4,14 +4,10 @@
 基準値は引数で渡した正解 vpr から算出するため、基準の固定値はここにも実装にも現れない。
 """
 
+import check_vpr_output as check
 import pytest
 
 from vpr import Note, Part, TempoEvent, TimeSignature, Track, VprProject
-
-check = pytest.importorskip(
-    "check_vpr_output",
-    reason="impl pending: 出力vprを正解vpr由来の基準で機械検査する処理",
-)
 
 RESOLUTION = 480
 
@@ -158,6 +154,16 @@ def test_zero_duration_note_is_reported():
     ]
     assert len(violations) == 1
     assert violations[0].measure == 2
+
+
+def test_zero_duration_note_inside_another_is_not_an_overlap():
+    # 長さ0の音符の発音区間は空なので、他の音符の区間の中にあっても重なりにはしない
+    # (長さ0そのものは別の違反として報告する)。
+    thresholds = check.compute_thresholds([_reference([96])])
+    project = _project([_note(0, 960), _note(480, 0)])
+    violations = check.check_project(project, thresholds)
+    assert [v for v in violations if v.kind == "overlap"] == []
+    assert len([v for v in violations if v.kind == "zero_duration"]) == 1
 
 
 # --- 正解の分布と突き合わせる検査 ---
