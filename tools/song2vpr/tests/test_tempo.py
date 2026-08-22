@@ -122,8 +122,6 @@ def test_given_tempo_is_used_as_is():
 # --- 半分読みの昇格 ----------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: 半分のテンポへ倒れた速い拍を倍へ昇格して戻す判定",
-                   strict=True)
 def test_a_fast_plain_beat_folded_to_half_is_promoted_back():
     """半分へ倒れた速い素の拍は、倍へ昇格して戻す。
 
