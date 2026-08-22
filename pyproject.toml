@@ -105,9 +105,9 @@ disable = ["MD013", "MD038", "MD051"]
 [tool.pytest.ini_options]
 testpaths = ["libs/cli_events", "libs/cli_options", "libs/cli_progress",
              "libs/cli_progress_router", "libs/cli_resource_watch", "libs/lipsync", "libs/pmx", "libs/vmd",
-             "libs/vocal_analysis", "libs/vocal_analysis_cli", "libs/vpr", "tools/mocapvmd", "tools/shakevmd", "tools/song2vmd",
+             "libs/vocal_analysis", "libs/vocal_analysis_cli", "libs/vpr", "scripts", "tools/mocapvmd", "tools/shakevmd", "tools/song2vmd",
              "tools/song2vpr", "tools/sparsevmd", "tools/vpr2vmd"]
-pythonpath = ["libs", "tools"]
+pythonpath = ["libs", "tools", "scripts"]
 # 各ツールの tests に同名テストファイル(test_cli.py 等)があるため、basename 衝突を
 # 避ける importlib インポートモードを使う(prepend 既定だと collection で衝突する)。
 addopts = "--import-mode=importlib"
