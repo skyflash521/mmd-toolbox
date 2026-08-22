@@ -317,3 +317,14 @@ def test_the_two_ways_of_telling_the_fallback_agree():
                    tempo.estimate(_silence(), tempo_bpm=100.0),
                    tempo.estimate(_click_track(120.0))):
         assert result.tempo_defaulted == (result.tempo_source == "default")
+
+
+# --- 拍の位相を公開しない ----------------------------------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: 採用したテンポと拍子が拍の位相フィールドを持たない状態",
+                   strict=True)
+def test_estimate_does_not_expose_a_beat_phase():
+    """採用したテンポと拍子には拍の位相を含めない(出力にも診断にも消費者が無い)。"""
+    result = tempo.estimate(_click_track(120.0))
+    assert not hasattr(result, "beat_offset_sec")
