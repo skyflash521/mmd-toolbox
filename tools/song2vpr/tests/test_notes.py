@@ -138,8 +138,13 @@ def test_same_pitch_without_a_break_is_one_note():
     assert result[0].end_sec == pytest.approx(0.6, abs=FRAME)
 
 
+_PITCH_XFAIL = pytest.mark.xfail(
+    reason="impl pending: 音高の変わり目の保持長0.34秒と、丸めた半音の最頻値による音高の代表",
+    strict=True)
+
+
 def test_pitch_change_splits_the_note():
-    track = _track([(0.3, 69), (0.3, 71)])
+    track = _track([(0.4, 69), (0.4, 71)])
     assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71]
 
 
@@ -152,40 +157,60 @@ def test_a_momentary_pitch_change_does_not_split_the_note():
 
 
 def test_a_pitch_change_that_lasts_splits_the_note():
-    """最小長ぶん続く音高の変化は、瞬間的な揺れではないので別の音符にする。"""
-    track = _track([(0.2, 69), (0.08, 71), (0.2, 69)])
+    """保持長ぶん続く音高の変化は、瞬間的な揺れではないので別の音符にする。"""
+    track = _track([(0.4, 69), (0.36, 71), (0.4, 69)])
     assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71, 69]
 
 
-def test_the_note_pitch_is_the_median_of_its_frames():
-    """音符の音高は、その音符の中のフレームの MIDI ノート番号の中央値にする。
+def test_a_pitch_change_at_exactly_the_hold_length_splits_the_note():
+    track = _track([(0.4, 69), (0.34, 71), (0.4, 69)])
+    assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71, 69]
 
-    どの値もそれだけでは最小長ぶん続かないので1音符になる。先頭のフレームの値なら 60、平均を
-    丸めると 64、最も多い値なら 61 になる配置で、中央値の 67 になることを見る。
+
+@_PITCH_XFAIL
+def test_a_pitch_change_shorter_than_the_hold_does_not_split():
+    """新しい音高が保持長に満たないうちに戻る変化は、音符の切れ目にしない。
+
+    保持長は音高の変わり目と確定するための長さで、音符として残す最小長(吸収の規則)とは
+    別の値。短い滞在まで切れ目にすると、1つの発声が細かな継続の音符へ割れて、人の作る
+    下書きから離れる。境界の1フレーム下(0.33秒)で区切らないことを見る。
     """
-    track = _track([(0.03, 60), (0.07, 61), (0.06, 67), (0.05, 68)])
-    result = notes.split(track, _one_vowel(track)).notes
-    assert len(result) == 1
-    assert result[0].midi == 67
-
-
-def test_the_median_is_taken_before_rounding_to_a_semitone():
-    """中央値は半音へ丸める前の値で求め、その中央値を丸める。
-
-    先に各フレームを半音へ丸めてから中央値を求めると 69 と 70 の中間になり 70 へ倒れる配置で、
-    丸める前の中央値 69.1 から 69 になることを見る。
-    """
-    track = _track([(0.07, 68.6), (0.07, 69.6)])
+    track = _track([(0.4, 69), (0.33, 71), (0.4, 69)])
     result = notes.split(track, _one_vowel(track)).notes
     assert len(result) == 1
     assert result[0].midi == 69
 
 
-def test_the_median_pitch_is_not_truncated():
-    """中央値は切り捨てず、最も近い半音へ丸める。"""
-    # 中央値は 69.6 なので、切り捨てなら 69、丸めれば 70 になる。
-    track = _track([(0.07, 69.2), (0.07, 70.0)])
-    assert notes.split(track, _one_vowel(track)).notes[0].midi == 70
+@_PITCH_XFAIL
+def test_the_note_pitch_is_the_most_frequent_semitone():
+    """音符の音高は、フレームごとに半音へ丸めた値の最頻値にする。
+
+    どの値も保持長ぶん続かないので1音符になる。先頭のフレームの値なら 60、中央値なら 67 に
+    なる配置で、最も長く現れた 61 になることを見る。
+    """
+    track = _track([(0.03, 60), (0.07, 61), (0.06, 67), (0.05, 68)])
+    result = notes.split(track, _one_vowel(track)).notes
+    assert len(result) == 1
+    assert result[0].midi == 61
+
+
+@_PITCH_XFAIL
+def test_frames_are_rounded_before_counting_the_mode():
+    """最頻値は各フレームを半音へ丸めてから数える(丸める前の値の分布では数えない)。
+
+    同じ半音(60)へ丸まる2種類の生値の合算(6フレーム)だけが最頻になる配置。丸める前の
+    値のまま数えると 70.0 か 71.0(各5フレーム)が最頻で、丸める前の中央値も 70 になるため、
+    丸めてから数える実装だけが 60 を返す。
+    """
+    track = _track([(0.03, 59.6), (0.03, 60.4), (0.05, 70.0), (0.05, 71.0)])
+    assert notes.split(track, _one_vowel(track)).notes[0].midi == 60
+
+
+@_PITCH_XFAIL
+def test_the_mode_tie_falls_to_the_lower_semitone():
+    """最頻値が同数で並んだときは低い方の半音を採る。"""
+    track = _track([(0.07, 69.0), (0.07, 71.0)])
+    assert notes.split(track, _one_vowel(track)).notes[0].midi == 69
 
 
 def test_vowel_change_splits_the_note_at_the_same_pitch():
@@ -241,13 +266,13 @@ def test_short_note_is_absorbed_by_the_preceding_note_in_the_same_syllable():
 
     音高の変化が続いて音符になった後、音節の切り替わりで切り詰められると最小長を割ることがある。
     """
-    # 音高は 0.30 秒で変わって続くので音符になるが、0.36 秒の音節の境界で切り詰められる。
-    track = _track([(0.30, 69), (0.30, 71)])
-    segments = [_vowel(0.0, 0.36, "a"), _vowel(0.36, 0.60, "i")]
+    # 音高は 0.36 秒で変わって続くので音符になるが、0.42 秒の音節の境界で切り詰められる。
+    track = _track([(0.36, 69), (0.40, 71)])
+    segments = [_vowel(0.0, 0.42, "a"), _vowel(0.42, 0.76, "i")]
     result = notes.split(track, segments).notes
     assert [note.midi for note in result] == [69, 71]
     # 吸収先は音高を保ち、短音符の区間を足して延びる。
-    assert result[0].end_sec == pytest.approx(0.36, abs=FRAME)
+    assert result[0].end_sec == pytest.approx(0.42, abs=FRAME)
 
 
 def test_short_note_is_absorbed_by_the_following_note_in_the_same_syllable():
@@ -256,8 +281,8 @@ def test_short_note_is_absorbed_by_the_following_note_in_the_same_syllable():
     吸収先の音高を保つので、最初の音節の音高は 69 ではなく 71 になる。音高の変化が続くかどうかは
     音節の境界で区切らずに見るため、0.07 秒からの 71 は音節の先まで続いて音符になる。
     """
-    track = _track([(0.07, 69), (0.30, 71)])
-    segments = [_vowel(0.0, 0.13, "a"), _vowel(0.13, 0.37, "i")]
+    track = _track([(0.07, 69), (0.40, 71)])
+    segments = [_vowel(0.0, 0.13, "a"), _vowel(0.13, 0.47, "i")]
     result = notes.split(track, segments).notes
     assert [note.midi for note in result] == [71, 71]
     assert result[0].start_sec == pytest.approx(0.0, abs=FRAME)
@@ -287,8 +312,8 @@ def test_note_carries_its_syllable():
     最初の音節は音高の変わり目で2つの音符に分かれるので、音符の通し番号を入れる実装では
     期待値に一致しない。
     """
-    track = _track([(0.1, None), (0.3, 69), (0.2, 71), (0.3, 62)])
-    segments = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.6, "a"), _vowel(0.6, 0.9, "i")]
+    track = _track([(0.1, None), (0.4, 69), (0.4, 71), (0.4, 62)])
+    segments = [_consonant(0.0, 0.1, "k"), _vowel(0.1, 0.9, "a"), _vowel(0.9, 1.3, "i")]
     assert [note.syllable for note in notes.split(track, segments).notes] == [0, 0, 1]
 
 
@@ -297,10 +322,10 @@ def test_a_gap_before_the_nucleus_does_not_pull_the_head_consonant_back():
 
     音符の帰属とセグメントの帰属が食い違うと、付与の段が別の音節の音素を載せる。
     """
-    track = _track([(0.2, 69), (0.2, 69), (0.2, 71)])
+    track = _track([(0.2, 69), (0.2, 69), (0.4, 71)])
     head = _consonant(0.2, 0.3, "k")
     first = _vowel(0.0, 0.2, "a")
-    second = _vowel(0.4, 0.6, "i")
+    second = _vowel(0.4, 0.8, "i")
     result = notes.split(track, [first, head, _gap(0.3, 0.4), second])
     assert [note.syllable for note in result.notes] == [0, 1, 1]
     assert result.syllable_segments == [[first], [head, second]]
@@ -367,8 +392,8 @@ def test_component_starting_far_from_the_nucleus_is_dropped_whole():
 
     分離しきれなかった伴奏が、gap の引き継ぎで核から遠く離れたまま音符化するのを抑える。
     """
-    track = _track([(0.3, 69), (2.2, None), (0.3, 60), (0.3, 62)])
-    result = notes.split(track, [_vowel(0.0, 0.3, "a"), _gap(0.3, 3.1)])
+    track = _track([(0.3, 69), (2.2, None), (0.4, 60), (0.4, 62)])
+    result = notes.split(track, [_vowel(0.0, 0.3, "a"), _gap(0.3, 3.3)])
     assert [note.midi for note in result.notes] == [69]
     assert result.diagnostics.suppressed_notes == 2
 
@@ -421,7 +446,7 @@ def test_a_suppressed_short_note_is_counted_as_suppressed():
 
 
 def test_notes_are_ordered_and_do_not_overlap():
-    track = _track([(0.3, 69), (0.3, 71), (0.1, None), (0.3, 67)])
+    track = _track([(0.4, 69), (0.4, 71), (0.1, None), (0.4, 67)])
     result = notes.split(track, _one_vowel(track)).notes
     assert len(result) == 3
     for earlier, later in zip(result, result[1:], strict=False):
