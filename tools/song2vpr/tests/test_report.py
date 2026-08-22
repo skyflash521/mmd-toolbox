@@ -20,12 +20,13 @@ def _fields(**overrides):
         output="out.vpr", tempo=_tempo(), duration_sec=12.5, separated=True,
         backends={"separator": "demucs", "recognizer": None, "recognizer_revision": None,
                   "forced_aligner": None, "english_katakana_method": None},
-        split=notes.Diagnostics(short_notes=1, suppressed_notes=10),
+        split=notes.Diagnostics(suppressed_notes=10),
         annotation=lyrics.Diagnostics(undetermined_vowel_notes=2, moraic_nasal_notes=3,
                                       no_phoneme_notes=4, notes_beyond_morae=5,
                                       discarded_morae=6, suppressed_notes=11),
         build=project.Diagnostics(note_count=3, pitch_clamped_notes=7,
-                                  quantized_merged_notes=8, quantized_stretched_notes=9),
+                                  quantized_merged_notes=8, quantized_stretched_notes=9,
+                                  short_notes=1),
     )
     given.update(overrides)
     return report.run_fields(**given)

@@ -217,7 +217,6 @@ def test_short_note_is_not_absorbed_across_a_syllable():
     segments = [_vowel(0.0, 0.3, "a"), _vowel(0.3, 0.33, "i"), _vowel(0.33, 0.63, "a")]
     result = notes.split(track, segments)
     assert [note.syllable for note in result.notes] == [0, 1, 2]
-    assert result.diagnostics.short_notes == 1
 
 
 def test_short_note_is_absorbed_by_the_nearest_pitch():
@@ -410,13 +409,12 @@ def test_a_component_does_not_span_two_syllables():
     assert result.diagnostics.suppressed_notes == 1
 
 
-def test_suppressed_notes_are_not_counted_as_short():
-    """抑制で出力しない音符は、短いまま残った音符として数えない。"""
+def test_a_suppressed_short_note_is_counted_as_suppressed():
+    """最小長に満たない音符でも、抑制で出力しなければ抑制として数える。"""
     track = _track([(0.3, 69), (2.5, None), (0.03, 60), (0.2, None)])
     result = notes.split(track, [_vowel(0.0, 0.3, "a"), _gap(0.3, 3.03)])
     assert [note.midi for note in result.notes] == [69]
     assert result.diagnostics.suppressed_notes == 1
-    assert result.diagnostics.short_notes == 0
 
 
 # --- 音符の並び --------------------------------------------------------------
@@ -446,21 +444,11 @@ def test_same_input_gives_the_same_notes():
 # --- 診断 --------------------------------------------------------------------
 
 
-def test_short_notes_left_alone_are_counted():
-    """まとめる先が無く短いまま残った音符は、件数を診断に出す(最小長は内部の値のため)。"""
+def test_short_notes_without_an_absorb_target_are_left_in_place():
+    """まとめる先が無く最小長に満たない音符は、この段では落とさずそのまま返す。
+
+    残った音符の救済(tick へ写した後の配り直し)は出力する vpr の組み立てが担う。
+    """
     track = _track([(0.2, None), (0.03, 69), (0.2, None), (0.03, 71), (0.2, None)])
     result = notes.split(track, _one_vowel(track))
     assert len(result.notes) == 2
-    assert result.diagnostics.short_notes == 2
-
-
-def test_absorbed_short_notes_are_not_counted():
-    """隣へ吸収された短音符は残っていないので数えない。
-
-    音節の最初の音符が最小長に満たず、同じ音節の直後の音符へ吸収される配置。
-    """
-    track = _track([(0.07, 69), (0.30, 71)])
-    segments = [_vowel(0.0, 0.13, "a"), _vowel(0.13, 0.37, "i")]
-    result = notes.split(track, segments)
-    assert len(result.notes) == 2
-    assert result.diagnostics.short_notes == 0

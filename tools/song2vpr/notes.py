@@ -27,7 +27,6 @@ _MAX_START_AFTER_NUCLEUS_SEC = 2.0
 class Diagnostics:
     """分割の過程で数えた件数。利用者向けの診断へ出す。"""
 
-    short_notes: int = 0
     suppressed_notes: int = 0
 
 
@@ -261,8 +260,9 @@ def split(track, segments, *, frame_sec=None) -> SplitResult:
     """時刻ごとの音高と音素セグメントから音符の区間と音高を決める。
 
     frame_sec は時刻の刻み(省略時は track の時刻列から求める)。音符の区間は互いに重ならず、
-    長さは正になる。まとめる先が無く最小長に満たないまま残った音符と、音節と結びつかず落とした
-    音符は、件数を診断に出す(どちらも内部の規則によるもので、呼び出し側からは数えられないため)。
+    長さは正になる。音節と結びつかず落とした音符は、件数を診断に出す(内部の規則によるもので、
+    呼び出し側からは数えられないため)。まとめる先が無く短いまま残った音符はそのまま返し、
+    tick へ写した後の配り直しに委ねる。
     """
     times = np.asarray(track.times_sec)
     if len(times) < 2:
@@ -275,7 +275,6 @@ def split(track, segments, *, frame_sec=None) -> SplitResult:
     spans = _voiced_spans(track, syllable_index, frame_sec)
     spans = _extend_to_leading_consonants(spans, syllable_index, is_consonant)
     spans = _absorb_short_spans(spans, frame_sec)
-    # 抑制は吸収の後に行う。短いまま残った音符の診断は、抑制を通って出力される音符だけを数える。
     spans, suppressed = _suppress_unattached(spans, times, nuclei)
 
     # 終端は次のフレームの時刻をそのまま使う(切れ目なく続く音符が同じ値を共有し、後段が
@@ -285,8 +284,6 @@ def split(track, segments, *, frame_sec=None) -> SplitResult:
                    else float(times[hi - 1]) + frame_sec,
                    midi=midi, syllable=syllable)
               for lo, hi, midi, syllable in spans]
-    short = sum(1 for lo, hi, _midi, _syllable in spans
-                if (hi - lo) * frame_sec < _MIN_DURATION_SEC)
     return SplitResult(notes=result,
                        syllable_segments=_segments_per_syllable(segments, nuclei),
-                       diagnostics=Diagnostics(short_notes=short, suppressed_notes=suppressed))
+                       diagnostics=Diagnostics(suppressed_notes=suppressed))

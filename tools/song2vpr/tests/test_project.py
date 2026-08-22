@@ -238,10 +238,6 @@ def test_same_input_gives_the_same_project():
 
 # --- 歌える長さの下限の確保(tick へ写した後の配り直し) ---
 
-_SINGABLE_XFAIL = pytest.mark.xfail(
-    reason="impl pending: tickへ写した後に短い音符を並びの中で配り直して歌える長さの下限を満たす処理",
-    strict=True)
-
 # 120 BPM・分解能480では 1 tick = 1/960 秒。歌える長さの下限 28ms は 27 tick に当たる。
 
 
@@ -249,7 +245,6 @@ def _t(ticks):
     return ticks / 960.0
 
 
-@_SINGABLE_XFAIL
 def test_short_lyric_note_in_a_run_is_redistributed_to_the_minimum():
     """切れ目なく続く並びの中の短い表示歌詞音符は、配り直しで下限を満たす。
 
@@ -266,7 +261,6 @@ def test_short_lyric_note_in_a_run_is_redistributed_to_the_minimum():
     assert result.diagnostics.short_notes == 0
 
 
-@_SINGABLE_XFAIL
 def test_isolated_short_lyric_note_extends_to_the_minimum():
     """切れ目なく接する音符が無い単独の短い音符は、下限まで伸ばす。"""
     result = project.build([_sung(_t(0), _t(20), lyric="あ"),
@@ -276,7 +270,6 @@ def test_isolated_short_lyric_note_extends_to_the_minimum():
     assert result.diagnostics.short_notes == 0
 
 
-@_SINGABLE_XFAIL
 def test_isolated_short_lyric_note_does_not_bite_into_the_next_note():
     """単独の短い音符の伸ばしは、次の音符へ食い込まない範囲まで。届かなければ診断に数える。"""
     result = project.build([_sung(_t(0), _t(20), lyric="あ"),
@@ -287,7 +280,6 @@ def test_isolated_short_lyric_note_does_not_bite_into_the_next_note():
     assert result.diagnostics.short_notes == 1
 
 
-@_SINGABLE_XFAIL
 def test_run_too_short_to_afford_the_minimum_is_left_unchanged():
     """並びの全長が音符数×下限に満たない並びは変えず、下限に届かない音符を診断に数える。"""
     result = project.build([_sung(_t(0), _t(20), lyric="あ"),
@@ -297,7 +289,6 @@ def test_run_too_short_to_afford_the_minimum_is_left_unchanged():
     assert result.diagnostics.short_notes == 2
 
 
-@_SINGABLE_XFAIL
 def test_short_continuation_note_does_not_trigger_redistribution():
     """下限を下回るのが継続の音符だけの並びは配り直さない(下限の対象は表示歌詞を持つ音符)。"""
     result = project.build([_sung(_t(0), _t(100), lyric="あ"),
@@ -308,7 +299,6 @@ def test_short_continuation_note_does_not_trigger_redistribution():
     assert result.diagnostics.short_notes == 0
 
 
-@_SINGABLE_XFAIL
 def test_redistribution_does_not_touch_neighboring_runs():
     """配り直しは対象の並びの中だけで行い、切れ目の外の音符は動かさない。"""
     result = project.build([_sung(_t(0), _t(50), lyric="ま"),
@@ -323,7 +313,6 @@ def test_redistribution_does_not_touch_neighboring_runs():
     assert notes[2].start_tick + notes[2].duration_tick == 220
 
 
-@_SINGABLE_XFAIL
 def test_equal_fractions_give_the_leftover_tick_to_the_earlier_note():
     """比例配分の端数が同じときは、残りの tick を先の音符から与える。
 
@@ -337,7 +326,6 @@ def test_equal_fractions_give_the_leftover_tick_to_the_earlier_note():
     assert [(n.start_tick, n.duration_tick) for n in notes] == [(0, 27), (27, 44), (71, 43)]
 
 
-@_SINGABLE_XFAIL
 def test_last_isolated_short_note_extends_and_updates_part_length():
     """末尾の単独の短い音符も下限まで伸び、パート長も伸ばした終端に追随する。"""
     result = project.build([_sung(_t(0), _t(20), lyric="あ")], _tempo(), name="song")
@@ -346,7 +334,6 @@ def test_last_isolated_short_note_extends_and_updates_part_length():
     assert result.project.tracks[0].parts[0].duration_tick == 27
 
 
-@_SINGABLE_XFAIL
 def test_unaffordable_run_counts_every_note_left_below_the_minimum():
     """救済できない並びでは、下限を確保しようとした全音符のうち届かないまま残ったものを数える。
 
@@ -361,7 +348,6 @@ def test_unaffordable_run_counts_every_note_left_below_the_minimum():
     assert result.diagnostics.short_notes == 2
 
 
-@_SINGABLE_XFAIL
 def test_redistributed_notes_do_not_overlap_and_keep_positive_length():
     result = project.build([_sung(_t(0), _t(10), lyric="あ"),
                             _sung(_t(10), _t(20), lyric="-", phonemes=["-"]),
@@ -371,3 +357,19 @@ def test_redistributed_notes_do_not_overlap_and_keep_positive_length():
     assert all(end == nxt.start_tick for end, nxt in zip(ends, notes[1:], strict=False))
     assert all(n.duration_tick >= 27 for n in notes)
     assert ends[-1] == 120
+
+
+def test_equal_fractions_survive_float_rounding():
+    """数学的に同じ端数は、浮動小数点の丸めに左右されず先の音符から選ぶ。
+
+    元の長さ 25, 28, 31, 28 tick の並びでは、余剰 4 tick を重み 0:1:4:1 で配ると端数が
+    3音符とも 2/3 になる。浮動小数点で比べると重み4の音符の端数だけわずかに小さく計算され
+    順位が崩れるので、整数の剰余で比べることを固定する。
+    """
+    result = project.build([_sung(_t(0), _t(25), lyric="あ"),
+                            _sung(_t(25), _t(53), lyric="い"),
+                            _sung(_t(53), _t(84), lyric="う"),
+                            _sung(_t(84), _t(112), lyric="え")], _tempo(), name="song")
+    notes = result.project.tracks[0].parts[0].notes
+    assert [(n.start_tick, n.duration_tick) for n in notes] == \
+           [(0, 27), (27, 28), (55, 30), (85, 27)]

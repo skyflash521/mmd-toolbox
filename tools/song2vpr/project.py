@@ -9,6 +9,7 @@
 丸めによる隙間や重なりが出るため。
 """
 
+import math
 from dataclasses import dataclass, field
 
 from vpr import Note, Part, TempoEvent, TimeSignature, Track, VoiceBank, VprProject
@@ -17,6 +18,11 @@ from .lyrics import CONTINUATION
 
 # 音高の格納範囲。外れた値は端へ丸めて件数を診断へ出す。
 _MIDI_RANGE = (0, 127)
+
+# 歌える長さの下限(秒)。表示歌詞を持つ音符がこの長さを下回ると VOCALOID が子音を発音し
+# きれないため、tick へ写した後に切れ目なく続く並びの中で時間を配り直して確保する。
+# CLI へは公開しない内部の値。
+_MIN_SINGABLE_SEC = 0.028
 
 # 形式が要求するボイスバンクの指定。利用者の環境を調べて選び分けることはせず固定値を与える
 # (特定の歌手を推すものではなく、利用者は出力した vpr を VOCALOID で開いて差し替える)。
@@ -31,6 +37,7 @@ class Diagnostics:
     pitch_clamped_notes: int = 0
     quantized_merged_notes: int = 0
     quantized_stretched_notes: int = 0
+    short_notes: int = 0  # 配り直しでも歌える長さの下限に届かないまま残った音符数
 
 
 @dataclass
@@ -89,6 +96,81 @@ def _stretch_empty(merged, diagnostics):
     return spans
 
 
+def _min_singable_ticks(tempo) -> int:
+    """歌える長さの下限を tick で表した値(下限以上を保証する最小の整数 tick)。"""
+    return math.ceil(_MIN_SINGABLE_SEC * tempo.bpm * tempo.resolution / 60.0 - 1e-9)
+
+
+def _redistribute_run(run, floor):
+    """切れ目なく続く並びの中で、全長と順序を保ったまま各音符へ下限以上の長さを配り直す。
+
+    まず全音符へ下限を確保し、残り(全長 − 音符数×下限)を元の長さが下限を超える音符へ
+    (元の長さ − 下限)の比で配る。整数 tick は下限+比例配分の整数部分を与え、残った tick を
+    端数の大きい音符から順に(端数が同じなら先の音符から)1 tick ずつ配って全長へ合わせる。
+    """
+    total = run[-1].start_tick + run[-1].duration_tick - run[0].start_tick
+    surplus = total - len(run) * floor
+    weights = [max(0, note.duration_tick - floor) for note in run]
+    weight_total = sum(weights)
+    # 端数の比較は整数の剰余で行う(分母が共通なので剰余の大小が端数の大小と一致し、
+    # 浮動小数点の丸めで数学的に同じ端数の順位が崩れない)。
+    quotients = [divmod(surplus * weight, weight_total) for weight in weights]
+    durations = [floor + quotient for quotient, _ in quotients]
+    order = sorted(range(len(run)), key=lambda i: (-quotients[i][1], i))
+    for i in order[:total - sum(durations)]:
+        durations[i] += 1
+
+    redistributed = []
+    position = run[0].start_tick
+    for note, duration in zip(run, durations, strict=True):
+        redistributed.append(Note(
+            start_tick=position, duration_tick=duration, pitch=note.pitch,
+            lyric=note.lyric, velocity=note.velocity, phonemes=note.phonemes,
+            is_protected=note.is_protected))
+        position += duration
+    return redistributed
+
+
+def _ensure_singable(notes, floor, diagnostics):
+    """表示歌詞を持つ音符が歌える長さの下限を満たすよう、並びの中で時間を配り直す。
+
+    下限を下回る表示歌詞音符を含む並びだけを対象にする。単独の音符は次の音符へ食い込まない
+    範囲で下限まで伸ばす。全長が音符数×下限に満たない並びは変えず、下限に届かないまま残った
+    音符数を診断へ数える。
+    """
+    runs = []
+    for note in notes:
+        if runs and runs[-1][-1].start_tick + runs[-1][-1].duration_tick == note.start_tick:
+            runs[-1].append(note)
+        else:
+            runs.append([note])
+
+    result = []
+    for index, run in enumerate(runs):
+        if not any(note.lyric != CONTINUATION and note.duration_tick < floor for note in run):
+            result.extend(run)
+            continue
+        if len(run) == 1:
+            note = run[0]
+            limit = floor
+            if index + 1 < len(runs):
+                limit = min(floor, runs[index + 1][0].start_tick - note.start_tick)
+            duration = max(note.duration_tick, limit)
+            if duration < floor:
+                diagnostics.short_notes += 1
+            result.append(Note(start_tick=note.start_tick, duration_tick=duration,
+                               pitch=note.pitch, lyric=note.lyric, velocity=note.velocity,
+                               phonemes=note.phonemes, is_protected=note.is_protected))
+            continue
+        total = run[-1].start_tick + run[-1].duration_tick - run[0].start_tick
+        if total < len(run) * floor:
+            diagnostics.short_notes += sum(1 for note in run if note.duration_tick < floor)
+            result.extend(run)
+            continue
+        result.extend(_redistribute_run(run, floor))
+    return result
+
+
 def build(notes, tempo, *, name: str) -> BuildResult:
     """秒の音符列とテンポ推定から、出力する vpr のデータモデルを組み立てる。
 
@@ -105,11 +187,14 @@ def build(notes, tempo, *, name: str) -> BuildResult:
                     phonemes=list((head or longest).phonemes),
                     is_protected=(head or longest).is_protected)
                for start_tick, end_tick, longest, head in spans]
+    written = _ensure_singable(written, _min_singable_ticks(tempo), diagnostics)
 
     diagnostics.note_count = len(written)
 
-    # 音符が無いときも長さ 0 のパートを作らないので、1小節分を与える。
-    duration_tick = spans[-1][1] if spans else _ticks_per_bar(tempo)
+    # 音符が無いときも長さ 0 のパートを作らないので、1小節分を与える。パート長は配り直しを
+    # 済ませた最終の終端に合わせる(末尾の音符が伸びた場合に追随する)。
+    duration_tick = (written[-1].start_tick + written[-1].duration_tick
+                     if written else _ticks_per_bar(tempo))
     part = Part(name=name, start_tick=0, duration_tick=duration_tick, voice=_VOICE, notes=written)
 
     project = VprProject(
