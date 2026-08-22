@@ -15,6 +15,12 @@ import numpy as np
 # これより短い音符は独立させず、隣接する音符へ吸収する(人が1音として歌っていない長さのため)。
 _MIN_DURATION_SEC = 0.08
 
+# 音高の変わり目と確定するために、新しい音高が同じまま続くことを求める長さ(保持長)。
+# 短い滞在まで切れ目にすると1つの発声が細かな継続の音符へ割れ、人の作る下書きの粒度から
+# 離れるため、下書きで別の音符として書かれる音高の滞在の長さに合わせて置く。音符として
+# 残す最小長(吸収)とは役割が違うので別の値で持つ。
+_PITCH_HOLD_SEC = 0.34
+
 # 撥音の音素記号。母音を伴わずに1つの音節をなすので、音節の核として母音と同じに扱う。
 # 付与の段も音節の核を見分けるのに使うので、同じ判定を2か所で持たないよう公開する。
 MORAIC_NASAL = "ɴ"
@@ -122,23 +128,27 @@ def _segments_per_syllable(segments, nuclei):
 def _voiced_spans(track, syllable_index, frame_sec):
     """有声フレームを、音節の切り替わりと、続く音高の変化で区切る。
 
-    丸めた音高が変わっても、新しい値が最小長ぶん同じまま続かなければ区切らない。ビブラートや
-    しゃくりの瞬間的な動きは音符の切れ目ではないため。音符の音高は、丸める前の値の中央値を丸めて
-    求める(揺れをまたぐ区間でも、その音符の中心の音高になる)。
+    丸めた音高が変わっても、新しい値が保持長ぶん同じまま続かなければ区切らない。ビブラートや
+    しゃくりの瞬間的な動きや、人が1音として歌わない短い滞在まで切れ目にすると、1つの発声が
+    細かな継続の音符へ割れて人の作る下書きから離れるため。音符の音高は、フレームごとに半音へ
+    丸めた値の最頻値(同数なら低い方)にする(揺れをまたぐ区間でも、最も長く歌われた音高になる)。
     """
     voiced = np.asarray(track.voiced)
-    # 丸めた値と中央値を同じ列から求め、欠測を 0 へ倒す寛容さを両方で揃える。
+    # 丸めた値と最頻値を同じ列から求め、欠測を 0 へ倒す寛容さを両方で揃える。
     values = np.nan_to_num(np.asarray(track.midi, dtype=float), nan=0.0)
     rounded = np.where(voiced, np.rint(values), np.nan)
-    # 最小長をフレーム数へ直すときは切り上げる(最小長に満たない継続で区切らないため)。
-    held_frames = max(1, int(np.ceil(_MIN_DURATION_SEC / frame_sec)))
+    # 保持長をフレーム数へ直すときは切り上げる(保持長に満たない継続で区切らないため)。
+    held_frames = max(1, int(np.ceil(_PITCH_HOLD_SEC / frame_sec)))
 
     spans = []
     start = None
     held = None
 
     def close(stop):
-        spans.append([start, stop, int(np.rint(np.median(values[start:stop]))),
+        window = np.rint(values[start:stop]).astype(int)
+        counts = np.bincount(window - window.min())
+        # argmax は同数の最初の要素を返すので、同数なら低い方の半音になる。
+        spans.append([start, stop, int(window.min() + counts.argmax()),
                       int(syllable_index[start])])
 
     for i in range(len(voiced)):

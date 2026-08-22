@@ -138,11 +138,6 @@ def test_same_pitch_without_a_break_is_one_note():
     assert result[0].end_sec == pytest.approx(0.6, abs=FRAME)
 
 
-_PITCH_XFAIL = pytest.mark.xfail(
-    reason="impl pending: 音高の変わり目の保持長0.34秒と、丸めた半音の最頻値による音高の代表",
-    strict=True)
-
-
 def test_pitch_change_splits_the_note():
     track = _track([(0.4, 69), (0.4, 71)])
     assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71]
@@ -167,7 +162,6 @@ def test_a_pitch_change_at_exactly_the_hold_length_splits_the_note():
     assert [note.midi for note in notes.split(track, _one_vowel(track)).notes] == [69, 71, 69]
 
 
-@_PITCH_XFAIL
 def test_a_pitch_change_shorter_than_the_hold_does_not_split():
     """新しい音高が保持長に満たないうちに戻る変化は、音符の切れ目にしない。
 
@@ -181,7 +175,6 @@ def test_a_pitch_change_shorter_than_the_hold_does_not_split():
     assert result[0].midi == 69
 
 
-@_PITCH_XFAIL
 def test_the_note_pitch_is_the_most_frequent_semitone():
     """音符の音高は、フレームごとに半音へ丸めた値の最頻値にする。
 
@@ -194,7 +187,6 @@ def test_the_note_pitch_is_the_most_frequent_semitone():
     assert result[0].midi == 61
 
 
-@_PITCH_XFAIL
 def test_frames_are_rounded_before_counting_the_mode():
     """最頻値は各フレームを半音へ丸めてから数える(丸める前の値の分布では数えない)。
 
@@ -206,7 +198,6 @@ def test_frames_are_rounded_before_counting_the_mode():
     assert notes.split(track, _one_vowel(track)).notes[0].midi == 60
 
 
-@_PITCH_XFAIL
 def test_the_mode_tie_falls_to_the_lower_semitone():
     """最頻値が同数で並んだときは低い方の半音を採る。"""
     track = _track([(0.07, 69.0), (0.07, 71.0)])
