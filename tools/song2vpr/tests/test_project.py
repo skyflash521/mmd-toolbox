@@ -11,11 +11,10 @@ from song2vpr.tempo import TempoEstimate
 from vpr import read, write_file
 
 
-def _tempo(bpm=120.0, numerator=4, denominator=4, beat_offset_sec=0.0):
+def _tempo(bpm=120.0, numerator=4, denominator=4):
     # 拍子は指定が無ければ 4/4 の既定になるので、それ以外の拍子は指定から来たものになる。
     source = "default" if (numerator, denominator) == (4, 4) else "option"
     return TempoEstimate(bpm=bpm, numerator=numerator, denominator=denominator,
-                         beat_offset_sec=beat_offset_sec,
                          tempo_source="estimated", time_signature_source=source)
 
 

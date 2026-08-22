@@ -66,7 +66,6 @@ class TempoEstimate:
     bpm: float
     numerator: int
     denominator: int
-    beat_offset_sec: float
     tempo_source: str  # "option" 指定値 / "estimated" 推定値 / "default" 仮置き
     time_signature_source: str  # "option" 指定値 / "default" 既定値
     resolution: int = RESOLUTION
@@ -277,24 +276,17 @@ def estimate(pcm, *, tempo_bpm=None, time_signature=None) -> TempoEstimate:
         estimated_bpm = _promote_folded_bpm(estimated_bpm, envelope, flux, hop_sec, denominator)
 
     if tempo_bpm is None and estimated_bpm is None:
-        # 周期が得られないので既定へ倒す。位相も求められないため 0 を置く。
         return TempoEstimate(
             bpm=_DEFAULT_BPM,
             numerator=numerator if numerator is not None else _DEFAULT_TIME_SIGNATURE[0],
-            denominator=denominator, beat_offset_sec=0.0,
+            denominator=denominator,
             tempo_source="default",
             time_signature_source="option" if numerator is not None else "default")
 
     bpm = quantize_bpm(tempo_bpm if tempo_bpm is not None else estimated_bpm)
-    # 自己相関が拾うのは拍(拍子の分母が表す音価)の周期。四分音符あたりの BPM から戻す。
-    period_sec = 60.0 / bpm * 4.0 / denominator
-    # 位相はテンポと別に決まるので、テンポが指定値でも音声から求める。
-    offset_sec = _estimate_phase(envelope, hop_sec, period_sec)
-
     return TempoEstimate(
         bpm=bpm,
         numerator=numerator if numerator is not None else _DEFAULT_TIME_SIGNATURE[0],
         denominator=denominator,
-        beat_offset_sec=offset_sec,
         tempo_source="option" if tempo_bpm is not None else "estimated",
         time_signature_source="option" if numerator is not None else "default")

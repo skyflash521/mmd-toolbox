@@ -1,6 +1,6 @@
 """song2vpr のテンポ推定と拍子の決め方のテスト。
 
-既知の拍で合成した信号から BPM と拍位相が得られることと、指定値と推定値の組み合わせが規則どおりに
+既知の拍で合成した信号から BPM が得られることと、指定値と推定値の組み合わせが規則どおりに
 なることを検証する。拍子は推定しないので、指定の有無で決まることを見る。
 """
 
@@ -168,27 +168,6 @@ def test_given_tempo_is_never_promoted():
     assert result.bpm == 100.0
 
 
-# --- 拍位相 ------------------------------------------------------------------
-
-
-def test_beat_phase_follows_the_offset():
-    """拍位相は拍の位置に追随する。
-
-    包絡は窓の左端を時刻の基準にするので、観測される位置は拍そのものより窓長ぶん早い。この
-    系統的なずれは拍の位置に依らないため、2つの音源の差で見る。
-    """
-    early = tempo.estimate(_click_track(120.0, offset_sec=0.1), tempo_bpm=120.0)
-    late = tempo.estimate(_click_track(120.0, offset_sec=0.35), tempo_bpm=120.0)
-    assert late.beat_offset_sec - early.beat_offset_sec == pytest.approx(0.25, abs=0.03)
-
-
-def test_phase_is_estimated_even_when_the_tempo_is_given():
-    """位相はテンポと別に求めるので、テンポを指定した実行でも音声から決める。"""
-    aligned = tempo.estimate(_click_track(120.0, offset_sec=0.0), tempo_bpm=120.0)
-    shifted = tempo.estimate(_click_track(120.0, offset_sec=0.25), tempo_bpm=120.0)
-    assert shifted.beat_offset_sec != aligned.beat_offset_sec
-
-
 # --- 拍子 --------------------------------------------------------------------
 
 
@@ -287,8 +266,8 @@ def test_same_input_gives_the_same_estimate():
     pcm = _click_track(132.0)
     first = tempo.estimate(pcm)
     second = tempo.estimate(pcm)
-    assert (first.bpm, first.numerator, first.denominator, first.beat_offset_sec) == \
-           (second.bpm, second.numerator, second.denominator, second.beat_offset_sec)
+    assert (first.bpm, first.numerator, first.denominator) == \
+           (second.bpm, second.numerator, second.denominator)
 
 
 # --- 採用値の出どころ --------------------------------------------------------
@@ -322,8 +301,6 @@ def test_the_two_ways_of_telling_the_fallback_agree():
 # --- 拍の位相を公開しない ----------------------------------------------------
 
 
-@pytest.mark.xfail(reason="impl pending: 採用したテンポと拍子が拍の位相フィールドを持たない状態",
-                   strict=True)
 def test_estimate_does_not_expose_a_beat_phase():
     """採用したテンポと拍子には拍の位相を含めない(出力にも診断にも消費者が無い)。"""
     result = tempo.estimate(_click_track(120.0))

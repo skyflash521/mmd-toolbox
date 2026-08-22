@@ -11,7 +11,7 @@ from song2vpr.tempo import TempoEstimate
 def _tempo(bpm=120.0, numerator=4, denominator=4, tempo_source="estimated",
            time_signature_source="default"):
     return TempoEstimate(bpm=bpm, numerator=numerator, denominator=denominator,
-                         beat_offset_sec=0.0, tempo_source=tempo_source,
+                         tempo_source=tempo_source,
                          time_signature_source=time_signature_source)
 
 
