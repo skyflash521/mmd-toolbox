@@ -557,6 +557,90 @@ def test_sanitize_word_timestamps_clamp_precedes_minimum_length_enforcement():
     assert result == [("a", 1.98, pytest.approx(2.03))]
 
 
+# --- 逼迫した単語の実時間の引き上げ ---
+
+_WIDEN_XFAIL = pytest.mark.xfail(
+    reason="impl pending: 音素数に対して短すぎる単語タイムスタンプの実時間を広げる処理",
+    strict=True)
+
+
+@_WIDEN_XFAIL
+def test_widen_cramped_words_widens_below_30ms_per_phoneme():
+    from vocal_analysis.recognizer import _widen_cramped_words
+
+    # 4音素で0.06秒(1音素あたり15ms)は30msを下回るので、終了時刻を保って
+    # 音素数×40ms=0.16秒へ広げる。
+    result = _widen_cramped_words([(["a", "b", "c", "d"], 0.94, 1.0)], duration_sec=2.0)
+
+    assert result[0][0] == ["a", "b", "c", "d"]
+    assert result[0][1] == pytest.approx(0.84)
+    assert result[0][2] == pytest.approx(1.0)
+
+
+@_WIDEN_XFAIL
+def test_widen_cramped_words_keeps_words_at_or_above_threshold():
+    from vocal_analysis.recognizer import _widen_cramped_words
+
+    # 1音素あたりちょうど30ms(下回らない)と、十分に長い単語は変えない。
+    words = [(["a", "b"], 0.0, 0.06), (["a"], 0.5, 1.0)]
+    assert _widen_cramped_words(words, duration_sec=2.0) == words
+
+
+@_WIDEN_XFAIL
+def test_widen_cramped_words_widens_just_below_the_threshold():
+    from vocal_analysis.recognizer import _widen_cramped_words
+
+    # 1音素あたり29ms(30msをわずかに下回る)も引き上げの対象(しきい値の位置の固定)。
+    result = _widen_cramped_words([(["a", "b"], 1.0, 1.058)], duration_sec=2.0)
+
+    assert result[0][1] == pytest.approx(1.058 - 0.08)
+    assert result[0][2] == pytest.approx(1.058)
+
+
+@_WIDEN_XFAIL
+def test_widen_cramped_words_does_not_remonotonize_starts():
+    from vocal_analysis.recognizer import _widen_cramped_words
+
+    # 広げた単語の開始時刻が直前の単語の開始時刻より手前になっても、そのまま許す
+    # (開始順の再クランプをしない)。直前の単語は変えない。
+    words = [(["a"], 0.98, 1.03), (["b", "c", "d", "e"], 1.04, 1.10)]
+    result = _widen_cramped_words(words, duration_sec=2.0)
+
+    assert result[0] == (["a"], 0.98, 1.03)
+    assert result[1][1] == pytest.approx(0.94)
+    assert result[1][2] == pytest.approx(1.10)
+
+
+@_WIDEN_XFAIL
+def test_widen_cramped_words_sends_overflow_past_start_to_the_end():
+    from vocal_analysis.recognizer import _widen_cramped_words
+
+    # 開始を手前へ動かして0秒を下回る分は、終了時刻を後ろへ送る。
+    result = _widen_cramped_words([(["a", "b", "c", "d"], 0.02, 0.1)], duration_sec=2.0)
+
+    assert result[0][1] == pytest.approx(0.0)
+    assert result[0][2] == pytest.approx(0.16)
+
+
+@_WIDEN_XFAIL
+def test_widen_cramped_words_clamps_to_the_trimmed_range():
+    from vocal_analysis.recognizer import _widen_cramped_words
+
+    # トリムした入力範囲そのものが必要長より短ければ、範囲全体でクランプする。
+    result = _widen_cramped_words([(["a", "b", "c", "d"], 0.05, 0.1)], duration_sec=0.12)
+
+    assert result[0][1] == pytest.approx(0.0)
+    assert result[0][2] == pytest.approx(0.12)
+
+
+@_WIDEN_XFAIL
+def test_widen_cramped_words_ignores_words_without_phonemes():
+    from vocal_analysis.recognizer import _widen_cramped_words
+
+    words = [([], 0.5, 0.5)]
+    assert _widen_cramped_words(words, duration_sec=2.0) == words
+
+
 def test_extract_word_timestamps_skips_empty_text_and_missing_start():
     from vocal_analysis.recognizer import _extract_word_timestamps
 

@@ -1705,3 +1705,51 @@ def test_recognize_sofa_path_silent_input_does_not_call_align_batch_with_targets
     assert calls[0] == []
     assert len(segments) == 1
     assert segments[0].type == "gap"
+
+
+@pytest.mark.xfail(
+    reason="impl pending: 音素数に対して短すぎる単語タイムスタンプの実時間を広げる処理",
+    strict=True)
+def test_recognize_widens_cramped_word_before_alignment(tmp_path, monkeypatch):
+    """音素数に対して短すぎる単語は、窓の割り当て・最小滞在の算出より前に実時間が広がる。
+
+    2音素の単語へ0.05秒(1音素あたり25ms。30msを下回る)しか与えないタイムスタンプを
+    モックで返し、強制アライメントのジョブへ渡る単語の実時間が音素数×40ms=0.08秒へ
+    広がっている(終了時刻は保たれる)ことと、単語の窓が引き上げ後の開始時刻から
+    導かれていることを確認する。
+    """
+    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis.recognizer import _WORD_WINDOW_MARGIN_SEC
+
+    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(6400), 16000)  # 0.4秒
+
+    monkeypatch.setattr(
+        recognizer_module, "_load_content_recognizer_pipeline",
+        lambda content_recognizer_model, on_progress=None: object(),
+    )
+    monkeypatch.setattr(
+        recognizer_module, "_transcribe_segment",
+        lambda pipeline, samples: ("な", [("な", 0.30, 0.35)]))
+    monkeypatch.setattr(recognizer_module, "_g2p",
+                        lambda text, method=None, **kwargs: {"な": ["n", "a"]}[text])
+    decoder = {0: "<pad>", 1: "n", 2: "a"}
+    monkeypatch.setattr(recognizer_module, "_load_model_and_processor",
+                        lambda on_progress=None: (_FakeProcessor(decoder), object()))
+    captured = {}
+
+    def fake_align(processor, model, vocab, blank_token_id, threshold, job):
+        captured["words"] = job["words_phonemes"]
+        captured["windows"] = job["windows_sec"]
+        return []
+
+    monkeypatch.setattr(recognizer_module, "_align_wav2vec2_job", fake_align)
+
+    recognizer_module.recognize(wav_path)
+
+    phonemes, start, end = captured["words"][0]
+    assert phonemes == ["n", "a"]
+    assert start == pytest.approx(0.27)
+    assert end == pytest.approx(0.35)
+    # 記号列は [pau, n, a, pau]。音素記号の窓は引き上げ後の開始時刻から導かれる。
+    assert captured["windows"][1][0] == pytest.approx(0.27 - _WORD_WINDOW_MARGIN_SEC)
+    assert captured["windows"][1][1] == pytest.approx(0.35 + _WORD_WINDOW_MARGIN_SEC)
