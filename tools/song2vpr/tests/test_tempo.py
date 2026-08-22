@@ -40,6 +40,35 @@ def _silence(seconds=8.0, sample_rate=SR):
     return AudioPcm(samples=np.zeros((n, 1), dtype=np.float32), sample_rate=sample_rate)
 
 
+def _subdivided_click_track(bpm, subdivisions, sub_amp, seconds=16.0, sample_rate=SR):
+    """拍クリック(振幅1.0)の間へ、拍を subdivisions 等分する弱いクリックを重ねた信号。"""
+    n = int(seconds * sample_rate)
+    samples = np.zeros(n, dtype=np.float32)
+    rng = np.random.default_rng(0)
+    samples += rng.normal(0.0, 0.001, n).astype(np.float32)
+    period = 60.0 / bpm
+    length = int(0.02 * sample_rate)
+    envelope = np.exp(-np.arange(length) / (0.004 * sample_rate))
+
+    def add_click(at, amp):
+        start = int(at * sample_rate)
+        if start >= n:
+            return False
+        segment = (envelope * amp)[:max(0, min(length, n - start))]
+        samples[start:start + len(segment)] += segment.astype(np.float32)
+        return True
+
+    index = 0
+    while add_click(index * period, 1.0):
+        index += 1
+    index = 0
+    while index * period < seconds:
+        for k in range(1, subdivisions):
+            add_click(index * period + k * period / subdivisions, sub_amp)
+        index += 1
+    return AudioPcm(samples=samples[:, None], sample_rate=sample_rate)
+
+
 # --- BPM の推定 --------------------------------------------------------------
 
 
@@ -88,6 +117,57 @@ def test_given_tempo_is_used_as_is():
     result = tempo.estimate(_click_track(90.0), tempo_bpm=140.0)
     assert result.bpm == 140.0
     assert not result.tempo_defaulted
+
+
+# --- 半分読みの昇格 ----------------------------------------------------------
+
+
+@pytest.mark.xfail(reason="impl pending: 半分のテンポへ倒れた速い拍を倍へ昇格して戻す判定",
+                   strict=True)
+def test_a_fast_plain_beat_folded_to_half_is_promoted_back():
+    """半分へ倒れた速い素の拍は、倍へ昇格して戻す。
+
+    200 BPM の素の拍は、120 中心の重みが倍の周期(=半分のテンポ)を選ばせる帯にある。
+    採用テンポの拍の中間に同格の拍が並ぶ(線形の流束で表拍と裏拍の強さが釣り合い、
+    倍のテンポ側の周期=採用周期の半分にも同等の周期性がある)証拠が揃うときだけ倍へ
+    昇格する。昇格後も採用値は形式が格納できる粒度に載る。
+    """
+    result = tempo.estimate(_click_track(200.0, seconds=16.0))
+    assert result.bpm == pytest.approx(200.0, rel=0.03)
+    assert result.bpm * 100 == round(result.bpm * 100)
+    assert result.tempo_source == "estimated"
+
+
+def test_eighth_subdivisions_do_not_promote_the_correct_tempo():
+    """8分の細分が強くても、正しく読めたテンポを倍へ昇格しない。
+
+    細分は倍のグリッドの裏拍を埋めるが、表拍との強さの差が線形の流束に残るので
+    同格とは判定されない。
+    """
+    result = tempo.estimate(_subdivided_click_track(120.0, 2, 0.7))
+    assert result.bpm == pytest.approx(120.0, rel=0.03)
+
+
+def test_sixteenth_subdivisions_do_not_promote_the_correct_tempo():
+    result = tempo.estimate(_subdivided_click_track(100.0, 4, 0.4))
+    assert result.bpm == pytest.approx(100.0, rel=0.03)
+
+
+def test_promotion_does_not_exceed_the_target_cap():
+    """昇格先が上限を超えるときは昇格せず、採用した半分のテンポを保つ。
+
+    上限は、半分読みが実際に起きる帯の上端より上、かつ正しく読めた通常の曲の倍が
+    入り込まない位置に置く。真のテンポが上限より上の素の拍(270 BPM)は半分へ倒れた
+    まま残る(安全側)。
+    """
+    result = tempo.estimate(_click_track(270.0, seconds=16.0))
+    assert result.bpm == pytest.approx(135.0, rel=0.03)
+
+
+def test_given_tempo_is_never_promoted():
+    """指定されたテンポには昇格判定を掛けず、そのまま使う。"""
+    result = tempo.estimate(_click_track(200.0, seconds=16.0), tempo_bpm=100.0)
+    assert result.bpm == 100.0
 
 
 # --- 拍位相 ------------------------------------------------------------------
