@@ -1,13 +1,3 @@
-"""先行準備(anticipation)・後行残し(release-lag)のテスト。
-
-無音区間の後に始まる母音は、口形を A_eff フレーム手前から緩やかに立ち上げ音符開始で保持値へ達する(窓全体の
-ランプ)。後続が無音の母音は、音符終了まで保持し R_eff フレームかけて緩やかに閉じる(先行準備と対称)。
-A_eff/R_eff は開き量比例 `half_up(anticipation_frames × clamp(open/open_cap, 0, 1))` を隣接区間長の1/2で
-頭打ちした値で、開きが大きいほど長い余韻になる。無音・休符と両唇閉鎖はどちらも先行準備・後行残しの対象と
-なる。時間軸先頭・極短無音では先行しない(前区間を侵食せず負フレームに出ない)ことを回帰ガードとして
-併せて確認する。
-"""
-
 import pytest
 
 import lipsync
@@ -30,18 +20,14 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-def test_anticipation_after_silence():
-    # 無音[0,10]・あ[10,20]op0.5、anticipation_frames=1。開き量比 0.5/0.8=0.625、A_eff=half_up(1×0.625)=1、
-    # floor(10/2)=5 で頭打ちなし。立ち上がりは無音側へ1フレーム入り、(9,0)→音符開始(10,0.5)で保持値へ達する。
+def test_anticipation_after_silence_reaches_hold_at_note_start():
     env = _envelope(
         [MouthEvent(MouthShape.SILENCE, 0.0, 10.0), MouthEvent(MouthShape.A, 10.0, 20.0, 0.5)]
     )
     _approx_envelope(env["あ"], [(9, 0.0), (10, 0.5), (18, 0.5), (20, 0.0)])
 
 
-def test_anticipation_auto_shortened_by_short_silence():
-    # 無音[0,2]・あ[2,12]op0.5、anticipation_frames=2。A_eff=half_up(2×0.625)=1、floor(2/2)=1 で頭打ち1。
-    # 立ち上がりは (1,0)→音符開始(2,0.5)。前区間長で頭打ちされ無音を侵食しすぎない。
+def test_anticipation_capped_at_half_of_short_silence():
     p = GenerationParams(anticipation_frames=2)
     env = _envelope(
         [MouthEvent(MouthShape.SILENCE, 0.0, 2.0), MouthEvent(MouthShape.A, 2.0, 12.0, 0.5)], p
@@ -49,10 +35,7 @@ def test_anticipation_auto_shortened_by_short_silence():
     _approx_envelope(env["あ"], [(1, 0.0), (2, 0.5), (10, 0.5), (12, 0.0)])
 
 
-def test_release_lag_before_silence():
-    # 後続が無音の母音は急に閉じず余韻を残す(先行準備と対称)。あ[0,10]op0.5・無音[10,20]、
-    # anticipation_frames=3。R_eff=half_up(3×0.625)=2、floor(10/2)=5 で頭打ちなし。音符終了10まで保持し、
-    # その後2フレームかけて (10,0.5)→(12,0) と緩やかに閉じる(先頭は時間軸先頭なので通常アタック)。
+def test_release_lag_before_silence_holds_to_note_end():
     p = GenerationParams(anticipation_frames=3)
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.SILENCE, 10.0, 20.0)], p
@@ -60,32 +43,30 @@ def test_release_lag_before_silence():
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (10, 0.5), (12, 0.0)])
 
 
-def test_lead_lag_scales_with_opening():
-    # 先行/後行量は開き量に比例する。anticipation_frames=4、長い無音[0,20]の後の母音で比較。
-    # 開き0.8: 比1.0、A_eff=half_up(4×1.0)=4 → 立ち上がり開始フレーム 20−4=16。
-    big = _envelope(
-        [MouthEvent(MouthShape.SILENCE, 0.0, 20.0), MouthEvent(MouthShape.A, 20.0, 40.0, 0.8)],
+@pytest.mark.parametrize(
+    "open_amount,ramp_start_frame",
+    [
+        pytest.param(0.8, 16, id="full_open_ramp_4_frames"),
+        pytest.param(0.2, 19, id="quarter_open_ramp_1_frame"),
+    ],
+)
+def test_anticipation_scales_with_opening(open_amount, ramp_start_frame):
+    env = _envelope(
+        [
+            MouthEvent(MouthShape.SILENCE, 0.0, 20.0),
+            MouthEvent(MouthShape.A, 20.0, 40.0, open_amount),
+        ],
         GenerationParams(anticipation_frames=4),
     )
-    # 開き0.2: 比0.2/0.8=0.25、A_eff=half_up(4×0.25)=1 → 立ち上がり開始フレーム 20−1=19。
-    small = _envelope(
-        [MouthEvent(MouthShape.SILENCE, 0.0, 20.0), MouthEvent(MouthShape.A, 20.0, 40.0, 0.2)],
-        GenerationParams(anticipation_frames=4),
-    )
-    assert big["あ"][0][0] == 16
-    assert small["あ"][0][0] == 19  # 開きが小さいほど先行は短い(開始フレームが後ろ)
+    assert env["あ"][0][0] == ramp_start_frame
 
 
 def test_no_anticipation_at_timeline_start():
-    # 時間軸先頭の母音は直前イベントが無いので先行しない(A_eff=0、負フレームに出ない)。
     env = _envelope([MouthEvent(MouthShape.A, 0.0, 10.0, 0.5)])
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
 
 
 def test_anticipation_after_bilabial():
-    # 両唇閉鎖の直後の母音も無音直後と同様に先行準備の対象になる。無音[0,8]・両唇閉鎖[8,10]・
-    # あ[10,20]op0.5、anticipation_frames=1(既定)。開き量比 0.5/0.8=0.625、
-    # A_eff=half_up(1×0.625)=1、floor(2/2)=1 で頭打ちなし。
     env = _envelope(
         [
             MouthEvent(MouthShape.SILENCE, 0.0, 8.0),
@@ -97,8 +78,6 @@ def test_anticipation_after_bilabial():
 
 
 def test_release_lag_before_bilabial():
-    # 直後が両唇閉鎖の母音も直後が無音の場合と同様に後行残しの対象になる(先行準備と対称)。あ[0,10]op0.5・
-    # 両唇閉鎖[10,20]、anticipation_frames=3。R_eff=half_up(3×0.625)=2、floor(10/2)=5 で頭打ちなし。
     p = GenerationParams(anticipation_frames=3)
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.BILABIAL, 10.0, 20.0)], p
@@ -106,8 +85,7 @@ def test_release_lag_before_bilabial():
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (10, 0.5), (12, 0.0)])
 
 
-def test_no_anticipation_when_silence_too_short():
-    # 無音[0,1]は floor(1/2)=0 で A_eff=0。設定 anticipation_frames=2 でも前区間を侵食せず先行しない。
+def test_no_anticipation_when_silence_shorter_than_two_frames():
     p = GenerationParams(anticipation_frames=2)
     env = _envelope(
         [MouthEvent(MouthShape.SILENCE, 0.0, 1.0), MouthEvent(MouthShape.A, 1.0, 11.0, 0.5)], p

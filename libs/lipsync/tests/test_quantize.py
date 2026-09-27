@@ -1,15 +1,7 @@
-"""疎キー配置・30fps量子化のテスト。
-
-生成側が出した float 目標位置を、四捨五入(floor(x+0.5)・0.5は切り上げ)で整数フレーム化し、同一モーフ・
-同一フレームへ潰れた目標値を量子化前 float が最も後ろの値へ統合して、量子化後に重複キーが出ないことを
-検証する。協調調音の遷移長 T が奇数(=1)になる overlap_max=1 の境界で b±0.5 が潰れる衝突を扱う。
-協調調音が T=4 になる overlap_max=4 では衝突が起きないことを回帰ガードで確認する(協調調音と同じ既知値)。
-"""
-
 import pytest
 
 import lipsync
-from lipsync import GenerationParams, MouthEvent, MouthShape
+from lipsync import GenerationParams, MouthEvent, MouthShape, generate
 
 
 def _envelope(events, params=None):
@@ -28,33 +20,41 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-def test_t1_coartic_collision_resolved():
-    # あ[0,10]op0.5・う[10,20]op0.5、overlap_max=1 で T=min(1, 5)=1、境界10。
-    # 遷移目標は s=9.5・b=10.0・e=10.5。四捨五入(半上げ)で 9.5→10・10.0→10・10.5→11。
-    # 同一(モーフ,フレーム10)へ潰れた s と b は量子化前 float が後ろの b(10.0)へ統合する。
+def test_half_frame_targets_round_up_and_later_target_wins_collision():
+    events = [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)]
     p = GenerationParams(coartic_overlap_max=1)
-    keys = lipsync.generate_morph_keys(
-        [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)],
-        p,
-    )
-    # 量子化後に同一(モーフ名,フレーム)の重複キーが無い。
+    keys = lipsync.generate_morph_keys(events, p)
     assert len({(k.name_raw, k.frame) for k in keys}) == len(keys)
-    env = _envelope(
-        [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)],
-        p,
-    )
+    env = _envelope(events, p)
     assert set(env) == {"あ", "う"}
-    # あ: アタック後、境界10で中間口形0.25へ統合、e は半上げで11に分離し0へ。
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (10, 0.25), (11, 0.0)])
-    # う: 境界10で0.25、11で0.5に達し保持、末尾リリースで0。
     _approx_envelope(env["う"], [(10, 0.25), (11, 0.5), (18, 0.5), (20, 0.0)])
 
 
-def test_no_collision_overlap4_unchanged():
-    # overlap_max=4 では T=min(4, 5)=4、窓[8,12]が整数で衝突なし。協調調音の既知値と同じ(量子化後も不変)。
+def test_integer_coarticulation_window_has_no_collision():
     p = GenerationParams(coartic_overlap_max=4)
     env = _envelope(
         [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)], p
     )
     _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.25), (12, 0.0)])
     _approx_envelope(env["う"], [(8, 0.0), (10, 0.25), (12, 0.5), (18, 0.5), (20, 0.0)])
+
+
+def test_quantize_rounds_half_up_and_keeps_latest_target_per_frame():
+    targets = [
+        generate._Target("あ", 0.5, 0.1),
+        generate._Target("あ", 2.5, 0.2),
+        generate._Target("あ", 4.4, 0.3),
+        generate._Target("あ", 3.6, 0.4),
+        generate._Target("あ", 6.0, 0.5),
+        generate._Target("あ", 6.0, 0.6),
+        generate._Target("い", 1.5, 0.7),
+    ]
+    keys = generate._quantize_targets(targets)
+    assert [(k.name, k.frame, k.weight) for k in keys] == [
+        ("あ", 1, 0.1),
+        ("い", 2, 0.7),
+        ("あ", 3, 0.2),
+        ("あ", 4, 0.3),
+        ("あ", 6, 0.6),
+    ]
