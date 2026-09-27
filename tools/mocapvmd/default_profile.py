@@ -1,14 +1,29 @@
-"""既定モデルプロファイル(内蔵縮約骨格)。
-
-PMX未指定時に使う標準モデル近似。FK評価とマーカー解決に必要な、標準ボーンの
-縮約骨格(必須ロールとその祖先のみ)・ロール対応・マーカー/派生特徴のbindingを
-内蔵定数で持つ。具体的な元モデル名・パスは持たない。
-"""
+from typing import NamedTuple
 
 from pmx.types import PmxBone, PmxModel
 
-# 縮約骨格: (name, parent_index|None, (x, y, z), movable, rotatable)
-_BONES = [
+
+class _SkeletonBone(NamedTuple):
+    name: str
+    parent: int | None
+    position: tuple[float, float, float]
+    movable: bool
+    rotatable: bool
+
+
+class MarkerSpec(NamedTuple):
+    role: str
+    category: str
+    fit_weight: float
+
+
+class FeatureSpec(NamedTuple):
+    head_role: str
+    tail_role: str
+    weight: float
+
+
+_BONES = tuple(_SkeletonBone(*row) for row in (
     ('全ての親', None, (0.0, 0.0, 0.0), True, True),
     ('センター', 0, (0.0, 8.0, 0.0), True, True),
     ('グルーブ', 1, (0.0, 8.199999809265137, 0.0), True, True),
@@ -44,9 +59,8 @@ _BONES = [
     ('左足首', 31, (1.0130000114440918, 0.7950601577758789, 0.6805299520492554), False, True),
     ('右つま先', 28, (-1.0130000114440918, 0.2046802043914795, -1.1429799795150757), False, True),
     ('左つま先', 32, (1.0130000114440918, 0.2046802043914795, -1.1429799795150757), False, True),
-]
+))
 
-# 標準ロール名 -> _BONES のindex
 ROLE_TO_INDEX = {
     'center': 1,
     'groove': 2,
@@ -71,40 +85,37 @@ ROLE_TO_INDEX = {
     'toe_r': 33,
 }
 
-# マーカー -> (参照ロール, 部位カテゴリ, 姿勢フィット重み)
 MARKER_BINDINGS = {
-    'center': ('center', 'center', 0.6),
-    'pelvis': ('lower_body', 'torso', 1.0),
-    'chest': ('upper_body2', 'torso', 1.0),
-    'head': ('head', 'head', 1.0),
-    'shoulder_l': ('shoulder_l', 'arms', 1.0),
-    'shoulder_r': ('shoulder_r', 'arms', 1.0),
-    'elbow_l': ('elbow_l', 'arms', 0.6),
-    'elbow_r': ('elbow_r', 'arms', 0.6),
-    'wrist_l': ('wrist_l', 'wrists', 1.0),
-    'wrist_r': ('wrist_r', 'wrists', 1.0),
-    'knee_l': ('knee_l', 'legs', 0.6),
-    'knee_r': ('knee_r', 'legs', 0.6),
-    'ankle_l': ('ankle_l', 'feet', 0.3),
-    'ankle_r': ('ankle_r', 'feet', 0.3),
-    'toe_l': ('toe_l', 'feet', 0.3),
-    'toe_r': ('toe_r', 'feet', 0.3),
+    'center': MarkerSpec('center', 'center', 0.6),
+    'pelvis': MarkerSpec('lower_body', 'torso', 1.0),
+    'chest': MarkerSpec('upper_body2', 'torso', 1.0),
+    'head': MarkerSpec('head', 'head', 1.0),
+    'shoulder_l': MarkerSpec('shoulder_l', 'arms', 1.0),
+    'shoulder_r': MarkerSpec('shoulder_r', 'arms', 1.0),
+    'elbow_l': MarkerSpec('elbow_l', 'arms', 0.6),
+    'elbow_r': MarkerSpec('elbow_r', 'arms', 0.6),
+    'wrist_l': MarkerSpec('wrist_l', 'wrists', 1.0),
+    'wrist_r': MarkerSpec('wrist_r', 'wrists', 1.0),
+    'knee_l': MarkerSpec('knee_l', 'legs', 0.6),
+    'knee_r': MarkerSpec('knee_r', 'legs', 0.6),
+    'ankle_l': MarkerSpec('ankle_l', 'feet', 0.3),
+    'ankle_r': MarkerSpec('ankle_r', 'feet', 0.3),
+    'toe_l': MarkerSpec('toe_l', 'feet', 0.3),
+    'toe_r': MarkerSpec('toe_r', 'feet', 0.3),
 }
 
-# 派生特徴 -> (始点ロール, 終点ロール, 重み)。ベクトル a-b を表す
 FEATURE_BINDINGS = {
-    'shoulder_line': ('shoulder_r', 'shoulder_l', 1.0),
-    'hip_line': ('hip_r', 'hip_l', 1.0),
-    'torso_axis': ('upper_body2', 'lower_body', 1.0),
-    'forearm_l': ('wrist_l', 'elbow_l', 1.0),
-    'forearm_r': ('wrist_r', 'elbow_r', 1.0),
-    'shin_l': ('ankle_l', 'knee_l', 1.0),
-    'shin_r': ('ankle_r', 'knee_r', 1.0),
+    'shoulder_line': FeatureSpec('shoulder_r', 'shoulder_l', 1.0),
+    'hip_line': FeatureSpec('hip_r', 'hip_l', 1.0),
+    'torso_axis': FeatureSpec('upper_body2', 'lower_body', 1.0),
+    'forearm_l': FeatureSpec('wrist_l', 'elbow_l', 1.0),
+    'forearm_r': FeatureSpec('wrist_r', 'elbow_r', 1.0),
+    'shin_l': FeatureSpec('ankle_l', 'knee_l', 1.0),
+    'shin_r': FeatureSpec('ankle_r', 'knee_r', 1.0),
 }
 
 
 def build_default_model() -> PmxModel:
-    """内蔵縮約骨格から共通 PmxModel を構築する。"""
     bones = []
     name_to_index: dict[str, int] = {}
     for i, (name, parent, position, movable, rotatable) in enumerate(_BONES):

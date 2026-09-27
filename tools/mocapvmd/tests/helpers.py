@@ -1,5 +1,3 @@
-"""mocapvmd テスト用の共通ヘルパ(VMDキー構築・PMX構築・ドキュメント書き出し)。"""
-
 import struct
 
 from vmd import io
@@ -21,21 +19,26 @@ from vmd.types import (
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 
-# 逐語透過の検証用に、線形でない補間バイト列。再構築・線形化されれば値が変わる。
 BONE_NONLINEAR = bone_interp_bytes((30, 20, 90, 100), (25, 15, 80, 110), (35, 45, 70, 95), (40, 50, 60, 85))
 CAM_NONLINEAR = camera_interp_bytes(
     (30, 40, 80, 90), (25, 35, 75, 95), (20, 30, 70, 100),
     (15, 45, 65, 105), (10, 50, 60, 110), (5, 55, 55, 115),
 )
 
+_VMD_BONE_NAME_BYTES = 15
+_VMD_IK_NAME_BYTES = 20
+
+
+def _vmd_name(name, size):
+    return name.encode("cp932").ljust(size, b"\x00")
+
 
 def bone(name, frame, pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 1.0), interp=BONE_LINEAR_INTERP):
-    """ボーンキー。name は cp932 で15バイト固定にエンコードする。"""
-    return BoneKey(name.encode("cp932").ljust(15, b"\x00"), frame, pos, rot, interp)
+    return BoneKey(_vmd_name(name, _VMD_BONE_NAME_BYTES), frame, pos, rot, interp)
 
 
 def morph(name, frame, weight=0.0):
-    return MorphKey(name.encode("cp932").ljust(15, b"\x00"), frame, weight)
+    return MorphKey(_vmd_name(name, _VMD_BONE_NAME_BYTES), frame, weight)
 
 
 def cam(frame, center=(0.0, 0.0, 0.0), interp=CAM_LINEAR):
@@ -50,9 +53,8 @@ def self_shadow(frame, mode=1, distance=0.0):
     return SelfShadowKey(frame, mode, distance)
 
 
-def ik_property(frame, names, display=1):
-    """IKプロパティキー。names は (ボーン名, enable) のタプル列。名前は20バイト固定。"""
-    ik_bones = [IkBone(n.encode("cp932").ljust(20, b"\x00"), enable) for n, enable in names]
+def ik_property(frame, bone_name_enable_pairs, display=1):
+    ik_bones = [IkBone(_vmd_name(n, _VMD_IK_NAME_BYTES), enable) for n, enable in bone_name_enable_pairs]
     return IkPropertyKey(frame, display, ik_bones)
 
 
@@ -60,36 +62,51 @@ def write_vmd(path, **sections):
     io.write_file(VmdDocument(**sections), str(path))
 
 
+_PMX_ENCODING_UTF16 = 0
+_PMX_BONE_ROTATABLE = 0x0002
+_PMX_BONE_MOVABLE = 0x0004
+_PMX_NO_PARENT = -1
+_PMX_MODEL_INFO_TEXT_COUNT = 4
+_PMX_SECTIONS_AFTER_BONES = 4
+
+
 def _pmx_textbuf(s):
     b = s.encode("utf-16-le")
     return struct.pack("<i", len(b)) + b
 
 
-def build_standard_pmx(bone_names):
-    """指定ボーン名だけを持つ最小PMX(平坦階層・PMX2.0/UTF16)のバイト列。
+def _pmx_count(n):
+    return struct.pack("<i", n)
 
-    頂点・面・テクスチャ・材質・モーフ以降は個数0。各ボーンは親なし・
-    回転/移動可・接続先オフセット指定。read_pmx でボーン名解決の検証に使う。
-    """
+
+def _pmx_globals(*, encoding, add_uv, vertex_index, texture_index, material_index, bone_index,
+                 morph_index, rigid_index):
+    values = [encoding, add_uv, vertex_index, texture_index, material_index, bone_index,
+              morph_index, rigid_index]
+    return struct.pack("<B", len(values)) + bytes(values)
+
+
+def build_standard_pmx(bone_names):
     out = bytearray()
     out += b"PMX "
     out += struct.pack("<f", 2.0)
-    out += struct.pack("<B", 8)
-    out += bytes([0, 0, 1, 1, 1, 1, 1, 1])  # utf16, 追加UV0, 各indexサイズ1
-    for _ in range(4):
-        out += _pmx_textbuf("")  # モデル情報
-    out += struct.pack("<i", 0)  # 頂点
-    out += struct.pack("<i", 0)  # 面
-    out += struct.pack("<i", 0)  # テクスチャ
-    out += struct.pack("<i", 0)  # 材質
-    out += struct.pack("<i", len(bone_names))
+    out += _pmx_globals(encoding=_PMX_ENCODING_UTF16, add_uv=0, vertex_index=1, texture_index=1,
+                        material_index=1, bone_index=1, morph_index=1, rigid_index=1)
+    for _ in range(_PMX_MODEL_INFO_TEXT_COUNT):
+        out += _pmx_textbuf("")
+    vertex_count = face_count = texture_count = material_count = 0
+    for count in (vertex_count, face_count, texture_count, material_count):
+        out += _pmx_count(count)
+    out += _pmx_count(len(bone_names))
     for i, name in enumerate(bone_names):
         out += _pmx_textbuf(name)
         out += _pmx_textbuf("")
-        out += struct.pack("<3f", 0.0, float(i), 0.0)  # 位置
-        out += struct.pack("<b", -1)  # 親(なし)
-        out += struct.pack("<i", 0)  # 変形階層
-        out += struct.pack("<H", 0x0002 | 0x0004)  # 回転+移動可
-        out += struct.pack("<3f", 0.0, 0.0, 0.0)  # 接続先オフセット
-    out += struct.pack("<i", 0) * 4  # モーフ/表示枠/剛体/Joint
+        out += struct.pack("<3f", 0.0, float(i), 0.0)
+        out += struct.pack("<b", _PMX_NO_PARENT)
+        deform_layer = 0
+        out += struct.pack("<i", deform_layer)
+        out += struct.pack("<H", _PMX_BONE_ROTATABLE | _PMX_BONE_MOVABLE)
+        tail_offset = (0.0, 0.0, 0.0)
+        out += struct.pack("<3f", *tail_offset)
+    out += _pmx_count(0) * _PMX_SECTIONS_AFTER_BONES
     return bytes(out)

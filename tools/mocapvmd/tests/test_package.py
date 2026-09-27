@@ -1,9 +1,3 @@
-"""mocapvmd パッケージ土台のスモークテスト。
-
-パッケージがインポート可能で、console script のエントリ(cli.main)が
-公開・登録されていることを確認する。
-"""
-
 import tomllib
 from pathlib import Path
 
@@ -11,8 +5,7 @@ import mocapvmd
 from mocapvmd import cli
 
 
-def test_package_imports():
-    # namespace package ではなく実パッケージであること(__init__.py を持つ)。
+def test_package_is_regular_package_with_init_file():
     assert mocapvmd.__file__ is not None
 
 
@@ -26,11 +19,9 @@ def _pyproject():
 
 
 def test_console_script_registered_in_pyproject():
-    # pyproject の [project.scripts] に mocapvmd = "mocapvmd.cli:main" が登録されていること。
     assert _pyproject()["project"]["scripts"]["mocapvmd"] == "mocapvmd.cli:main"
 
 
 def test_package_included_in_setuptools_find():
-    # 配布物に mocapvmd を含めるため packages.find の include に mocapvmd* があること。
     include = _pyproject()["tool"]["setuptools"]["packages"]["find"]["include"]
     assert "mocapvmd*" in include

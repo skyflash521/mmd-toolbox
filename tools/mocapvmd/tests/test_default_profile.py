@@ -1,10 +1,3 @@
-"""既定モデルプロファイル(内蔵縮約骨格)のテスト。
-
-PMX未指定時に使う既定モデルプロファイルが、FK評価とマーカー解決に必要な
-情報(縮約ボーン階層・標準ロール対応・マーカー/派生特徴のbinding)を
-共通 PmxModel 相当として提供できることを検証する。
-"""
-
 from mocapvmd.default_profile import (
     FEATURE_BINDINGS,
     MARKER_BINDINGS,
@@ -14,7 +7,6 @@ from mocapvmd.default_profile import (
 from pmx.pose import evaluate_fk, sample_local_poses
 from pmx.types import PmxModel
 
-# markers.py が必要とする必須標準ロール(初期マーカー表)。
 _REQUIRED_ROLES = {
     "center",
     "groove",
@@ -41,7 +33,6 @@ _REQUIRED_ROLES = {
 
 _CATEGORIES = {"center", "torso", "head", "arms", "wrists", "legs", "feet"}
 
-# 初期マーカー表。
 _EXPECTED_MARKERS = {
     "center",
     "pelvis",
@@ -61,7 +52,6 @@ _EXPECTED_MARKERS = {
     "toe_r",
 }
 
-# 派生特徴(肩線・腰線・胴体軸・前腕方向・下腿方向)。
 _EXPECTED_FEATURES = {
     "shoulder_line",
     "hip_line",
@@ -79,14 +69,12 @@ def test_build_default_model_is_pmxmodel():
     assert len(model.bones) >= len(_REQUIRED_ROLES)
 
 
-def test_name_to_index_is_consistent():
+def test_name_to_index_points_back_to_every_bone():
     model = build_default_model()
     n = len(model.bones)
-    # 各ボーン名から有効なindexを引け、その並びは bones と矛盾しない。
     for name, idx in model.name_to_index.items():
         assert 0 <= idx < n
         assert model.bones[idx].name == name
-    # 全ボーンが索引から引ける(同名は先勝ちで少なくとも1つ)。
     for b in model.bones:
         assert b.name in model.name_to_index
 
@@ -113,7 +101,6 @@ def test_required_roles_resolve_to_valid_bones():
 
 
 def test_required_roles_map_to_distinct_bones():
-    # 各標準ロールは別々のボーンを指す(wrist_l と elbow_l が同骨に潰れない)。
     indices = [ROLE_TO_INDEX[role] for role in _REQUIRED_ROLES]
     assert len(set(indices)) == len(_REQUIRED_ROLES)
 
@@ -130,8 +117,7 @@ def test_fk_runs_on_default_model():
     assert len(world) == len(model.bones)
 
 
-def test_marker_bindings_cover_initial_table():
-    # 初期マーカー表を過不足なく提供する。
+def test_marker_bindings_cover_expected_markers_and_every_category():
     assert set(MARKER_BINDINGS) == _EXPECTED_MARKERS
     used_categories = set()
     for marker, (role, category, weight) in MARKER_BINDINGS.items():
@@ -139,14 +125,13 @@ def test_marker_bindings_cover_initial_table():
         assert category in _CATEGORIES, f"未知カテゴリ: {marker} -> {category}"
         assert 0.0 < weight <= 1.0
         used_categories.add(category)
-    # 部位別カテゴリを全て被覆する。
     assert used_categories == _CATEGORIES
 
 
 def test_feature_bindings_cover_derived_features():
     assert set(FEATURE_BINDINGS) == _EXPECTED_FEATURES
-    for feature, (a_role, b_role, weight) in FEATURE_BINDINGS.items():
-        assert a_role in ROLE_TO_INDEX, f"未知ロール a: {feature} -> {a_role}"
-        assert b_role in ROLE_TO_INDEX, f"未知ロール b: {feature} -> {b_role}"
-        assert a_role != b_role
+    for feature, (head_role, tail_role, weight) in FEATURE_BINDINGS.items():
+        assert head_role in ROLE_TO_INDEX, f"未知ロール head: {feature} -> {head_role}"
+        assert tail_role in ROLE_TO_INDEX, f"未知ロール tail: {feature} -> {tail_role}"
+        assert head_role != tail_role
         assert 0.0 < weight <= 1.0

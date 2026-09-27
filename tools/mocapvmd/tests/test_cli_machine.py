@@ -1,15 +1,3 @@
-"""mocapvmd CLI 機械モード(--machine)のテスト。
-
-機械モードは stdout を JSON Lines のイベント専用にし、progress / warning / result / error を出す。
-ストリームは result または error のちょうど 1 つで終端する。構造化エラーは確定 code/field/exit_code の
-error イベントで終端し、非機械モードは理由を標準エラーへ 1 行出す。非機械モードの出力ファイル・
-終了コードが機械モードと同じであることも併せて検証する。
-
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テストは
-決定論的に実行し、外部依存を使わない。--describe は独立メタ操作として別ステップで
-扱う(本モジュールは含めない)。
-"""
-
 import json
 
 import pytest
@@ -17,73 +5,120 @@ import pytest
 from mocapvmd import cli, presets
 from mocapvmd.model_profile import STANDARD_BONE_NAMES
 from vmd import io
+from vmd.reduce import BONE_LINEAR_INTERP
+from vmd.types import BoneKey, VmdDocument
 
 from .helpers import bone, build_standard_pmx, write_vmd
 
+_RAMP_FRAME_COUNT = 11
+_RAMP_LAST_FRAME = _RAMP_FRAME_COUNT - 1
+_VMD_FPS = 30.0
+_CP932_UNDECODABLE_BONE_NAME = b"\x81\x20name".ljust(15, b"\x00")
+
+_META_OPTIONS = ("--describe", "--version", "--help", "--machine")
+_NEGATED_FLAGS = ("--no-denoise", "--no-foot-ik-stabilize", "--no-reduce")
+_DESCRIBED_OPTION_COUNT = 18
+_NON_NEGATIVE_UNBOUNDED = {"min": 0, "max": None, "exclusive_min": False}
+_EXPECTED_TYPE_CONSTRAINT_DEFAULT_BY_OPTION = {
+    "input": ("str", None, None),
+    "--output": ("str", None, None),
+    "--overwrite": ("flag", None, False),
+    "--preset": ("enum", {"choices": list(presets.PRESET_NAMES)}, "medium"),
+    "--clean-strength": ("float", _NON_NEGATIVE_UNBOUNDED, 1.0),
+    "--denoise": ("flag", None, True),
+    "--denoise-mode": ("enum", {"choices": ["bone", "pose"]}, "bone"),
+    "--pmx": ("str", None, None),
+    "--foot-ik-stabilize": ("flag", None, True),
+    "--foot-slide-suppression": ("float", {"min": 0, "max": 1, "exclusive_min": False}, 1.0),
+    "--reduce-error-bone-pos": ("float", _NON_NEGATIVE_UNBOUNDED, None),
+    "--reduce-error-bone-rot": ("float", _NON_NEGATIVE_UNBOUNDED, None),
+    "--curve-mode": ("enum", {"choices": ["bezier", "linear"]}, "bezier"),
+    "--reduce": ("flag", None, True),
+    "--list-bones": ("flag", None, False),
+    "--dry-run": ("flag", None, False),
+    "--quiet": ("flag", None, False),
+    "--verbose": ("flag", None, False),
+}
+_EXPECTED_PRESET_BASE_TOLERANCES = {
+    "slower": {"reduce_error_bone_pos": 0.05, "reduce_error_bone_rot": 0.40},
+    "slow": {"reduce_error_bone_pos": 0.10, "reduce_error_bone_rot": 0.75},
+    "medium": {"reduce_error_bone_pos": 0.20, "reduce_error_bone_rot": 1.50},
+    "fast": {"reduce_error_bone_pos": 0.80, "reduce_error_bone_rot": 6.0},
+    "faster": {"reduce_error_bone_pos": 1.60, "reduce_error_bone_rot": 12.0},
+}
+
 
 def machine_events(capsysbinary):
-    """capsysbinary で捕捉した stdout を JSON Lines として解析しイベント配列で返す。"""
     out = capsysbinary.readouterr().out
-    text = out.decode("utf-8")  # UTF-8 固定(ロケール非依存)を前提に decode
+    text = out.decode("utf-8")
     return [json.loads(ln) for ln in text.split("\n") if ln]
 
 
+def _count_terminal_events(events):
+    return sum(1 for e in events if e["type"] in ("result", "error"))
+
+
 def machine_error(capsysbinary):
-    """機械モードの stdout を解析し、終端の error イベントを返す(失敗は error で終端)。"""
     events = machine_events(capsysbinary)
     assert events[-1]["type"] == "error"
-    assert sum(1 for e in events if e["type"] in ("result", "error")) == 1  # 終端はちょうど1つ
+    assert _count_terminal_events(events) == 1
     return events[-1]
 
 
-def _ramp_doc(path):
-    # センターの直線ランプ(密11フレーム)。疎化で端キーへ削減される。
-    write_vmd(path, bone=[bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(11)])
+def _write_center_linear_ramp(path):
+    write_vmd(path, bone=[bone("センター", f, pos=(float(f), 0.0, 0.0))
+                          for f in range(_RAMP_FRAME_COUNT)])
 
 
-def _foot_doc(path):
-    # 右足ＩＫ(接地中の遅いドリフト)。足IK安定化段が走る。
+def _write_right_foot_ik_slow_grounded_drift(path):
     write_vmd(path, bone=[bone("右足ＩＫ", f, pos=(round(0.05 * f, 6), 0.0, 0.0)) for f in range(11)])
 
 
-# --- 正常系: process result / JSON Lines / チャネル固定 ---------------------
+def _write_undecodable_name_track(path, frame_count):
+    keys = [BoneKey(_CP932_UNDECODABLE_BONE_NAME, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0),
+                    BONE_LINEAR_INTERP)
+            for f in range(frame_count)]
+    io.write_file(VmdDocument(bone=keys), str(path))
 
 
-def test_machine_emits_process_result(tmp_path, capsysbinary):
+def _raise_keyboard_interrupt(*a, **k):
+    raise KeyboardInterrupt()
+
+
+def test_machine_emits_single_process_result_counting_input_bone_keys(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(out), "--machine"])
     assert rc == 0
     events = machine_events(capsysbinary)
     assert events[-1]["type"] == "result"
-    assert sum(1 for e in events if e["type"] in ("result", "error")) == 1
+    assert _count_terminal_events(events) == 1
     r = events[-1]
     assert r["mode"] == "process"
     assert r["output"] == str(out)
-    assert r["input_keys"] == 11                 # 入力ボーンキー総数
+    assert r["input_keys"] == _RAMP_FRAME_COUNT
     assert isinstance(r["output_keys"], int) and r["output_keys"] >= 1
     assert out.exists()
 
 
-def test_machine_stdout_is_valid_json_lines(tmp_path, capsysbinary):
+def test_machine_stdout_is_newline_terminated_json_lines_without_blank_lines(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--machine"])
     assert rc == 0
     raw = capsysbinary.readouterr().out
     text = raw.decode("utf-8")
     assert text.endswith("\n")
     for ln in text.split("\n")[:-1]:
-        assert ln != ""            # 空行を挟まない
-        obj = json.loads(ln)       # 各行が単一 JSON
+        assert ln != ""
+        obj = json.loads(ln)
         assert "type" in obj
 
 
 def test_machine_stdout_lf_only_no_cr(tmp_path, capsysbinary):
-    # 行区切りは LF 固定で \r を一切含まない(CRLF 変換なし。バイト列で検証)。
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--machine"])
     assert rc == 0
     raw = capsysbinary.readouterr().out
@@ -91,25 +126,21 @@ def test_machine_stdout_lf_only_no_cr(tmp_path, capsysbinary):
     assert b"\r" not in raw
 
 
-def test_machine_no_human_text_on_stdout(tmp_path, capsysbinary):
-    # 機械モードの stdout は人間向けテキストを含まない(チャネル固定)。--verbose 併用でも JSON のみ。
+def test_machine_stdout_is_json_only_even_with_verbose(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--machine", "--verbose"])
     text = capsysbinary.readouterr().out.decode("utf-8")
     lines = [ln for ln in text.split("\n") if ln]
     assert lines
     for ln in lines:
-        json.loads(ln)  # すべて JSON、人間向けレポート行は混入しない
+        json.loads(ln)
 
 
-# --- progress イベント(3 段) --------------------------------------------
-
-
-def test_machine_emits_progress_stages(tmp_path, capsysbinary):
-    # 既定(denoise on / foot_ik on / reduce on)で denoise・foot_ik・reduce の 3 段の progress が出る。
+def test_machine_default_emits_denoise_foot_ik_reduce_progress_each_with_one_fixed_start_event(
+        tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _foot_doc(src)
+    _write_right_foot_ik_slow_grounded_drift(src)
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--machine"])
     assert rc == 0
     events = machine_events(capsysbinary)
@@ -120,17 +151,31 @@ def test_machine_emits_progress_stages(tmp_path, capsysbinary):
     assert {"denoise", "foot_ik", "reduce"} <= stages
     for p in progress:
         assert set(p) >= {"type", "stage", "done", "total", "note", "elapsed"}
-    # 各段の開始イベントは done=0, total=null, note:"", elapsed:0.0 の固定形が 1 本ある。
     for stage in ("denoise", "foot_ik", "reduce"):
         starts = [p for p in progress if p["stage"] == stage and p["done"] == 0 and p["total"] is None]
         assert len(starts) == 1, f"{stage} 段の開始イベントは 1 本"
         assert starts[0]["note"] == "" and starts[0]["elapsed"] == 0.0
 
 
-def test_machine_disabled_stages_emit_no_progress(tmp_path, capsysbinary):
-    # 無効化した段(--no-denoise / --no-foot-ik-stabilize)は progress を出さない。
+def test_machine_denoise_and_foot_ik_emit_only_start_event_and_reduce_ends_at_multikey_track_count(
+        tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_right_foot_ik_slow_grounded_drift(src)
+    multikey_track_count = 1
+    rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--machine"])
+    assert rc == 0
+    progress = [e for e in machine_events(capsysbinary) if e["type"] == "progress"]
+    for stage in ("denoise", "foot_ik"):
+        assert len([p for p in progress if p["stage"] == stage]) == 1, stage
+    reduce_updates = [p for p in progress if p["stage"] == "reduce" and p["total"] is not None]
+    assert (reduce_updates[-1]["done"], reduce_updates[-1]["total"]) == (
+        multikey_track_count, multikey_track_count)
+    assert all(p["note"] == "" for p in progress)
+
+
+def test_machine_disabled_stages_emit_no_progress(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--machine",
                    "--no-denoise", "--no-foot-ik-stabilize"])
     assert rc == 0
@@ -139,37 +184,21 @@ def test_machine_disabled_stages_emit_no_progress(tmp_path, capsysbinary):
     assert "reduce" in stages
 
 
-# --- warning 透過 -----------------------------------------------------------
-
-
-def test_machine_emits_decode_error_warning(tmp_path, capsysbinary):
-    # デコード不能なボーン名を含む入力 → vmd.io の decode-error 警告を warning イベントへ透過。
-    # 不正な cp932 シーケンスを名前フィールドに埋めた密トラックを書く。
-    from vmd.reduce import BONE_LINEAR_INTERP
-    from vmd.types import BoneKey, VmdDocument
-    bad_name = b"\x81\x20name".ljust(15, b"\x00")  # cp932 で復号できないバイト列
-    keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
-            for f in range(4)]
-    io.write_file(VmdDocument(bone=keys), str(tmp_path / "in.vmd"))
+def test_machine_passes_vmd_io_decode_error_through_as_warning_with_single_element_section(
+        tmp_path, capsysbinary):
+    _write_undecodable_name_track(tmp_path / "in.vmd", frame_count=4)
     rc = cli.main([str(tmp_path / "in.vmd"), "-o", str(tmp_path / "out.vmd"), "--machine", "--no-reduce"])
     assert rc == 0
     events = machine_events(capsysbinary)
     assert events[-1]["type"] == "result"
     warns = [e for e in events if e["type"] == "warning"]
     w = next(w for w in warns if w["code"] == "decode-error")
-    assert isinstance(w["section"], list) and len(w["section"]) == 1   # 単一要素配列
+    assert isinstance(w["section"], list) and len(w["section"]) == 1
     assert isinstance(w["message"], str) and w["message"]
 
 
-def test_machine_warning_dedup_matches_human(tmp_path, capsysbinary):
-    # 同一(code, section, message)の警告は 1 件へ集約する(人間向け経路と同じ基準)。
-    from vmd.reduce import BONE_LINEAR_INTERP
-    from vmd.types import BoneKey, VmdDocument
-    bad_name = b"\x81\x20name".ljust(15, b"\x00")
-    # 同名のデコード不能キーを複数フレーム持たせても decode-error は 1 件へ集約される。
-    keys = [BoneKey(bad_name, f, (float(f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
-            for f in range(6)]
-    io.write_file(VmdDocument(bone=keys), str(tmp_path / "in.vmd"))
+def test_machine_dedups_identical_decode_error_warnings_across_frames_into_one(tmp_path, capsysbinary):
+    _write_undecodable_name_track(tmp_path / "in.vmd", frame_count=6)
     rc = cli.main([str(tmp_path / "in.vmd"), "-o", str(tmp_path / "out.vmd"), "--machine", "--no-reduce"])
     assert rc == 0
     warns = [e for e in machine_events(capsysbinary) if e["type"] == "warning"]
@@ -177,32 +206,27 @@ def test_machine_warning_dedup_matches_human(tmp_path, capsysbinary):
     assert len(decode) == 1
 
 
-# --- 構造化エラー -----------------------------------------------------------
-
-
-def test_machine_error_bad_argument_unknown_option(tmp_path, capsysbinary):
+def test_machine_error_unknown_option_field_is_first_unrecognized_token(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "--machine", "--bogus"])
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["exit_code"] == 2
-    assert e["field"] == "--bogus"   # unrecognized arguments: の先頭トークン
+    assert e["field"] == "--bogus"
     assert isinstance(e["message"], str) and e["message"]
 
 
-def test_machine_error_bad_argument_missing_input(capsysbinary):
-    # positional input 欠落 → bad_argument、field は input。
+def test_machine_error_missing_input_is_bad_argument_with_field_input(capsysbinary):
     rc = cli.main(["--machine"])
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["field"] == "input"
 
 
-def test_machine_error_bad_argument_type_error_field(tmp_path, capsysbinary):
-    # 型エラー(--clean-strength 非数値)→ argparse 検出の bad_argument、field は長形式。
+def test_machine_error_non_numeric_value_is_bad_argument_with_long_option_field(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "--machine", "--clean-strength", "abc"])
     assert rc == 2
     e = machine_error(capsysbinary)
@@ -210,17 +234,17 @@ def test_machine_error_bad_argument_type_error_field(tmp_path, capsysbinary):
 
 
 @pytest.mark.parametrize("opt,val", [
-    ("--clean-strength", "-0.1"),
-    ("--clean-strength", "nan"),
-    ("--foot-slide-suppression", "1.5"),
-    ("--foot-slide-suppression", "nan"),
-    ("--reduce-error-bone-pos", "-1"),
-    ("--reduce-error-bone-rot", "inf"),
+    pytest.param("--clean-strength", "-0.1", id="clean-strength-negative"),
+    pytest.param("--clean-strength", "nan", id="clean-strength-nan"),
+    pytest.param("--foot-slide-suppression", "1.5", id="foot-slide-suppression-above-1"),
+    pytest.param("--foot-slide-suppression", "nan", id="foot-slide-suppression-nan"),
+    pytest.param("--reduce-error-bone-pos", "-1", id="reduce-error-bone-pos-negative"),
+    pytest.param("--reduce-error-bone-rot", "inf", id="reduce-error-bone-rot-inf"),
 ])
-def test_machine_error_bad_argument_value_validation(tmp_path, capsysbinary, opt, val):
-    # 解析後の値検証(範囲外・非有限・負)も bad_argument(該当オプションの field)。
+def test_machine_error_parsed_value_out_of_range_or_nonfinite_is_bad_argument_with_option_field(
+        tmp_path, capsysbinary, opt, val):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "--machine", opt, val])
     assert rc == 2
     e = machine_error(capsysbinary)
@@ -236,7 +260,7 @@ def test_machine_error_input_not_file(tmp_path, capsysbinary):
 
 def test_machine_error_pmx_not_file(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "--machine", "--denoise-mode", "pose", "--pmx", str(tmp_path / "nope.pmx")])
     assert rc == 1
     e = machine_error(capsysbinary)
@@ -245,7 +269,7 @@ def test_machine_error_pmx_not_file(tmp_path, capsysbinary):
 
 def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(src), "--machine"])
     assert rc == 2
     e = machine_error(capsysbinary)
@@ -253,9 +277,8 @@ def test_machine_error_output_exists(tmp_path, capsysbinary):
 
 
 def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
-    # 入力と別パスの既存出力も機械モードで output_exists を返すこと。
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     out = tmp_path / "out.vmd"
     out.write_bytes(b"old content")
     rc = cli.main([str(src), "-o", str(out), "--machine"])
@@ -274,8 +297,7 @@ def test_machine_error_not_vmd(tmp_path, capsysbinary):
     assert isinstance(e["message"], str) and e["message"]
 
 
-def test_machine_error_invalid_bone_values(tmp_path, capsysbinary):
-    # 非有限ボーン値 → invalid_bone_values(exit 1)、field は input。
+def test_machine_error_nonfinite_bone_value_is_invalid_bone_values(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0, pos=(float("nan"), 0.0, 0.0)), bone("センター", 1)])
     rc = cli.main([str(src), "--machine"])
@@ -285,7 +307,6 @@ def test_machine_error_invalid_bone_values(tmp_path, capsysbinary):
 
 
 def test_machine_error_not_pmx(tmp_path, capsysbinary):
-    # PMX 形式不正(PmxFormatError)→ not_pmx(exit 1)、field は --pmx。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("センター", 10, pos=(0.3, 0.0, 0.0))])
     pmx = tmp_path / "bad.pmx"
@@ -296,8 +317,7 @@ def test_machine_error_not_pmx(tmp_path, capsysbinary):
     assert e["code"] == "not_pmx" and e["field"] == "--pmx" and e["exit_code"] == 1
 
 
-def test_machine_error_model_profile_invalid(tmp_path, capsysbinary):
-    # 必須標準ボーン欠落(MocapModelProfileError)→ model_profile_invalid(exit 1)、pmx 指定時 field は --pmx。
+def test_machine_error_pmx_missing_standard_bone_is_model_profile_invalid(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("センター", 10, pos=(0.3, 0.0, 0.0))])
     pmx = tmp_path / "model.pmx"
@@ -309,10 +329,9 @@ def test_machine_error_model_profile_invalid(tmp_path, capsysbinary):
     assert e["code"] == "model_profile_invalid" and e["field"] == "--pmx" and e["exit_code"] == 1
 
 
-def test_machine_error_write_failed(tmp_path, capsysbinary):
-    # 出力の I/O 失敗(親がファイル)→ write_failed(exit 3)、field は --output、path 付き。
+def test_machine_error_output_parent_is_file_is_write_failed_with_path(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     clash = tmp_path / "afile"
     clash.write_bytes(b"x")
     out = str(clash / "out.vmd")
@@ -323,21 +342,19 @@ def test_machine_error_write_failed(tmp_path, capsysbinary):
     assert e["path"] == out
 
 
-def test_machine_error_internal_error(tmp_path, capsysbinary, monkeypatch):
-    # 想定外の内部例外(reduce が RuntimeError)→ internal_error(exit 1)。安全網。
+def test_machine_error_unexpected_exception_in_reduce_is_internal_error(tmp_path, capsysbinary, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("boom")
     monkeypatch.setattr(cli.reduce, "reduce_bones", boom)
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--machine"])
     assert rc == 1
     e = machine_error(capsysbinary)
     assert e["code"] == "internal_error" and e["exit_code"] == 1
 
 
-def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
-    # 非機械モードでも失敗理由を標準エラーへ 1 行出す。終了コードは維持、stdout に JSON は出さない。
+def test_non_machine_error_prints_reason_to_stderr_and_no_json_to_stdout(tmp_path, capsys):
     bad = tmp_path / "bad.vmd"
     bad.write_bytes(b"not a vmd file")
     rc = cli.main([str(bad)])
@@ -347,58 +364,49 @@ def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
     assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
 
 
-# --- 入力検査 --machine --dry-run(mode:"inspect") -------------------------
-
-
-def test_machine_dry_run_emits_inspect_result(tmp_path, capsysbinary):
-    # --machine --dry-run は VMD を書かず inspect result を出す。
+def test_machine_dry_run_emits_inspect_result_with_resolved_plan_without_writing(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(out), "--machine", "--dry-run"])
     assert rc == 0
     events = machine_events(capsysbinary)
     r = events[-1]
     assert r["type"] == "result" and r["mode"] == "inspect"
-    assert sum(1 for e in events if e["type"] in ("result", "error")) == 1
+    assert _count_terminal_events(events) == 1
     assert r["output"] is None and not out.exists()
     assert r["input_kind"] == "bone"
-    assert r["keys"] == 11
-    assert r["frame_range"] == [0, 10]
-    assert r["duration_sec"] == 10 / 30.0
+    assert r["keys"] == _RAMP_FRAME_COUNT
+    assert r["frame_range"] == [0, _RAMP_LAST_FRAME]
+    assert r["duration_sec"] == _RAMP_LAST_FRAME / _VMD_FPS
     assert isinstance(r["sections"], list) and "bone" in r["sections"]
-    # 実行計画(解決済み引数値)。
     assert r["preset"] == "medium" and r["clean_strength"] == 1.0
     assert r["denoise"] is True and r["denoise_mode"] == "bone"
     assert r["foot_ik_stabilize"] is True and r["foot_slide_suppression"] == 1.0
     assert r["curve_mode"] == "bezier" and r["reduce"] is True
-    # bones は初出順の {name, category, keys, frame_range}。
     assert isinstance(r["bones"], list) and r["bones"]
     b0 = r["bones"][0]
     assert set(b0) == {"name", "category", "keys", "frame_range"}
     assert b0["name"] == "センター" and b0["category"] == "center"
-    assert b0["keys"] == 11 and b0["frame_range"] == [0, 10]
-    # reduction 診断(--reduce 既定 on)。
+    assert b0["keys"] == _RAMP_FRAME_COUNT and b0["frame_range"] == [0, _RAMP_LAST_FRAME]
     assert isinstance(r["reduction"], dict) and "センター" in r["reduction"]
     red = r["reduction"]["センター"]
     assert set(red) == {"input_keys", "output_keys", "tol_pos", "tol_rot", "cuts", "errors"}
     assert set(red["errors"]) == {"pos_x", "pos_y", "pos_z", "rot_deg"}
-    # pose_denoise は bone モードなので null。
     assert r["pose_denoise"] is None
 
 
 def test_machine_dry_run_inspect_no_reduce_null_reduction(tmp_path, capsysbinary):
-    # --no-reduce のとき reduction は null。
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "--machine", "--dry-run", "--no-reduce"])
     assert rc == 0
     r = machine_events(capsysbinary)[-1]
     assert r["mode"] == "inspect" and r["reduce"] is False and r["reduction"] is None
 
 
-def test_machine_dry_run_inspect_pose_denoise_payload(tmp_path, capsysbinary):
-    # pose モードの inspect は curated pose_denoise 診断を載せる(既定モデルプロファイル)。
+def test_machine_dry_run_inspect_pose_mode_reports_pose_denoise_with_default_profile(
+        tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[
         bone("センター", 0), bone("センター", 10, pos=(0.3, 0.0, 0.0)),
@@ -414,13 +422,11 @@ def test_machine_dry_run_inspect_pose_denoise_payload(tmp_path, capsysbinary):
     assert set(pd["marker_displacement"]) == {"max", "mean"}
     assert set(pd["fit"]) == {"mean_error_before", "mean_error_after", "fallback_frames",
                               "max_bone_delta_deg", "max_center_delta"}
-    assert pd["pmx"] is None  # 既定モデルプロファイル
+    assert pd["pmx"] is None
 
 
-# --- ボーン一覧 --machine --list-bones(mode:"list_bones") ------------------
-
-
-def test_machine_list_bones_result(tmp_path, capsysbinary):
+def test_machine_list_bones_lists_each_name_once_in_first_appearance_order_with_category(
+        tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("右足ＩＫ", 0), bone("センター", 1)])
     out = tmp_path / "out.vmd"
@@ -431,7 +437,7 @@ def test_machine_list_bones_result(tmp_path, capsysbinary):
     assert r["type"] == "result" and r["mode"] == "list_bones"
     assert not out.exists()
     names = [b["name"] for b in r["bones"]]
-    assert names == ["センター", "右足ＩＫ"]  # 初出順・名前ごと
+    assert names == ["センター", "右足ＩＫ"]
     for b in r["bones"]:
         assert set(b) == {"name", "category"}
     cats = {b["name"]: b["category"] for b in r["bones"]}
@@ -439,7 +445,6 @@ def test_machine_list_bones_result(tmp_path, capsysbinary):
 
 
 def test_machine_list_bones_not_blocked_by_invalid_values(tmp_path, capsysbinary):
-    # --list-bones は診断モード。非有限ボーン値でも弾かれず一覧を返す(処理固有検証を迂回)。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0, pos=(float("nan"), 0.0, 0.0))])
     rc = cli.main([str(src), "--machine", "--list-bones"])
@@ -448,11 +453,17 @@ def test_machine_list_bones_not_blocked_by_invalid_values(tmp_path, capsysbinary
     assert r["mode"] == "list_bones"
 
 
-# --- メタ操作の例外(--help / --version) ---------------------------------
+def test_machine_list_bones_takes_precedence_over_dry_run(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=[bone("センター", 0), bone("センター", 1)])
+    rc = cli.main([str(src), "--machine", "--list-bones", "--dry-run"])
+    assert rc == 0
+    events = machine_events(capsysbinary)
+    assert _count_terminal_events(events) == 1
+    assert events[-1]["mode"] == "list_bones"
 
 
-def test_machine_version_stays_human(capsys):
-    # --machine 併用でも --version は人間向けテキスト+exit 0、イベントに載せない。
+def test_machine_version_stays_human_text(capsys):
     rc = cli.main(["--machine", "--version"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -466,27 +477,18 @@ def test_machine_help_stays_human(capsys):
     assert out.strip() and not out.lstrip().startswith("{")
 
 
-def test_help_lists_machine_flag(capsys):
-    # --help に新設フラグ(--machine / --reduce / --verbose)が現れる(人間向けヘルプ)。
+def test_help_lists_machine_reduce_verbose_flags(capsys):
     rc = cli.main(["--help"])
     assert rc == 0
     text = capsys.readouterr().out
     assert "--machine" in text and "--reduce" in text and "--verbose" in text
 
 
-# --- 中断 -------------------------------------------------------------------
-
-
-def _raise_keyboard_interrupt(*a, **k):
-    raise KeyboardInterrupt()
-
-
-def test_machine_cancelled_on_keyboard_interrupt(tmp_path, capsysbinary, monkeypatch):
-    # 計算中の KeyboardInterrupt → cancelled の error イベント・exit 130。出力は書かれない(原子性)。
+def test_machine_keyboard_interrupt_is_cancelled_error_130_without_output(tmp_path, capsysbinary, monkeypatch):
     monkeypatch.setattr(cli.reduce, "reduce_bones", _raise_keyboard_interrupt)
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(out), "--machine"])
     assert rc == 130
     e = machine_error(capsysbinary)
@@ -494,12 +496,12 @@ def test_machine_cancelled_on_keyboard_interrupt(tmp_path, capsysbinary, monkeyp
     assert not out.exists()
 
 
-def test_non_machine_cancelled_on_keyboard_interrupt(tmp_path, capsys, monkeypatch):
-    # 非機械モードの中断は stdout に JSON を出さず理由を標準エラーへ 1 行、exit 130。出力は書かれない。
+def test_non_machine_keyboard_interrupt_exits_130_with_stderr_reason_without_output(
+        tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(cli.reduce, "reduce_bones", _raise_keyboard_interrupt)
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     rc = cli.main([str(src), "-o", str(out)])
     assert rc == 130
     cap = capsys.readouterr()
@@ -508,122 +510,83 @@ def test_non_machine_cancelled_on_keyboard_interrupt(tmp_path, capsys, monkeypat
     assert not out.exists()
 
 
-# --- 自己記述 --describe -----------------------------------------------------
+def test_main_installs_ctrl_break_bridge_once(monkeypatch, capsysbinary):
+    installs = []
+    monkeypatch.setattr(cli, "install_sigbreak_handler", lambda: installs.append(True))
+    assert cli.main(["--describe"]) == 0
+    assert installs == [True]
 
 
-def describe_result(capsysbinary):
-    """--describe の stdout を解析し、単一の result(mode:"describe")イベントを返す。"""
+def single_describe_result(capsysbinary):
     events = machine_events(capsysbinary)
     assert len(events) == 1 and events[0]["type"] == "result" and events[0]["mode"] == "describe"
     return events[0]
 
 
-def test_describe_emits_result_without_input(capsysbinary):
-    # --describe は入力を要求せず、VMD を読まずに options/presets の result を出して exit 0。
+def test_describe_without_input_emits_options_and_presets_without_run_result_keys(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0
-    r = describe_result(capsysbinary)
+    r = single_describe_result(capsysbinary)
     assert isinstance(r["options"], list) and r["options"]
     assert isinstance(r["presets"], list)
-    # process/inspect/list_bones のキーは describe には載せない。
     for k in ("output", "keys", "bones", "reduction", "input_kind"):
         assert k not in r
 
 
 def test_describe_works_without_machine_flag(capsysbinary):
-    # --describe は --machine を要さない独立メタ操作(--machine 無しでも構造化 result を出す)。
     rc = cli.main(["--describe"])
     assert rc == 0
-    assert describe_result(capsysbinary)["mode"] == "describe"
+    assert single_describe_result(capsysbinary)["mode"] == "describe"
 
 
-def test_describe_options_shape_and_values(capsysbinary):
+def test_describe_options_exclude_meta_and_negated_forms_and_pin_type_constraint_default(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0
-    r = describe_result(capsysbinary)
+    r = single_describe_result(capsysbinary)
     by_name = {o["name"]: o for o in r["options"]}
-    # メタ/モード操作は options に含めない。
-    for meta in ("--describe", "--version", "--help", "--machine"):
+    for meta in _META_OPTIONS:
         assert meta not in by_name
-    # 否定形は重複列挙しない(肯定形の長形式のみ)。
-    for neg in ("--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"):
+    for neg in _NEGATED_FLAGS:
         assert neg not in by_name
-    # 全 18 要素・各要素は常に 5 キー・help は非空文字列。
-    assert len(r["options"]) == 18
+    assert len(r["options"]) == _DESCRIBED_OPTION_COUNT
     for o in r["options"]:
         assert set(o) == {"name", "type", "constraint", "default", "help"}
         assert isinstance(o["help"], str) and o["help"]
-    # 18 個の全要素を {type, constraint, default} で固定する(float の constraint は
-    # {min,max,exclusive_min} 3キー・enum は {choices}・flag/str は null)。
-    expected = {
-        "input": ("str", None, None),
-        "--output": ("str", None, None),
-        "--overwrite": ("flag", None, False),
-        "--preset": ("enum", {"choices": list(presets.PRESET_NAMES)}, "medium"),
-        "--clean-strength": ("float", {"min": 0, "max": None, "exclusive_min": False}, 1.0),
-        "--denoise": ("flag", None, True),
-        "--denoise-mode": ("enum", {"choices": ["bone", "pose"]}, "bone"),
-        "--pmx": ("str", None, None),
-        "--foot-ik-stabilize": ("flag", None, True),
-        "--foot-slide-suppression": ("float", {"min": 0, "max": 1, "exclusive_min": False}, 1.0),
-        "--reduce-error-bone-pos": ("float", {"min": 0, "max": None, "exclusive_min": False}, None),
-        "--reduce-error-bone-rot": ("float", {"min": 0, "max": None, "exclusive_min": False}, None),
-        "--curve-mode": ("enum", {"choices": ["bezier", "linear"]}, "bezier"),
-        "--reduce": ("flag", None, True),
-        "--list-bones": ("flag", None, False),
-        "--dry-run": ("flag", None, False),
-        "--quiet": ("flag", None, False),
-        "--verbose": ("flag", None, False),
-    }
-    assert set(by_name) == set(expected)
-    for name, (type_, constraint, default) in expected.items():
+    assert set(by_name) == set(_EXPECTED_TYPE_CONSTRAINT_DEFAULT_BY_OPTION)
+    for name, (type_, constraint, default) in _EXPECTED_TYPE_CONSTRAINT_DEFAULT_BY_OPTION.items():
         o = by_name[name]
         assert o["type"] == type_, name
         assert o["constraint"] == constraint, name
         assert o["default"] == default, name
 
 
-def test_describe_presets_shape_and_values(capsysbinary):
+def test_describe_presets_pin_base_pos_and_rot_tolerances(capsysbinary):
     rc = cli.main(["--describe"])
     assert rc == 0
-    r = describe_result(capsysbinary)
+    r = single_describe_result(capsysbinary)
     for p in r["presets"]:
         assert set(p) == {"name", "values"}
         assert set(p["values"]) == {"reduce_error_bone_pos", "reduce_error_bone_rot"}
-    # 5 プリセットの基準位置許容・基準回転許容(プリセット基準値)を全件固定する。
-    expected = {
-        "slower": {"reduce_error_bone_pos": 0.05, "reduce_error_bone_rot": 0.40},
-        "slow": {"reduce_error_bone_pos": 0.10, "reduce_error_bone_rot": 0.75},
-        "medium": {"reduce_error_bone_pos": 0.20, "reduce_error_bone_rot": 1.50},
-        "fast": {"reduce_error_bone_pos": 0.80, "reduce_error_bone_rot": 6.0},
-        "faster": {"reduce_error_bone_pos": 1.60, "reduce_error_bone_rot": 12.0},
-    }
-    assert {p["name"]: p["values"] for p in r["presets"]} == expected
+    assert {p["name"]: p["values"] for p in r["presets"]} == _EXPECTED_PRESET_BASE_TOLERANCES
 
 
-def test_describe_type_table_covers_non_meta_args():
-    # _D_TYPE はメタ/モード操作を除く全 parser 引数を覆う。parser に引数を足して _D_TYPE への追加を
-    # 忘れると describe から黙って抜けるため、その載せ忘れをここで検出する。
+def test_describe_type_table_covers_every_non_meta_parser_arg():
     parser = cli._build_parser()
     meta = {"help", "version", "machine", "describe"}
     non_meta = {a.dest for a in parser._actions if a.dest not in meta}
-    assert non_meta <= set(cli._D_TYPE)
+    assert non_meta <= set(cli._DESCRIBED_TYPE_AND_CONSTRAINT_BY_DEST)
 
 
-def test_describe_mode_arg_error_is_error_event(capsysbinary):
-    # --describe(--machine 無し)も構造化出力モードなので、引数エラーは標準エラーでなく error
-    # イベントでストリームを終端する。
+def test_describe_without_machine_reports_arg_error_as_terminal_error_event(capsysbinary):
     rc = cli.main(["--describe", "--clean-strength", "abc"])
     assert rc == 2
     e = machine_error(capsysbinary)
     assert e["code"] == "bad_argument" and e["field"] == "--clean-strength" and e["exit_code"] == 2
 
 
-def test_machine_error_output_is_directory(tmp_path, capsysbinary):
-    # 出力先が既存ディレクトリ → output_is_directory(exit 2)。ディレクトリは --overwrite でも
-    # 書けないので、併用しても同じコードで拒否する(上書きの許可を促す案内へ落とさない)。
+def test_machine_error_output_is_directory_even_with_overwrite(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
-    _ramp_doc(src)
+    _write_center_linear_ramp(src)
     outdir = tmp_path / "outdir"
     outdir.mkdir()
     for extra in ([], ["--overwrite"]):
@@ -635,7 +598,6 @@ def test_machine_error_output_is_directory(tmp_path, capsysbinary):
 
 
 def test_machine_list_bones_ignores_output_is_directory(tmp_path, capsysbinary):
-    # --list-bones は出力を書かないので、出力先がディレクトリでも一覧を返す(検査の対象外)。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0)])
     outdir = tmp_path / "outdir"
@@ -645,10 +607,7 @@ def test_machine_list_bones_ignores_output_is_directory(tmp_path, capsysbinary):
     assert machine_events(capsysbinary)[-1]["mode"] == "list_bones"
 
 
-def test_non_machine_usage_error_is_single_error_line(capsys):
-    # 非機械モードの使用法エラーも人間向けのエラー行1行だけを出し、argparse 素の用法は出さない。
+def test_non_machine_usage_error_stderr_is_exactly_one_argparse_message_line_without_usage(capsys):
     rc = cli.main(["in.vmd", "--bogus"])
     assert rc == 2
-    # 標準エラー全体との完全一致で、物理的に1行であること・書式・argparse 生成の本文をそのまま
-    # 載せていることを同時に固定する(用法の行が混じればここで落ちる)。
     assert capsys.readouterr().err == "error: unrecognized arguments: --bogus\n"
