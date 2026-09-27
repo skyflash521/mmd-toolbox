@@ -10,15 +10,17 @@ _IDENTITY_QUAT = (0.0, 0.0, 0.0, 1.0)
 
 @dataclass
 class LocalBonePose:
+    """rotation はクォータニオンで、成分順は (x, y, z, w)。"""
+
     position: tuple[float, float, float]
-    # クォータニオンの成分順は (x, y, z, w)。
     rotation: tuple[float, float, float, float]
 
 
 @dataclass
 class WorldBonePose:
+    """rotation はクォータニオンで、成分順は (x, y, z, w)。"""
+
     position: tuple[float, float, float]
-    # クォータニオンの成分順は (x, y, z, w)。
     rotation: tuple[float, float, float, float]
 
 

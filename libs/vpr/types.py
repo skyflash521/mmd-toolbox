@@ -14,27 +14,30 @@ class VprFormatError(Exception):
 
 @dataclass
 class VprWarning:
+    """tick はプロジェクト絶対 tick(パート相対ではない)。"""
+
     code: str
     message: str
     track_index: int | None = None
     part_index: int | None = None
     note_index: int | None = None
     related_note_index: int | None = None
-    # プロジェクト絶対 tick。パート相対ではない。
     tick: int | None = None
 
 
 @dataclass
 class VibratoPoint:
-    # プロジェクト絶対 tick。ビブラート区間始端からの相対位置ではない。
+    """pos はプロジェクト絶対 tick(ビブラート区間始端からの相対位置ではない)。"""
+
     pos: int
     value: int
 
 
 @dataclass
 class NoteVibrato:
+    """duration は区間長で、単位は tick。"""
+
     type: int
-    # 区間長(tick)。
     duration: int
     depths: list[VibratoPoint] = field(default_factory=list)
     rates: list[VibratoPoint] = field(default_factory=list)
@@ -48,10 +51,10 @@ class NoteAiExpression:
 
 @dataclass
 class Note:
-    # プロジェクト絶対 tick。パート相対ではない。
+    """start_tick はプロジェクト絶対 tick(パート相対ではない)。pitch は MIDI ノート番号。"""
+
     start_tick: int
     duration_tick: int
-    # MIDI ノート番号。
     pitch: int
     lyric: str
     velocity: int
@@ -63,7 +66,8 @@ class Note:
 
 @dataclass
 class ControllerEvent:
-    # プロジェクト絶対 tick。パート相対ではない。
+    """tick はプロジェクト絶対 tick(パート相対ではない)。"""
+
     tick: int
     value: int
 
@@ -111,12 +115,12 @@ class TimeSignature:
 
 @dataclass
 class VprProject:
-    # tick/四分音符。
+    """resolution の単位は tick/四分音符。entries は Project/sequence.json を含めない。"""
+
     resolution: int
     tempos: list[TempoEvent] = field(default_factory=list)
     time_signatures: list[TimeSignature] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
     title: str = ""
     raw_sequence: dict | None = None
-    # Project/sequence.json を含めない。
     entries: dict[str, bytes] | None = None
