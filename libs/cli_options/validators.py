@@ -1,19 +1,13 @@
-"""引数値の受理範囲を1か所で決め、検証と自己記述の双方へ供給する検証子。"""
-
 import argparse
 import math
+from collections.abc import Callable, Sequence
+from typing import Literal
 
 
 class RangeValidator:
-    """範囲付きの数値引数の検証子。argparse の type と自己記述の constraint を1つの範囲から導く。
-
-    受理判定はこの範囲そのもので行うので、公開する制約と実際に通る値が別管理にならない。
-    解析できない値も自分で日本語の理由へ変換する(argparse は型が関数でないと理由の代わりに
-    オブジェクトの repr を出すため、そのままでは実行ごとに変わる文字列が報告に載る)。
-    """
-
-    def __init__(self, *, value_type, minimum=None, maximum=None, exclusive_min=False):
-        self.value_type = value_type  # "int" | "float"
+    def __init__(self, *, value_type: Literal["int", "float"], minimum=None, maximum=None,
+                 exclusive_min=False):
+        self.value_type = value_type
         self.constraint = {"min": minimum, "max": maximum, "exclusive_min": exclusive_min}
 
     def __call__(self, text):
@@ -21,8 +15,8 @@ class RangeValidator:
             value = int(text) if self.value_type == "int" else float(text)
         except ValueError:
             raise argparse.ArgumentTypeError(f"{self._unit()}が必要: {text!r}") from None
+        # NaN は大小比較がすべて偽になり、範囲判定では弾けない。
         if self.value_type == "float" and not math.isfinite(value):
-            # 無限大・非数は大小比較をすり抜けるので、範囲判定の前に弾く。
             raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
         minimum, maximum = self.constraint["min"], self.constraint["max"]
         too_small = minimum is not None and (
@@ -50,17 +44,22 @@ class RangeValidator:
 
 
 class CompoundValidator:
-    """複合トークンの引数の検証子。要素検証子の列と書式から自己記述の constraint を導く。
+    def __init__(
+        self,
+        *,
+        format: str,
+        elements: Sequence[tuple[str, RangeValidator]],
+        relation: tuple[str, Callable[[list[int | float]], bool]] | None = None,
+        separator: str = ":",
+    ):
+        """format が separator で区切って示す要素の数と並びは、elements と一致させて渡す。
 
-    要素間の関係の制約は constraint の形に載る場所が無いため、ここでは検証だけ行い公開しない
-    (利用者へは help 文で示す)。文言に引数名は入れない(argparse が理由の前へ引数名を付けるので、
-    入れると二重になる)。
-    """
-
-    def __init__(self, *, format, elements, relation=None, separator=":"):
+        relation は (違反時の理由, 判定関数)。判定関数は elements の順に並べた要素値を受け取り、成立なら真を返す。
+        relation の条件は constraint に載らないので、この検証子を使う引数の help に書く。
+        """
         self.format = format
-        self.elements = elements  # [(要素名, RangeValidator), ...]
-        self.relation = relation  # (説明, 判定関数) または None
+        self.elements = elements
+        self.relation = relation
         self.separator = separator
 
     @property
@@ -71,7 +70,8 @@ class CompoundValidator:
                        for name, element in self.elements],
         }
 
-    def __call__(self, text):
+    def __call__(self, text) -> tuple[int | float, ...]:
+        """戻り値は elements の順に並べた要素値。"""
         parts = text.split(self.separator)
         if len(parts) != len(self.elements):
             raise argparse.ArgumentTypeError(

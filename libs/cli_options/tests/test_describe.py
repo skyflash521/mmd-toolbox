@@ -1,5 +1,3 @@
-"""自己記述の options 配列の導出の単体テスト。"""
-
 import argparse
 
 from cli_options import CompoundValidator, RangeValidator, describe_options
@@ -50,10 +48,15 @@ def test_arguments_absent_from_the_table_are_excluded():
     assert "--machine" not in _by_name()
 
 
-def test_negated_form_alone_is_excluded():
-    # 否定形は肯定形と同じ格納先で、肯定形の長形式が既に載る。
+def test_negated_form_is_excluded_and_the_positive_form_keeps_its_help():
     assert "--no-trim" not in _by_name()
     assert _by_name()["--trim"]["help"] == "端を落とす"
+
+
+def test_short_form_only_option_is_excluded():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-q", dest="quiet", action="store_true")
+    assert describe_options(parser, {"quiet": ("flag", None)}) == []
 
 
 def test_positional_uses_its_destination_name():
@@ -78,10 +81,22 @@ def test_range_validator_supplies_type_and_constraint():
     assert amount["constraint"] == _UNIT_FLOAT.constraint
 
 
+def test_int_range_validator_is_typed_int():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--count", type=RangeValidator(value_type="int", minimum=1))
+    assert describe_options(parser, {"count": (None, None)})[0]["type"] == "int"
+
+
 def test_compound_validator_is_typed_as_compound():
     size = _by_name()["--size"]
     assert size["type"] == "compound"
     assert size["constraint"] == _COUNT.constraint
+
+
+def test_table_constraint_is_ignored_when_the_validator_supplies_it():
+    table = dict(_TYPE_TABLE, amount=(None, {"min": 99}))
+    amount = {o["name"]: o for o in describe_options(_parser(), table)}["--amount"]
+    assert amount["constraint"] == _UNIT_FLOAT.constraint
 
 
 def test_default_and_help_come_from_the_parser():
