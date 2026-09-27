@@ -1,11 +1,3 @@
-"""vpr→VMD 変換パイプライン(cli._build と main)の統合テスト。
-
-cli._build は vpr 解析結果(合成フィクスチャ)を入口に、トラック選択→重なり解決→口形イベント
-確定→開き量→lipsync→モーフキー生成までを束ね、main が書き込み・診断表示・警告を担う。
-vpr.read と vmd の write_file は monkeypatch で差し替え、配線と終了コードを決定論的に
-検証する。
-"""
-
 import re
 
 from vmd import read as vmd_read
@@ -13,9 +5,11 @@ from vpr import (
     ControllerCurve,
     ControllerEvent,
     Note,
+    NoteVibrato,
     Part,
     TempoEvent,
     Track,
+    VibratoPoint,
     VprFormatError,
     VprProject,
 )
@@ -45,7 +39,7 @@ def _patch_read(monkeypatch, project):
 
 def _run(monkeypatch, tmp_path, project, *args):
     src = tmp_path / "in.vpr"
-    src.write_bytes(b"")  # 存在確認を通す(内容は monkeypatch 済み read が無視)
+    src.write_bytes(b"")
     out = tmp_path / "out.vmd"
     _patch_read(monkeypatch, project)
     rc = cli.main([str(src), "-o", str(out), *args])
@@ -62,7 +56,6 @@ def _morph_names(path):
 
 
 def test_convert_single_vowel_writes_morph_vmd(monkeypatch, tmp_path):
-    # [a] 音符1つ → モーフキー VMD を出力(あ モーフを含む)。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
     assert rc == 0
     assert out.exists()
@@ -70,14 +63,12 @@ def test_convert_single_vowel_writes_morph_vmd(monkeypatch, tmp_path):
 
 
 def test_convert_default_model_name_is_tool_and_version(monkeypatch, tmp_path):
-    # --model-name 未指定時、出力VMDの model_name はツール名+実行中のバージョン。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
     assert rc == 0
     assert _read_doc(out).model_name == f"vpr2vmd {__version__}"
 
 
 def test_convert_output_has_frame0_keys_for_used_morphs(monkeypatch, tmp_path):
-    # 出力VMDは使用モーフを 0F に中立登録する(編集・MMD互換規約。ensure_frame0_neutral_keys 経由)。
     rc, out = _run(
         monkeypatch, tmp_path, _project([_note(0, 240, ["a"]), _note(480, 240, ["i"])])
     )
@@ -85,12 +76,11 @@ def test_convert_output_has_frame0_keys_for_used_morphs(monkeypatch, tmp_path):
     doc = _read_doc(out)
     used = {k.name for k in doc.morph}
     zero = {k.name for k in doc.morph if k.frame == 0}
-    assert used  # 使用モーフがある
-    assert used <= zero  # 各使用モーフに 0F キーがある
+    assert used
+    assert used <= zero
 
 
 def test_convert_cli_overrides_reach_generation_params(monkeypatch, tmp_path):
-    # CLI 調整は最終的な GenerationParams へ届く(指定フィールドを取り違えず上書き)。
     captured = {}
 
     real = cli.generate_morph_keys
@@ -114,8 +104,7 @@ def test_convert_cli_overrides_reach_generation_params(monkeypatch, tmp_path):
     )
 
 
-def test_convert_ref_bpm_override_changes_tempo_correction(monkeypatch, tmp_path):
-    # --ref-bpm はテンポ補正の入力。基準を代表BPMに合わせると s=1.0 で縮まない。
+def test_convert_ref_bpm_equal_to_song_tempo_keeps_preset_min_hold(monkeypatch, tmp_path):
     captured = {}
 
     real = cli.generate_morph_keys
@@ -128,13 +117,10 @@ def test_convert_ref_bpm_override_changes_tempo_correction(monkeypatch, tmp_path
     project = _project([_note(0, 480, ["a"])], tempos=[TempoEvent(0, 190.0)])
     rc, _out = _run(monkeypatch, tmp_path, project, "--ref-bpm", "190")
     assert rc == 0
-    # ref-bpm=190・代表BPM=190 → s=1.0。pop の min_hold 基礎値 3 のまま(既定 ref120 なら 2 へ縮む)。
     assert captured["params"].min_hold_frames == 3
 
 
 def test_convert_loudness_controller_drives_open_amount(monkeypatch, tmp_path):
-    # 声量コントローラ(dynamics)があれば velocity でなく曲線から開き量を出す。大音量の音符の開き量が
-    # 小音量より大きくなる(velocity は一様でも声量曲線で強弱が出る)。
     captured = {}
 
     real = cli.build_mouth_events
@@ -160,11 +146,10 @@ def test_convert_loudness_controller_drives_open_amount(monkeypatch, tmp_path):
     )
     rc, _out = _run(monkeypatch, tmp_path, project)
     assert rc == 0
-    assert captured["open"][0] > captured["open"][1]  # 大音量(note0) > 小音量(note1)
+    assert captured["open"][0] > captured["open"][1]
 
 
 def test_convert_tempo_scale_min_override_reaches_correction(monkeypatch, tmp_path):
-    # --tempo-scale-min はテンポ補正の下げ止まり係数として apply_tempo_correction へ届く。
     captured = {}
 
     real = cli.generate_morph_keys
@@ -177,13 +162,10 @@ def test_convert_tempo_scale_min_override_reaches_correction(monkeypatch, tmp_pa
     project = _project([_note(0, 480, ["a"])], tempos=[TempoEvent(0, 600.0)])
     rc, _out = _run(monkeypatch, tmp_path, project, "--tempo-scale-min", "0.2")
     assert rc == 0
-    # 600bpm・ref120 → 比0.2。s_min=0.2 まで下がり s=0.2、min_hold=round(3*0.2)=1(下限1)。
-    # 既定 s_min=0.5 なら s=0.5 で min_hold=2 になるので、上書きが効いていることを固定。
     assert captured["params"].min_hold_frames == 1
 
 
 def test_convert_valley_deep_above_shallow_is_arg_error(monkeypatch, tmp_path):
-    # 谷係数の下限(deep)が上限(shallow)を上回る指定は不正(pop 既定 shallow=0.45 との組み合わせ)。
     rc, _out = _run(
         monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]), "--valley-deep", "0.6"
     )
@@ -191,7 +173,6 @@ def test_convert_valley_deep_above_shallow_is_arg_error(monkeypatch, tmp_path):
 
 
 def test_convert_legato_max_override_reaches_build_mouth_events(monkeypatch, tmp_path):
-    # --legato-max は口形イベント確定段(間隙分類)の入力として渡る。
     captured = {}
 
     real = cli.build_mouth_events
@@ -207,11 +188,10 @@ def test_convert_legato_max_override_reaches_build_mouth_events(monkeypatch, tmp
 
 
 def test_convert_writes_only_morph_section(monkeypatch, tmp_path):
-    # 生成するのはモーフキーのみ。ボーン・カメラ・照明・セルフ影・IK は空。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]))
     assert rc == 0
     doc = _read_doc(out)
-    assert doc.morph  # モーフキーは生成される
+    assert doc.morph
     assert doc.bone == []
     assert doc.camera == []
     assert doc.light == []
@@ -220,7 +200,6 @@ def test_convert_writes_only_morph_section(monkeypatch, tmp_path):
 
 
 def test_convert_empty_notes_writes_empty_morph_vmd(monkeypatch, tmp_path):
-    # 採用音符列が空(発音無し)→ エラーにせず空のモーフキー VMD を出力(コード0)。
     rc, out = _run(monkeypatch, tmp_path, _project([]))
     assert rc == 0
     assert out.exists()
@@ -228,25 +207,21 @@ def test_convert_empty_notes_writes_empty_morph_vmd(monkeypatch, tmp_path):
 
 
 def test_convert_no_tracks_is_input_error(monkeypatch, tmp_path):
-    # 対象トラックが1件も無い → 入力不正(コード1)。
     rc, _ = _run(monkeypatch, tmp_path, _project([], tracks=[]))
     assert rc == 1
 
 
 def test_convert_track_index_out_of_range_is_arg_error(monkeypatch, tmp_path):
-    # --track INDEX 範囲外 → 引数エラー(コード2)。
     rc, _ = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]), "--track", "5")
     assert rc == 2
 
 
 def test_convert_track_name_no_match_is_arg_error(monkeypatch, tmp_path):
-    # --track NAME 不一致 → 引数エラー(コード2)。
     rc, _ = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]), "--track", "Nope")
     assert rc == 2
 
 
 def test_convert_vpr_format_error_is_input_error(monkeypatch, tmp_path):
-    # vpr の読み込み/形式検証失敗(非vpr 等)→ 入力不正(コード1)。
     src = tmp_path / "in.vpr"
     src.write_bytes(b"")
     out = tmp_path / "out.vmd"
@@ -259,15 +234,12 @@ def test_convert_vpr_format_error_is_input_error(monkeypatch, tmp_path):
 
 
 def test_convert_moraic_nasal_is_silence_by_default(monkeypatch, tmp_path):
-    # 既定は無音(閉口)に倒す。撥音音符単独ではモーフキーを一切出さない(「ん」不在に加え、
-    # 誤って「あ」等へ倒さないことも固定)。
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]))
     assert rc == 0
     assert _morph_names(out) == []
 
 
 def test_convert_no_n_morph_drops_n_morph(monkeypatch, tmp_path):
-    # --no-n-morph を明示しても既定(無音)と変わらない。単独撥音はモーフキーを一切出さない。
     rc, out = _run(
         monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]), "--no-n-morph"
     )
@@ -276,7 +248,6 @@ def test_convert_no_n_morph_drops_n_morph(monkeypatch, tmp_path):
 
 
 def test_convert_n_morph_flag_enables_n_morph(monkeypatch, tmp_path):
-    # --n-morph 指定時、単独撥音は「ん」モーフキーを含む。
     rc, out = _run(
         monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]), "--n-morph"
     )
@@ -285,7 +256,6 @@ def test_convert_n_morph_flag_enables_n_morph(monkeypatch, tmp_path):
 
 
 def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):
-    # 出力 VMD の書き込み失敗 → 出力書き込み失敗(コード3)。
     src = tmp_path / "in.vpr"
     src.write_bytes(b"")
     out = tmp_path / "out.vmd"
@@ -298,11 +268,7 @@ def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):
     assert cli.main([str(src), "-o", str(out)]) == 3
 
 
-# --- 診断(--dry-run) ---
-
-
 def _dry_run(monkeypatch, tmp_path, project, capsys, *args):
-    """read を差し替えて --dry-run を走らせ、(rc, stdout, stderr) を返す。"""
     src = tmp_path / "in.vpr"
     src.write_bytes(b"")
     _patch_read(monkeypatch, project)
@@ -312,12 +278,10 @@ def _dry_run(monkeypatch, tmp_path, project, capsys, *args):
 
 
 def test_dry_run_reports_adopted_event_and_morph_counts(monkeypatch, tmp_path, capsys):
-    # --dry-run は採用音符数・口形イベント数・モーフキー数を診断に出す。
     project = _project([_note(0, 240, ["a"]), _note(480, 240, ["i"])])
     rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
     assert rc == 0
     assert "採用音符数: 2" in out
-    # ラベルだけでなく件数値(正の整数)を固定する(空値・見出しのみの実装を弾く)。
     ev = re.search(r"口形イベント数:\s*(\d+)", out)
     assert ev and int(ev.group(1)) >= 1
     mk = re.search(r"モーフキー数:\s*(\d+)", out)
@@ -325,13 +289,11 @@ def test_dry_run_reports_adopted_event_and_morph_counts(monkeypatch, tmp_path, c
 
 
 def test_dry_run_reports_openness_stats(monkeypatch, tmp_path, capsys):
-    # 開き量統計(最小/最大/平均)を出す(velocity に強弱差のある2音符)。
     project = _project(
         [_note(0, 240, ["a"], velocity=40), _note(480, 240, ["i"], velocity=120)]
     )
     rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
     assert rc == 0
-    # 見出しだけでなく最小/最大/平均の3値を固定する。velocity 差があるので最小<最大。
     m = re.search(r"開き量[^\n]*?([\d.]+)\s*/\s*([\d.]+)\s*/\s*([\d.]+)", out)
     assert m, "開き量の最小/最大/平均が出ていない"
     lo, hi, avg = (float(m.group(i)) for i in (1, 2, 3))
@@ -340,8 +302,6 @@ def test_dry_run_reports_openness_stats(monkeypatch, tmp_path, capsys):
 
 
 def test_dry_run_reports_vowel_undetermined_count(monkeypatch, tmp_path, capsys):
-    # 母音が得られない音符(母音なし・撥音/促音でもない)を母音未確定として計上する。
-    # 母音音符に続けて、その他子音のみの音符(直前口形継続=母音未確定)を置く。
     project = _project([_note(0, 240, ["a"]), _note(480, 240, ["k"])])
     rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
     assert rc == 0
@@ -349,11 +309,10 @@ def test_dry_run_reports_vowel_undetermined_count(monkeypatch, tmp_path, capsys)
 
 
 def test_dry_run_reports_overlap_exclusion_and_truncation(monkeypatch, tmp_path, capsys):
-    # 同一 start の重複は除外、後続開始への切り詰めは切り詰めとして計上する。
     project = _project([
         _note(0, 480, ["a"]),
-        _note(0, 240, ["i"]),    # 同一 start → 除外1件
-        _note(480, 480, ["u"]),  # 終端960が次音符start720を越える → 切り詰め1件
+        _note(0, 240, ["i"]),
+        _note(480, 480, ["u"]),
         _note(720, 240, ["e"]),
     ])
     rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
@@ -363,9 +322,7 @@ def test_dry_run_reports_overlap_exclusion_and_truncation(monkeypatch, tmp_path,
 
 
 def test_dry_run_lists_non_event_symbols(monkeypatch, tmp_path, capsys):
-    # 自前の口形イベントを作らない記号(その他子音・未知記号)を記号種・件数で列挙する。
-    # 表明はラベルと「記号(件数)」形でパス文字列への偶発一致を避ける(単独 "k" 等は不可)。
-    project = _project([_note(0, 480, ["k", "a"])])  # k は OTHER(自前イベントを作らない)
+    project = _project([_note(0, 480, ["k", "a"])])
     rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
     assert rc == 0
     assert "イベント外記号" in out
@@ -373,14 +330,12 @@ def test_dry_run_lists_non_event_symbols(monkeypatch, tmp_path, capsys):
 
 
 def test_dry_run_empty_track_warns_on_stderr(monkeypatch, tmp_path, capsys):
-    # 採用音符列が空 → 標準エラーへ警告を出す(--dry-run でも、出力VMDは書かない・exit 0)。
     rc, _out, err = _dry_run(monkeypatch, tmp_path, _project([]), capsys)
     assert rc == 0
     assert "warning: no_adopted_notes: " in err
 
 
 def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys):
-    # 通常実行でも採用音符列が空なら標準エラーへ警告を出す(空VMD出力・exit 0)。
     rc, out = _run(monkeypatch, tmp_path, _project([]))
     assert rc == 0
     assert out.exists()
@@ -388,8 +343,28 @@ def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys
 
 
 def test_dry_run_non_event_symbols_keep_length_mark(monkeypatch, tmp_path, capsys):
-    # 診断は正規化前の生の記号で記録する(正規化後へ丸めると vpr に実際にあった記号を追えない)。
     project = _project([_note(0, 480, ["k:", "a"])])
     rc, out, _err = _dry_run(monkeypatch, tmp_path, project, capsys)
     assert rc == 0
     assert "k:(1)" in out
+
+
+def test_pitch_and_vibrato_do_not_change_output(monkeypatch, tmp_path):
+    plain = [_note(0, 480, ["a"]), _note(480, 960, ["o"])]
+    expressive = [
+        Note(start_tick=0, duration_tick=480, pitch=48, lyric="x", velocity=64, phonemes=["a"]),
+        Note(
+            start_tick=480, duration_tick=960, pitch=79, lyric="x", velocity=64, phonemes=["o"],
+            vibrato=NoteVibrato(
+                type=1, duration=960,
+                depths=[VibratoPoint(pos=480, value=100)], rates=[VibratoPoint(pos=480, value=100)],
+            ),
+        ),
+    ]
+    plain_dir = tmp_path / "plain"
+    expressive_dir = tmp_path / "expressive"
+    plain_dir.mkdir()
+    expressive_dir.mkdir()
+    _, plain_out = _run(monkeypatch, plain_dir, _project(plain))
+    _, expressive_out = _run(monkeypatch, expressive_dir, _project(expressive))
+    assert expressive_out.read_bytes() == plain_out.read_bytes()

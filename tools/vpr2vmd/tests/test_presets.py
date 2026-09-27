@@ -1,11 +1,3 @@
-"""リップモーションスタイルプリセット解決のテスト。
-
-`presets.resolve` はスタイル名と任意の上書き(--open-max/--default-open)から、開き量写像の
-パラメータ(OpennessParams)と lipsync の生成パラメータ(GenerationParams)を返す。プリセット
-具体値は presets モジュールが出発点値として持つ。default_open 既定は開き量レンジの中央 (lo+hi)/2、
---open-max は写像上限かつ lipsync の open_cap。
-"""
-
 import pytest
 
 from lipsync import GenerationParams
@@ -19,9 +11,7 @@ def test_all_styles_resolve_to_param_pair():
         op, gen = presets.resolve(style)
         assert isinstance(op, presets.OpennessParams)
         assert isinstance(gen, GenerationParams)
-        # gamma は全スタイル共通の初期値 0.6。pop 以外の設定漏れを落とす。
         assert op.gamma == 0.6
-        # --open-max 既定はそのスタイルの写像上限であり lipsync の open_cap にも渡る。
         assert gen.open_cap == op.open_max
 
 
@@ -32,11 +22,9 @@ def test_pop_openness_params():
 
 
 def test_pop_generation_params():
-    # pop は視覚チューニング(MMD目視)で定めた標準値。attack/release/min_hold は基礎値
-    # (テンポ補正はこれを別途縮める)。協調調音は広め・先行準備は緩やか・レガート谷と伸び表現を持つ。
     _, gen = presets.resolve("pop")
     assert gen.open_cap == 0.90
-    assert gen.vowel_scale == (1.30, 1.20, 1.70, 0.80, 1.70, 1.00)  # 母音別開き量(え小・う/お大)
+    assert gen.vowel_scale == (1.30, 1.20, 1.70, 0.80, 1.70, 1.00)
     assert gen.attack_frames == 2
     assert gen.release_frames == 2
     assert gen.coartic_overlap_max == 6
@@ -55,12 +43,10 @@ def test_pop_generation_params():
 
 
 def test_nonpop_presets_keep_default_continuity_params():
-    # pop 以外は連続感パラメータ(三角形下限・伸び表現・レガート谷・モーラ境界の谷)を lipsync 既定の
-    # まま据え置く。presets が明示フィールドへ移行しても既定挙動が保たれることを固定する。
     default = GenerationParams()
     for style in ("ballad", "powerful", "whisper", "rap"):
         _, gen = presets.resolve(style)
-        assert gen.vowel_scale == default.vowel_scale  # 母音別開き量は既定(全1倍)のまま
+        assert gen.vowel_scale == default.vowel_scale
         assert gen.triangle_min_frames == pytest.approx(default.triangle_min_frames)
         assert gen.vibrato_threshold == default.vibrato_threshold
         assert gen.vibrato_amp == pytest.approx(default.vibrato_amp)
@@ -105,13 +91,11 @@ def test_rap_values():
 
 
 def test_default_open_defaults_to_range_midpoint():
-    # 未指定の default_open は開き量レンジの中央 (lo+hi)/2(スタイルごと)。
     op, _ = presets.resolve("whisper")
     assert op.default_open == pytest.approx((0.10 + 0.35) / 2)
 
 
 def test_open_max_override_replaces_preset_and_open_cap():
-    # --open-max は写像上限(OpennessParams.open_max)かつ lipsync の open_cap を上書きする。
     op, gen = presets.resolve("pop", open_max=0.50)
     assert op.open_max == 0.50
     assert gen.open_cap == 0.50
