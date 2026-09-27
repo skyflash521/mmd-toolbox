@@ -1,10 +1,3 @@
-"""FK評価。
-
-VMDボーンキーを指定フレームでサンプルしてローカル姿勢を作り、PMXボーン
-階層に沿って前方運動学でワールド姿勢を評価する。IK・付与親・物理演算は
-扱わない近似FK。
-"""
-
 import math
 from dataclasses import dataclass
 
@@ -17,21 +10,20 @@ _IDENTITY_QUAT = (0.0, 0.0, 0.0, 1.0)
 
 @dataclass
 class LocalBonePose:
-    position: tuple[float, float, float]  # VMDローカル移動量
-    rotation: tuple[float, float, float, float]  # VMDローカル回転 (x,y,z,w)
+    position: tuple[float, float, float]
+    # クォータニオンの成分順は (x, y, z, w)。
+    rotation: tuple[float, float, float, float]
 
 
 @dataclass
 class WorldBonePose:
     position: tuple[float, float, float]
-    rotation: tuple[float, float, float, float]  # (x,y,z,w)
+    # クォータニオンの成分順は (x, y, z, w)。
+    rotation: tuple[float, float, float, float]
 
 
 def sample_local_poses(model, bone_tracks, frame):
-    """フレーム frame の各ボーンのローカル姿勢を返す(model.bones 順)。
-
-    キーの無いボーンは位置 (0,0,0)・単位クォータニオン。
-    """
+    """戻り値は model.bones と同じ並び。"""
     poses = []
     for bone in model.bones:
         keys = bone_tracks.get(bone.name)
@@ -65,7 +57,6 @@ def _quat_to_matrix(q) -> np.ndarray:
 
 
 def _matrix_to_quat(m) -> tuple[float, float, float, float]:
-    """回転行列からクォータニオン (x,y,z,w)(Shepperd法)。"""
     trace = m[0, 0] + m[1, 1] + m[2, 2]
     if trace > 0.0:
         s = math.sqrt(trace + 1.0) * 2
@@ -95,12 +86,7 @@ def _matrix_to_quat(m) -> tuple[float, float, float, float]:
 
 
 def evaluate_fk(model, local_poses):
-    """ローカル姿勢列から各ボーンのワールド姿勢を評価する。
-
-    world = parent_world * translate(base_offset + 移動量) * rotate(回転量)
-    親なしボーンはモデル原点を親とする。親が子より後ろのindexでも解決できる
-    ようワールド行列をメモ化再帰で求める。
-    """
+    """local_poses と戻り値はどちらも model.bones と同じ並び。"""
     bones = model.bones
     world_mats: list[np.ndarray | None] = [None] * len(bones)
 
@@ -154,7 +140,6 @@ def evaluate_fk(model, local_poses):
 
 
 def evaluate_fk_range(model, bone_tracks, frames):
-    """frames の各フレームについて FK 評価結果を順に返す。"""
     return [
         evaluate_fk(model, sample_local_poses(model, bone_tracks, f))
         for f in frames

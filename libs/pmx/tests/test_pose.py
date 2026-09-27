@@ -1,9 +1,3 @@
-"""FK評価のテスト。
-
-PmxModel/PmxBone はデータモデルを直接組み立て、BoneKey のトラックを与えて
-ローカル姿勢サンプリングと前方運動学を検証する。
-"""
-
 import math
 
 import pytest
@@ -16,14 +10,8 @@ from pmx.pose import (
 from pmx.types import PmxBone, PmxModel
 from vmd.types import BoneKey
 
-# Z軸まわり90度のクォータニオン (x,y,z,w)
 _SIN45 = math.sin(math.pi / 4)
-_RZ90 = (0.0, 0.0, _SIN45, _SIN45)
-
-
-# ---------------------------------------------------------------------------
-# データ構築ヘルパ
-# ---------------------------------------------------------------------------
+_ROT_Z_90 = (0.0, 0.0, _SIN45, _SIN45)
 
 
 def _bone(
@@ -65,18 +53,13 @@ def _approx_vec(v):
     return pytest.approx(v, abs=1e-6)
 
 
-# ---------------------------------------------------------------------------
-# sample_local_poses
-# ---------------------------------------------------------------------------
-
-
 def test_sample_uses_vmd_values():
     model = _model([_bone("P")])
-    tracks = {"P": [_key("P", position=(1.0, 2.0, 3.0), rotation=_RZ90)]}
+    tracks = {"P": [_key("P", position=(1.0, 2.0, 3.0), rotation=_ROT_Z_90)]}
     poses = sample_local_poses(model, tracks, 0)
     assert len(poses) == 1
     assert poses[0].position == _approx_vec((1.0, 2.0, 3.0))
-    assert poses[0].rotation == _approx_vec(_RZ90)
+    assert poses[0].rotation == _approx_vec(_ROT_Z_90)
 
 
 def test_sample_missing_bone_is_base_pose():
@@ -88,16 +71,10 @@ def test_sample_missing_bone_is_base_pose():
     assert poses[1].rotation == _approx_vec((0.0, 0.0, 0.0, 1.0))
 
 
-# ---------------------------------------------------------------------------
-# evaluate_fk
-# ---------------------------------------------------------------------------
-
-
 def test_parent_rotation_moves_child_world_position():
     model = _model([_bone("P"), _bone("C", parent=0, position=(1.0, 0.0, 0.0))])
-    tracks = {"P": [_key("P", rotation=_RZ90)]}
+    tracks = {"P": [_key("P", rotation=_ROT_Z_90)]}
     world = evaluate_fk(model, sample_local_poses(model, tracks, 0))
-    # 親をZ90回転 → 子(基準オフセット (1,0,0))はワールドで (0,1,0)
     assert world[0].position == _approx_vec((0.0, 0.0, 0.0))
     assert world[1].position == _approx_vec((0.0, 1.0, 0.0))
 
@@ -110,10 +87,25 @@ def test_ancestor_rotation_propagates_to_descendant():
             _bone("C", parent=1, position=(2.0, 0.0, 0.0)),
         ]
     )
-    tracks = {"A": [_key("A", rotation=_RZ90)]}
+    tracks = {"A": [_key("A", rotation=_ROT_Z_90)]}
     world = evaluate_fk(model, sample_local_poses(model, tracks, 0))
     assert world[1].position == _approx_vec((0.0, 1.0, 0.0))
     assert world[2].position == _approx_vec((0.0, 2.0, 0.0))
+
+
+def test_parent_placed_after_child_is_resolved():
+    model = _model([_bone("C", parent=1, position=(1.0, 0.0, 0.0)), _bone("P")])
+    tracks = {"P": [_key("P", rotation=_ROT_Z_90)]}
+    world = evaluate_fk(model, sample_local_poses(model, tracks, 0))
+    assert world[0].position == _approx_vec((0.0, 1.0, 0.0))
+
+
+def test_non_unit_quaternion_is_normalized_before_applying():
+    model = _model([_bone("P"), _bone("C", parent=0, position=(1.0, 0.0, 0.0))])
+    scaled = tuple(3.0 * c for c in _ROT_Z_90)
+    tracks = {"P": [_key("P", rotation=scaled)]}
+    world = evaluate_fk(model, sample_local_poses(model, tracks, 0))
+    assert world[1].position == _approx_vec((0.0, 1.0, 0.0))
 
 
 def test_immovable_bone_ignores_vmd_position():
@@ -130,9 +122,8 @@ def test_unrotatable_bone_ignores_vmd_rotation():
             _bone("C", parent=0, position=(1.0, 0.0, 0.0)),
         ]
     )
-    tracks = {"P": [_key("P", rotation=_RZ90)]}
+    tracks = {"P": [_key("P", rotation=_ROT_Z_90)]}
     world = evaluate_fk(model, sample_local_poses(model, tracks, 0))
-    # 親の回転が無視されるので子は回らない
     assert world[1].position == _approx_vec((1.0, 0.0, 0.0))
 
 
@@ -143,16 +134,10 @@ def test_missing_keys_give_base_pose():
     assert world[1].rotation == _approx_vec((0.0, 0.0, 0.0, 1.0))
 
 
-def test_root_has_no_parent_uses_origin():
+def test_root_without_parent_is_placed_at_its_base_position():
     model = _model([_bone("R", position=(2.0, 1.0, 0.0))])
     world = evaluate_fk(model, sample_local_poses(model, {}, 0))
-    # 親なしボーンはモデル原点を親とする → 基準位置がそのままワールド
     assert world[0].position == _approx_vec((2.0, 1.0, 0.0))
-
-
-# ---------------------------------------------------------------------------
-# evaluate_fk_range
-# ---------------------------------------------------------------------------
 
 
 def test_fk_range_is_per_frame_and_deterministic():
@@ -169,7 +154,6 @@ def test_fk_range_is_per_frame_and_deterministic():
     assert len(result) == 3
     for f in (0, 1, 2):
         assert result[f][0].position == _approx_vec((float(f), 0.0, 0.0))
-    # 決定論性
     assert evaluate_fk_range(model, tracks, frames)[1][0].position == _approx_vec(
         (1.0, 0.0, 0.0)
     )
