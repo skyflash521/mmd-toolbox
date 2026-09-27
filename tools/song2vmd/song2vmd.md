@@ -184,7 +184,7 @@ song2vmd INPUT [options]
 | `--overwrite` | off | 出力先の既存ファイルへの上書きを許可する(上書きガードの解除。[§5.3](#53-入出力要件)) |
 | `--model-name NAME` | `song2vmd <実行中のツールバージョン>`(例: `song2vmd 1.2.3`) | VMDに格納するモデル名(最大20バイト, Shift-JIS) |
 | `--style NAME` | `pop` | 歌い方スタイルプリセット([§8.1](#81-歌い方スタイルプリセット))。開き量レンジ・タイミングを切り替える |
-| 音声前段の共通引数群 | 共有側の既定 | ボーカル分離の実施方針・分離バックエンド・内容認識モデルとそのリビジョン・内容認識のリトライ・強制アライメント段・SOFA 設定・英語カタカナ化フォールバックの方式・実行デバイス・長尺の自動分割の目標長を選ぶ共通引数群を**全件公開する**。個々の引数名・型・既定・意味と組み合わせ検証は [vocal_analysis_cli.md §2](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#2-共通引数群)・[§3](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#3-組み合わせ検証) が定める |
+| 音声前段の共通引数群 | 共有側の既定 | ボーカル分離の実施方針・分離バックエンド・内容認識モデルとそのリビジョン・内容認識のリトライ・強制アライメント段・SOFA 設定・英語カタカナ化フォールバックの方式・実行デバイス・長尺の自動分割の目標長を選ぶ共通引数群を**全件公開する**。個々の引数名・型・既定・意味と組み合わせ検証は [vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md) が定める |
 | `--n-morph` | off(既定は閉口) | 撥音(音節末の鼻音)に「ん」モーフ(`MouthShape.N`)を使う(既定off。[§6.3](#63-口形イベント列の確定入口))。既定offの明示形 `--no-n-morph` も受理する |
 | `--vowel-gain a:i:u:e:o` | `1:1:1:1:1` | 母音別(あ/い/う/え/お)の開き量微調整倍率。プリセットの母音別倍率([§8.1](#81-歌い方スタイルプリセット))へ要素ごとに乗算する(既定はプリセット値そのまま。プリセット非依存の共通既定)。「ん」はプリセット値のままで本引数の対象外([§8.2](#82-母音口形母音合成プロファイルは-lipsync-が確定)) |
 | `--open-max V` | プリセット値([§8.1](#81-歌い方スタイルプリセット)) | 口の開き量の上限(開けすぎ防止) |
@@ -281,7 +281,7 @@ argparse の型検証と自己記述の制約公開の双方を導く([cli_optio
   `missing_dependency`・終了コード4で返す([§11](#11-終了コード))。非機械モードは標準エラーへの1行、機械モードは
   error イベント([§12.3](#123-構造化エラー))で、他の失敗と同じ経路に載せる。トレースバックは出さない。理由1行の
   組み立てと、ガードをどの時点で評価するかは共有側
-  ([vocal_analysis_cli.md §5](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#5-追加依存の未導入))が定める。
+  ([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))が定める。
   どの取り込みが追加依存を要するかの宣言と、ガードの評価そのものは `song2vmd` が持つ。
 - 上の評価位置の帰結として、メタ操作(`--help`/`--version`/`--describe`。[§5.5](#55-機械モードとメタ操作機械可読インターフェース))と引数エラーは
   追加依存の有無に依らず成立し、それぞれ規約が定める終了コード(メタ操作は0、引数エラーは2)で終わる。
@@ -946,7 +946,7 @@ MMD上の視覚確認で調整する。特に開き量レンジ・最小保持�
 GPU を使えない構成の2警告 `cpu_only_torch`・`cuda_unavailable`([§6.9](#69-gpu-を使えない構成の警告))。
 
 後ろの4件は、成立条件と追加で持つ観測値のキーを
-[cli_resource_watch.md §2](../../libs/cli_resource_watch/cli_resource_watch.md#2-資源逼迫の観測)・[§3](../../libs/cli_resource_watch/cli_resource_watch.md#3-gpu-を使えない実行構成の判定)
+[cli_resource_watch.md](../../libs/cli_resource_watch/cli_resource_watch.md)
 が定める。`song2vmd` は判定が返した観測値をそのまま warning イベントへ載せる。
 
 その他の警告は実装で[§12](#12-機械モード機械可読インターフェース)へ追記して増やす(追加は後方互換。規約 [§4.1](../../docs/conventions/cli-interface.md#41-イベント契約の進化と前方互換))。
@@ -979,10 +979,10 @@ GPU を使えない構成の2警告 `cpu_only_torch`・`cuda_unavailable`([§6.9
 ### 12.2 `--describe` の中身
 
 `options` は**処理を駆動する引数**の配列(本書 [§5.2](#52-オプション)が挙げる `song2vmd` 固有引数と、そこで公開すると
-宣言した共通引数群([vocal_analysis_cli.md §2](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#2-共通引数群))の全引数の
+宣言した共通引数群([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))の全引数の
 うち、メタ/モード操作 `--describe`/`--version`/`--help`/`--machine` を除く全引数)。**配列の要素が持つキー・
 名前の採り方・掲載対象・検証子からの型と制約の導出は共有側が定める**
-([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。本書は `song2vmd` 固有引数が
+([cli_options.md](../../libs/cli_options/cli_options.md))。本書は `song2vmd` 固有引数が
 そこで何を持つかだけを述べる(共通引数群の分は共有側の型情報が与える)。
 
 - `type`: `song2vmd` が型表で与えるのは `"str"` / `"flag"`(真偽)/ `"enum"`(選択肢)の3つで、検証子を
@@ -1009,7 +1009,7 @@ GPU を使えない構成の2警告 `cpu_only_torch`・`cuda_unavailable`([§6.9
 |---|---|---|---|
 | 入力ファイルが存在しない、または音声として読み込めない・破損(利用可能な復号経路で試みて失敗した) | `not_audio` | `"input"` | 1 |
 | 内部生成ファイル(分離後ボーカルWAV)の読み直しに失敗した | `not_audio` | `null`(+ `path` に対象ファイル) | 1 |
-| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。共通引数群の組み合わせ検証([vocal_analysis_cli.md §3](../../libs/vocal_analysis_cli/vocal_analysis_cli.md#3-組み合わせ検証))も含む | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は共有側が返す対象引数の長形式フラグ名 | 2 |
+| 未知オプション・型/範囲エラー・positional 欠落等(argparse 検出)。共通引数群の組み合わせ検証([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))も含む | `bad_argument` | argparse が示す引数名(オプションは長形式フラグ名、positional は `"input"`)。組み合わせ検証は共有側が返す対象引数の長形式フラグ名 | 2 |
 | 出力先が既存のディレクトリ(`--overwrite` の有無に依らない。[§5.3](#53-入出力要件)) | `output_is_directory` | `"--output"`(+ `path`) | 2 |
 | 出力先に既存ファイルがある・`--overwrite` 未指定([§5.3](#53-入出力要件)) | `output_exists` | `"--output"` | 2 |
 | 出力書き込み失敗、または `--keep-intermediate` 指定時の中間生成物書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"` または `"--keep-intermediate"`(+ `path`) | 3 |
@@ -1044,6 +1044,6 @@ GPU を使えない構成の2警告 `cpu_only_torch`・`cuda_unavailable`([§6.9
   **機械モード**では `cancelled` の error イベントを標準出力へ出してストリームを終端し、**非機械モード**では
   標準出力に JSON を出さず中断理由を標準エラーへ1行出す。どちらも終了コード `130` を返す。
 - **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
-  扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
+  扱う。橋渡しの要否・実装は共有基盤([cli_events.md](../../libs/cli_events/cli_events.md))が正。
 - 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める
   終端保証の例外の 1 つ)。原子性により中途半端な出力は残らない。

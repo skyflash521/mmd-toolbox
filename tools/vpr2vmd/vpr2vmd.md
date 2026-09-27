@@ -381,7 +381,7 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
 
 `options` は処理を駆動する引数の配列(メタ/モード操作 `--describe`/`--version`/`--help`/`--machine` は
 含めない)。**配列の要素が持つキー・名前の採り方・掲載対象・検証子からの型と制約の導出は共有側が定める**
-([cli_options.md §4](../../libs/cli_options/cli_options.md#4-自己記述の-options-配列の導出))。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、
+([cli_options.md](../../libs/cli_options/cli_options.md))。各要素は `{name, type, constraint, default, help}`(キーは常に 5 つ、
 該当しない値は `null`)。`type` は固定語彙 `"float"`/`"int"`/`"str"`/`"flag"`/`"enum"`。数値の `constraint` は
 `{min, max, exclusive_min}` の 3 キー常設(上限が無ければ `max:null`)、`enum` は `{choices:[...]}`、
 `flag`/`str` は `null`(`--model-name` の cp932・20 バイト制約と `--track` の INDEX/NAME 二義は
@@ -442,7 +442,7 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
   内部エラーへは回さない(パスの存在も読み込み可否も入力の問題であり、規約
   [§5](../../docs/conventions/cli-interface.md#5-エラーと終了コード) が入力不正と定めている)。
 - 構造化出力モードの argparse エラーは `bad_argument` イベントへ振り替える。`field` の抽出規則は
-  [cli_events.md §4](../../libs/cli_events/cli_events.md#4-argparse-エラー変換ヘルパ) が正。
+  [cli_events.md](../../libs/cli_events/cli_events.md) が正。
 - `internal_error` は CLI 本体の全体をトップレベルで捕捉して畳む。`KeyboardInterrupt` は内部エラーで
   なく中断(`cancelled`/130)として手前で分岐する([§7.5](#75-中断と出力の原子性))。
 
@@ -454,6 +454,6 @@ progress イベント・`--quiet` は導入しない(将来重い段が生じた
   error イベントでストリームを終端、それ以外では理由を標準エラーへ 1 行出し、どちらも終了コード 130
   で終える(`vpr2vmd` は単一プロセスで走り、子プロセスは持たない)。
 - **Windows**: `CTRL_BREAK_EVENT` も上の `KeyboardInterrupt` 捕捉経路へ橋渡しし、`cancelled`/`130` として
-  扱う。橋渡しの要否・実装は共有基盤([cli_events.md §5](../../libs/cli_events/cli_events.md#5-中断シグナルの橋渡し))が正。
+  扱う。橋渡しの要否・実装は共有基盤([cli_events.md](../../libs/cli_events/cli_events.md))が正。
 - 呼び出し側がプロセスを強制終了した場合は終端イベントを出せないまま途切れる(規約 [§4](../../docs/conventions/cli-interface.md#4-イベントストリーム標準出力) が定める
   終端保証の例外の 1 つ。規約 [§8](../../docs/conventions/cli-interface.md#8-キャンセルと出力の原子性))。出力の原子性により中途半端な出力ファイルは残らない。
