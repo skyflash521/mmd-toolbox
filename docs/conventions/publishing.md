@@ -36,7 +36,7 @@
    - 対象ツールの概要節(目的・最小コマンド・要点)。
    - [README.md リポジトリ構成](../../README.md#リポジトリ構成)には行を追加しない。
    - 依存・開発環境に対象ツール固有の事項があれば反映(無ければ変更不要)。
-4. 対象ツールの仕様書を公開水準に点検する: 目的・非目標・CLI仕様・既知の制約が現実装と整合するか。共有規約 artifact-hygiene(harness の flow プラグイン同梱)の作業過程参照の混入禁止の節に当たる記述が残っていれば除去。共有規約 document-authoring(harness の flow プラグイン同梱)の恒久仕様書の記述範囲の節の観点でロールアウト過程が残っていないかも点検。→ 共有規約 cross-references(harness の flow プラグイン同梱)・[terminology.md](terminology.md) の観点で参照の記法・用語規約を直接確認。
+4. 対象ツールの仕様書を公開水準に点検する: 記述が現実装と整合するか。共有規約 artifact-hygiene(harness の flow プラグイン同梱)の作業過程参照の混入禁止の節に当たる記述が残っていれば除去。共有規約 document-authoring(harness の flow プラグイン同梱)の恒久仕様書の記述範囲の節の観点でロールアウト過程が残っていないかも点検。→ 共有規約 cross-references(harness の flow プラグイン同梱)・[terminology.md](terminology.md) の観点で参照の記法・用語規約を直接確認。
 
 ## D. リリース確定
 
