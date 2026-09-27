@@ -1,9 +1,6 @@
-"""節参照 `§N` と裸の `.md` パス参照が平文で残っていないかを検査する。
+"""検証手順の節参照検査として起動するコマンドラインスクリプト。
 
-Markdownリンクとして書かれた参照は lychee がリンク切れを検査できるが、平文表記(そもそも
-リンクでない)は lychee の検査対象外のため、この再発防止チェッカーで別途検査する。
-節参照は必ず `[表示](path.md#アンカー)`、ファイル相互参照は必ず `[表示](path.md)` として
-書く決まりへの適合を機械的に確認する。違反があればファイル:行を列挙して終了コード1で終わる。
+違反はファイル:行とともに標準出力へ列挙して終了コード1で終わり、違反が無ければ0で終わる。
 """
 import re
 import subprocess
@@ -35,8 +32,6 @@ def line_of(text: str, pos: int) -> int:
 
 
 def strip_frontmatter(text: str) -> str:
-    """先頭のYAML frontmatter(--- ... ---)はMarkdown本文でなく描画もされないため検査対象外とする。
-    行番号を保つため、除いた分を同じ行数の空行に置き換える(削除はしない)。"""
     m = FRONTMATTER_RE.match(text)
     if not m:
         return text
@@ -71,11 +66,11 @@ def check_section_tokens(rel_path: str, text: str, exception_pos: int | None) ->
         if exception_pos is not None and start == exception_pos:
             continue
         if covering(start, 2) is not None:
-            continue  # URL内は対象外(既存リンクとして正当)
+            continue
         text_link = covering(start, 1)
         if text_link is not None:
             if '#' in text_link.group(2):
-                continue  # 表示テキスト内・アンカー付きは正当
+                continue
             violations.append(
                 f'{rel_path}:{line_of(text, start)}: 節参照 {m.group(0)!r} を含むリンクにアンカー(#)が無い'
             )
@@ -108,8 +103,6 @@ def check_bare_md(rel_path: str, text: str) -> list[str]:
         prefix = text[line_start:start]
         if '<' in prefix and prefix.count('<') > prefix.count('>'):
             continue
-        # `<ツール>/x.md` の `>` 直後、`*/SKILL.md` の `*` 直後はプレースホルダー・globパターンの
-        # 断片であり実ファイルではないため対象外とする
         if start > 0 and text[start - 1] in ('>', '*'):
             continue
         violations.append(f'{rel_path}:{line_of(text, start)}: 裸の.md参照 {m.group(0)!r} がリンク化されていない')

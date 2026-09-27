@@ -1,12 +1,9 @@
-"""song2vpr が出力した vpr を、人が作った正解 vpr 由来の基準で機械検査する。
+"""実素材を使う人手検査で起動するコマンドラインスクリプト。
 
 使い方: python scripts/check_vpr_output.py <検査対象.vpr> <正解.vpr> [<正解.vpr> ...]
 
-検査項目は5つ。音符が重ならない・長さ0の音符が無い(いずれも song2vpr 仕様の不変条件)、
-表示歌詞を持つ音符の長さが正解の最短を下回らない・切れ目なく続く並びの1モーラあたりの長さが
-正解の最短を下回らない・継続の音符の割合が正解の最大値の1.5倍を超えない(基準は引数の正解から
-毎回算出し、固定値をここに書かない)。違反は編集器の表示に合わせた1始まりの小節番号とともに
-列挙して終了コード1で終わる。違反が無ければ何も出力しない。
+違反は1件1行で標準出力へ出し、音符・並びに対する違反の行は「小節<N>: 」で始まる。違反があれば
+終了コード1、無ければ何も出力せず0、引数が足りなければ2で終わる。
 """
 
 from __future__ import annotations
@@ -18,35 +15,28 @@ from pathlib import Path
 
 try:
     from vpr import TimeSignature, read
-except ImportError:  # 単体起動ではリポジトリの libs を import パスへ足す
+except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs"))
     from vpr import TimeSignature, read
 
-# 「等しい値は合格」を浮動小数点の丸めで壊さないための許容差。
 _EPSILON = 1e-9
 
 
 @dataclass
 class Thresholds:
-    """正解 vpr から算出した基準。"""
-
-    min_lyric_note_sec: float  # 表示歌詞を持つ音符の長さの下限(秒)
-    min_mora_sec: float  # 切れ目なく続く並びの1モーラあたりの長さの下限(秒)
-    max_continuation_ratio: float  # 継続の音符の割合の上限(正解の最大値の1.5倍)
+    min_lyric_note_sec: float
+    min_mora_sec: float
+    max_continuation_ratio: float
 
 
 @dataclass
 class Violation:
     kind: str
-    measure: int | None  # 1始まりの小節番号。曲全体の性質の違反では None
+    measure: int | None
     message: str
 
 
 def seconds_at(tick, tempos, resolution):
-    """テンポイベント列に沿って tick を秒へ区分的に換算する。
-
-    先頭イベントより前の tick は先頭イベントのテンポで換算する。
-    """
     events = sorted(tempos, key=lambda e: e.tick)
     if not events:
         raise ValueError("テンポイベントがありません")
@@ -66,11 +56,10 @@ def seconds_at(tick, tempos, resolution):
 
 
 def measure_number(tick, time_signatures, resolution):
-    """拍子イベント列に沿って、1始まりの小節番号(編集器の表示)を求める。"""
     events = sorted(time_signatures, key=lambda e: e.tick)
     if not events:
         events = [TimeSignature(tick=0, numerator=4, denominator=4)]
-    segments = []  # (開始tick, 分子, 分母)。同一 tick は後のイベントで上書き
+    segments = []
     for event in events:
         t = max(event.tick, 0)
         if segments and segments[-1][0] == t:
@@ -85,8 +74,7 @@ def measure_number(tick, time_signatures, resolution):
         ticks_per_measure = resolution * 4 * numerator / denominator
         end = segments[i + 1][0] if i + 1 < len(segments) else None
         if end is not None and end <= tick:
-            # 拍子の変わり目までの小節数。端数の小節は1小節として数える
-            # (編集器は変わり目から新しい小節を始める)。
+            # 編集器は拍子の変わり目から新しい小節を始める。
             measures += max(1, math.ceil((end - start) / ticks_per_measure - _EPSILON))
             continue
         return measures + int((tick - start) // ticks_per_measure) + 1
@@ -104,7 +92,6 @@ def _has_lyric(note):
 
 
 def _runs(notes):
-    """前の音符の終端と次の音符の開始が一致して続く並びへ分ける。"""
     runs = []
     for note in sorted(notes, key=lambda n: n.start_tick):
         if runs and runs[-1][-1].start_tick + runs[-1][-1].duration_tick == note.start_tick:
@@ -115,7 +102,6 @@ def _runs(notes):
 
 
 def _lyric_note_secs(project):
-    """表示歌詞を持つ各音符の長さ(秒)と開始 tick。"""
     values = []
     for part in _iter_parts(project):
         for note in part.notes:
@@ -129,11 +115,6 @@ def _lyric_note_secs(project):
 
 
 def _mora_run_secs(project):
-    """切れ目なく続く各並びの1モーラあたりの長さ(秒)と開始 tick。
-
-    1モーラあたりの長さは、並びの全長を並びの中の表示歌詞を持つ音符の数で割った値。
-    表示歌詞を持つ音符の無い並びは対象にしない。
-    """
     values = []
     for part in _iter_parts(project):
         for run in _runs(part.notes):
@@ -148,7 +129,6 @@ def _mora_run_secs(project):
 
 
 def _continuation_ratio(project):
-    """継続の音符(表示歌詞が「-」)の全音符に対する割合。音符が無ければ 0。"""
     total = 0
     continuation = 0
     for part in _iter_parts(project):
@@ -160,7 +140,6 @@ def _continuation_ratio(project):
 
 
 def compute_thresholds(references):
-    """正解 vpr の列から基準を算出する。長さ系は正解ごとの最短の最小、割合は最大の1.5倍。"""
     lyric_mins = []
     mora_mins = []
     ratios = []
@@ -182,7 +161,6 @@ def compute_thresholds(references):
 
 
 def check_project(project, thresholds):
-    """検査対象の vpr を基準と突き合わせ、違反を列挙する。"""
     violations = []
 
     def measure_of(tick):
@@ -190,10 +168,9 @@ def check_project(project, thresholds):
 
     for part in _iter_parts(project):
         notes = sorted(part.notes, key=lambda n: n.start_tick)
-        reach = 0  # ここまでに見た発音区間の終端の最大
+        furthest_end = 0
         for i, note in enumerate(notes):
-            # 長さ0の音符の発音区間は空なので重なりにならない(長さ0は別の違反として報告する)。
-            if i > 0 and note.duration_tick > 0 and note.start_tick < reach:
+            if i > 0 and note.duration_tick > 0 and note.start_tick < furthest_end:
                 violations.append(
                     Violation(
                         kind="overlap",
@@ -201,7 +178,7 @@ def check_project(project, thresholds):
                         message="音符が重なっている",
                     )
                 )
-            reach = max(reach, note.start_tick + note.duration_tick)
+            furthest_end = max(furthest_end, note.start_tick + note.duration_tick)
             if note.duration_tick <= 0:
                 violations.append(
                     Violation(
