@@ -264,10 +264,9 @@ vpr2vmd <入力ファイル名>.vpr
 | lychee | ドキュメントのリンク検査 | pip では入らないため各自で導入する。設定は [lychee.toml](lychee.toml) |
 | ruff | Python コードの静的検査 | 開発依存として導入される。設定は [pyproject.toml](pyproject.toml) |
 
-`numpy`・`scipy`(実行時依存)と `pytest`・`ruff`(開発依存)は `pip install -e ".[dev,vocal-analysis]"` で導入される。
-`song2vmd`(音声認識・ボーカル分離を使う)のテスト実行には、追加で `vocal-analysis` extra
-(`torch`・`transformers`・`pyopenjtalk-plus`等)が要る。開発環境構築では両方合わせて
-`pip install -e ".[dev,vocal-analysis]"` を使う。
+`song2vmd`(音声認識・ボーカル分離を使う)のテスト実行には、開発依存(`pytest`・`ruff`・`rumdl`)に加えて
+`vocal-analysis` extra(`torch`・`transformers`・`pyopenjtalk-plus`等)が要る。どちらも[環境構築](#環境構築)の
+手順で実行時依存とあわせて導入される。
 
 ### 環境構築
 
