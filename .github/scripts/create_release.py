@@ -1,7 +1,6 @@
-"""タグ push から GitHub Release を作成する。
+"""タグ push で CI が走らせる GitHub Release 作成スクリプト。
 
-タグ名 <ツール>/v<バージョン> を受け取り、tools/<ツール>/CHANGELOG.md から該当バージョンの節を抽出して
-Release の本文にする。形式逸脱・節なしの場合は失敗し、Release を作らない。
+引数はタグ名 <ツール>/v<バージョン>。失敗時は Release を作らず非 0 で終わる。
 """
 import subprocess
 import sys
@@ -16,7 +15,6 @@ def main() -> None:
     if not tool or not version:
         sys.exit(f"タグ名が <構成要素>/v<バージョン> の形式でない: {tag}")
     if not (Path("tools") / tool / "README.md").exists():
-        # 公開CLIツール以外の構成要素のタグ。Release は公開ツールのみ作る。
         print(f"{tag} は公開CLIツールのタグでないため Release を作らない")
         return
     changelog = Path("tools") / tool / "CHANGELOG.md"

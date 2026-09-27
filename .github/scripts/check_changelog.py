@@ -1,10 +1,4 @@
-"""PR 時に CHANGELOG を検査する。
-
-常に全公開ツールの CHANGELOG の形式を検査する。さらに main 宛ての PR では、リリース対象
-(main と比べて __version__ が変わった公開ツール。複数可)ごとに、その後のタグ push で
-Release 本文を抽出できること(該当バージョンの節が先頭にある)を検査する。失敗は exit 1。
-公開ツール = tools/<ツール>/ に利用者向け README.md を持つツール。
-"""
+"""PR で CI が走らせる CHANGELOG 検査スクリプト。不合格なら終了コード 1。"""
 import argparse
 import re
 import subprocess
@@ -52,7 +46,7 @@ def main() -> None:
                 failures.append(f"tools/{tool}/__init__.py から __version__ を読めない")
                 continue
             if version == version_on_main(tool):
-                continue  # バージョンが変わっていない = このPRのリリース対象でない
+                continue
             changelog = Path("tools") / tool / "CHANGELOG.md"
             sections = all_sections.get(tool)
             if sections is None:

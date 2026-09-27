@@ -39,7 +39,6 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      # 版の境界は pyproject.toml の dev extra が正本。ここで版を指定すると宣言が二重になる。
       - name: Install
         run: pip install -e ".[dev]"
 
@@ -57,8 +56,6 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      # rumdl は GitHub Action としても配布されているが、それを使うと版の宣言が
-      # pyproject.toml の dev extra と二重になるため、ruff と同じく pip で入れる。
       - name: Install
         run: pip install -e ".[dev]"
 
