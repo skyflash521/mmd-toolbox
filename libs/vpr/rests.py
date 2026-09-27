@@ -1,14 +1,8 @@
-"""休符導出。
-
-休符は同一トラック内の発音区間 [start_tick, start_tick + duration_tick) の和集合の補集合として
-観測する。隣接差分でなく和集合の補集合とすることで、区間が重なっても偽の休符を作らない。
-"""
-
 from .types import Note
 
 
 def rest_intervals(notes: list[Note], end_tick: int) -> list[tuple[int, int]]:
-    """[0, end_tick) のうち発音区間の和集合の補集合(休符)を、(開始, 終了)の昇順で返す。"""
+    """戻り値は [0, end_tick) 内の休符区間 (開始 tick, 終了 tick) を開始の昇順に並べたもの。"""
     sounds = []
     for note in notes:
         start = max(note.start_tick, 0)

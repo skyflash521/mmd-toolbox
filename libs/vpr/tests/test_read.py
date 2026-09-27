@@ -1,17 +1,12 @@
-"""vpr read のテスト。
-
-テスト用 vpr は最小の sequence.json を zip 化してテスト内で合成する(実素材に依存しない)。
-"""
-
 import io
 import json
+import math
 import zipfile
 
 import pytest
 
 
 def _make_vpr(sequence: dict) -> bytes:
-    """sequence.json を Project/sequence.json として持つ最小の vpr(zip)を組み立てる。"""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("Project/sequence.json", json.dumps(sequence, ensure_ascii=False))
@@ -103,7 +98,6 @@ def test_read_timesig_bar_zero_maps_to_tick_zero():
 def test_read_timesig_nonzero_bar_maps_to_tick():
     from vpr import read
 
-    # bar 0 は 4/4(1小節 = 4 * 480 = 1920 tick)。bar 1 の拍子変更は tick 1920 に写る。
     events = [{"bar": 0, "numer": 4, "denom": 4}, {"bar": 1, "numer": 3, "denom": 4}]
     project, _ = read(_make_vpr(_sequence([_singing_track([])], timesig_events=events)))
     mapped = [(t.tick, t.numerator, t.denominator) for t in project.time_signatures]
@@ -113,7 +107,6 @@ def test_read_timesig_nonzero_bar_maps_to_tick():
 def test_read_timesig_first_event_after_bar_zero_uses_default_4_4():
     from vpr import read
 
-    # 最初の拍子イベントが bar>0 のとき、その前の小節は既定 4/4(1小節=1920 tick)で積算する。
     events = [{"bar": 2, "numer": 4, "denom": 4}]
     project, _ = read(_make_vpr(_sequence([_singing_track([])], timesig_events=events)))
     assert [(t.tick, t.numerator, t.denominator) for t in project.time_signatures] == [(3840, 4, 4)]
@@ -122,8 +115,6 @@ def test_read_timesig_first_event_after_bar_zero_uses_default_4_4():
 def test_read_timesig_accumulates_nonuniform_bar_lengths():
     from vpr import read
 
-    # bar 0・1 は 3/4(1小節 = 3 * 480 = 1440 tick)。bar 2 の拍子変更は tick 2880(= 1440 * 2)に写る。
-    # 先行小節長を積算するので「常に bar * 1920」では誤りになる。
     events = [{"bar": 0, "numer": 3, "denom": 4}, {"bar": 2, "numer": 4, "denom": 4}]
     project, _ = read(_make_vpr(_sequence([_singing_track([])], timesig_events=events)))
     mapped = [(t.tick, t.numerator, t.denominator) for t in project.time_signatures]
@@ -150,7 +141,6 @@ def test_read_absolutizes_note_start_with_part_pos():
     from vpr import read
 
     notes = [_note(pos=480, duration=240, number=60, lyric="ら", phoneme="r a", velocity=64)]
-    # パート相対の note.pos を part.pos 加算で絶対化する(1920 + 480 = 2400)。
     track = _singing_track(notes, part_pos=1920, part_duration=2400)
     project, _ = read(_make_vpr(_sequence([track])))
     part = project.tracks[0].parts[0]
@@ -187,7 +177,6 @@ def test_read_maps_is_protected(stored, expected):
 def test_read_missing_is_protected_is_false():
     from vpr import read
 
-    # 形式が省略可と定めるフィールドで、欠落時は偽として扱う。
     notes = [_note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64)]
     project, _ = read(_make_vpr(_sequence([_singing_track(notes)])))
     assert project.tracks[0].parts[0].notes[0].is_protected is False
@@ -197,7 +186,6 @@ def test_read_missing_is_protected_is_false():
 def test_read_non_boolean_is_protected_is_false_without_error(stored):
     from vpr import read
 
-    # 現在読める vpr が読めなくなることを避ける寛容規則。型不正を構造異常にしない。
     note = _note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64)
     note["isProtected"] = stored
     project, warnings = read(_make_vpr(_sequence([_singing_track([note])])))
@@ -208,7 +196,6 @@ def test_read_non_boolean_is_protected_is_false_without_error(stored):
 def test_read_notes_sorted_by_start_tick():
     from vpr import read
 
-    # 入力順が start_tick 昇順でなくても、モデルは昇順で返す。
     notes = [
         _note(pos=960, duration=240, number=62, lyric="そ", phoneme="s o", velocity=64),
         _note(pos=480, duration=240, number=60, lyric="ら", phoneme="r a", velocity=64),
@@ -224,7 +211,6 @@ def test_read_excludes_audio_track():
     audio_track = {"type": 1, "name": "audio", "parts": [{"name": "a", "pos": 0, "wav": {}, "region": {}}]}
     seq = _sequence([_singing_track([]), audio_track])
     project, _ = read(_make_vpr(seq))
-    # 歌唱トラック(type 2)のみがデータモデルに現れる。
     assert [t.name for t in project.tracks] == ["vocal"]
 
 
@@ -233,7 +219,6 @@ def test_read_extracts_all_singing_tracks():
 
     seq = _sequence([_singing_track([], name="vocal1"), _singing_track([], name="vocal2")])
     project, _ = read(_make_vpr(seq))
-    # type=2 のトラックは全件抽出する。
     assert [t.name for t in project.tracks] == ["vocal1", "vocal2"]
 
 
@@ -249,7 +234,6 @@ def test_read_extracts_all_parts_in_track():
         ],
     }
     project, _ = read(_make_vpr(_sequence([track])))
-    # 1トラック内のパートは全件抽出する。
     assert [p.name for p in project.tracks[0].parts] == ["p1", "p2"]
     assert [p.start_tick for p in project.tracks[0].parts] == [0, 1920]
 
@@ -266,11 +250,7 @@ def test_read_accepts_bytes_str_and_path(tmp_path):
     assert from_bytes.resolution == from_path.resolution == from_str.resolution == 480
 
 
-# --- 構造異常(VprFormatError)と許容入力 ---
-
-
 def _zip_with(entries: dict) -> bytes:
-    """{エントリ名: 文字列} を持つ最小の zip を組み立てる(壊れた sequence.json 等の合成用)。"""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, content in entries.items():
@@ -302,7 +282,6 @@ def test_read_raises_format_error_on_invalid_json():
 def test_read_raises_format_error_on_invalid_utf8_sequence_json():
     from vpr import VprFormatError, read
 
-    # sequence.json が UTF-8 として復号できない。
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("Project/sequence.json", b"\x80\x81\x82\xff")
@@ -331,7 +310,6 @@ def test_read_raises_format_error_on_missing_tracks():
 def test_read_raises_format_error_on_malformed_tempo_event():
     from vpr import VprFormatError, read
 
-    # TempoEvent を構築するための必須キー(value)が無い。
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -340,7 +318,6 @@ def test_read_raises_format_error_on_malformed_tempo_event():
 def test_read_raises_format_error_on_tempo_event_type_error():
     from vpr import VprFormatError, read
 
-    # value が数値でない(bpm 構築で型不正)。
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0, "value": "fast"}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -349,7 +326,6 @@ def test_read_raises_format_error_on_tempo_event_type_error():
 def test_read_raises_format_error_on_malformed_timesig_event():
     from vpr import VprFormatError, read
 
-    # TimeSignature を構築するための必須キー(numer)が無い。
     seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "denom": 4}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -358,7 +334,6 @@ def test_read_raises_format_error_on_malformed_timesig_event():
 def test_read_raises_format_error_on_timesig_event_type_error():
     from vpr import VprFormatError, read
 
-    # denom が数値でない(小節長 tick 構築で型不正)。
     seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "numer": 4, "denom": "x"}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -380,7 +355,6 @@ def test_read_format_error_carries_locator():
     del note["number"]
     with pytest.raises(VprFormatError) as exc:
         read(_make_vpr(_sequence([_singing_track([note])])))
-    # 原因特定のためのロケータ(JSON パスと欠落キー)を持つ。
     assert exc.value.path is not None
     assert exc.value.key == "number"
 
@@ -388,7 +362,6 @@ def test_read_format_error_carries_locator():
 def test_read_raises_format_error_on_missing_track_name():
     from vpr import VprFormatError, read
 
-    # 歌唱トラックの公開モデル対象フィールド(name)が欠落。
     track = {"type": 2, "parts": [{"name": "p", "pos": 0, "duration": 1920, "notes": []}]}
     with pytest.raises(VprFormatError):
         read(_make_vpr(_sequence([track])))
@@ -397,7 +370,6 @@ def test_read_raises_format_error_on_missing_track_name():
 def test_read_raises_format_error_on_missing_part_pos():
     from vpr import VprFormatError, read
 
-    # パートの公開モデル対象フィールド(pos)が欠落。
     track = {"type": 2, "name": "vocal", "parts": [{"name": "p", "duration": 1920, "notes": []}]}
     with pytest.raises(VprFormatError):
         read(_make_vpr(_sequence([track])))
@@ -406,7 +378,6 @@ def test_read_raises_format_error_on_missing_part_pos():
 def test_read_raises_format_error_on_note_field_type_error():
     from vpr import VprFormatError, read
 
-    # 音符の公開モデル対象フィールド(number)の型が不正。ロケータは欠落キーを指す。
     note = _note(pos=0, duration=240, number="x", lyric="あ", phoneme="a", velocity=64)
     with pytest.raises(VprFormatError) as exc:
         read(_make_vpr(_sequence([_singing_track([note])])))
@@ -416,7 +387,6 @@ def test_read_raises_format_error_on_note_field_type_error():
 def test_read_raises_format_error_on_bool_as_int_field():
     from vpr import VprFormatError, read
 
-    # JSON の bool は int フィールドの型不正(bool は int のサブクラスだが値として不正)。
     seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "numer": 4, "denom": False}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -425,7 +395,6 @@ def test_read_raises_format_error_on_bool_as_int_field():
 def test_read_raises_format_error_on_tempo_pos_type_error():
     from vpr import VprFormatError, read
 
-    # tempo event の pos が整数でない。
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": "zero", "value": 12000}])
     with pytest.raises(VprFormatError):
         read(_make_vpr(seq))
@@ -434,7 +403,6 @@ def test_read_raises_format_error_on_tempo_pos_type_error():
 def test_read_raises_format_error_on_non_list_tempo_events():
     from vpr import VprFormatError, read
 
-    # tempo.events が配列でない(null)場合、生の TypeError を漏らさず VprFormatError。
     seq = _sequence([_singing_track([])])
     seq["masterTrack"]["tempo"]["events"] = None
     with pytest.raises(VprFormatError):
@@ -444,7 +412,6 @@ def test_read_raises_format_error_on_non_list_tempo_events():
 def test_read_raises_format_error_on_non_list_parts():
     from vpr import VprFormatError, read
 
-    # 歌唱トラックの parts が配列でない(null)場合も VprFormatError。
     track = {"type": 2, "name": "vocal", "parts": None}
     with pytest.raises(VprFormatError):
         read(_make_vpr(_sequence([track])))
@@ -453,7 +420,6 @@ def test_read_raises_format_error_on_non_list_parts():
 def test_read_tolerates_missing_notes_as_empty_part():
     from vpr import read
 
-    # 歌唱パートに notes が無い場合は空の音符列として扱う(エラーにしない)。
     track = {"type": 2, "name": "vocal", "parts": [{"name": "p", "pos": 0, "duration": 1920}]}
     project, _ = read(_make_vpr(_sequence([track])))
     assert project.tracks[0].parts[0].notes == []
@@ -462,20 +428,15 @@ def test_read_tolerates_missing_notes_as_empty_part():
 def test_read_tolerates_unknown_top_level_keys():
     from vpr import read
 
-    # 公開データモデル対象外の未知キーが存在しても read は失敗しない。
     seq = _sequence([_singing_track([])])
     seq["someUnknownKey"] = {"x": 1}
     project, _ = read(_make_vpr(seq))
     assert project.resolution == 480
 
 
-# --- 発音区間の重なり警告(VprWarning) ---
-
-
 def test_read_warns_on_overlapping_notes_in_part():
     from vpr import read
 
-    # 同一パート内で発音区間が重なる2音符([0,480) と [240,720))。
     notes = [
         _note(pos=0, duration=480, number=60, lyric="あ", phoneme="a", velocity=64),
         _note(pos=240, duration=480, number=62, lyric="い", phoneme="i", velocity=64),
@@ -484,7 +445,7 @@ def test_read_warns_on_overlapping_notes_in_part():
     assert [w.code for w in warnings] == ["overlapping_notes"]
 
 
-def test_read_overlap_warning_carries_locator():
+def test_read_overlap_warning_locates_the_pair_and_the_overlap_start():
     from vpr import read
 
     notes = [
@@ -497,13 +458,12 @@ def test_read_overlap_warning_carries_locator():
     assert w.part_index == 0
     assert w.note_index == 0
     assert w.related_note_index == 1
-    assert w.tick == 240  # 重なり開始位置(後続音符の開始)
+    assert w.tick == 240
 
 
 def test_read_warns_once_per_overlapping_pair():
     from vpr import read
 
-    # 独立した2組の重なり([0,480)&[240,500)、[1000,1480)&[1200,1500))→ ペアごとに1件。
     notes = [
         _note(pos=0, duration=480, number=60, lyric="あ", phoneme="a", velocity=64),
         _note(pos=240, duration=260, number=62, lyric="い", phoneme="i", velocity=64),
@@ -517,8 +477,6 @@ def test_read_warns_once_per_overlapping_pair():
 def test_read_warns_for_all_overlapping_pairs():
     from vpr import read
 
-    # 3音符が相互に重なる([0,1000)・[240,480)・[300,600))→ ペア (0,1)(0,2)(1,2) の3件。
-    # 最大終端の先行音符だけを見ると (1,2) を取りこぼすため、全ペアを報告することを検証する。
     notes = [
         _note(pos=0, duration=1000, number=60, lyric="あ", phoneme="a", velocity=64),
         _note(pos=240, duration=240, number=62, lyric="い", phoneme="i", velocity=64),
@@ -543,7 +501,6 @@ def test_read_no_warning_for_non_overlapping_notes():
 def test_read_no_warning_for_adjacent_notes():
     from vpr import read
 
-    # 隣接(前音符の終端 == 次音符の開始)は半開区間 [start, start+dur) では重ならない。
     notes = [
         _note(pos=0, duration=480, number=60, lyric="あ", phoneme="a", velocity=64),
         _note(pos=480, duration=480, number=62, lyric="い", phoneme="i", velocity=64),
@@ -555,7 +512,6 @@ def test_read_no_warning_for_adjacent_notes():
 def test_read_no_overlap_warning_across_parts():
     from vpr import read
 
-    # クロスパートの重なりは初期スコープ外(検出は同一パート内のみ)。
     track = {
         "type": 2,
         "name": "vocal",
@@ -568,13 +524,9 @@ def test_read_no_overlap_warning_across_parts():
     assert warnings == []
 
 
-# --- 未解釈データのロスレス保持(raw_sequence) ---
-
-
 def test_read_retains_raw_sequence():
     from vpr import read
 
-    # read は Project/sequence.json 全体を raw_sequence に保持する。
     seq = _sequence([_singing_track([])])
     project, _ = read(_make_vpr(seq))
     assert project.raw_sequence == seq
@@ -583,7 +535,6 @@ def test_read_retains_raw_sequence():
 def test_raw_sequence_retains_uninterpreted_data():
     from vpr import read
 
-    # 公開データモデルに写像しないトップレベルキーも raw_sequence に保持される。
     seq = _sequence([_singing_track([])])
     seq["customField"] = {"keep": [1, 2, 3]}
     project, _ = read(_make_vpr(seq))
@@ -593,7 +544,6 @@ def test_raw_sequence_retains_uninterpreted_data():
 def test_raw_sequence_retains_audio_track_excluded_from_model():
     from vpr import read
 
-    # オーディオトラックは公開モデル(tracks)に現れないが raw_sequence には保持される。
     audio = {"type": 1, "name": "audio", "parts": [{"name": "a", "pos": 0, "wav": {}, "region": {}}]}
     seq = _sequence([_singing_track([], name="vocal"), audio])
     project, _ = read(_make_vpr(seq))
@@ -604,7 +554,6 @@ def test_raw_sequence_retains_audio_track_excluded_from_model():
 def test_vprproject_raw_sequence_defaults_to_none():
     from vpr import VprProject
 
-    # 手組みの VprProject(read を介さない)は raw_sequence を持たない(既定 None)。
     project = VprProject(resolution=480)
     assert project.raw_sequence is None
 
@@ -626,7 +575,6 @@ def _singing_track_with_controllers(notes, controllers, part_pos=0, part_duratio
 
 
 def test_controllers_extracted_with_absolute_tick():
-    # コントローラ曲線を生値で抽出し、events の pos に part 開始位置を加算して絶対 tick 化する。
     from vpr import read
 
     controllers = [{"name": "dynamics", "events": [{"pos": 100, "value": 64}, {"pos": 300, "value": 90}]}]
@@ -639,7 +587,6 @@ def test_controllers_extracted_with_absolute_tick():
 
 
 def test_controllers_default_empty_when_absent():
-    # controllers キーが無いパートは空リスト(欠落は許容)。
     from vpr import read
 
     project, _ = read(_make_vpr(_sequence([_singing_track([])])))
@@ -647,7 +594,6 @@ def test_controllers_default_empty_when_absent():
 
 
 def test_controller_events_sorted_by_tick():
-    # events は tick 昇順に整列する(ファイル順に依存しない)。
     from vpr import read
 
     controllers = [{"name": "dynamics", "events": [{"pos": 300, "value": 90}, {"pos": 100, "value": 64}]}]
@@ -657,7 +603,6 @@ def test_controller_events_sorted_by_tick():
 
 
 def test_multiple_controllers_all_preserved_in_order():
-    # 声量以外も含め全コントローラを生値で公開する(選別は呼び出し側)。
     from vpr import read
 
     controllers = [
@@ -671,7 +616,6 @@ def test_multiple_controllers_all_preserved_in_order():
 
 
 def test_controller_event_missing_value_is_format_error():
-    # events の必須キー(value)欠落は構造異常。
     from vpr import VprFormatError, read
 
     controllers = [{"name": "dynamics", "events": [{"pos": 0}]}]
@@ -679,13 +623,9 @@ def test_controller_event_missing_value_is_format_error():
         read(_make_vpr(_sequence([_singing_track_with_controllers([], controllers)])))
 
 
-# --- テンポマップの条件(read が返す VprProject の条件)---
-
-
 def test_read_raises_format_error_on_empty_tempo_events():
     from vpr import VprFormatError, read
 
-    # テンポマップが空だと tick を時刻へ写せない。ロケータでイベント配列そのものを指す。
     seq = _sequence([_singing_track([])], tempo_events=[])
     with pytest.raises(VprFormatError) as exc:
         read(_make_vpr(seq))
@@ -696,8 +636,7 @@ def test_read_raises_format_error_on_empty_tempo_events():
 
 
 @pytest.mark.parametrize("raw", [0, -12000, float("nan"), float("inf"), float("-inf")])
-def test_read_raises_format_error_on_non_positive_finite_bpm(raw):
-    # BPM が正の有限値でない(0・負・非有限)。非有限値は型不正ではなく本条件の違反として報告する。
+def test_read_raises_format_error_on_bpm_that_is_not_positive_and_finite(raw):
     from vpr import VprFormatError, read
 
     seq = _sequence([_singing_track([])],
@@ -705,24 +644,20 @@ def test_read_raises_format_error_on_non_positive_finite_bpm(raw):
     with pytest.raises(VprFormatError) as exc:
         read(_make_vpr(seq))
     e = exc.value
-    assert e.path == "masterTrack.tempo.events[1]"  # 該当イベントを添字で一意に指す
+    assert e.path == "masterTrack.tempo.events[1]"
     assert e.key == "value"
-    if raw == raw:  # NaN は自身と等しくないので値の比較は有限値のときだけ行う
-        assert e.value == raw
+    if math.isnan(raw):
+        assert math.isnan(e.value)
     else:
-        assert e.value != e.value
+        assert e.value == raw
 
 
 def test_read_accepts_fractional_tempo_value():
-    # 生の値の型検査は数値までで、形式仕様が整数と定めることを理由に小数を型不正としない。
     from vpr import read
 
     seq = _sequence([_singing_track([])], tempo_events=[{"pos": 0, "value": 12050.5}])
     project, _ = read(_make_vpr(seq))
     assert project.tempos[0].bpm == 120.505
-
-
-# --- 書き利用のために新たに読むキー -------------------------------------------
 
 
 def _vibrato_note(vibrato, pos=0, duration=480):
@@ -732,7 +667,6 @@ def _vibrato_note(vibrato, pos=0, duration=480):
 
 
 def test_read_maps_vibrato_points_to_absolute_ticks():
-    # 格納値は区間始端からの相対位置なので、区間始端(音符終端 − 区間長)を足して絶対 tick で公開する。
     from vpr import read
 
     seq = _sequence([_singing_track([_vibrato_note(
@@ -746,15 +680,14 @@ def test_read_maps_vibrato_points_to_absolute_ticks():
 
 
 @pytest.mark.parametrize("vibrato", [
-    {"type": 0, "duration": 0},  # 区間長 0 はビブラート無し
-    {"type": 0, "duration": -240},  # 区間始端が音符の開始前になる区間は形式が持たない
-    {"type": 0},  # 必須キーの欠落
-    {"type": 0, "duration": "240"},  # 型不正
-    {"type": 0, "duration": 240, "depths": [{"pos": 0}]},  # 制御点の欠落
-    "vibrato",  # 構造自体が違う
+    pytest.param({"type": 0, "duration": 0}, id="zero_duration_means_no_vibrato"),
+    pytest.param({"type": 0, "duration": -240}, id="negative_duration"),
+    pytest.param({"type": 0}, id="missing_duration"),
+    pytest.param({"type": 0, "duration": "240"}, id="non_integer_duration"),
+    pytest.param({"type": 0, "duration": 240, "depths": [{"pos": 0}]}, id="point_without_value"),
+    pytest.param("vibrato", id="not_an_object"),
 ])
 def test_read_maps_unusable_vibrato_to_none(vibrato):
-    # 書き利用のために新たに読むキーは、写せなければ読みを失敗させず None にする。
     from vpr import read
 
     project, _ = read(_make_vpr(_sequence([_singing_track([_vibrato_note(vibrato)])])))
@@ -762,10 +695,10 @@ def test_read_maps_unusable_vibrato_to_none(vibrato):
 
 
 @pytest.mark.parametrize("expression", [
-    {"vibratoLeadingDepth": 0.25},  # 片方だけ
-    {"vibratoLeadingDepth": 0.25, "vibratoFollowingDepth": True},  # 真偽値は数値として通さない
-    {},
-    "aiExp",
+    pytest.param({"vibratoLeadingDepth": 0.25}, id="only_one_depth"),
+    pytest.param({"vibratoLeadingDepth": 0.25, "vibratoFollowingDepth": True}, id="boolean_depth"),
+    pytest.param({}, id="no_depths"),
+    pytest.param("aiExp", id="not_an_object"),
 ])
 def test_read_maps_unusable_depth_envelope_to_none(expression):
     from vpr import read
@@ -786,8 +719,7 @@ def test_read_maps_missing_part_duration_and_title_to_defaults():
     assert project.tracks[0].parts[0].duration_tick == 0
 
 
-def test_read_raises_format_error_on_a_time_signature_without_a_bar_length():
-    # 分母 0 は小節長を定義できない。ゼロ除算で落とさず構造化エラーで返す。
+def test_read_raises_format_error_on_zero_time_signature_denominator():
     from vpr import VprFormatError, read
 
     seq = _sequence([_singing_track([])], timesig_events=[{"bar": 0, "numer": 4, "denom": 0}])
@@ -795,3 +727,85 @@ def test_read_raises_format_error_on_a_time_signature_without_a_bar_length():
         read(_make_vpr(seq))
     assert exc.value.key == "denom"
     assert exc.value.path == "masterTrack.timeSig.events[0]"
+
+
+@pytest.mark.parametrize("field", ["pos", "duration", "number", "lyric", "phoneme", "velocity"])
+def test_read_raises_format_error_on_each_missing_required_note_field(field):
+    from vpr import VprFormatError, read
+
+    note = _note(pos=0, duration=240, number=60, lyric="あ", phoneme="a", velocity=64)
+    del note[field]
+    with pytest.raises(VprFormatError) as exc:
+        read(_make_vpr(_sequence([_singing_track([note])])))
+    assert exc.value.key == field
+
+
+def test_read_maps_non_string_title_to_empty():
+    from vpr import read
+
+    seq = _sequence([_singing_track([])])
+    seq["title"] = 1
+    project, _ = read(_make_vpr(seq))
+    assert project.title == ""
+
+
+def test_read_resolves_part_voice_from_voice_definitions():
+    from vpr import VoiceBank, read
+
+    seq = _sequence([_singing_track([])])
+    seq["voices"] = [{"compID": "TESTCOMPID000001", "name": "TEST_VOICE"}]
+    seq["tracks"][0]["parts"][0]["aiVoice"] = {"compID": "TESTCOMPID000001"}
+    project, _ = read(_make_vpr(seq))
+    assert project.tracks[0].parts[0].voice == VoiceBank(comp_id="TESTCOMPID000001",
+                                                         name="TEST_VOICE")
+
+
+def test_read_maps_voice_reference_without_definition_to_none():
+    from vpr import read
+
+    seq = _sequence([_singing_track([])])
+    seq["tracks"][0]["parts"][0]["aiVoice"] = {"compID": "TESTCOMPID000001"}
+    project, _ = read(_make_vpr(seq))
+    assert project.tracks[0].parts[0].voice is None
+
+
+def test_read_raises_format_error_on_voices_that_is_not_a_list():
+    from vpr import VprFormatError, read
+
+    seq = _sequence([_singing_track([])])
+    seq["voices"] = 5
+    seq["tracks"][0]["parts"][0]["aiVoice"] = {"compID": "TESTCOMPID000001"}
+    with pytest.raises(VprFormatError) as exc:
+        read(_make_vpr(seq))
+    assert exc.value.key == "voices"
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param("x", id="string"),
+        pytest.param(1.5, id="float"),
+        pytest.param(True, id="bool"),
+    ],
+)
+def test_read_maps_part_duration_that_is_missing_or_not_an_integer_to_zero(stored):
+    from vpr import read
+
+    seq = _sequence([_singing_track([])])
+    part = seq["tracks"][0]["parts"][0]
+    if stored is None:
+        del part["duration"]
+    else:
+        part["duration"] = stored
+    project, _ = read(_make_vpr(seq))
+    assert project.tracks[0].parts[0].duration_tick == 0
+
+
+def test_read_keeps_zip_entries_other_than_sequence_json():
+    from vpr import read
+
+    data = _zip_with({"Project/sequence.json": json.dumps(_sequence([_singing_track([])])),
+                      "Project/Audio/x.wav": "RIFF"})
+    project, _ = read(data)
+    assert project.entries == {"Project/Audio/x.wav": b"RIFF"}

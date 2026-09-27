@@ -1,9 +1,3 @@
-"""vpr write のテスト。
-
-読みと同じく、テスト用 vpr は最小の sequence.json を zip 化してテスト内で合成する
-(実素材に依存しない)。
-"""
-
 import io
 import json
 import zipfile
@@ -67,7 +61,6 @@ def _raw_note(pos, duration, number, lyric, phoneme, velocity):
 
 
 def _project(notes=None, *, title="song", voice=None, parts=None):
-    """手組みのプロジェクト(raw_sequence を持たない)。"""
     part = Part(name="p", start_tick=0, duration_tick=1920, voice=voice,
                 notes=notes if notes is not None else [])
     return VprProject(
@@ -90,16 +83,11 @@ def _read_back(data):
 
 
 def _sequence_of(data) -> dict:
-    """書き出した vpr の sequence.json を辞書で返す。"""
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         return json.loads(z.read("Project/sequence.json"))
 
 
-# --- 往復(手組みのプロジェクト)---------------------------------------------
-
-
 def test_round_trip_keeps_the_public_model():
-    """書いた vpr を読み戻すと、raw_sequence を除いて同じ公開モデルが得られる。"""
     source = _project([_note(0, 480, 60, "あ"), _note(480, 240, 62, "い")])
     result = _read_back(write(source))
 
@@ -133,17 +121,11 @@ def test_round_trip_keeps_is_protected(is_protected):
 
 @pytest.mark.parametrize("is_protected", [True, False])
 def test_is_protected_is_written_as_the_format_field(is_protected):
-    """公開モデルの値が、形式の音符フィールドとして真偽値で載る。
-
-    偽も検査するのは、真のときだけ書く実装を許さないため(往復だけでは、書かずに欠落させても
-    読みが偽へ倒すので通ってしまう)。
-    """
     written = _sequence_of(write(_project([_note(is_protected=is_protected)])))
     assert written["tracks"][0]["parts"][0]["notes"][0]["isProtected"] is is_protected
 
 
 def test_is_protected_cleared_by_the_caller_overwrites_the_raw_value():
-    """読んだ真を公開モデルで偽にしたら、書き出しも偽になる(読み書きが対称)。"""
     raw = _raw_note(0, 480, 60, "か", "k a", 64)
     raw["isProtected"] = True
     project = _read_back(_make_vpr(_sequence([_singing_track([raw])])))
@@ -164,10 +146,10 @@ def test_round_trip_keeps_the_controllers():
 
 
 @pytest.mark.parametrize("vibrato", [
-    None,
-    NoteVibrato(type=0, duration=240),  # 自動化曲線を持たないビブラート(実 vpr にある形)
-    NoteVibrato(type=0, duration=240, depths=[VibratoPoint(pos=240, value=64)],
-                rates=[VibratoPoint(pos=240, value=70)]),
+    pytest.param(None, id="none"),
+    pytest.param(NoteVibrato(type=0, duration=240), id="without_curves"),
+    pytest.param(NoteVibrato(type=0, duration=240, depths=[VibratoPoint(pos=240, value=64)],
+                             rates=[VibratoPoint(pos=240, value=70)]), id="with_curves"),
 ])
 def test_round_trip_keeps_the_vibrato(vibrato):
     result = _read_back(write(_project([_note(vibrato=vibrato)])))
@@ -175,10 +157,9 @@ def test_round_trip_keeps_the_vibrato(vibrato):
 
 
 def test_vibrato_points_are_written_relative_to_the_span_start():
-    """公開モデルは絶対 tick で持ち、格納は区間始端からの相対位置にする。"""
     note = _note(960, 480, vibrato=NoteVibrato(
         type=0, duration=240, depths=[VibratoPoint(pos=1200, value=64)],
-        rates=[VibratoPoint(pos=1320, value=70)]))  # 区間始端 = 960 + 480 − 240
+        rates=[VibratoPoint(pos=1320, value=70)]))
     raw = _sequence_of(write(_project([note])))["tracks"][0]["parts"][0]["notes"][0]["vibrato"]
     assert [p["pos"] for p in raw["depths"]] == [0]
     assert [p["pos"] for p in raw["rates"]] == [120]
@@ -189,7 +170,6 @@ def test_vibrato_points_are_written_relative_to_the_span_start():
     NoteAiExpression(vibrato_leading_depth=0.25, vibrato_following_depth=0.75),
 ])
 def test_round_trip_keeps_the_depth_envelope(expression):
-    """読みが立てた音符には書きが同じ2つの値を戻し、None の音符へ値を作らない。"""
     result = _read_back(write(_project([_note(ai_expression=expression)])))
     assert result.tracks[0].parts[0].notes[0].ai_expression == expression
 
@@ -199,11 +179,7 @@ def test_round_trip_keeps_the_voice_bank():
     assert _read_back(write(_project([_note()], voice=voice))).tracks[0].parts[0].voice == voice
 
 
-# --- 往復(読んだ vpr を無加工で書き戻す)-------------------------------------
-
-
 def test_unparsed_keys_survive_a_round_trip():
-    """公開モデルへ写さないキーは、読んで書き戻しても失われない。"""
     sequence = _sequence([_singing_track([_raw_note(0, 480, 60, "あ", "a", 64)])])
     sequence["masterTrack"]["loop"] = {"isEnabled": False, "begin": 0, "end": 7680}
     sequence["tracks"][0]["color"] = 7
@@ -215,7 +191,6 @@ def test_unparsed_keys_survive_a_round_trip():
 
 
 def test_audio_tracks_survive_a_round_trip():
-    """公開モデルが持たないトラックも、読んで書き戻すと残る。"""
     audio = {"type": 1, "name": "audio",
              "parts": [{"name": "a", "pos": 0, "wav": {"name": "x.wav"}, "region": {}}]}
     sequence = _sequence([audio, _singing_track([_raw_note(0, 480, 60, "あ", "a", 64)])])
@@ -227,7 +202,6 @@ def test_audio_tracks_survive_a_round_trip():
 
 
 def test_other_zip_entries_survive_a_round_trip():
-    """sequence.json 以外のエントリ(波形データ等)も書き戻す。"""
     sequence = _sequence([_singing_track([])])
     written = write(_read_back(_make_vpr(sequence, entries={"Project/Audio/x.wav": b"RIFF...."})))
     with zipfile.ZipFile(io.BytesIO(written)) as z:
@@ -235,7 +209,6 @@ def test_other_zip_entries_survive_a_round_trip():
 
 
 def test_note_added_to_a_read_project_is_written():
-    """読んだプロジェクトへ音符を足しても書ける(生の配列より公開モデルが多い場合)。"""
     sequence = _sequence([_singing_track([_raw_note(0, 480, 60, "あ", "a", 64)])])
     project = _read_back(_make_vpr(sequence))
     project.tracks[0].parts[0].notes.append(_note(480, 240, 62, "い"))
@@ -245,7 +218,6 @@ def test_note_added_to_a_read_project_is_written():
 
 
 def test_note_removed_from_a_read_project_is_dropped():
-    """生の配列より公開モデルが少ない場合、余った生の要素は消える。"""
     sequence = _sequence([_singing_track([_raw_note(0, 480, 60, "あ", "a", 64),
                                           _raw_note(480, 240, 62, "い", "i", 64)])])
     project = _read_back(_make_vpr(sequence))
@@ -255,11 +227,7 @@ def test_note_removed_from_a_read_project_is_dropped():
     assert [(n.start_tick, n.pitch) for n in result.tracks[0].parts[0].notes] == [(0, 60)]
 
 
-# --- ボイスバンクの解決 ------------------------------------------------------
-
-
 def test_voice_bank_definition_is_added_when_missing():
-    """指定したボイスバンクの定義が無ければ足す(参照切れの vpr を書かない)。"""
     voice = VoiceBank(comp_id="TESTCOMPID000001", name="TEST_VOICE")
     written = write(_project([_note()], voice=voice))
     result = _sequence_of(written)
@@ -267,8 +235,15 @@ def test_voice_bank_definition_is_added_when_missing():
     assert result["tracks"][0]["parts"][0]["aiVoice"]["compID"] == "TESTCOMPID000001"
 
 
+def test_raw_voices_that_is_not_a_list_is_replaced_by_the_used_definitions():
+    voice = VoiceBank(comp_id="TESTCOMPID000001", name="TEST_VOICE")
+    project = _project([_note()], voice=voice)
+    project.raw_sequence = {"voices": 5}
+    result = _sequence_of(write(project))
+    assert result["voices"] == [{"compID": "TESTCOMPID000001", "name": "TEST_VOICE"}]
+
+
 def test_existing_voice_bank_definition_is_not_replaced():
-    """同じ識別子の定義が既にあれば、生の定義を置き換えない。"""
     voices = [{"compID": "TESTCOMPID000001", "name": "ORIGINAL_NAME", "extra": 1}]
     sequence = _sequence([_singing_track([], comp_id="TESTCOMPID000001")], voices=voices)
     project = _read_back(_make_vpr(sequence))
@@ -277,10 +252,9 @@ def test_existing_voice_bank_definition_is_not_replaced():
     assert result["voices"] == voices
 
 
-def test_every_part_voice_reference_resolves():
-    """書き出した vpr では、全パートのボイスバンク参照が定義のいずれかに解決する。"""
+def test_every_part_voice_reference_resolves_when_a_singing_track_is_added():
     audio = {"type": 1, "name": "audio", "parts": [{"name": "a", "pos": 0, "wav": {}, "region": {}}]}
-    sequence = _sequence([audio])  # 歌唱トラックを持たない vpr
+    sequence = _sequence([audio])
     project = _read_back(_make_vpr(sequence))
     project.tracks.append(Track(name="vocal", parts=[
         Part(name="p", start_tick=0, duration_tick=1920,
@@ -294,15 +268,11 @@ def test_every_part_voice_reference_resolves():
                 assert part["aiVoice"]["compID"] in defined
 
 
-# --- 写せなかった生の値の扱い --------------------------------------------------
-
-
 def _raw_note_of(data):
     return _sequence_of(data)["tracks"][0]["parts"][0]["notes"][0]
 
 
-def test_vibrato_cleared_by_the_caller_is_written_as_a_zero_length_span():
-    """公開モデルで消したビブラートは、形式がビブラート無しを表す区間長 0 で書く。"""
+def test_vibrato_cleared_by_the_caller_is_written_as_a_zero_length_span_keeping_unparsed_keys():
     raw = _raw_note(0, 480, 60, "あ", "a", 64)
     raw["vibrato"] = {"type": 0, "duration": 240, "depths": [{"pos": 0, "value": 64}], "hint": 1}
     project = _read_back(_make_vpr(_sequence([_singing_track([raw])])))
@@ -310,13 +280,12 @@ def test_vibrato_cleared_by_the_caller_is_written_as_a_zero_length_span():
 
     written = _raw_note_of(write(project))["vibrato"]
     assert written["duration"] == 0
-    assert written["hint"] == 1  # 未解釈キーは消さない
+    assert written["hint"] == 1
     assert _read_back(write(project)).tracks[0].parts[0].notes[0].vibrato is None
 
 
 @pytest.mark.parametrize("vibrato", [{"type": 0}, {"type": 0, "duration": "240"}])
 def test_vibrato_the_reader_could_not_map_is_left_untouched(vibrato):
-    """読みが写せなかった構造は、公開モデルが空でもそのまま残す。"""
     raw = _raw_note(0, 480, 60, "あ", "a", 64)
     raw["vibrato"] = vibrato
     project = _read_back(_make_vpr(_sequence([_singing_track([raw])])))
@@ -324,16 +293,15 @@ def test_vibrato_the_reader_could_not_map_is_left_untouched(vibrato):
     assert _raw_note_of(write(project))["vibrato"] == vibrato
 
 
-def test_depth_envelope_the_reader_could_not_map_is_left_untouched():
+def test_depth_envelope_with_only_one_depth_is_left_untouched():
     raw = _raw_note(0, 480, 60, "あ", "a", 64)
-    raw["aiExp"] = {"vibratoLeadingDepth": 0.25, "pitchFine": 3}  # 片方だけなので写せない
+    raw["aiExp"] = {"vibratoLeadingDepth": 0.25, "pitchFine": 3}
     project = _read_back(_make_vpr(_sequence([_singing_track([raw])])))
     assert project.tracks[0].parts[0].notes[0].ai_expression is None
     assert _raw_note_of(write(project))["aiExp"] == {"vibratoLeadingDepth": 0.25, "pitchFine": 3}
 
 
 def test_depth_envelope_cleared_by_the_caller_is_removed():
-    """読みが写せた2キーは、公開モデルで消せば消える(他の表現パラメータは残る)。"""
     raw = _raw_note(0, 480, 60, "あ", "a", 64)
     raw["aiExp"] = {"vibratoLeadingDepth": 0.25, "vibratoFollowingDepth": 0.75, "pitchFine": 3}
     project = _read_back(_make_vpr(_sequence([_singing_track([raw])])))
@@ -341,22 +309,24 @@ def test_depth_envelope_cleared_by_the_caller_is_removed():
     assert _raw_note_of(write(project))["aiExp"] == {"pitchFine": 3}
 
 
-# --- 検査と正規化 ------------------------------------------------------------
-
-
 @pytest.mark.parametrize("note", [
-    _note(pitch=-1), _note(pitch=128),  # MIDI の範囲外
-    _note(duration=0), _note(duration=-1),  # 長さ0以下
-    _note(velocity=-1), _note(velocity=128),  # 0〜127 の外
-    _note(phonemes=["k a"]), _note(phonemes=[""]),  # 空白区切りで別の列として読み戻される
-    # 区間長 0 以下はビブラート無しの表現、音符長超えは音符の開始前へはみ出す区間。
-    _note(vibrato=NoteVibrato(type=0, duration=0)),
-    _note(duration=480, vibrato=NoteVibrato(type=0, duration=481)),
-    # 制御点が区間の外(区間は tick 240〜480)。格納は区間始端からの相対位置なので書けない。
-    _note(duration=480, vibrato=NoteVibrato(type=0, duration=240,
-                                            depths=[VibratoPoint(pos=120, value=64)])),
-    _note(duration=480, vibrato=NoteVibrato(type=0, duration=240,
-                                            rates=[VibratoPoint(pos=481, value=64)])),
+    pytest.param(_note(pitch=-1), id="pitch_below_midi"),
+    pytest.param(_note(pitch=128), id="pitch_above_midi"),
+    pytest.param(_note(duration=0), id="zero_duration"),
+    pytest.param(_note(duration=-1), id="negative_duration"),
+    pytest.param(_note(velocity=-1), id="velocity_below_0"),
+    pytest.param(_note(velocity=128), id="velocity_above_127"),
+    pytest.param(_note(phonemes=["k a"]), id="phoneme_with_space"),
+    pytest.param(_note(phonemes=[""]), id="empty_phoneme"),
+    pytest.param(_note(vibrato=NoteVibrato(type=0, duration=0)), id="zero_vibrato_duration"),
+    pytest.param(_note(duration=480, vibrato=NoteVibrato(type=0, duration=481)),
+                 id="vibrato_longer_than_note"),
+    pytest.param(_note(duration=480, vibrato=NoteVibrato(
+        type=0, duration=240, depths=[VibratoPoint(pos=120, value=64)])),
+                 id="depth_point_before_vibrato_span"),
+    pytest.param(_note(duration=480, vibrato=NoteVibrato(
+        type=0, duration=240, rates=[VibratoPoint(pos=481, value=64)])),
+                 id="rate_point_after_vibrato_span"),
 ])
 def test_values_the_format_cannot_hold_are_rejected(note):
     with pytest.raises(VprFormatError):
@@ -364,7 +334,6 @@ def test_values_the_format_cannot_hold_are_rejected(note):
 
 
 def test_resolution_the_format_cannot_hold_is_rejected():
-    """分解能はファイルへ格納されない固定値なので、他の値は表現できない。"""
     project = _project([_note()])
     project.resolution = 960
     with pytest.raises(VprFormatError):
@@ -372,8 +341,8 @@ def test_resolution_the_format_cannot_hold_is_rejected():
 
 
 @pytest.mark.parametrize("signature", [
-    TimeSignature(tick=0, numerator=0, denominator=4),
-    TimeSignature(tick=0, numerator=4, denominator=0),
+    pytest.param(TimeSignature(tick=0, numerator=0, denominator=4), id="zero_numerator"),
+    pytest.param(TimeSignature(tick=0, numerator=4, denominator=0), id="zero_denominator"),
 ])
 def test_time_signature_without_a_bar_length_is_rejected(signature):
     project = _project([_note()])
@@ -383,7 +352,6 @@ def test_time_signature_without_a_bar_length_is_rejected(signature):
 
 
 def test_time_signature_with_an_unusual_denominator_is_written():
-    """分母は2の冪へ限定しない(形式は整数としか定めていない)。"""
     project = _project([_note()])
     project.time_signatures = [TimeSignature(tick=0, numerator=5, denominator=6)]
     assert _read_back(write(project)).time_signatures[0].denominator == 6
@@ -397,7 +365,6 @@ def test_tempo_that_the_format_cannot_hold_is_rejected():
 
 
 def test_time_signature_off_a_bar_boundary_is_rejected():
-    """拍子の位置は小節境界に一致する(一致しない位置の拍子は書き出せない)。"""
     project = _project([_note()])
     project.time_signatures = [TimeSignature(tick=0, numerator=4, denominator=4),
                                TimeSignature(tick=100, numerator=3, denominator=4)]
@@ -406,7 +373,6 @@ def test_time_signature_off_a_bar_boundary_is_rejected():
 
 
 def test_tempo_is_rounded_to_the_storable_grain():
-    """テンポは形式が格納できる粒度(BPM の 100 倍の整数)へ丸めて書く。"""
     project = _project([_note()])
     project.tempos = [TempoEvent(tick=0, bpm=120.005)]
     result = _sequence_of(write(project))
@@ -427,36 +393,98 @@ def test_tempos_are_written_in_position_order():
     assert [e["pos"] for e in result["masterTrack"]["tempo"]["events"]] == [0, 960]
 
 
-# --- ファイルへの書き出し ----------------------------------------------------
-
-
 def test_write_file_produces_a_readable_vpr(tmp_path):
     path = tmp_path / "out.vpr"
     write_file(_project([_note()]), path)
     assert _read_back(path.read_bytes()).tracks[0].parts[0].notes[0].pitch == 60
 
 
-def test_write_file_replaces_atomically(tmp_path):
-    """書き込み途中で落ちても既存の出力先を壊さない。"""
+def test_write_file_rejected_by_validation_keeps_the_existing_output_and_no_temp_file(tmp_path):
     path = tmp_path / "out.vpr"
     write_file(_project([_note()]), path)
     original = path.read_bytes()
 
-    broken = _project([_note(pitch=200)])  # 検査で拒否される
+    broken = _project([_note(pitch=200)])
     with pytest.raises(VprFormatError):
         write_file(broken, path)
     assert path.read_bytes() == original
-    assert not list(tmp_path.glob("*.tmp"))  # 一時ファイルを残さない
+    assert not list(tmp_path.glob("*.tmp"))
 
 
-# --- 決定論 ------------------------------------------------------------------
-
-
-def test_same_model_gives_the_same_content():
-    """同じモデルからは同じ内容が出る。
-
-    バイト一致は契約(§4.3)が保証しない範囲(ZIP はエントリへ書き込み時刻を埋める)なので、
-    sequence.json の内容で見る。
-    """
+def test_same_model_gives_the_same_sequence_json():
     source = _project([_note(0, 480, 60, "あ"), _note(480, 240, 62, "い")])
     assert _sequence_of(write(source)) == _sequence_of(write(source))
+
+
+def test_project_without_tempos_is_rejected():
+    project = _project([_note()])
+    project.tempos = []
+    with pytest.raises(VprFormatError):
+        write(project)
+
+
+def test_project_without_time_signatures_is_rejected():
+    project = _project([_note()])
+    project.time_signatures = []
+    with pytest.raises(VprFormatError):
+        write(project)
+
+
+def test_time_signatures_are_written_in_position_order_as_bars():
+    project = _project([_note()])
+    project.time_signatures = [TimeSignature(tick=1920, numerator=3, denominator=4),
+                               TimeSignature(tick=0, numerator=4, denominator=4)]
+    events = _sequence_of(write(project))["masterTrack"]["timeSig"]["events"]
+    assert [(e["bar"], e["numer"], e["denom"]) for e in events] == [(0, 4, 4), (1, 3, 4)]
+
+
+def test_controller_events_are_written_in_position_order():
+    part = Part(name="p", start_tick=0, duration_tick=1920, notes=[_note()],
+                controllers=[ControllerCurve(name="dynamics",
+                                             events=[ControllerEvent(tick=240, value=100),
+                                                     ControllerEvent(tick=0, value=64)])])
+    raw = _sequence_of(write(_project(parts=[part])))["tracks"][0]["parts"][0]["controllers"][0]
+    assert [e["pos"] for e in raw["events"]] == [0, 240]
+
+
+def test_vibrato_without_curves_is_written_without_curve_keys():
+    note = _note(vibrato=NoteVibrato(type=0, duration=240))
+    written = _raw_note_of(write(_project([note])))["vibrato"]
+    assert "depths" not in written
+    assert "rates" not in written
+
+
+def test_empty_curve_keys_in_the_raw_vibrato_survive_a_round_trip():
+    raw = _raw_note(0, 480, 60, "あ", "a", 64)
+    raw["vibrato"] = {"type": 0, "duration": 240, "depths": [], "rates": []}
+    project = _read_back(_make_vpr(_sequence([_singing_track([raw])])))
+    written = _raw_note_of(write(project))["vibrato"]
+    assert written["depths"] == []
+    assert written["rates"] == []
+
+
+def test_added_singing_track_is_placed_after_the_last_singing_track():
+    audio = {"type": 1, "name": "audio", "parts": []}
+    sequence = _sequence([_singing_track([], name="vocal1"), audio])
+    project = _read_back(_make_vpr(sequence))
+    project.tracks.append(Track(name="vocal2"))
+
+    result = _sequence_of(write(project))
+    assert [(t["type"], t["name"]) for t in result["tracks"]] == [
+        (2, "vocal1"),
+        (2, "vocal2"),
+        (1, "audio"),
+    ]
+
+
+def test_fewer_singing_tracks_drop_the_trailing_raw_singing_tracks():
+    audio = {"type": 1, "name": "audio", "parts": []}
+    sequence = _sequence([_singing_track([], name="vocal1"), audio,
+                          _singing_track([], name="vocal2")])
+    sequence["tracks"][0]["color"] = 7
+    project = _read_back(_make_vpr(sequence))
+    del project.tracks[0]
+
+    result = _sequence_of(write(project))
+    assert [(t["type"], t["name"]) for t in result["tracks"]] == [(2, "vocal2"), (1, "audio")]
+    assert result["tracks"][0]["color"] == 7

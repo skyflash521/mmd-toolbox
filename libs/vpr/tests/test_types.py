@@ -1,8 +1,3 @@
-"""vpr データモデル型のテスト。
-
-型定義(フィールド・既定値)のみを検証する。read/write の振る舞いはこのファイルでは扱わない。
-"""
-
 import pytest
 
 
@@ -30,7 +25,6 @@ def test_note_phonemes_default_empty_and_independent():
 
     a = Note(start_tick=0, duration_tick=1, pitch=60, lyric="あ", velocity=0)
     b = Note(start_tick=0, duration_tick=1, pitch=60, lyric="い", velocity=0)
-    # 音素列は空可。既定の可変リストがインスタンス間で共有されないこと。
     assert a.phonemes == []
     a.phonemes.append("a")
     assert b.phonemes == []
@@ -39,7 +33,6 @@ def test_note_phonemes_default_empty_and_independent():
 def test_note_is_protected_defaults_to_false():
     from vpr import Note
 
-    # 音素の保護は既定で偽。値の意味付け・選別はフォーマット層が持たず、器だけを持つ。
     note = Note(start_tick=0, duration_tick=1, pitch=60, lyric="あ", velocity=0)
     assert note.is_protected is False
 
@@ -52,12 +45,7 @@ def test_note_is_protected_holds_true():
     assert note.is_protected is True
 
 
-def test_note_positional_arguments_still_bind_vibrato():
-    """音素列の次の位置引数はビブラートのまま(音素の保護はキーワード専用)。
-
-    保護を位置引数の並びへ挟むと、位置で渡したビブラートが保護へ入り、真偽値でない値が形式へ
-    書かれてしまう。
-    """
+def test_note_is_protected_is_keyword_only_so_the_seventh_positional_binds_vibrato():
     from vpr import Note, NoteVibrato
 
     vibrato = NoteVibrato(type=0, duration=240)
@@ -69,7 +57,6 @@ def test_note_positional_arguments_still_bind_vibrato():
 def test_note_velocity_upper_bound():
     from vpr import Note
 
-    # ベロシティは 0〜127 の生値。上限 127 を保持できること。
     note = Note(start_tick=0, duration_tick=1, pitch=60, lyric="は", velocity=127)
     assert note.velocity == 127
 

@@ -1,11 +1,10 @@
-"""vpr 読み込み。"""
-
 import io
 import json
 import math
 import zipfile
+from pathlib import Path
 
-from .constants import RESOLUTION, SEQUENCE_PATH, SINGING_TRACK_TYPE
+from .constants import DEFAULT_TIME_SIGNATURE, RESOLUTION, SEQUENCE_PATH, SINGING_TRACK_TYPE
 from .types import (
     ControllerCurve,
     ControllerEvent,
@@ -25,28 +24,22 @@ from .types import (
 
 
 def _require(obj, key, path, type_=None):
-    """obj[key] を返す。欠落・型不一致は構造異常 VprFormatError。
-
-    type_ を与えると値の型を検証する。原因特定のため path・key・value を付与する。
-    """
     loc = f"{path}.{key}" if path else key
     try:
         value = obj[key]
     except (KeyError, TypeError) as e:
         raise VprFormatError(f"必須キー {key!r} がありません", path=loc, key=key) from e
-    # bool は int のサブクラスなので、JSON の true/false が int フィールドを素通りしないよう除外する。
+    # Python の bool は int のサブクラスなので、isinstance だけでは JSON の true/false を弾けない。
     if type_ is not None and (not isinstance(value, type_) or isinstance(value, bool)):
         raise VprFormatError(f"{key!r} の型が不正です", path=loc, key=key, value=value)
     return value
 
 
 def _optional(obj, key, default):
-    """obj[key] を返す。obj が辞書でない/キーが無ければ default(許容入力)。"""
     return obj.get(key, default) if isinstance(obj, dict) else default
 
 
 def _optional_list(obj, key, path):
-    """obj[key] を返す。キーが無ければ []。値が配列でなければ VprFormatError。"""
     if not isinstance(obj, dict) or key not in obj:
         return []
     value = obj[key]
@@ -57,11 +50,6 @@ def _optional_list(obj, key, path):
 
 
 def _load_sequence(src):
-    """vpr(ZIP)から Project/sequence.json と、それ以外のエントリを読む。
-
-    エントリは書き出しがそのまま書き戻せるように保持する(波形データを落とさないため)。
-    構造異常は VprFormatError。
-    """
     source = io.BytesIO(src) if isinstance(src, bytes) else src
     try:
         with zipfile.ZipFile(source) as archive:
@@ -84,11 +72,6 @@ def _load_sequence(src):
 
 
 def _ticks_per_bar(numerator: int, denominator: int, path=None) -> int:
-    """拍子の1小節あたりの tick 長。
-
-    分母 0 は小節長を定義できない。素通しにするとゼロ除算で落ち、構造異常を構造化エラーで返す
-    フォーマット層の約束から外れるので、ここで弾く。
-    """
     if denominator < 1:
         raise VprFormatError("拍子の分母は 1 以上でなければなりません",
                              path=path, key="denom", value=denominator)
@@ -96,12 +79,6 @@ def _ticks_per_bar(numerator: int, denominator: int, path=None) -> int:
 
 
 def _tempos(master) -> list[TempoEvent]:
-    """テンポイベントを TempoEvent(bpm = value/100)へ写像する。
-
-    テンポマップは tick が指す時刻を決める前提なので、1件以上あり各 BPM が正の有限値であることを
-    要求する。満たさない入力は写像自体はできても利用先が tick を時刻へ写せないため構造異常とする。
-    生の value の型検査は数値までで、小数は型不正としない(非有限値はここを通り下の条件で弾く)。
-    """
     tempo = _require(master, "tempo", "masterTrack", dict)
     events = _require(tempo, "events", "masterTrack.tempo", list)
     if not events:
@@ -121,7 +98,6 @@ def _tempos(master) -> list[TempoEvent]:
 
 
 def _time_signatures(master) -> list[TimeSignature]:
-    """拍子イベント(小節番号 bar 基準)を、先行小節長を積算して tick へ変換する。"""
     timesig = _require(master, "timeSig", "masterTrack", dict)
     events = _require(timesig, "events", "masterTrack.timeSig", list)
     indexed = []
@@ -139,8 +115,7 @@ def _time_signatures(master) -> list[TimeSignature]:
     result: list[TimeSignature] = []
     tick = 0
     prev_bar = 0
-    # 最初の明示イベントより前の小節は VOCALOID 既定の 4/4 とみなして積算する。
-    prev_ticks_per_bar = _ticks_per_bar(4, 4)
+    prev_ticks_per_bar = _ticks_per_bar(*DEFAULT_TIME_SIGNATURE)
     for bar, numerator, denominator, path in sorted(indexed, key=lambda x: x[0]):
         tick += (bar - prev_bar) * prev_ticks_per_bar
         result.append(TimeSignature(tick=tick, numerator=numerator, denominator=denominator))
@@ -150,17 +125,10 @@ def _time_signatures(master) -> list[TimeSignature]:
 
 
 def _is_int(value) -> bool:
-    """JSON の true/false を整数として通さない整数判定。"""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
 def accepts_vibrato(raw) -> bool:
-    """読みがビブラートを公開モデルへ写せる形か。
-
-    書き出しが同じ判定を使って対称性を保つ(写せなかった生の構造を、公開モデルの側が空だからと
-    いって消さないため)ので、判定はここにだけ置く。区間長が正でない場合も「写せる形」に含む
-    (公開モデルでは None になるが、それは値の解釈であって構造の不備ではない)。
-    """
     if not isinstance(raw, dict):
         return False
     if not _is_int(raw.get("type")) or not _is_int(raw.get("duration")):
@@ -177,11 +145,6 @@ def accepts_vibrato(raw) -> bool:
 
 
 def accepts_depth_envelope(raw) -> bool:
-    """読みが深さ包絡を公開モデルへ写せる形か(書き出しも同じ判定を使う)。
-
-    2つの値は両方そろっているときだけ写す。片方だけを持つ状態を公開モデルへ作らないことで、
-    書き出しとの対称性(読みが立てた音符には書きが同じ2つを戻す)を保つ。
-    """
     if not isinstance(raw, dict):
         return False
     return all(isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -189,22 +152,11 @@ def accepts_depth_envelope(raw) -> bool:
 
 
 def _vibrato_points(raw_points, span_start) -> list[VibratoPoint]:
-    """ビブラートの自動化曲線を絶対 tick 化して写像する。
-
-    格納値はビブラート区間始端からの相対位置なので、区間始端を足して他のコントローラ点と同じ
-    プロジェクト絶対 tick で公開する。キー自体が無い音符があるので欠落は空とする。
-    """
     return [VibratoPoint(pos=span_start + point["pos"], value=point["value"])
             for point in raw_points]
 
 
 def _vibrato(note, note_start, note_duration) -> NoteVibrato | None:
-    """音符のビブラートを写像する。写せない形の音符は None(読みを失敗させない)。
-
-    区間は音符の末尾側に付く(形式仕様)ので、区間始端は音符終端から区間長を引いた位置になる。
-    区間長 0 はビブラート無しを表すので、キーがある音符でも None とする(正でない区間長も同じ。
-    区間始端を音符の開始前へ置く区間は形式が持たない)。
-    """
     raw = _optional(note, "vibrato", None)
     if not accepts_vibrato(raw) or raw["duration"] <= 0:
         return None
@@ -218,7 +170,6 @@ def _vibrato(note, note_start, note_duration) -> NoteVibrato | None:
 
 
 def _ai_expression(note) -> NoteAiExpression | None:
-    """音符の表現パラメータのうち、ビブラートの深さ包絡だけを写像する。"""
     raw = _optional(note, "aiExp", None)
     if not accepts_depth_envelope(raw):
         return None
@@ -227,7 +178,6 @@ def _ai_expression(note) -> NoteAiExpression | None:
 
 
 def _notes(raw_notes, part_pos, part_path) -> list[Note]:
-    """音符を絶対 tick 化(part 開始位置を加算)し、start_tick 昇順で返す。"""
     notes: list[Note] = []
     for i, note in enumerate(raw_notes):
         path = f"{part_path}.notes[{i}]"
@@ -241,7 +191,6 @@ def _notes(raw_notes, part_pos, part_path) -> list[Note]:
                 lyric=_require(note, "lyric", path, str),
                 velocity=_require(note, "velocity", path, int),
                 phonemes=_require(note, "phoneme", path, str).split(),
-                # 欠落も真偽値でない値も偽へ倒す(型の不正で読みを失敗させない寛容規則)。
                 is_protected=_optional(note, "isProtected", False) is True,
                 vibrato=_vibrato(note, start_tick, duration_tick),
                 ai_expression=_ai_expression(note),
@@ -252,9 +201,6 @@ def _notes(raw_notes, part_pos, part_path) -> list[Note]:
 
 
 def _controllers(raw_controllers, part_pos, part_path) -> list[ControllerCurve]:
-    """パートの連続コントローラ曲線を絶対 tick 化して写像する(音符と同じく events の pos に part 開始
-    位置を加算)。声量の選別・正規化は呼び出し側の責務なので、ここでは全コントローラを生値で公開する。
-    """
     curves: list[ControllerCurve] = []
     for i, controller in enumerate(raw_controllers):
         path = f"{part_path}.controllers[{i}]"
@@ -274,10 +220,6 @@ def _controllers(raw_controllers, part_pos, part_path) -> list[ControllerCurve]:
 
 
 def _voice(part, voices) -> VoiceBank | None:
-    """パートが参照するボイスバンクを、トップレベルの定義から解決する。
-
-    参照だけあって定義が無い場合は、名前を決められないので None とする(利用先が値を選ぶ)。
-    """
     reference = _optional(part, "aiVoice", None)
     if not isinstance(reference, dict):
         return None
@@ -292,7 +234,6 @@ def _voice(part, voices) -> VoiceBank | None:
 
 
 def _tracks(raw_tracks, voices) -> list[Track]:
-    """歌唱トラック(type==2)のみをデータモデルへ写像する。"""
     tracks: list[Track] = []
     for i, track in enumerate(raw_tracks):
         if _optional(track, "type", None) != SINGING_TRACK_TYPE:
@@ -302,11 +243,12 @@ def _tracks(raw_tracks, voices) -> list[Track]:
         for j, part in enumerate(_optional_list(track, "parts", path)):
             part_path = f"{path}.parts[{j}]"
             part_pos = _require(part, "pos", part_path, int)
+            raw_duration = _optional(part, "duration", 0)
             parts.append(
                 Part(
                     name=_require(part, "name", part_path, str),
                     start_tick=part_pos,
-                    duration_tick=_optional(part, "duration", 0),
+                    duration_tick=raw_duration if _is_int(raw_duration) else 0,
                     voice=_voice(part, voices),
                     notes=_notes(_optional_list(part, "notes", part_path), part_pos, part_path),
                     controllers=_controllers(
@@ -319,19 +261,13 @@ def _tracks(raw_tracks, voices) -> list[Track]:
 
 
 def _overlap_warnings(tracks) -> list[VprWarning]:
-    """同一パート内で発音区間が重なる音符ペアを警告する(単音想定違反)。
-
-    notes は start_tick 昇順。各音符について、まだ終端に達していない先行音符(active)を残し、その
-    全てと重なるとみなして音符ペアごとに1件報告する。半開区間 [start, start+duration) なので終端 ==
-    開始は重ならない。重なりが無い通常入力では active は短く保たれる。
-    """
     warnings: list[VprWarning] = []
     for track_index, track in enumerate(tracks):
         for part_index, part in enumerate(track.parts):
-            active: list[tuple[int, int]] = []  # (発音終端, note 添字)
+            sounding: list[tuple[int, int]] = []
             for note_index, note in enumerate(part.notes):
-                active = [(end, idx) for end, idx in active if end > note.start_tick]
-                for _end, idx in active:
+                sounding = [(end, idx) for end, idx in sounding if end > note.start_tick]
+                for _end, idx in sounding:
                     warnings.append(
                         VprWarning(
                             code="overlapping_notes",
@@ -343,12 +279,11 @@ def _overlap_warnings(tracks) -> list[VprWarning]:
                             tick=note.start_tick,
                         )
                     )
-                active.append((note.start_tick + note.duration_tick, note_index))
+                sounding.append((note.start_tick + note.duration_tick, note_index))
     return warnings
 
 
-def read(src) -> tuple[VprProject, list[VprWarning]]:
-    """vpr を読み、データモデルと警告を返す。"""
+def read(src: str | Path | bytes) -> tuple[VprProject, list[VprWarning]]:
     sequence, entries = _load_sequence(src)
     master = _require(sequence, "masterTrack", "", dict)
     raw_tracks = _require(sequence, "tracks", "", list)
@@ -358,7 +293,7 @@ def read(src) -> tuple[VprProject, list[VprWarning]]:
         resolution=RESOLUTION,
         tempos=_tempos(master),
         time_signatures=_time_signatures(master),
-        tracks=_tracks(raw_tracks, _optional(sequence, "voices", [])),
+        tracks=_tracks(raw_tracks, _optional_list(sequence, "voices", "")),
         title=title if isinstance(title, str) else "",
         raw_sequence=sequence,
         entries=entries,

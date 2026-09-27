@@ -1,17 +1,3 @@
-"""vpr 書き出し。
-
-読んだプロジェクトは生の JSON(`raw_sequence`)を基礎にし、手組みのプロジェクトは骨組みを基礎に
-する。基礎の各要素へ公開モデルの値を上書きする形にして、公開モデルへ写さないキー・トラックを
-落とさない。
-
-公開モデルと生 JSON の対応付けは、読みが使う並べ替えを再現して一意に定める。読みは音符を位置で
-安定ソートし、拍子を小節番号で安定ソートし、それ以外は出現順のまま公開するので、書き出しも同じ
-順序で突き合わせれば同じ置換になる。
-
-「読みが写せた形か」の判定は読み側(`io`)にだけ置き、ここはそれを使う。公開モデルが空のときに
-生の構造を消してよいかは読みの受理条件そのものなので、判定を写すと対称性が静かに崩れる。
-"""
-
 import copy
 import io
 import json
@@ -22,9 +8,9 @@ import zipfile
 from pathlib import Path
 
 from . import template
-from .constants import RESOLUTION, SEQUENCE_PATH, SINGING_TRACK_TYPE
+from .constants import DEFAULT_TIME_SIGNATURE, RESOLUTION, SEQUENCE_PATH, SINGING_TRACK_TYPE
 from .io import accepts_depth_envelope, accepts_vibrato
-from .types import VprFormatError
+from .types import VprFormatError, VprProject
 
 _MIDI_RANGE = (0, 127)
 _VELOCITY_RANGE = (0, 127)
@@ -35,11 +21,6 @@ def _ticks_per_bar(numerator: int, denominator: int) -> int:
 
 
 def _pair_up(raw_items, count, fallback):
-    """生の配列を公開モデルの要素数へ合わせる。
-
-    余った公開モデルの要素は生の先頭要素(生が空なら骨組み)を複製して作り、余った生の要素は捨てる。
-    配列ごと作り直さないのは、要素別の未解釈キーを保つため。
-    """
     items = [copy.deepcopy(item) if isinstance(item, dict) else fallback()
              for item in raw_items[:count]]
     source = raw_items[0] if raw_items and isinstance(raw_items[0], dict) else None
@@ -58,8 +39,6 @@ def _check_note(note, path):
     if not _VELOCITY_RANGE[0] <= note.velocity <= _VELOCITY_RANGE[1]:
         raise VprFormatError("ベロシティが格納できる範囲を外れています",
                              path=path, key="velocity", value=note.velocity)
-    # 形式は音素列を空白区切りの1つの文字列として持つので、要素自体が空白を含むと別の列として
-    # 読み戻される(空要素も同じく列から消える)。
     for phoneme in note.phonemes:
         if not phoneme or phoneme.split() != [phoneme]:
             raise VprFormatError("音素は空白を含まない非空の文字列でなければなりません",
@@ -67,15 +46,11 @@ def _check_note(note, path):
     if note.vibrato is None:
         return
     if note.vibrato.duration <= 0:
-        # 形式では区間長 0 がビブラート無しを表し、読みはそれを None として写す(往復しない)。
         raise VprFormatError("ビブラートの区間長は正でなければなりません",
                              path=f"{path}.vibrato", key="duration", value=note.vibrato.duration)
     if note.vibrato.duration > note.duration_tick:
-        # 区間始端は「音符終端 − 区間長」なので、音符長を超える区間は音符の開始前へはみ出す。
         raise VprFormatError("ビブラートの区間長が音符の長さを超えています",
                              path=f"{path}.vibrato", key="duration", value=note.vibrato.duration)
-    # 制御点は区間始端からの相対位置で格納するので、区間の外にある点は書けない(音符や区間長だけを
-    # 動かすと絶対 tick の点が区間から外れるため、区間長の検査と対で見る)。
     span_start = note.start_tick + note.duration_tick - note.vibrato.duration
     for key, points in (("depths", note.vibrato.depths), ("rates", note.vibrato.rates)):
         for point in points:
@@ -85,16 +60,10 @@ def _check_note(note, path):
 
 
 def _vibrato_points(points, span_start):
-    """絶対 tick の制御点を、格納表現(ビブラート区間始端からの相対位置)へ戻す。"""
     return [{"pos": point.pos - span_start, "value": point.value} for point in points]
 
 
 def _write_vibrato(raw, note):
-    """ビブラートを書く。
-
-    公開値が None のときは、読みが写せた形の生の値だけを区間長 0(=ビブラート無し)で無効化し、
-    欠落・型不正で写せなかった生の構造には手を触れない(読み取り時に写せなかった値を消さない)。
-    """
     previous = raw.get("vibrato")
     if note.vibrato is None:
         if accepts_vibrato(previous):
@@ -102,8 +71,6 @@ def _write_vibrato(raw, note):
         return
     span_start = note.start_tick + note.duration_tick - note.vibrato.duration
     written = {"type": note.vibrato.type, "duration": note.vibrato.duration}
-    # 形式は自動化曲線のキー自体を持たない音符を許し、読みは欠落を空として写す。空のまま書き足すと
-    # 無加工の書き戻しで生の形が変わるので、値があるか元から持っていたキーだけを書く。
     for key, points in (("depths", note.vibrato.depths), ("rates", note.vibrato.rates)):
         if points or (isinstance(previous, dict) and key in previous):
             written[key] = _vibrato_points(points, span_start)
@@ -111,11 +78,6 @@ def _write_vibrato(raw, note):
 
 
 def _write_ai_expression(raw, note):
-    """深さ包絡を書く。読みが None とした音符へ値を作らず、他の表現パラメータには触らない。
-
-    公開値が None のとき2キーを消すのは、読みがその2つを写せた場合だけにする(片方だけ・型不正で
-    写せなかった生の値は、公開モデルの None が「元から無い」を意味するので残す)。
-    """
     expression = raw.get("aiExp")
     if note.ai_expression is None:
         if accepts_depth_envelope(expression):
@@ -132,7 +94,6 @@ def _write_ai_expression(raw, note):
 
 
 def _write_note(raw, note, part_start, path):
-    """骨組みまたは生の音符へ公開モデルの値を上書きする。"""
     _check_note(note, path)
     raw["pos"] = note.start_tick - part_start
     raw["duration"] = note.duration_tick
@@ -181,13 +142,11 @@ def _write_part(raw, part, path):
 
 
 def _write_tracks(raw_tracks, tracks):
-    """歌唱トラックだけを公開モデルと対応させ、それ以外は変更せず相対順序を保つ。"""
     singing = [i for i, track in enumerate(raw_tracks)
                if isinstance(track, dict) and track.get("type") == SINGING_TRACK_TYPE]
     source = copy.deepcopy(raw_tracks[singing[0]]) if singing else template.singing_track()
 
     result = [copy.deepcopy(track) for track in raw_tracks]
-    # 公開モデルより多い歌唱トラックは捨て、少なければ最後の歌唱トラックの直後(無ければ末尾)へ足す。
     for index in reversed(singing[len(tracks):]):
         del result[index]
     kept = [i for i, track in enumerate(result)
@@ -225,7 +184,6 @@ def _write_tempos(raw_events, tempos):
 
 
 def _write_time_signatures(raw_events, signatures):
-    """公開モデルの tick を小節番号へ逆変換して書く。"""
     if not signatures:
         raise VprFormatError("拍子イベントが 1 件もありません", path="time_signatures")
     ordered = sorted(signatures, key=lambda s: s.tick)
@@ -233,9 +191,8 @@ def _write_time_signatures(raw_events, signatures):
 
     tick = 0
     bar = 0
-    ticks_per_bar = _ticks_per_bar(4, 4)
+    ticks_per_bar = _ticks_per_bar(*DEFAULT_TIME_SIGNATURE)
     for raw, signature in zip(events, ordered, strict=True):
-        # 分母は2の冪へ限定しない(形式は整数としか定めず、読みも任意の整数分母で小節長を出す)。
         if signature.numerator < 1 or signature.denominator < 1:
             raise VprFormatError("拍子の分子・分母は 1 以上でなければなりません",
                                  path="time_signatures", key="numerator",
@@ -255,7 +212,6 @@ def _write_time_signatures(raw_events, signatures):
 
 
 def _resolve_voices(raw_voices, tracks):
-    """パートが参照するボイスバンクの定義を、欠けていれば足す(既存は置き換えない)。"""
     voices = [copy.deepcopy(voice) for voice in raw_voices if isinstance(voice, dict)]
     defined = {voice.get("compID") for voice in voices}
     for track in tracks:
@@ -266,10 +222,8 @@ def _resolve_voices(raw_voices, tracks):
     return voices
 
 
-def write(project) -> bytes:
-    """データモデルを vpr(ZIP)へ直列化する。"""
+def write(project: VprProject) -> bytes:
     if project.resolution != RESOLUTION:
-        # 形式は分解能をファイルへ格納せず固定値とするため、他の分解能は表現できない。
         raise VprFormatError("分解能が形式の固定値と異なります",
                              path="resolution", key="resolution", value=project.resolution)
     base = copy.deepcopy(project.raw_sequence) if isinstance(project.raw_sequence, dict) \
@@ -283,10 +237,10 @@ def write(project) -> bytes:
     timesig["events"] = _write_time_signatures(timesig.get("events") or [],
                                                project.time_signatures)
     base["tracks"] = _write_tracks(base.get("tracks") or [], project.tracks)
-    base["voices"] = _resolve_voices(base.get("voices") or [], project.tracks)
+    raw_voices = base.get("voices")
+    base["voices"] = _resolve_voices(raw_voices if isinstance(raw_voices, list) else [], project.tracks)
 
-    buffer = _archive(base, project.entries or {})
-    return buffer
+    return _archive(base, project.entries or {})
 
 
 def _archive(sequence, entries) -> bytes:
@@ -298,14 +252,10 @@ def _archive(sequence, entries) -> bytes:
     return buffer.getvalue()
 
 
-def write_file(project, path) -> None:
-    """原子的に書き出す。
-
-    同ディレクトリの一時ファイルへ書いて fsync し、os.replace で原子置換する。書き込み途中の中断・
-    ディスクフルでも、既存の出力先(入力と同一パスへの上書きを含む)を破損させない。
-    """
+def write_file(project: VprProject, path: str | Path) -> None:
+    """出力先を原子置換で書き換える。途中で失敗しても既存の出力先は壊れない。"""
     path = Path(path)
-    data = write(project)  # 検査で拒否される場合は一時ファイルを作る前に落とす
+    data = write(project)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as f:

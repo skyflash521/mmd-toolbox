@@ -1,15 +1,7 @@
-"""手組みのプロジェクトを書き出すときの骨組み。
-
-読んだプロジェクトは生の JSON を基礎にできるが、手組みのプロジェクトには基礎が無い。形式が要求する
-キーだけを持つ最小の骨組みをここに置き、公開モデルの値で埋めて書き出す。
-
-置くのは形式を成立させるために必要な構造だけで、利用先の判断に属する値(どの歌手を使うか・どんな
-歌い方かなど)は持たない。それらは公開モデルが運ぶ。
-"""
+from .constants import SINGING_TRACK_TYPE
 
 
 def sequence() -> dict:
-    """トップレベルの骨組み。"""
     return {
         "version": {"major": 6, "minor": 5, "revision": 1},
         "vender": "Yamaha Corporation",
@@ -28,9 +20,8 @@ def sequence() -> dict:
 
 
 def singing_track() -> dict:
-    """歌唱トラックの骨組み。"""
     return {
-        "type": 2,
+        "type": SINGING_TRACK_TYPE,
         "name": "",
         "color": 0,
         "busNo": 0,
@@ -45,24 +36,15 @@ def singing_track() -> dict:
 
 
 def part() -> dict:
-    """歌唱パートの骨組み。"""
     return {"name": "", "pos": 0, "duration": 0, "notes": [], "controllers": []}
 
 
 def note() -> dict:
-    """音符の骨組み。読み手が全音符での存在を当てにしてよい6キーと、音素の保護を持つ。
-
-    音素の保護は形式では省略可だが、公開モデルが必ず値を持つので骨組みにも置く。
-    """
     return {"pos": 0, "duration": 0, "number": 60, "lyric": "", "phoneme": "", "velocity": 64,
             "isProtected": False}
 
 
 def lang_ids() -> list:
-    """パートの音声バンク参照が持つ言語指定の骨組み。
-
-    値の意味は未解析なので、解析に用いた実 vpr が持っていた形をそのまま置く。
-    """
     return [{"langID": 0}, {"langID": 1}]
 
 
