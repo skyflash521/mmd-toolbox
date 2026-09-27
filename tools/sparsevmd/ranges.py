@@ -1,20 +1,9 @@
-"""削減範囲(--range)の解析・展開・積集合。
-
-- parse_range: 1個の RANGE 文字列(START:END / START: / :END)を (start, end) に解析。
-  省略側は None。両端は0以上の10進整数(両端含む)。両方指定で START>END はエラー。
-  両端省略(:)は仕様外でエラー。
-- expand_and_normalize: 省略端を対象トラック全体の最小/最大に1回だけ展開し、
-  昇順に正規化、端の接触を含む重複でエラー、展開後 START>END でエラー。
-- intersect: グローバル範囲と当該トラックの先頭/末尾フレームの積集合。空なら空リスト。
-"""
-
-
 class RangeError(ValueError):
-    """範囲指定のエラー(CLI で終了コード2)。"""
+    pass
 
 
 def parse_range(text):
-    """1個の RANGE 文字列を (start, end) に解析する。省略側は None。"""
+    """戻り値は (start, end)。省略された側は None。"""
     if text.count(":") != 1:
         raise RangeError(f"範囲は START:END 形式: {text!r}")
     start_str, end_str = text.split(":")
@@ -28,7 +17,6 @@ def parse_range(text):
 
 
 def _parse_endpoint(part, text):
-    """範囲端を解析する。空文字は None、それ以外は0以上の10進整数。"""
     if part == "":
         return None
     if not (part.isascii() and part.isdigit()):
@@ -37,11 +25,7 @@ def _parse_endpoint(part, text):
 
 
 def expand_and_normalize(parsed_ranges, global_min, global_max):
-    """省略端を展開し、昇順正規化と重複検査を行う。
-
-    parsed_ranges は parse_range の戻り値((start|None, end|None))のリスト。
-    省略端は global_min / global_max に1回だけ展開する。
-    """
+    """parsed_ranges は parse_range の戻り値のリスト。戻り値は昇順の (start, end) のリスト。"""
     expanded = []
     for start, end in parsed_ranges:
         s = global_min if start is None else start
@@ -52,14 +36,12 @@ def expand_and_normalize(parsed_ranges, global_min, global_max):
 
     expanded.sort()
     for prev, cur in zip(expanded, expanded[1:], strict=False):
-        # 端の接触(cur.start == prev.end)も1フレーム重複としてエラー。
         if cur[0] <= prev[1]:
             raise RangeError(f"範囲が重複しています: {prev} と {cur}")
     return expanded
 
 
 def intersect(global_ranges, first, last):
-    """グローバル範囲(正規化済み)とトラック範囲 [first, last] の積集合。"""
     result = []
     for s, e in global_ranges:
         lo = max(s, first)

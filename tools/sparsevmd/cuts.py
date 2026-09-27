@@ -1,11 +1,3 @@
-"""カット閾値パース + 不連続検出の後方互換 re-export。
-
-CLI 層の閾値文字列パース(`POS,ROT,DIST` / `POS,ROT`)は sparsevmd 固有として本モジュールに
-残す。不連続検出・必須境界の本体(detect_cuts_* / perspective_cut_frames / assemble_boundaries
-と角度ヘルパ)は共通ライブラリ vmd.cuts にあるので、旧 import パス
-(`sparsevmd.cuts`)維持のため同名で再公開する。
-"""
-
 import math
 
 from vmd.cuts import (  # noqa: F401
@@ -17,15 +9,18 @@ from vmd.cuts import (  # noqa: F401
     perspective_cut_frames,
 )
 
+_CAMERA_THRESHOLD_COUNT = 3
+_BONE_THRESHOLD_COUNT = 2
+
 
 def parse_cut_threshold_camera(text):
-    """`POS,ROT,DIST` を (pos, rot, dist) に解析する。"""
-    return _parse_thresholds(text, 3)
+    """戻り値は (pos, rot, dist)。"""
+    return _parse_thresholds(text, _CAMERA_THRESHOLD_COUNT)
 
 
 def parse_cut_threshold_bone(text):
-    """`POS,ROT` を (pos, rot) に解析する。"""
-    return _parse_thresholds(text, 2)
+    """戻り値は (pos, rot)。"""
+    return _parse_thresholds(text, _BONE_THRESHOLD_COUNT)
 
 
 def _parse_thresholds(text, n):
@@ -36,9 +31,6 @@ def _parse_thresholds(text, n):
     for p in parts:
         if p == "" or p != p.strip():
             raise ValueError(f"閾値に空要素・空白は不可: {text!r}")
-        # 数値変換は float() を用いる(shakevmd の _finite_float と同じ規約)。
-        # 符号付き・指数表記等の float() が受理する形式は許容し、非有限・負値のみ弾く。
-        # より厳格な書式制限はプロジェクト全体の数値CLIパース方針として別途扱う。
         try:
             v = float(p)
         except ValueError:

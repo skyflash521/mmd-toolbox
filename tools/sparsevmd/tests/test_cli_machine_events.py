@@ -1,19 +1,11 @@
-"""sparsevmd CLI 機械モードの成功経路イベントのテスト。
-
-機械モードの成功経路: progress(camera/bone 2 段)・warning(読み込み透過・選択不一致・keep-frame 無視・
-選択不能)・result(reduce / inspect / list_bones)。ストリームは result のちょうど 1 つで終端する。
-
-機械モード stdout は UTF-8 バイトでバイナリバッファへ書くため capsysbinary で捕捉する。テストは
-決定論的に実行し、外部依存を使わない。
-"""
-
 import json
 
 from sparsevmd import cli
 from vmd import io
-from vmd.types import BoneKey, CameraKey, VmdDocument
+from vmd.types import BoneKey, CameraKey, VmdDocument, VmdWarning
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
+_CP932_LONE_LEAD_BYTE = b"\x81"
 
 
 def _bone_linear():
@@ -59,9 +51,6 @@ def terminal(events):
     return events[-1]
 
 
-# --- result(reduce)通常実行-----------------------------------------
-
-
 def test_machine_emits_reduce_result(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -71,7 +60,6 @@ def test_machine_emits_reduce_result(tmp_path, capsysbinary):
     events = machine_events(capsysbinary)
     r = terminal(events)
     assert r["type"] == "result" and r["mode"] == "reduce"
-    # reduce の result は {output, target, camera, bone, reduced} のみ。
     assert set(r) == {"type", "mode", "output", "target", "camera", "bone", "reduced"}
     assert r["output"] == str(out)
     assert r["target"] == "all"
@@ -82,7 +70,6 @@ def test_machine_emits_reduce_result(tmp_path, capsysbinary):
 
 
 def test_machine_reduce_result_target_camera_null_bone(tmp_path, capsysbinary):
-    # --target camera → bone は null。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc(), bone=ramp_bone_doc())
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera",
@@ -104,11 +91,7 @@ def test_machine_reduce_result_target_bone_null_camera(tmp_path, capsysbinary):
     assert r["bone"] is not None and r["camera"] is None
 
 
-# --- チャネル固定(JSON Lines・LF・人間向けテキスト非混入)---------------------
-
-
 def _assert_json_lines_lf(raw):
-    # 末尾 LF あり・\r 不在・末尾 LF より前の各行は空でない単一 JSON。
     assert raw.endswith(b"\n") and b"\r" not in raw
     for ln in raw.decode("utf-8").split("\n")[:-1]:
         assert ln != ""
@@ -116,7 +99,6 @@ def _assert_json_lines_lf(raw):
 
 
 def test_machine_stdout_json_lines_lf_all_modes(tmp_path, capsysbinary):
-    # 通常実行・dry-run(inspect)・list-bones のどのモードでも stdout は LF のみの有効な JSON Lines。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc(), bone=ramp_bone_doc())
     assert cli.main([str(src), "-o", str(tmp_path / "o.vmd"), "--curve-mode", "linear", "--machine"]) == 0
@@ -128,7 +110,6 @@ def test_machine_stdout_json_lines_lf_all_modes(tmp_path, capsysbinary):
 
 
 def test_machine_no_human_text_on_stdout_with_verbose(tmp_path, capsysbinary):
-    # --machine --verbose でも標準出力はイベント専用(人間向けレポートは混入しない)。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera",
@@ -140,10 +121,7 @@ def test_machine_no_human_text_on_stdout_with_verbose(tmp_path, capsysbinary):
         json.loads(ln)
 
 
-def test_machine_verbose_diagnostics_go_to_stderr(tmp_path, capsysbinary):
-    # --machine --verbose の詳細診断(不連続検出位置など)は stdout でなく stderr へ出ることを、
-    # cli.main を通した実際の呼び出し経路(_log_diagnostics への file 引数の配線)で検証する
-    # (_log_diagnostics 単体呼び出しだけの検証は呼び出し側の配線漏れを検出できないため)。
+def test_machine_verbose_diagnostics_go_to_stderr_through_main(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     keys = [cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0)) for f in range(31)]
     write_vmd(src, camera=keys)
@@ -155,15 +133,11 @@ def test_machine_verbose_diagnostics_go_to_stderr(tmp_path, capsysbinary):
     lines = [ln for ln in out_text.split("\n") if ln]
     assert lines
     for ln in lines:
-        json.loads(ln)  # stdout は全行イベントのまま(診断が混入していない)
+        json.loads(ln)
     assert "不連続検出位置" in err_text
 
 
-# --- progress(camera/bone 2 段)------------------------------------
-
-
 def test_machine_emits_progress_camera_and_bone(tmp_path, capsysbinary):
-    # camera 段・bone 段の progress が出る。各段は開始時に done=0/total=null/note=""/elapsed=0.0 を 1 本。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc(), bone=ramp_bone_doc())
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--curve-mode", "linear", "--machine"])
@@ -172,29 +146,24 @@ def test_machine_emits_progress_camera_and_bone(tmp_path, capsysbinary):
     progress = [e for e in events if e["type"] == "progress"]
     assert progress
     for p in progress:
-        # progress は {type, stage, done, total, note, elapsed} のちょうど 6 キー。
         assert set(p) == {"type", "stage", "done", "total", "note", "elapsed"}
         assert p["stage"] in ("camera", "bone")
         assert isinstance(p["elapsed"], float) and p["elapsed"] >= 0.0
     stages = {p["stage"] for p in progress}
-    assert stages == {"camera", "bone"}  # camera/bone の 2 段のみ
+    assert stages == {"camera", "bone"}
     for stage in ("camera", "bone"):
         starts = [p for p in progress if p["stage"] == stage and p["done"] == 0 and p["total"] is None]
         assert len(starts) == 1, f"{stage} 段の開始イベントは 1 本"
         assert starts[0]["note"] == "" and starts[0]["elapsed"] == 0.0
-    # bone 段の完了イベントは note=ボーン名・total=対象トラック数。
     bone_done = [p for p in progress if p["stage"] == "bone" and p["total"] is not None]
-    assert bone_done and all(p["note"] for p in bone_done)
-    assert {p["total"] for p in bone_done} == {1}  # 対象トラック 1 本(センター)
-    # camera 段は開始イベントだけでなくフレーム進捗(total=全範囲フレーム数≠null)も出す。
+    assert bone_done and all(p["note"] == "センター" for p in bone_done)
+    assert {p["total"] for p in bone_done} == {1}
     cam_progress = [p for p in progress if p["stage"] == "camera" and p["total"] is not None]
     assert cam_progress and all(isinstance(p["total"], int) and p["total"] > 0 for p in cam_progress)
-    # camera 段は出力後検証区間で補足文字列(note)を付ける。note が落ちていないこと。
     assert any(p["note"] for p in progress if p["stage"] == "camera")
 
 
 def test_machine_camera_one_key_still_emits_camera_start(tmp_path, capsysbinary):
-    # カメラ1キー(削減不能)でも --target camera なら camera 段は処理対象なので start イベントを 1 本出す。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=[cam(7, center=(3.0, 0.0, 0.0))])
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera", "--machine"])
@@ -207,8 +176,7 @@ def test_machine_camera_one_key_still_emits_camera_start(tmp_path, capsysbinary)
     assert len(camera_starts) == 1
 
 
-def test_machine_progress_only_processed_stages(tmp_path, capsysbinary):
-    # --target camera はカメラ段のみ。bone 段の progress は出さない(処理しない段はイベントを出さない)。
+def test_machine_progress_only_for_processed_stages(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc(), bone=ramp_bone_doc())
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera",
@@ -218,12 +186,8 @@ def test_machine_progress_only_processed_stages(tmp_path, capsysbinary):
     assert "camera" in stages and "bone" not in stages
 
 
-# --- warning 透過・選択不一致・keep-frame 無視------------------------
-
-
-def test_machine_emits_decode_error_warning(tmp_path, capsysbinary):
-    # デコード不能なボーン名 → vmd.io の decode-error を warning へ透過(section 単一要素配列)。
-    bad_name = b"\x81\x20name".ljust(15, b"\x00")
+def test_machine_emits_decode_error_warning_with_bone_section(tmp_path, capsysbinary):
+    bad_name = (_CP932_LONE_LEAD_BYTE + b"\x20name").ljust(15, b"\x00")
     keys = [BoneKey(bad_name, f, (0.0, float(f), 0.0), (0.0, 0.0, 0.0, 1.0), BL) for f in range(4)]
     io.write_file(VmdDocument(bone=keys), str(tmp_path / "in.vmd"))
     rc = cli.main([str(tmp_path / "in.vmd"), "-o", str(tmp_path / "out.vmd"),
@@ -233,14 +197,12 @@ def test_machine_emits_decode_error_warning(tmp_path, capsysbinary):
     assert terminal(events)["type"] == "result"
     decode = [e for e in events if e["type"] == "warning" and e["code"] == "decode-error"]
     assert len(decode) == 1
-    assert set(decode[0]) == {"type", "code", "message", "section"}  # warning の形
-    # bone 名のデコードエラーなので section は単一要素 ["bone"](VmdWarning.section 透過)。
+    assert set(decode[0]) == {"type", "code", "message", "section"}
     assert decode[0]["section"] == ["bone"]
     assert isinstance(decode[0]["message"], str) and decode[0]["message"]
 
 
-def test_machine_selector_unmatched_warning(tmp_path, capsysbinary):
-    # 一致する include があり、別 include の glob が不一致 → selector_unmatched 警告 + 正常終了。
+def test_machine_selector_unmatched_warning_with_other_include_matching(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=ramp_bone_doc("頭"))
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "bone",
@@ -253,8 +215,7 @@ def test_machine_selector_unmatched_warning(tmp_path, capsysbinary):
     assert unmatched[0]["section"] is None and "幻*" in unmatched[0]["message"]
 
 
-def test_machine_keep_frame_ignored_warning(tmp_path, capsysbinary):
-    # 全削減範囲外の keep-frame → keep_frame_ignored 警告。
+def test_machine_keep_frame_ignored_warning_before_result(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera",
@@ -266,10 +227,7 @@ def test_machine_keep_frame_ignored_warning(tmp_path, capsysbinary):
     ignored = [e for e in events if e["type"] == "warning" and e["code"] == "keep_frame_ignored"]
     assert ignored and set(ignored[0]) == {"type", "code", "message", "section"}
     assert ignored[0]["section"] is None and "50" in ignored[0]["message"]
-    assert events.index(ignored[0]) < events.index(r)  # warning は result より前
-
-
-# --- inspect(--machine --dry-run)----------------------------------
+    assert events.index(ignored[0]) < events.index(r)
 
 
 def test_machine_dry_run_emits_inspect(tmp_path, capsysbinary):
@@ -282,7 +240,6 @@ def test_machine_dry_run_emits_inspect(tmp_path, capsysbinary):
     events = machine_events(capsysbinary)
     r = terminal(events)
     assert r["type"] == "result" and r["mode"] == "inspect"
-    # inspect の result のトップレベル形を固定。
     assert set(r) == {"type", "mode", "output", "target", "sections", "keys", "frame_range",
                       "duration_sec", "ranges", "keep_frames", "reduced", "camera", "bones"}
     assert r["output"] is None and not out.exists()
@@ -299,11 +256,10 @@ def test_machine_dry_run_emits_inspect(tmp_path, capsysbinary):
     assert cam_r["input_keys"] == 31 and isinstance(cam_r["output_keys"], int)
     assert set(cam_r["errors"]) == {"pos_x", "pos_y", "pos_z", "rot_deg", "distance", "fov"}
     assert isinstance(cam_r["cuts"], list)
-    assert r["bones"] is None  # target camera
+    assert r["bones"] is None
 
 
 def test_machine_dry_run_inspect_target_all(tmp_path, capsysbinary):
-    # --target all の inspect は camera と bones の両方を載せる。
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc(), bone=ramp_bone_doc())
     rc = cli.main([str(src), "--curve-mode", "linear", "--machine", "--dry-run"])
@@ -316,7 +272,6 @@ def test_machine_dry_run_inspect_target_all(tmp_path, capsysbinary):
 
 
 def test_machine_dry_run_inspect_bones(tmp_path, capsysbinary):
-    # --target bone の inspect は bones 配列(name/selected/input_keys/output_keys/errors/cuts)。camera は null。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=ramp_bone_doc("センター"))
     rc = cli.main([str(src), "--target", "bone", "--curve-mode", "linear", "--machine", "--dry-run"])
@@ -332,7 +287,6 @@ def test_machine_dry_run_inspect_bones(tmp_path, capsysbinary):
 
 
 def test_machine_dry_run_inspect_null_errors_nonselected_and_nonreducible(tmp_path, capsysbinary):
-    # errors/cuts が null になるのは「非選択」と「選択でも削減不能(1キー)」の両方。
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=ramp_bone_doc("センター") + ramp_bone_doc("頭") + [bone("肩", 5)])
     rc = cli.main([str(src), "--target", "bone", "--curve-mode", "linear", "--machine", "--dry-run",
@@ -340,17 +294,21 @@ def test_machine_dry_run_inspect_null_errors_nonselected_and_nonreducible(tmp_pa
     assert rc == 0
     r = terminal(machine_events(capsysbinary))
     by_name = {b["name"]: b for b in r["bones"]}
-    # 選択+削減可能: errors 非 null。
     assert by_name["センター"]["selected"] is True and by_name["センター"]["errors"] is not None
-    # 選択でも 1 キー(削減不能): errors/cuts null。
     assert by_name["肩"]["selected"] is True
     assert by_name["肩"]["errors"] is None and by_name["肩"]["cuts"] is None
-    # 非選択: errors/cuts null。
     assert by_name["頭"]["selected"] is False
     assert by_name["頭"]["errors"] is None and by_name["頭"]["cuts"] is None
 
 
-# --- list_bones(--machine --list-bones)----------------------------
+def test_machine_dry_run_inspect_keep_frames_sorted_and_deduplicated(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    rc = cli.main([str(src), "--target", "camera", "--curve-mode", "linear", "--machine", "--dry-run",
+                   "--keep-frame", "20", "--keep-frame", "5", "--keep-frame", "20"])
+    assert rc == 0
+    r = terminal(machine_events(capsysbinary))
+    assert r["keep_frames"] == [5, 20]
 
 
 def test_machine_list_bones_result(tmp_path, capsysbinary):
@@ -362,7 +320,7 @@ def test_machine_list_bones_result(tmp_path, capsysbinary):
     events = machine_events(capsysbinary)
     r = terminal(events)
     assert r["type"] == "result" and r["mode"] == "list_bones"
-    assert set(r) == {"type", "mode", "bones"}  # list_bones の result は bones のみ
+    assert set(r) == {"type", "mode", "bones"}
     assert not out.exists()
     assert r["bones"] == [
         {"name": "センター", "keys": 2, "selected": True},
@@ -370,9 +328,7 @@ def test_machine_list_bones_result(tmp_path, capsysbinary):
     ]
 
 
-def test_machine_list_bones_unresolved_warns_then_result(tmp_path, capsysbinary):
-    # 選択子解決不能(唯一の include が不一致 glob)でも一覧(全件非選択)で終了コード 0。
-    # selector_unmatched(蓄積分)と selection_unresolved(理由)の warning を result より先に出す。
+def test_machine_list_bones_unresolved_warns_unmatched_then_unresolved_then_result(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("頭", 0), bone("頭", 30)])
     rc = cli.main([str(src), "--machine", "--list-bones", "--bone-glob", "幻*"])
@@ -383,25 +339,76 @@ def test_machine_list_bones_unresolved_warns_then_result(tmp_path, capsysbinary)
     warns = [e for e in events if e["type"] == "warning"]
     codes = [w["code"] for w in warns]
     assert "selector_unmatched" in codes and "selection_unresolved" in codes
-    # selector_unmatched(蓄積分)は selection_unresolved(理由)より先。
     assert codes.index("selector_unmatched") < codes.index("selection_unresolved")
-    # selection_unresolved の形は {code, message, section}、section は null。
     unresolved = next(w for w in warns if w["code"] == "selection_unresolved")
     assert set(unresolved) == {"type", "code", "message", "section"}
     assert unresolved["section"] is None
     assert isinstance(unresolved["message"], str) and unresolved["message"]
-    # warning はすべて result より前に出る。
     result_idx = events.index(r)
     assert all(i < result_idx for i, e in enumerate(events) if e["type"] == "warning")
-    # 全件非選択。
     assert all(b["selected"] is False for b in r["bones"])
 
 
-# --- 移植性------------------------------------------------------
+def test_machine_reduce_result_bone_input_keys_count_non_selected_bones(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=ramp_bone_doc("センター") + ramp_bone_doc("頭"))
+    rc = cli.main([str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear", "--machine",
+                   "--bone", "センター"])
+    assert rc == 0
+    r = terminal(machine_events(capsysbinary))
+    assert r["bone"] == {"input_keys": 62, "output_keys": 2 + 31}
+
+
+def test_machine_reduce_result_not_reduced_when_range_misses_every_track(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=linear_camera_doc())
+    rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera", "--curve-mode", "linear",
+                   "--machine", "--range", "100:200"])
+    assert rc == 0
+    r = terminal(machine_events(capsysbinary))
+    assert r["reduced"] is False
+    assert r["camera"] == {"input_keys": 31, "output_keys": 31}
+
+
+def test_machine_range_open_end_expands_to_selected_tracks_extent(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    long_head = [bone("頭", f, pos=(0.0, float(f), 0.0)) for f in range(101)]
+    write_vmd(src, bone=ramp_bone_doc("センター") + long_head)
+    rc = cli.main([str(src), "--target", "bone", "--curve-mode", "linear", "--machine", "--dry-run",
+                   "--bone", "センター", "--range", "10:"])
+    assert rc == 0
+    r = terminal(machine_events(capsysbinary))
+    assert r["ranges"] == [[10, 30]]
+
+
+def test_machine_bone_selection_invalid_preceded_by_selector_unmatched(tmp_path, capsysbinary):
+    src = tmp_path / "in.vmd"
+    write_vmd(src, bone=ramp_bone_doc("頭"))
+    rc = cli.main([str(src), "--machine", "--target", "bone", "--bone-glob", "幻*"])
+    assert rc == 2
+    events = machine_events(capsysbinary)
+    e = terminal(events)
+    assert e["code"] == "bone_selection_invalid"
+    unmatched = [w for w in events if w["type"] == "warning" and w["code"] == "selector_unmatched"]
+    assert unmatched and events.index(unmatched[-1]) < events.index(e)
+
+
+def test_machine_read_warning_without_section_has_null_section(tmp_path, capsysbinary, monkeypatch):
+    cam_keys = linear_camera_doc()
+    warning = VmdWarning(code="sections-missing", message="missing")
+    monkeypatch.setattr(cli.io, "read", lambda path: (VmdDocument(camera=cam_keys), [warning]))
+    src = tmp_path / "in.vmd"
+    write_vmd(src, camera=cam_keys)
+    rc = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera", "--curve-mode", "linear",
+                   "--machine"])
+    assert rc == 0
+    events = machine_events(capsysbinary)
+    missing = [e for e in events if e["type"] == "warning" and e["code"] == "sections-missing"]
+    assert len(missing) == 1 and missing[0]["section"] is None
 
 
 def test_machine_non_ascii_paths(tmp_path, capsysbinary):
-    # 非 ASCII(日本語)の入出力パスで動作する。
     src = tmp_path / "入力モーション.vmd"
     out = tmp_path / "出力_疎.vmd"
     write_vmd(src, camera=linear_camera_doc())

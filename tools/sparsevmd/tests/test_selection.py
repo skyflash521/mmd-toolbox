@@ -1,23 +1,8 @@
-"""ボーン選択ルールのテスト。
-
-selection.resolve_selection は、入力VMDのボーン名集合に対して include/exclude
-セレクタを適用し、処理対象ボーン名と警告を返す。ハード エラー(--bone 不在、
-include と exclude の名前衝突、空文字、最終0件など)は SelectionError を送出する。
-SelectionError はそれまでに蓄積した警告を .warnings に保持する。
-ソフト事象(exclude のみの不在名、glob/group の不一致)は警告して継続する。
-
-警告はセレクタ値を含む文字列で、原因(どの名前/パターンか)を区別できる。
-
-bone-file のパス検証(不在・非通常ファイル)は CLI(argparse)層の責務であり、
-parse_bone_file はテキストを受ける。パス検証は CLI(argparse)層のテストで扱う。
-"""
-
 import pytest
 
 from sparsevmd import selection
 from sparsevmd.selection import SelectionError, Selector, resolve_selection
 
-# テスト用のボーン名集合(キーが存在するボーン)。case 比較用に head/Head を併置。
 BONES = [
     "センター",
     "上半身",
@@ -43,11 +28,7 @@ def warned_about(result_or_exc, needle):
     return any(needle in w for w in ws)
 
 
-# --- include の基本 ---------------------------------------------------------
-
-
 def test_no_include_selects_all():
-    # include 指定が無ければ全ボーンを include 扱い。
     r = resolve_selection(BONES, includes=[], excludes=[])
     assert set(names(r)) == set(BONES)
 
@@ -58,13 +39,11 @@ def test_name_include_exact():
 
 
 def test_name_include_partial_does_not_match():
-    # 部分一致しない。"上半身" は "上半身2" を含まない。
     r = resolve_selection(BONES, includes=[Selector("name", "上半身")], excludes=[])
     assert names(r) == ["上半身"]
 
 
 def test_glob_case_sensitive():
-    # GLOB は fnmatchcase 相当で大文字小文字を区別。"head" は "Head" に一致しない。
     r = resolve_selection(BONES, includes=[Selector("glob", "head")], excludes=[])
     assert names(r) == ["head"]
 
@@ -75,19 +54,16 @@ def test_glob_star():
 
 
 def test_glob_question():
-    # ? は1文字。"?腕" は2文字目が腕の2文字名に一致。
     r = resolve_selection(BONES, includes=[Selector("glob", "?腕")], excludes=[])
     assert set(names(r)) == {"左腕", "右腕"}
 
 
 def test_glob_charset():
-    # [左右] は文字集合。
     r = resolve_selection(BONES, includes=[Selector("glob", "[左右]腕")], excludes=[])
     assert set(names(r)) == {"左腕", "右腕"}
 
 
 def test_group_include_arms_exact():
-    # arms は *肩*/*腕*/*手首* 等。BONES では 左腕/右腕/左手首 のちょうど3件。
     r = resolve_selection(BONES, includes=[Selector("group", "arms")], excludes=[])
     assert set(names(r)) == {"左腕", "右腕", "左手首"}
 
@@ -96,11 +72,7 @@ def test_group_include_fingers_and_legs():
     rf = resolve_selection(BONES, includes=[Selector("group", "fingers")], excludes=[])
     assert set(names(rf)) == {"左親指１"}
     rl = resolve_selection(BONES, includes=[Selector("group", "legs")], excludes=[])
-    # legs の *足* は 左足 と 左足ＩＫ の両方に一致する。
     assert set(names(rl)) == {"左足", "左足ＩＫ"}
-
-
-# --- exclude ----------------------------------------------------------------
 
 
 def test_exclude_after_include():
@@ -116,9 +88,6 @@ def test_no_include_then_exclude_glob():
     r = resolve_selection(BONES, includes=[], excludes=[Selector("glob", "*ＩＫ")])
     assert "左足ＩＫ" not in names(r)
     assert "センター" in names(r)
-
-
-# --- groups の定義(全グループの中身を厳密一致で固定) -----------------------
 
 
 def test_groups_exact_contents():
@@ -151,18 +120,12 @@ def test_mocap_is_union_without_ik_globs():
         | set(selection.GROUPS["fingers"])
     )
     assert mocap == expected
-    # ik 固有のグロブは含まない。
     assert not (set(selection.GROUPS["ik"]) & mocap)
 
 
 def test_mocap_resolution_includes_ik_named_bone_via_legs():
-    # 「ik は含めない」は ik グロブを足さない意味であり、IK 名のボーンを能動的に
-    # 除外する意味ではない。左足ＩＫ は legs の *足* に一致して mocap に入る。
     r = resolve_selection(BONES, includes=[Selector("group", "mocap")], excludes=[])
     assert "左足ＩＫ" in names(r)
-
-
-# --- ハード エラー(SelectionError) ------------------------------------------
 
 
 def test_name_include_not_found_raises():
@@ -182,31 +145,24 @@ def test_include_exclude_same_name_raises():
 @pytest.mark.parametrize(
     "includes,excludes",
     [
-        ([Selector("name", "")], []),
-        ([], [Selector("name", "")]),
+        pytest.param([Selector("name", "")], [], id="include"),
+        pytest.param([], [Selector("name", "")], id="exclude"),
     ],
 )
 def test_empty_name_raises(includes, excludes):
-    # include 側・exclude 側いずれの空文字 NAME もエラー。
     with pytest.raises(SelectionError):
         resolve_selection(BONES, includes=includes, excludes=excludes)
 
 
-def test_final_zero_with_bones_present_raises():
-    # 全 include 後に全 exclude で0件(ボーンキーは存在) → エラー。
+def test_exclude_removing_every_bone_raises():
     with pytest.raises(SelectionError):
         resolve_selection(BONES, includes=[], excludes=[Selector("glob", "*")])
 
 
 def test_sole_unmatched_glob_warns_then_errors():
-    # 唯一の include が不一致 glob → 警告を出した上で最終0件 → SelectionError。
-    # 警告はエラーに載せて観測できる。
     with pytest.raises(SelectionError) as exc:
         resolve_selection(BONES, includes=[Selector("glob", "存在しない*")], excludes=[])
     assert warned_about(exc.value, "存在しない*")
-
-
-# --- ソフト警告(継続)。原因をセレクタ値で区別できること --------------------
 
 
 def test_exclude_name_not_found_warns_and_continues():
@@ -225,9 +181,7 @@ def test_unmatched_include_glob_warns_but_other_matches():
     assert warned_about(r, "幻*")
 
 
-def test_unmatched_include_group_warns():
-    # グループがどのボーンにも一致しない場合は警告継続(他に一致があれば継続)。
-    # arms はこの小universe(頭/センター)のどれにも一致しない。
+def test_unmatched_include_group_warns_but_other_matches():
     universe = ["頭", "センター"]
     r = resolve_selection(
         universe,
@@ -244,27 +198,21 @@ def test_unmatched_exclude_glob_warns():
     assert warned_about(r, "幻*")
 
 
-def test_empty_universe_no_include_is_empty_no_error():
-    # ボーンセクションが空(キー無し)で include 指定も無ければ0件を返しエラーにしない
-    # (空セクションのエラー化は CLI 側の責務)。
+def test_empty_universe_without_include_returns_empty_without_error():
     r = resolve_selection([], includes=[], excludes=[])
     assert names(r) == []
 
 
-def test_empty_universe_explicit_name_raises():
-    # 空 universe でも --bone NAME 明示名が不在ならエラー(ボーンセクション空を含む)。
+def test_empty_universe_explicit_include_name_raises():
     with pytest.raises(SelectionError):
         resolve_selection([], includes=[Selector("name", "センター")], excludes=[])
 
 
-# --- bone-file 解析(テキストのみ。パス検証は CLI 層) -----------------------
-
-
-def test_parse_bone_file_basic():
+def test_parse_bone_file_skips_comments_and_reads_every_prefix():
     text = (
         "# コメント\n"
         "\n"
-        "センター\n"  # 接頭辞なし → name:
+        "センター\n"
         "name:頭\n"
         "glob:*腕\n"
         "group:legs\n"
@@ -285,58 +233,57 @@ def test_parse_bone_file_basic():
 @pytest.mark.parametrize(
     "text,expect_inc,expect_exc",
     [
-        # include 側: bare と name: の重複。
-        ("センター\nname:センター\n", [Selector("name", "センター")], []),
-        # exclude 側の重複。
-        (
+        pytest.param(
+            "センター\nname:センター\n", [Selector("name", "センター")], [], id="unprefixed_and_name_prefix"
+        ),
+        pytest.param(
             "exclude:glob:*腕\nexclude:glob:*腕\n",
             [],
             [Selector("glob", "*腕")],
+            id="exclude_glob",
         ),
-        # group 重複。
-        ("group:arms\ngroup:arms\n", [Selector("group", "arms")], []),
+        pytest.param("group:arms\ngroup:arms\n", [Selector("group", "arms")], [], id="group"),
     ],
 )
 def test_parse_bone_file_dedup(text, expect_inc, expect_exc):
-    # 同じ選択子の重複は1つに正規化。
     includes, excludes = selection.parse_bone_file(text)
     assert includes == expect_inc
     assert excludes == expect_exc
 
 
-# --- デコード不能名は name 一致不可 ----------------------------------
-
-UNDEC = "�"  # CP932 デコード不能ボーン名の置換文字表示
+UNDECODABLE_NAME = "\ufffd"
 
 
 def test_name_selector_cannot_target_undecodable():
-    # --bone で置換文字名を明示しても一致しない → 入力に存在しない扱い(エラー)。
     with pytest.raises(SelectionError):
         resolve_selection(
-            BONES + [UNDEC],
-            includes=[Selector("name", UNDEC)],
+            BONES + [UNDECODABLE_NAME],
+            includes=[Selector("name", UNDECODABLE_NAME)],
             excludes=[],
-            undecodable={UNDEC},
+            undecodable={UNDECODABLE_NAME},
         )
 
 
 def test_exclude_name_undecodable_warns_not_matched():
-    # --exclude-bone で置換文字名を指定しても一致せず、警告して継続(除外されない)。
     r = resolve_selection(
-        BONES + [UNDEC],
+        BONES + [UNDECODABLE_NAME],
         includes=[],
-        excludes=[Selector("name", UNDEC)],
-        undecodable={UNDEC},
+        excludes=[Selector("name", UNDECODABLE_NAME)],
+        undecodable={UNDECODABLE_NAME},
     )
-    assert UNDEC in r.selected
+    assert UNDECODABLE_NAME in r.selected
     assert warned_about(r, "存在しません")
 
 
 def test_default_all_and_glob_still_include_undecodable():
-    # name 以外(デフォルト全件・glob)では置換文字名も対象になる。
-    r_all = resolve_selection(BONES + [UNDEC], includes=[], excludes=[], undecodable={UNDEC})
-    assert UNDEC in r_all.selected
+    r_all = resolve_selection(BONES + [UNDECODABLE_NAME], includes=[], excludes=[], undecodable={UNDECODABLE_NAME})
+    assert UNDECODABLE_NAME in r_all.selected
     r_glob = resolve_selection(
-        BONES + [UNDEC], includes=[Selector("glob", "*")], excludes=[], undecodable={UNDEC}
+        BONES + [UNDECODABLE_NAME], includes=[Selector("glob", "*")], excludes=[], undecodable={UNDECODABLE_NAME}
     )
-    assert UNDEC in r_glob.selected
+    assert UNDECODABLE_NAME in r_glob.selected
+
+
+def test_selected_keeps_input_order():
+    r = resolve_selection(BONES, includes=[Selector("glob", "左*"), Selector("name", "センター")], excludes=[])
+    assert names(r) == [n for n in BONES if n == "センター" or n.startswith("左")]

@@ -1,10 +1,3 @@
-"""sparsevmd.fit: 後方互換のための re-export。
-
-補間曲線フィット・誤差評価の実体は共通ライブラリ vmd.fit にある。
-本モジュールは旧 import パス(`sparsevmd.fit`)を維持するための薄い再公開層で、
-公開・非公開シンボルを同名で再輸出する。
-"""
-
 from vmd.fit import (  # noqa: F401
     _BEZIER_INITS,
     _BEZIER_LINEAR_CP,

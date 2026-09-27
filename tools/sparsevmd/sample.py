@@ -1,46 +1,22 @@
-"""対象トラックの正規化・分割・サンプリング。
-
-入力VMDの camera/bone セクションを内部作業ビューで正規化(フレームソート・同一キー
-後勝ち)し、camera を1トラック、bone をボーン名ごとのトラックに分割する。
-サンプリングは vmd.interp に委譲する(スカラーは numpy 配列、回転は
-値のリスト)。perspective は補間しない離散値で、直近キーの値を保持する。
-"""
-
 from dataclasses import dataclass
+from typing import Literal
 
 from vmd import interp, io
-
-# perspective_series の実体は vmd.sample にある。
-# 旧 import パス(sparsevmd.sample.perspective_series)維持のため再公開する。
 from vmd.sample import perspective_series  # noqa: F401
 
 
 @dataclass
 class Track:
-    """削減対象トラック。camera は name=None、bone はボーン表示名。"""
+    """name は kind が camera なら None、bone ならボーン表示名。"""
 
-    kind: str  # "camera" | "bone"
+    kind: Literal["camera", "bone"]
     name: str | None
     keys: list
     first: int
     last: int
 
 
-def build_tracks(doc, target):
-    """対象セクションを正規化し、トラック列に分割する。
-
-    target は "camera" / "bone" / "all"。
-
-    対象セクションにキーが無ければ、そのセクションのトラックは生成しない。
-    したがって target="all" でカメラ0件・ボーンありなら bone のみのトラック列を返す
-    (片側フォールバックは自動的に成立する)。全対象でトラックが0件(空リスト)
-    の場合を「対象キー無し=終了コード1」に対応づけるのは呼び出し側(CLI)の責務で、
-    本関数はトラック分割に専念しエラーは送出しない。
-
-    正規化警告(重複ドロップ・並べ替え)は現状この層では破棄する。ユーザーへの提示
-    (verbose/レポート)が必要な場合は、io.normalize を別途呼ぶか本関数の
-    警告返却を拡張して対応する。
-    """
+def build_tracks(doc, target: Literal["camera", "bone", "all"]) -> list[Track]:
     sections = {"camera": ["camera"], "bone": ["bone"], "all": ["camera", "bone"]}[target]
     normalized, _warnings = io.normalize(doc, sections=sections)
 
@@ -56,7 +32,6 @@ def build_tracks(doc, target):
 
 
 def _split_bone_tracks(bone_keys):
-    """正規化済みボーンキー列(name_raw,frame 順)をボーン名ごとに分割する。"""
     tracks = []
     group = []
     current_raw = None
@@ -78,10 +53,9 @@ def _bone_track(group):
 
 
 def sample_scalar(keys, channel, frame_start, frame_end):
-    """スカラーチャンネルを [frame_start, frame_end] で評価する(numpy 配列)。"""
     return interp.sample_range(keys, channel, frame_start, frame_end)
 
 
 def sample_rotation(keys, frame_start, frame_end):
-    """回転チャンネルを評価する。camera は Euler 3要素、bone は quaternion のリスト。"""
+    """戻り値の各要素は、camera なら Euler 角の3要素、bone ならクォータニオン。"""
     return interp.sample_range(keys, "rot", frame_start, frame_end)
