@@ -49,15 +49,18 @@ def build_bone_tolerances(bone_pos, bone_rot):
     )
 
 
-def camera_interp_bytes(cp_pos_x, cp_pos_y, cp_pos_z, cp_rot, cp_distance, cp_fov):
+def camera_interp_bytes(cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
+    """各引数は補間曲線の制御点 (x1, y1, x2, y2)。cp_x・cp_y・cp_z は位置の各軸、cp_r は回転、cp_l は距離、
+    cp_v は視野角。"""
     out = bytearray()
-    for x1, y1, x2, y2 in (cp_pos_x, cp_pos_y, cp_pos_z, cp_rot, cp_distance, cp_fov):
+    for x1, y1, x2, y2 in (cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
         out += bytes([x1, x2, y1, y2])
     return bytes(out)
 
 
-def bone_interp_bytes(pos_x_cp, pos_y_cp, pos_z_cp, rot_cp):
-    first = [cp[i] for i in range(4) for cp in (pos_x_cp, pos_y_cp, pos_z_cp, rot_cp)]
+def bone_interp_bytes(x_cp, y_cp, z_cp, r_cp):
+    """各引数は補間曲線の制御点 (x1, y1, x2, y2)。x_cp・y_cp・z_cp は位置の各軸、r_cp は回転。"""
+    first = [cp[i] for i in range(4) for cp in (x_cp, y_cp, z_cp, r_cp)]
     b = bytearray(64)
     b[0:16] = bytes(first)
     b[16:31] = bytes(first[1:16])
