@@ -1,10 +1,6 @@
-"""OS依存の協調的中断シグナルを KeyboardInterrupt へ橋渡しする。
+"""CPython は Windows の SIGBREAK(CTRL_BREAK_EVENT)に KeyboardInterrupt を送出する既定ハンドラを持たない。
 
-CPython は SIGINT (Ctrl-C) には既定でハンドラを登録し KeyboardInterrupt を送出するが、
-Windows の CTRL_BREAK_EVENT (SIGBREAK) には登録しない。GUI 等の呼び出し側が
-CREATE_NEW_PROCESS_GROUP で起動した子プロセスへは CTRL_C_EVENT を送れず CTRL_BREAK_EVENT
-のみが使えるため、ハンドラ未登録のツールは中断要求で、Python の例外処理を経ないまま
-OS の既定動作(STATUS_CONTROL_C_EXIT)により即座に終了する。
+CREATE_NEW_PROCESS_GROUP で起動された子プロセスへは CTRL_C_EVENT を送れず、CTRL_BREAK_EVENT だけが届く。
 """
 
 import signal
@@ -12,10 +8,10 @@ import sys
 
 
 def install_sigbreak_handler():
-    """Windows の CTRL_BREAK_EVENT (SIGBREAK) を KeyboardInterrupt へ変換する。
+    """SIGBREAK の無い環境では何もしない。構造化出力の送出手段を組み上げた後、本体処理より前に呼ぶ。
 
-    Windows かつ SIGBREAK が存在する環境でのみハンドラを登録する。それ以外の環境では
-    何もしないため、プラットフォームを問わず無条件で呼べる。
+    プロセスの SIGBREAK ハンドラを書き換えるので、これを呼ぶテストは conftest.py へ
+    cli_events.testing.restore_sigbreak_handler を取り込む。
     """
     if sys.platform != "win32" or not hasattr(signal, "SIGBREAK"):
         return

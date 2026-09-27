@@ -1,8 +1,3 @@
-"""cli_events の単体テスト。
-
-機械モードのイベント送出基盤(JSON Lines エミッタ・終端規則・UTF-8・argparse エラー変換)を検証する。
-決定論的に実行し、外部依存・ネットワークを使わない。
-"""
 import io
 import json
 
@@ -15,34 +10,32 @@ from cli_events import (
     MachineArgumentParser,
     StreamTerminatedError,
     argparse_error_event,
+    argparse_error_field,
     error_event,
 )
 
 
 def _lines(buf):
-    """BytesIO の中身を UTF-8 で行配列(末尾改行除く)に分解する。"""
     return [ln for ln in buf.getvalue().decode("utf-8").split("\n") if ln]
 
 
-def test_event_type_vocabulary():
-    # イベント種別の語彙は 4 種をこの順で公開する。
+def test_event_types_are_the_four_kinds_in_order():
     assert EVENT_TYPES == ("progress", "warning", "result", "error")
 
 
-def test_emits_json_lines_with_type():
+def test_each_event_is_one_json_object_per_line_with_type():
     buf = io.BytesIO()
     em = EventEmitter(buf)
     em.progress(stage="bake", done=0, total=None)
     em.result(mode="bake", output="x.vmd")
     raw = buf.getvalue().decode("utf-8")
-    # 末尾改行で終わり、オブジェクト間に空行を挿入しない(1行1オブジェクト)。
     assert raw.endswith("\n")
     parts = raw.split("\n")
-    assert parts[-1] == ""  # 末尾改行の後ろは空のみ
+    assert parts[-1] == ""
     obj_lines = parts[:-1]
-    assert len(obj_lines) == 2  # ちょうど2行
-    assert all(ln != "" for ln in obj_lines)  # 間に空行が無い(空行を明示拒否)
-    objs = [json.loads(ln) for ln in obj_lines]  # 各行が単一 JSON としてパースできる
+    assert len(obj_lines) == 2
+    assert all(ln != "" for ln in obj_lines)
+    objs = [json.loads(ln) for ln in obj_lines]
     assert objs[0]["type"] == "progress"
     assert objs[0]["stage"] == "bake"
     assert objs[0]["total"] is None
@@ -78,8 +71,7 @@ def test_error_terminates_stream():
         em.result(mode="bake")
 
 
-def test_exactly_one_terminal_event():
-    # result/error は 1 ストリームにつきちょうど 1 つ。2 つ目の終端も拒否する。
+def test_error_after_error_is_rejected():
     buf = io.BytesIO()
     em = EventEmitter(buf)
     em.error(code="x", exit_code=1, field=None, path=None, message="m")
@@ -87,8 +79,15 @@ def test_exactly_one_terminal_event():
         em.error(code="y", exit_code=1, field=None, path=None, message="n")
 
 
-def test_utf8_not_locale_encoding():
-    # 日本語(ロケール cp932 でも UTF-8 で出る)。ensure_ascii=False の実バイト。
+def test_result_after_result_is_rejected():
+    buf = io.BytesIO()
+    em = EventEmitter(buf)
+    em.result(mode="bake")
+    with pytest.raises(StreamTerminatedError):
+        em.result(mode="bake")
+
+
+def test_non_ascii_is_written_as_utf8_without_escaping():
     buf = io.BytesIO()
     em = EventEmitter(buf)
     em.warning(code="non_camera_sections_passthrough", message="カメラ以外", section=["bone"])
@@ -99,8 +98,7 @@ def test_utf8_not_locale_encoding():
     assert obj["section"] == ["bone"]
 
 
-def test_no_raw_newline_in_line():
-    # message 内の改行は JSON エスケープされ、出力は 1 行(末尾改行のみ)。
+def test_newline_in_payload_is_escaped_within_one_line():
     buf = io.BytesIO()
     em = EventEmitter(buf)
     em.warning(code="x", message="line1\nline2", section=None)
@@ -110,77 +108,25 @@ def test_no_raw_newline_in_line():
 
 
 def test_line_separator_is_lf_only():
-    # 行区切りは LF(\n)固定で \r を含まない(バイト列で検証)。バイナリストリームへ
-    # 書くのでプラットフォームの改行変換(Windows の CRLF 変換)は起きない。
     buf = io.BytesIO()
     em = EventEmitter(buf)
     em.progress(stage="bake", done=0, total=None)
     em.warning(code="octave_clamped", message="日本語メッセージ", section=None)
     em.result(mode="bake", output="out.vmd")
     raw = buf.getvalue()
-    assert b"\r\n" not in raw          # CRLF を混入させない
-    assert b"\r" not in raw            # CR を一切含まない
+    assert b"\r" not in raw
     assert raw.endswith(b"\n")
-    assert raw.count(b"\n") == 3       # 3イベント=3行、各行 LF 終端
-
-
-def test_error_event_builder():
-    ev = error_event(code="bad_argument", message="unknown", exit_code=2, field="--foo")
-    assert ev == {
-        "type": "error",
-        "code": "bad_argument",
-        "exit_code": 2,
-        "field": "--foo",
-        "path": None,
-        "message": "unknown",
-    }
-
-
-def test_machine_parser_raises_instead_of_exit():
-    p = MachineArgumentParser(prog="x")
-    p.add_argument("--n", type=int)
-    # 正常解析は通常どおり。
-    assert p.parse_args(["--n", "3"]).n == 3
-    # エラーは SystemExit でなく ArgumentParseError(message を持つ)。
-    with pytest.raises(ArgumentParseError) as exc:
-        p.parse_args(["--n", "notint"])
-    assert exc.value.message
-
-
-def test_argparse_error_converts_to_error_event():
-    # argparse エラー(=引数エラー)を error イベントへ変換する end-to-end フロー。
-    p = MachineArgumentParser(prog="x")
-    p.add_argument("--n", type=int)
-    with pytest.raises(ArgumentParseError) as exc:
-        p.parse_args(["--n", "notint"])
-    ev = argparse_error_event(exc.value, code="bad_argument", field="--n")
-    assert ev["type"] == "error"
-    assert ev["code"] == "bad_argument"
-    assert ev["exit_code"] == 2  # argparse エラーは基底共通 2(ヘルパが固定)
-    assert ev["field"] == "--n"
-    assert ev["path"] is None
-    assert ev["message"]  # argparse のメッセージを載せる
-
-
-def test_result_then_result_rejected():
-    # 終端の対称パターン: result の後の result も拒否する(ちょうど 1 つ)。
-    buf = io.BytesIO()
-    em = EventEmitter(buf)
-    em.result(mode="bake")
-    with pytest.raises(StreamTerminatedError):
-        em.result(mode="bake")
+    assert raw.count(b"\n") == 3
 
 
 def test_empty_payload_emits_type_only():
-    # ペイロード無しの送出は type だけのオブジェクトになる。
     buf = io.BytesIO()
     em = EventEmitter(buf)
     em.result()
     assert json.loads(buf.getvalue().decode("utf-8")) == {"type": "result"}
 
 
-def test_flushless_stream_ok():
-    # flush を持たない write-only stream でも例外なく書ける(getattr ガード)。
+def test_stream_without_flush_is_accepted():
     class _WriteOnly:
         def __init__(self):
             self.data = b""
@@ -193,9 +139,34 @@ def test_flushless_stream_ok():
     assert json.loads(s.data.decode("utf-8"))["type"] == "result"
 
 
-def test_help_and_version_not_converted_to_parse_error():
-    # --help/--version は parser.exit 経由のメタ操作で error() を通らないため、
-    # MachineArgumentParser でも ArgumentParseError でなく SystemExit になる。
+def test_error_event_has_fixed_key_set():
+    ev = error_event(code="bad_argument", message="unknown", exit_code=2, field="--foo")
+    assert ev == {
+        "type": "error",
+        "code": "bad_argument",
+        "exit_code": 2,
+        "field": "--foo",
+        "path": None,
+        "message": "unknown",
+    }
+
+
+def test_error_event_field_and_path_default_to_none():
+    ev = error_event(code="internal_error", message="m", exit_code=1)
+    assert ev["field"] is None
+    assert ev["path"] is None
+
+
+def test_machine_parser_raises_parse_error_instead_of_exiting():
+    p = MachineArgumentParser(prog="x")
+    p.add_argument("--n", type=int)
+    assert p.parse_args(["--n", "3"]).n == 3
+    with pytest.raises(ArgumentParseError) as exc:
+        p.parse_args(["--n", "notint"])
+    assert exc.value.message
+
+
+def test_help_and_version_exit_instead_of_raising_parse_error():
     p = MachineArgumentParser(prog="x")
     p.add_argument("--version", action="version", version="x 1.0")
     with pytest.raises(SystemExit):
@@ -204,47 +175,58 @@ def test_help_and_version_not_converted_to_parse_error():
         p.parse_args(["--version"])
 
 
-def test_argparse_error_field_extraction_rules():
-    # argparse の標準文言から bad_argument の field をベストエフォート抽出する規則。
-    from cli_events import argparse_error_field
-
-    # 「argument <引数名>: 」→ コロン前の引数名。
-    assert argparse_error_field("argument --foo: invalid int value: 'x'") == "--foo"
-    # 複数のオプション文字列が「/」で連結されるときは最後(長形式)を採る。
-    assert argparse_error_field("argument -o/--output: expected one argument") == "--output"
-    # 先頭が「-」でない positional 名はそのまま返す。
-    assert argparse_error_field("argument input: invalid choice: 'z'") == "input"
-    # 「unrecognized arguments: 」→ 続くトークン列の最初の 1 語。
-    assert argparse_error_field("unrecognized arguments: --bar baz") == "--bar"
-    # 「the following arguments are required: 」→ 続く名前列の先頭(カンマ区切りの最初)。
-    assert argparse_error_field("the following arguments are required: input") == "input"
-    assert argparse_error_field(
-        "the following arguments are required: input, --other"
-    ) == "input"
-    # 「argument 」で始まってもコロンが無ければ「argument <名前>: 」形でない → None。
-    assert argparse_error_field("argument --foo invalid") is None
-    assert argparse_error_field("argument ") is None
-    # いずれにも当たらない文言 → None(詳細は message 側に残す)。
-    assert argparse_error_field("some other unexpected message") is None
-    assert argparse_error_field("") is None
+def test_argparse_error_event_carries_argparse_message_and_exit_code_2():
+    p = MachineArgumentParser(prog="x")
+    p.add_argument("--n", type=int)
+    with pytest.raises(ArgumentParseError) as exc:
+        p.parse_args(["--n", "notint"])
+    ev = argparse_error_event(exc.value, code="bad_argument", field="--n")
+    assert ev == {
+        "type": "error",
+        "code": "bad_argument",
+        "exit_code": 2,
+        "field": "--n",
+        "path": None,
+        "message": exc.value.message,
+    }
 
 
-def test_argparse_error_field_from_real_parser():
-    # MachineArgumentParser の実エラー文言に対して end-to-end で抽出できること。
-    from cli_events import argparse_error_field
+def test_argparse_error_event_field_defaults_to_none():
+    ev = argparse_error_event(ArgumentParseError("m"), code="bad_argument")
+    assert ev["field"] is None
 
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        pytest.param("argument --foo: invalid int value: 'x'", "--foo", id="argument_option"),
+        pytest.param("argument -o/--output: expected one argument", "--output", id="argument_takes_last_option_string"),
+        pytest.param("argument input: invalid choice: 'z'", "input", id="argument_positional_as_is"),
+        pytest.param("unrecognized arguments: --bar baz", "--bar", id="unrecognized_first_token"),
+        pytest.param("the following arguments are required: input", "input", id="required_single"),
+        pytest.param("the following arguments are required: input, --other", "input", id="required_first_of_list"),
+        pytest.param("argument --foo invalid", None, id="argument_without_colon"),
+        pytest.param("argument ", None, id="argument_prefix_only"),
+        pytest.param("some other unexpected message", None, id="unknown_form"),
+        pytest.param("", None, id="empty"),
+    ],
+)
+def test_argparse_error_field_extraction(message, expected):
+    assert argparse_error_field(message) == expected
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        pytest.param([], "input", id="missing_positional"),
+        pytest.param(["in", "--n", "notint"], "--n", id="invalid_type"),
+        pytest.param(["in", "--nope"], "--nope", id="unknown_option"),
+    ],
+)
+def test_argparse_error_field_from_real_parser_message(argv, expected):
     p = MachineArgumentParser(prog="x", allow_abbrev=False)
     p.add_argument("input")
     p.add_argument("--n", type=int)
-
     with pytest.raises(ArgumentParseError) as exc:
-        p.parse_args([])  # positional 欠落
-    assert argparse_error_field(exc.value.message) == "input"
-
-    with pytest.raises(ArgumentParseError) as exc:
-        p.parse_args(["in", "--n", "notint"])  # 型エラー
-    assert argparse_error_field(exc.value.message) == "--n"
-
-    with pytest.raises(ArgumentParseError) as exc:
-        p.parse_args(["in", "--nope"])  # 未知オプション
-    assert argparse_error_field(exc.value.message) == "--nope"
+        p.parse_args(argv)
+    assert argparse_error_field(exc.value.message) == expected
