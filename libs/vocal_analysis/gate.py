@@ -1,10 +1,3 @@
-"""S-1 認識測定の参照ラベル処理と採点指標。
-
-参照ラベルの音素記号を採点用カテゴリ(母音 a/i/u/e/o・子音 c・無音/息 sil)へ写像する。想定外記号は
-黙って捨てず `UnknownReferenceSymbolError` で停止する。モノフォンラベル形式(秒単位・HTK 100ns単位)の
-パーサも提供する。
-"""
-
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,13 +8,11 @@ from vpr.types import Part, TempoEvent
 
 from .phonemes import xsampa_vowel_letter
 
-# モノフォンラベルのHTK 100ns単位を秒へ変換する係数。
 _HTK_100NS_UNITS_PER_SECOND = 1e7
 
 _VOWEL_SYMBOLS = frozenset({"a", "i", "u", "e", "o"})
 _SILENCE_SYMBOLS = frozenset({"pau", "br"})
-# cl(促音の閉鎖)・N(撥音)・その他の全子音。sy/ty/zy に相当する音は sh/ch/j で表記されるため
-# 別記号として含めない。
+# 参照ラベルは sy・ty・zy に当たる音を sh・ch・j で表記する。
 _CONSONANT_SYMBOLS = frozenset({
     "b", "by", "ch", "cl", "d", "f", "g", "gy", "h", "hy", "j", "k", "ky",
     "m", "my", "n", "N", "ny", "p", "py", "r", "ry", "s", "sh", "t", "ts",
@@ -31,21 +22,16 @@ _EXCLUDED_SYMBOLS = frozenset({"xx"})
 
 
 class UnknownReferenceSymbolError(Exception):
-    """参照ラベルの写像表に無い想定外の音素記号(写像表を補う必要がある)。"""
+    pass
 
 
 class MonophoneLabelFormatError(Exception):
-    """モノフォンラベルファイルの行が「開始 終了 音素」の3列形式でない(原因特定用にファイルパスと
-    行内容を含む)。"""
+    pass
 
 
 @dataclass
 class CategorySegment:
-    """参照ラベルの1区間(採点用カテゴリ)。
-
-    `category` は `reference_symbol_to_category` の戻り値(母音 a/i/u/e/o・子音 c・無音/息 sil、
-    または xx による除外印の None)。
-    """
+    """category は a/i/u/e/o・"c"・"sil" のいずれかで、採点から除く区間は None。"""
 
     category: str | None
     start_sec: float
@@ -53,11 +39,7 @@ class CategorySegment:
 
 
 def reference_symbol_to_category(symbol: str) -> str | None:
-    """参照ラベルの音素記号を採点用カテゴリへ写像する。
-
-    母音は a/i/u/e/o、pau・br は sil、子音は c を返す。xx(未定義区間)は採点から除外する
-    印として None を返す。写像表に無い記号は `UnknownReferenceSymbolError` で停止する。
-    """
+    """戻り値は CategorySegment.category の値。写像表に無い記号は UnknownReferenceSymbolError。"""
     if symbol in _VOWEL_SYMBOLS:
         return symbol
     if symbol in _SILENCE_SYMBOLS:
@@ -74,9 +56,6 @@ def reference_symbol_to_category(symbol: str) -> str | None:
 def _parse_monophone_label_lines(
     path: Path, lines: list[str], time_scale: float
 ) -> list[CategorySegment]:
-    """「開始 終了 音素」の3列形式(空行は無視)を、時刻を time_scale で除して秒へ変換しつつ
-    カテゴリ区間列へ変換する。記号→カテゴリの写像は reference_symbol_to_category に
-    委譲し、ここでは独自実装しない。"""
     segments = []
     for line in lines:
         if not line.strip():
@@ -98,14 +77,11 @@ def _parse_monophone_label_lines(
 
 
 def parse_seconds_monophone_label(path: str | Path) -> list[CategorySegment]:
-    """モノフォンラベル(開始 終了 音素。時刻は秒)を読み、カテゴリ区間列へ変換する。"""
     path = Path(path)
     return _parse_monophone_label_lines(path, path.read_text(encoding="utf-8").splitlines(), time_scale=1.0)
 
 
 def parse_htk100ns_monophone_label(path: str | Path) -> list[CategorySegment]:
-    """モノフォンラベル(開始 終了 音素。時刻はHTK 100ns単位の整数)を読み、カテゴリ区間列へ
-    変換する。"""
     path = Path(path)
     return _parse_monophone_label_lines(
         path, path.read_text(encoding="utf-8").splitlines(), time_scale=_HTK_100NS_UNITS_PER_SECOND
@@ -115,9 +91,6 @@ def parse_htk100ns_monophone_label(path: str | Path) -> list[CategorySegment]:
 def clip_segments_to_audio_duration(
     segments: list[CategorySegment], audio_duration_sec: float
 ) -> list[CategorySegment]:
-    """採点の時間軸を [0, audio_duration_sec] に限定する。範囲外の区間は除外し、範囲をまたぐ
-    区間は範囲内に収まるようクリップする。範囲内で参照ラベルが被覆しない区間(末尾欠落等)を
-    埋める合成区間は追加しない。"""
     result = []
     for seg in segments:
         start = max(seg.start_sec, 0.0)
@@ -128,14 +101,7 @@ def clip_segments_to_audio_duration(
 
 
 def remove_invalid_time_segments(segments: list[CategorySegment]) -> list[CategorySegment]:
-    """ゼロ長・時刻逆転の区間を除去し、2つ以上の区間が重複する時間範囲(隣接する区間どうしに
-    限らず、一方が他方を包含する場合や離れた区間と重なる場合も含む)を、どの区間からも除外する
-    (採点対象に残さず隙間にする)。
-
-    区間境界(開始・終了時刻)で時間軸を分割した各微小区間ごとに、それを覆う元区間の数を数える
-    (掃引法)。覆う元区間がちょうど1つの微小区間だけを採用し、同一の元区間に由来する隣接微小
-    区間は1つの区間へ結合する。覆う元区間が0または2つ以上の微小区間は捨てる。
-    """
+    """2つ以上の区間が重なる時間範囲は、どの区間からも取り除いて隙間にする。"""
     valid = [seg for seg in segments if seg.end_sec > seg.start_sec]
     if not valid:
         return []
@@ -160,12 +126,10 @@ def remove_invalid_time_segments(segments: list[CategorySegment]) -> list[Catego
     return result
 
 
-# MIDI粗整合の食い違いとみなす連続時間の閾値。
 _MIDI_MISMATCH_THRESHOLD_SEC = 0.3
 
 
 def _merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """区間列(開始, 終了)を開始時刻順に整列し、重なる/接する区間を結合する。"""
     ordered = sorted((iv for iv in intervals if iv[1] > iv[0]), key=lambda iv: iv[0])
     merged: list[tuple[float, float]] = []
     for start, end in ordered:
@@ -179,7 +143,6 @@ def _merge_intervals(intervals: list[tuple[float, float]]) -> list[tuple[float, 
 def _subtract_intervals(
     base: tuple[float, float], subtract: list[tuple[float, float]]
 ) -> list[tuple[float, float]]:
-    """base区間から subtract 区間群(結合済み・開始時刻順)を差し引いた残り区間列を返す。"""
     start, end = base
     remaining: list[tuple[float, float]] = []
     cursor = start
@@ -199,7 +162,6 @@ def _subtract_intervals(
 def _intersect_intervals(
     base: tuple[float, float], others: list[tuple[float, float]]
 ) -> list[tuple[float, float]]:
-    """base区間と others 区間群(結合済み・開始時刻順)との重なり区間列を返す。"""
     start, end = base
     result: list[tuple[float, float]] = []
     for other_start, other_end in others:
@@ -213,12 +175,7 @@ def _intersect_intervals(
 def find_midi_mismatch_ranges(
     segments: list[CategorySegment], midi_notes: list[tuple[float, float]]
 ) -> list[tuple[float, float]]:
-    """参照ラベルとMIDIノート(発音区間)を粗く突き合わせ、長時間の食い違いを検出する。
-
-    母音区間のうちMIDIノートに重ならない部分、および sil 区間のうちMIDIノートに連続して
-    覆われる部分について、`_MIDI_MISMATCH_THRESHOLD_SEC` 以上続くものを食い違い区間として
-    返す。子音区間は対象外。
-    """
+    """母音のうちノートに覆われない部分と、sil のうちノートに覆われる部分で、一定時間以上続くものを返す。"""
     merged_notes = _merge_intervals(midi_notes)
     mismatches: list[tuple[float, float]] = []
     for seg in segments:
@@ -237,8 +194,6 @@ def find_midi_mismatch_ranges(
 def exclude_ranges_from_segments(
     segments: list[CategorySegment], ranges_to_exclude: list[tuple[float, float]]
 ) -> list[CategorySegment]:
-    """segments から、ranges_to_exclude の各区間と重なる時間範囲を除外した区間列を返す
-    (重なる範囲だけを取り除き、区間を分割・全部除外・無変更のいずれかにする)。"""
     merged_exclusions = _merge_intervals(ranges_to_exclude)
     result: list[CategorySegment] = []
     for seg in segments:
@@ -248,12 +203,7 @@ def exclude_ranges_from_segments(
 
 
 def ticks_to_seconds(tick: int, tempos: list[TempoEvent], resolution: int) -> float:
-    """vpr の tick 値を、テンポマップ(`tempos`)と分解能(`resolution`。tick/四分音符)に基づいて
-    秒へ変換する(`vpr` は tick⇔秒変換を呼び出し側の責務とする)。
-
-    `tempos` はテンポ変化イベントの列(tick の順序は問わない)。各テンポ区間ごとに
-    経過秒数(`(区間のtick長 / resolution) * (60 / bpm)`)を積算する。
-    """
+    """resolution は四分音符あたりの tick 数。"""
     ordered = sorted(tempos, key=lambda t: t.tick)
     seconds = 0.0
     for i, tempo in enumerate(ordered):
@@ -269,14 +219,6 @@ def ticks_to_seconds(tick: int, tempos: list[TempoEvent], resolution: int) -> fl
 def generate_vpr_reference_segments(
     part: Part, tempos: list[TempoEvent], resolution: int
 ) -> list[CategorySegment]:
-    """vpr の1パート(歌唱区間)から参照ラベルのセグメント列を生成する。
-
-    各音符の代表音素(音素列の末尾)を X-SAMPA母音写像で母音(a/i/u/e/o)または子音(c)へ分類する。
-    音符全体が継続記号「-」単独、または音素列が空の音符は、直前の音符の代表音素を継承する
-    (継続は音符全体の状態であり、他の音素と混在する「-」は想定しない。継承元が無い場合は
-    その音符の区間を生成しない)。音符間の隙間は休符として sil 区間にする。同一カテゴリで
-    時間的に連続する区間は1つに結合する。
-    """
     segments: list[CategorySegment] = []
     previous_phoneme: str | None = None
     for note in part.notes:
@@ -315,22 +257,17 @@ def generate_vpr_reference_segments(
     return merged
 
 
-# 採点指標のフレーム展開幅。
-_FRAME_SEC = 0.01
+_SCORING_FRAME_SEC = 0.01
 _NON_VOWEL_SCORED_CATEGORIES = frozenset({"c", "sil"})
 
 
 def _frame_categories(segments: list[CategorySegment], duration_sec: float) -> list[str | None]:
-    """[0, duration_sec) を `_FRAME_SEC` 刻みのフレームへ展開し、各フレーム代表時刻(フレーム中央)を
-    覆う区間のカテゴリ列を返す。どの区間にも覆われないフレームは None。segments は開始時刻順である
-    必要は無い(内部で並べ替える)。区間どうしは重複しない前提(`remove_invalid_time_segments` 適用後)。
-    """
     ordered = sorted(segments, key=lambda seg: seg.start_sec)
-    num_frames = round(duration_sec / _FRAME_SEC)
+    num_frames = round(duration_sec / _SCORING_FRAME_SEC)
     categories: list[str | None] = []
     idx = 0
     for i in range(num_frames):
-        t = (i + 0.5) * _FRAME_SEC
+        t = (i + 0.5) * _SCORING_FRAME_SEC
         while idx < len(ordered) and ordered[idx].end_sec <= t:
             idx += 1
         if idx < len(ordered) and ordered[idx].start_sec <= t:
@@ -343,8 +280,6 @@ def _frame_categories(segments: list[CategorySegment], duration_sec: float) -> l
 def compute_vowel_accuracy(
     predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
 ) -> float:
-    """母音正解率: 基準が母音(a/i/u/e/o)のフレームのうち、予測の母音種別が一致した割合。
-    未検出(予測がそのフレームを覆わない)は不一致として数える。"""
     ref_frames = _frame_categories(reference, duration_sec)
     pred_frames = _frame_categories(predicted, duration_sec)
     vowel_indices = [i for i, category in enumerate(ref_frames) if category in _VOWEL_SYMBOLS]
@@ -355,7 +290,6 @@ def compute_vowel_accuracy(
 def compute_over_opening_rate(
     predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
 ) -> float:
-    """過開口率: 基準が c/sil のフレームのうち、予測が母音になったフレームの割合。"""
     ref_frames = _frame_categories(reference, duration_sec)
     pred_frames = _frame_categories(predicted, duration_sec)
     non_vowel_indices = [i for i, category in enumerate(ref_frames) if category in _NON_VOWEL_SCORED_CATEGORIES]
@@ -370,8 +304,6 @@ def _overlap_sec(a: CategorySegment, b: CategorySegment) -> float:
 def _better_assignment(
     a: tuple[float, tuple[tuple[int, int], ...]], b: tuple[float, tuple[tuple[int, int], ...]]
 ) -> tuple[float, tuple[tuple[int, int], ...]]:
-    """総重なり時間の最大化を第一基準、対応ペア列(基準番号, 予測番号)の辞書式最小を第二基準として
-    2つの候補のうち優先する方を返す。"""
     if a[0] != b[0]:
         return a if a[0] > b[0] else b
     return a if a[1] <= b[1] else b
@@ -380,23 +312,8 @@ def _better_assignment(
 def match_segments(
     predicted: list[CategorySegment], reference: list[CategorySegment]
 ) -> tuple[list[tuple[CategorySegment, CategorySegment]], list[CategorySegment], list[CategorySegment]]:
-    """区間の対応付け。
-
-    母音カテゴリ(a/i/u/e/o)の基準区間と予測区間のうち、母音種別が一致し時間重なりが正(0より大)の
-    組に限り、総重なり時間を最大化する全体最適割当で1対1対応させる。子音・無音カテゴリの区間は
-    母音種別を持たないため対応付けの対象にしない(未検出・余剰にも数えない)。最適割当が複数ある
-    ときは、基準区間・予測区間をそれぞれ開始時刻昇順(同時刻なら終了時刻昇順)で番号付けし、割当を
-    (基準番号, 予測番号)の組の昇順リストとして辞書式比較した最小の割当を採る。
-
-    基準区間列・予測区間列はそれぞれ時間的に重複しない(remove_invalid_time_segments 適用後)前提
-    とする。この前提の下では、基準番号・予測番号を跨いだ対応付けが交差する(番号の大きい基準区間が
-    番号の小さい予測区間に、番号の小さい基準区間が番号の大きい予測区間に、同時に正の重なりを持つ)
-    ことはあり得ないため、2つの整列済み列を先頭から同時に走査する動的計画法で全体最適割当を厳密に
-    求められる。
-
-    戻り値: (対応した(基準区間, 予測区間)の組のリスト, 対応の無い基準区間=未検出のリスト,
-    対応の無い予測区間=余剰のリスト)。
-    """
+    """predicted・reference はそれぞれ区間どうしが重ならないこと(remove_invalid_time_segments を通したもの)。
+    戻り値は (対応した (基準区間, 予測区間) の組, 対応の無い基準区間, 対応の無い予測区間)。"""
     ref_vowels = sorted(
         (seg for seg in reference if seg.category in _VOWEL_SYMBOLS),
         key=lambda seg: (seg.start_sec, seg.end_sec),
@@ -436,10 +353,7 @@ def match_segments(
 def compute_boundary_deviation(
     matched_pairs: list[tuple[CategorySegment, CategorySegment]],
 ) -> tuple[float, float] | None:
-    """境界時刻ずれ: match_segments が返す対応済み(基準区間, 予測区間)の組ごとに開始時刻差
-    |予測-基準|(ミリ秒)を求め、その中央値と95パーセンタイル(線形補間)を返す。対応区間が無い場合は
-    未定義として None を返す(マクロ平均からの除外とその事実の報告は集計側=呼び出し側の責務)。
-    """
+    """戻り値は開始時刻差のミリ秒の (中央値, 95パーセンタイル)。対応が1組も無ければ None。"""
     if not matched_pairs:
         return None
     deviations_ms = [
@@ -451,8 +365,6 @@ def compute_boundary_deviation(
 
 @dataclass
 class SongMetrics:
-    """1曲分の採点指標。"""
-
     vowel_accuracy: float
     over_opening_rate: float
     boundary_deviation: tuple[float, float] | None
@@ -464,11 +376,6 @@ class SongMetrics:
 def compute_song_metrics(
     predicted: list[CategorySegment], reference: list[CategorySegment], duration_sec: float
 ) -> SongMetrics:
-    """1曲分の採点指標をまとめて算出する。
-
-    合否判定は行わない(数値は認識構成間の相対比較と破綻検出に使い、品質の合否は利用先の
-    実装時調整と MMD 上の視聴確認が担う)。複数曲のマクロ平均などの集計は測定側(呼び出し側)が行う。
-    """
     matched, undetected, excess = match_segments(predicted, reference)
     return SongMetrics(
         vowel_accuracy=compute_vowel_accuracy(predicted, reference, duration_sec),

@@ -1,9 +1,3 @@
-"""日本語テキストのかな読みのテスト。
-
-読みの正しさそのものは G2P の辞書と形態素解析に依存し本モジュールの契約ではないので、ここでは
-公開面の契約——入力の単位・変換方式の固定・失敗の分類・取り込みが追加依存を要さないこと——を検証する。
-"""
-
 import builtins
 import os
 import subprocess
@@ -41,13 +35,12 @@ def test_converts_the_whole_text_in_one_call(monkeypatch):
     assert captured["kana"] is True
 
 
-def test_conversion_method_is_not_selectable(monkeypatch):
-    # 方式の選択は認識の品質と実行コストを測って決めるもので、読みを得るだけの用途には持ち込まない。
+def test_conversion_method_is_left_at_default(monkeypatch):
     captured = {}
     _install(monkeypatch, _fake_convert(captured, result="ア"))
 
     to_kana_reading("あ")
-    assert captured["method"] is None  # 既定のまま(呼び出し側から渡さない)
+    assert captured["method"] is None
 
 
 def test_multiple_lines_are_passed_as_one_unit(monkeypatch):
@@ -71,7 +64,6 @@ def test_recognition_error_passes_through_unchanged(monkeypatch):
 
 @pytest.mark.parametrize("error", [ImportError("no module named pyopenjtalk"), RuntimeError("boom")])
 def test_other_failures_are_reported_as_recognition_error(monkeypatch, error):
-    # 追加依存の未導入も変換そのものの失敗も、呼び出し元が1つの型で引き取れるよう同じ例外にする。
     from vocal_analysis.recognizer import RecognitionError
 
     _install(monkeypatch, _fake_convert({}, error=error))
@@ -83,8 +75,6 @@ def test_other_failures_are_reported_as_recognition_error(monkeypatch, error):
 
 
 def test_importing_the_module_does_not_pull_in_the_extra_dependencies():
-    # 取り込み自体は追加依存を要さない(未導入の環境でも取り込みは成立する)。追加依存を要する
-    # モジュールを取り込んでいないことを、別プロセスの取り込み後の状態で確かめる。
     code = ("import sys; import vocal_analysis.reading; "
             "print('vocal_analysis.recognizer' in sys.modules)")
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
@@ -94,7 +84,6 @@ def test_importing_the_module_does_not_pull_in_the_extra_dependencies():
 
 
 def test_missing_extra_dependency_at_import_time_is_reported_as_recognition_error(monkeypatch):
-    # 追加依存が未導入の環境では取り込みの時点で失敗する。その失敗も同じ型で分類する。
     from vocal_analysis.phonemes import RecognitionError
 
     real_import = builtins.__import__
@@ -111,9 +100,7 @@ def test_missing_extra_dependency_at_import_time_is_reported_as_recognition_erro
     assert "ImportError" in str(exc.value)
 
 
-def test_kana_reading_goes_through_the_english_katakana_fallback(monkeypatch):
-    # かな読みも音素認識と同じ経路(カタカナ化フォールバックを適用してから G2P)を通る。読みの実体は
-    # 規定しないので、フォールバックの結果がそのまま G2P へ渡ることと呼び出しの形だけを固定する。
+def test_kana_reading_passes_english_katakana_fallback_result_to_g2p(monkeypatch):
     import pyopenjtalk
 
     from vocal_analysis import recognizer as recognizer_module

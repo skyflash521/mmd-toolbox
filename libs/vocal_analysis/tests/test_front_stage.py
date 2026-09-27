@@ -1,11 +1,3 @@
-"""前段実行エンジンのテスト。
-
-S0読込・S1分離・S2認識・S3 RMS の呼び出し順序と受け渡し、長尺分割、進捗の中継、失敗の分類、
-診断用中間生成物の書き出しを検証する。重い外部アダプタ(S1分離・S2認識)はモックし、軽量な純粋
-数値処理(S0読込・S3 RMS)は短い合成WAVフィクスチャで実関数をそのまま通す(分割の境界計算・結合
-そのものは test_chunking.py が担うため、ここではモックして結線だけを検証する)。
-"""
-
 import json
 
 import numpy as np
@@ -79,7 +71,6 @@ def test_single_run_calls_stages_in_order(tmp_path, monkeypatch):
 
 
 def test_single_run_passes_separator_name_to_separate(tmp_path, monkeypatch):
-    # --separator で選んだ安定 id は診断表示だけでなく、実際の分離呼び出しへ渡る。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -101,9 +92,7 @@ def test_single_run_passes_separator_name_to_separate(tmp_path, monkeypatch):
     assert captured["separator"] == "audio-separator-htdemucs-ft"
 
 
-def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(tmp_path, monkeypatch):
-    # progress.stage()の順序だけでなく、実際の下位関数の呼び出し順序とデータの受け渡し
-    # (separateへ渡すpcm・recognizeへ渡すvocal_path・RMS算出へ渡すボーカルPCM)を検証する。
+def test_single_run_reports_each_stage_before_running_it_and_passes_data_through(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -149,20 +138,14 @@ def test_single_run_calls_underlying_functions_in_order_with_correct_data_flow(t
     result = run_front_stage(
         input_path, on_progress=_OrderRecordingProgress().stage, **_common_kwargs())
 
-    # load_audioは入力読み込みと(分離後の)ボーカル読み込みの2回呼ばれる。各段のprogress発行
-    # ("progress:X")は、その段の実処理("X")より必ず前に来る(「各段は開始時に
-    # 最低1本のprogressを出す」挙動の後退を防ぐ回帰テスト)。
     assert call_order == [
         "progress:load", "load_audio", "progress:separate", "separate", "progress:recognize",
         "recognize", "progress:rms", "load_audio", "compute_rms",
     ]
     assert str(captured["recognize_path"]) == str(vocal_path)
-    # 1回目のload_audioの戻り値がそのままseparateへ渡ること、compute_rmsの戻り値がそのまま
-    # 共有出力のRMSになることを、同一性(取り違え・別経路生成が無いこと)で確認する。
     assert captured["separate_pcm"] is captured["load_audio_results"][0]
     assert result.analysis.rms is captured["compute_rms_result"]
     assert result.analysis.segments == given_segments
-    # 2回目のload_audioの戻り値(分離後ボーカル)がそのまま返る(利用先が読み直さずに済む)。
     assert result.vocal_pcm is captured["load_audio_results"][1]
 
 
@@ -215,6 +198,33 @@ def test_recognizer_receives_selected_english_katakana_method(tmp_path, monkeypa
     assert received["english_katakana_method"] == "tinyllama-katakana-converter"
 
 
+def test_input_exactly_max_duration_is_not_chunked(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=3.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=3.0, amplitude=0.8)
+
+    def fail_find_boundaries(*a, **k):
+        raise AssertionError("尺が目標長ちょうどの入力で分割境界を探してはならない")
+
+    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", fail_find_boundaries)
+    separate_calls = []
+    monkeypatch.setattr(
+        front_stage._separator, "separate",
+        lambda pcm, mode, **kwargs: separate_calls.append(pcm) or vocal_path)
+    monkeypatch.setattr(
+        front_stage._recognizer, "recognize",
+        lambda path, **kwargs: [seg("vowel", 0.0, 3.0, phoneme="a", confidence=0.9)])
+
+    progress = _RecordingProgress()
+    result = run_front_stage(input_path, on_progress=progress.stage,
+                             **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    assert len(separate_calls) == 1
+    assert result.forced_split is False
+    assert all(c["done"] == 0 and c["total"] is None for c in progress.calls)
+
+
 def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0)
@@ -225,10 +235,8 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
 
     def fake_merge(chunk_segments_list, chunk_offsets_sec, boundaries_sec):
         assert len(chunk_segments_list) == 3
-        # 境界[3.0, 6.0]・オーバーラップ1.0秒・全長10.0秒のとき、各チャンクの範囲は
-        # [0,4]・[2,7]・[5,10](先頭・末尾は片側のみオーバーラップ)なので、
-        # チャンクローカル時刻0に対応するグローバル時刻(オフセット)は [0.0, 2.0, 5.0] になる。
-        assert chunk_offsets_sec == pytest.approx([0.0, 2.0, 5.0])
+        overlap = 1.0
+        assert chunk_offsets_sec == pytest.approx([0.0, 3.0 - overlap, 6.0 - overlap])
         assert boundaries_sec == [3.0, 6.0]
         return [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)]
 
@@ -259,31 +267,68 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
 
     assert len(separate_calls) == 3
     assert len(recognize_calls) == 3
-    # forced_aligner・sofa_aligner・english_katakana_methodは長尺分割の全チャンクへ
-    # 同一の値で伝播する。
     for _, kwargs in recognize_calls:
         assert kwargs["forced_aligner"] == "sofa-forcedalign"
         assert kwargs["sofa_aligner"] is sofa_config
         assert kwargs["english_katakana_method"] == "tinyllama-katakana-converter"
-    # S1の分離アダプタ選択も同様に全チャンクへ伝播する。
     for kwargs in separate_kwargs:
         assert kwargs["separator"] == "audio-separator-htdemucs-ft"
-    # 各チャンクは前後1.0秒のオーバーラップを持つ(先頭・末尾は片側のみ)。
-    assert separate_calls[0] == pytest.approx(4.0, abs=0.05)  # [0, 3+1]
-    assert separate_calls[1] == pytest.approx(5.0, abs=0.05)  # [3-1, 6+1]
-    assert separate_calls[2] == pytest.approx(5.0, abs=0.05)  # [6-1, 10]
+    assert separate_calls[0] == pytest.approx(3.0 + 1.0, abs=0.05)
+    assert separate_calls[1] == pytest.approx((6.0 + 1.0) - (3.0 - 1.0), abs=0.05)
+    assert separate_calls[2] == pytest.approx(10.0 - (6.0 - 1.0), abs=0.05)
     assert result.duration_sec == pytest.approx(10.0, abs=0.05)
-    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
     separate_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "separate"]
     assert separate_done_totals == [(0, 3), (1, 3), (2, 3)]
+    rms_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "rms"]
+    assert rms_done_totals == [(0, None)]
 
 
-def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_output(
+def test_chunked_run_separates_and_recognizes_one_chunk_at_a_time(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+    monkeypatch.setattr(
+        front_stage._chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+
+    call_order = []
+    monkeypatch.setattr(
+        front_stage._separator, "separate",
+        lambda pcm, mode, **kwargs: call_order.append("separate") or vocal_path)
+    monkeypatch.setattr(
+        front_stage._recognizer, "recognize",
+        lambda path, **kwargs: call_order.append("recognize") or [seg("vowel", 0.0, 1.0, phoneme="a")])
+
+    run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    assert call_order == ["separate", "recognize"] * 3
+
+
+def test_chunked_run_reports_forced_split(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=6.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=6.0, amplitude=0.8)
+
+    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, True)])
+    monkeypatch.setattr(
+        front_stage._chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
+    monkeypatch.setattr(
+        front_stage._recognizer, "recognize",
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    result = run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    assert result.forced_split is True
+
+
+def test_chunked_run_uses_unseparated_audio_rms_for_boundaries_and_whole_vocal_rms_for_output(
         tmp_path, monkeypatch):
-    # 境界決定(find_chunk_boundaries)には分離前の生音声のRMSを使い、共有出力にはチャンクの
-    # 核区間を連結した曲全体のボーカルRMSを1回だけ載せる(チャンクごとに個別正規化しない)。
-    # rms.compute_rmsは実関数をそのまま通し、どちらの呼び出しがどこへ渡ったかは戻り値の
-    # 同一性(is)で識別する(io.load_audioがピーク正規化するため、振幅の大小では入力を識別できない)。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0, amplitude=0.5)
     vocal_path = tmp_path / "vocal.wav"
@@ -319,21 +364,14 @@ def test_chunked_run_uses_raw_audio_rms_for_boundaries_and_whole_vocal_rms_for_o
 
     assert len(boundary_calls) == 1
     assert boundary_calls[0][0] == pytest.approx(10.0, abs=0.05)
-    # compute_rmsはちょうど2回: (1)境界決定用の生音声、(2)共有出力用の曲全体ボーカル。
     assert len(compute_rms_results) == 2
-    # 1回目のcompute_rmsの戻り値がそのままfind_chunk_boundariesへ、2回目の戻り値がそのまま
-    # 共有出力へ載ること(取り違えが無いこと)を同一性で確認する。
-    assert boundary_calls[0][1] is compute_rms_results[0].times_sec
-    assert boundary_calls[0][2] is compute_rms_results[0].values
-    assert result.analysis.rms is compute_rms_results[1]
+    unseparated_rms, whole_vocal_rms = compute_rms_results
+    assert boundary_calls[0][1] is unseparated_rms.times_sec
+    assert boundary_calls[0][2] is unseparated_rms.values
+    assert result.analysis.rms is whole_vocal_rms
 
 
 def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeypatch):
-    # 各チャンクの分離済みボーカル音声の振幅が異なるとき(曲の強弱)、チャンクごとの読み込みで
-    # vocal_analysis.io.load_audioのピーク正規化(目標値固定)を経由すると、静かなチャンクも
-    # 大きいチャンクも独立に同じ目標振幅へ引き伸ばされ、チャンク間の相対的な強弱(曲全体基準の
-    # RMS)が壊れる。核区間を連結した曲全体のボーカル音声が、チャンクごとの
-    # 元の振幅差を保持していることを検証する。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=6.0)
     quiet_vocal = tmp_path / "vocal_quiet.wav"
@@ -368,13 +406,11 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
 
     run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
-    # compute_rmsは2回呼ばれる: (1)境界決定用の生音声、(2)共有出力用の曲全体ボーカル。
-    whole_vocal_samples = compute_rms_pcms[1].samples
+    _, whole_vocal_pcm = compute_rms_pcms
+    whole_vocal_samples = whole_vocal_pcm.samples
     half = len(whole_vocal_samples) // 2
     first_half_peak = float(np.max(np.abs(whole_vocal_samples[:half])))
     second_half_peak = float(np.max(np.abs(whole_vocal_samples[half:])))
-    # ピーク正規化がチャンクごとにかかっていれば両半分とも同じ目標振幅になり見分けがつかない。
-    # 個別正規化を経ていなければ、静かな前半(0.1)と大きい後半(0.9)の振幅差が保たれる。
     assert first_half_peak < second_half_peak * 0.5
 
 
@@ -397,13 +433,11 @@ def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monk
     run_front_stage(input_path, on_progress=progress.stage,
                     **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
-    # doneは「このチャンクを始める時点までに完了したチャンク数」(0始まり)。
     recognize_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "recognize"]
     assert recognize_done_totals == [(0, 2), (1, 2)]
 
 
-def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_recognize(tmp_path, monkeypatch):
-    # 分割しない場合や内訳の無い段は done=0, total=None。
+def test_non_chunked_progress_reports_done_zero_total_none_for_every_stage(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -418,10 +452,9 @@ def test_non_chunked_progress_reports_done_zero_total_none_for_separate_and_reco
     run_front_stage(input_path, on_progress=progress.stage, **_common_kwargs())
 
     by_stage = {c["stage"]: c for c in progress.calls}
-    assert by_stage["separate"]["done"] == 0
-    assert by_stage["separate"]["total"] is None
-    assert by_stage["recognize"]["done"] == 0
-    assert by_stage["recognize"]["total"] is None
+    for stage in ("load", "separate", "recognize", "rms"):
+        assert by_stage[stage]["done"] == 0
+        assert by_stage[stage]["total"] is None
 
 
 def test_non_chunked_recognize_on_progress_forwards_download_note(tmp_path, monkeypatch):
@@ -447,7 +480,6 @@ def test_non_chunked_recognize_on_progress_forwards_download_note(tmp_path, monk
     assert captured["on_progress"] is not None
     recognize_calls = [c for c in progress.calls if c["stage"] == "recognize"]
     assert any(c["note"] == "ダウンロード中: dummy-model 42%" for c in recognize_calls)
-    # 分割しない実行の既定(done=0, total=None)を、ダウンロード通知後も保ったままにする。
     assert all(c["done"] == 0 and c["total"] is None for c in recognize_calls)
 
 
@@ -476,7 +508,6 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monk
 
     recognize_calls = [c for c in progress.calls if c["stage"] == "recognize"]
     download_notes = [c for c in recognize_calls if c["note"] == "ダウンロード中: dummy-model 10%"]
-    # 2チャンクとも、そのチャンクの done/total(チャンク進捗)を保ったままダウンロード通知が出る。
     assert [(c["done"], c["total"]) for c in download_notes] == [(0, 2), (1, 2)]
 
 
@@ -504,7 +535,6 @@ def test_non_chunked_separate_on_progress_forwards_download_note(tmp_path, monke
     assert captured["on_progress"] is not None
     separate_calls = [c for c in progress.calls if c["stage"] == "separate"]
     assert any(c["note"] == "ダウンロード中: 42%" for c in separate_calls)
-    # 分割しない実行の既定(done=0, total=None)を、ダウンロード通知後も保ったままにする。
     assert all(c["done"] == 0 and c["total"] is None for c in separate_calls)
 
 
@@ -534,12 +564,10 @@ def test_chunked_separate_on_progress_preserves_chunk_done_total(tmp_path, monke
 
     separate_calls = [c for c in progress.calls if c["stage"] == "separate"]
     download_notes = [c for c in separate_calls if c["note"] == "ダウンロード中: 10%"]
-    # 2チャンクとも、そのチャンクの done/total(チャンク進捗)を保ったままダウンロード通知が出る。
     assert [(c["done"], c["total"]) for c in download_notes] == [(0, 2), (1, 2)]
 
 
 def test_run_without_progress_reporter_passes_on_progress_none_to_separate(tmp_path, monkeypatch):
-    # progress 省略時は separate() へも on_progress=None を渡す(recognize と同じ契約)。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -561,10 +589,6 @@ def test_run_without_progress_reporter_passes_on_progress_none_to_separate(tmp_p
 
 
 def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_path, monkeypatch):
-    # progress 省略時は recognize() へ on_progress=None を渡す(存在しない進捗表示へ橋渡しする
-    # 無意味なコールバックを作らない)。on_progress を必須キーワード引数にして、現行の
-    # (on_progress を渡さない)実装では TypeError で確実に落ちるようにする(既定値だと
-    # 未実装のままでも偶然 None のまま通ってしまい印の意味が無くなるため)。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -585,8 +609,6 @@ def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_
 
 
 def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_path, monkeypatch):
-    # 上と同じ契約(progress省略→on_progress=None)を、_run_chunked 側の recognize 呼び出し箇所
-    # (_run_single とは別のコード経路)でも独立に固定する。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -623,17 +645,18 @@ def test_keep_intermediate_dir_none_creates_nothing(tmp_path, monkeypatch):
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     keep_dir = tmp_path / "out.vmd.intermediate"
-    run_front_stage(input_path, **_common_kwargs())  # keep_intermediate_dir省略(既定None)
+    run_front_stage(input_path, **_common_kwargs())
     assert not keep_dir.exists()
 
 
 def test_keep_intermediate_saves_normalized_input_vocal_and_segments(tmp_path, monkeypatch):
-    # input と vocal を異なるサンプルレートにし、保存先が入れ替わる退行を検出できるようにする。
     input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0, sample_rate=8000)
+    input_sample_rate = 8000
+    write_wav(input_path, seconds=1.0, sample_rate=input_sample_rate)
     vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, sample_rate=11025, amplitude=0.8)
-    given_segments = [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+    vocal_sample_rate = 11025
+    write_wav(vocal_path, seconds=1.0, sample_rate=vocal_sample_rate, amplitude=0.8)
+    given_segments = [seg("vowel", 0.0, 1.0, phoneme="ɯ", confidence=0.9)]
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
@@ -646,19 +669,18 @@ def test_keep_intermediate_saves_normalized_input_vocal_and_segments(tmp_path, m
     assert (keep_dir / "vocal.wav").exists()
     _, saved_input_sr = sf.read(str(keep_dir / "input_normalized.wav"))
     _, saved_vocal_sr = sf.read(str(keep_dir / "vocal.wav"))
-    assert saved_input_sr == 8000
-    assert saved_vocal_sr == 11025
+    assert saved_input_sr == input_sample_rate
+    assert saved_vocal_sr == vocal_sample_rate
     segments_path = keep_dir / "segments.json"
     assert segments_path.exists()
-    saved = json.loads(segments_path.read_text(encoding="utf-8"))
-    assert saved == [
-        {"type": "vowel", "start_sec": 0.0, "end_sec": 1.0, "phoneme": "a", "confidence": 0.9},
+    segments_text = segments_path.read_text(encoding="utf-8")
+    assert "ɯ" in segments_text
+    assert json.loads(segments_text) == [
+        {"type": "vowel", "start_sec": 0.0, "end_sec": 1.0, "phoneme": "ɯ", "confidence": 0.9},
     ]
 
 
 def test_keep_intermediate_write_failure_raises_intermediate_write_error(tmp_path, monkeypatch):
-    # sf.write はlibsndfileが開くため、失敗を OSError でなく sf.SoundFileError 系で送出する。
-    # モックで OSError を偽装せず、書き込み先の名前をディレクトリで塞いで実際に失敗させる。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -671,13 +693,13 @@ def test_keep_intermediate_write_failure_raises_intermediate_write_error(tmp_pat
 
     keep_dir = tmp_path / "out.vmd.intermediate"
     keep_dir.mkdir()
-    (keep_dir / "input_normalized.wav").mkdir()  # 同名ディレクトリで sf.write の書き込み先を塞ぐ
+    (keep_dir / "input_normalized.wav").mkdir()
 
     with pytest.raises(front_stage.IntermediateWriteError):
         run_front_stage(input_path, keep_intermediate_dir=keep_dir, **_common_kwargs())
 
 
-def test_keep_intermediate_chunked_saves_concatenated_vocal(tmp_path, monkeypatch):
+def test_chunked_run_returns_and_saves_concatenated_whole_vocal(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=6.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -693,12 +715,75 @@ def test_keep_intermediate_chunked_saves_concatenated_vocal(tmp_path, monkeypatc
         lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
     keep_dir = tmp_path / "out.vmd.intermediate"
-    run_front_stage(input_path, keep_intermediate_dir=keep_dir,
-                 **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+    result = run_front_stage(input_path, keep_intermediate_dir=keep_dir,
+                             **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
-    saved_samples, saved_sr = sf.read(str(keep_dir / "vocal.wav"), dtype="float32", always_2d=True)
-    # 曲全体(6秒)分の核区間連結ボーカルが保存される(チャンクごとの重複区間を含まない)。
-    assert saved_samples.shape[0] == pytest.approx(6.0 * saved_sr, abs=saved_sr * 0.01)
+    for path in (keep_dir / "vocal.wav", result.analysis.vocal_wav):
+        saved_samples, saved_sr = sf.read(str(path), dtype="float32", always_2d=True)
+        assert saved_samples.shape[0] == pytest.approx(6.0 * saved_sr, abs=saved_sr * 0.01)
+
+
+def test_chunked_run_private_whole_vocal_write_failure_propagates_without_classification(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=6.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=6.0, amplitude=0.8)
+
+    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
+    monkeypatch.setattr(
+        front_stage._chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
+    monkeypatch.setattr(
+        front_stage._recognizer, "recognize",
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+
+    error = OSError("disk full")
+
+    def fail_write(path, *a, **k):
+        raise error
+
+    monkeypatch.setattr(front_stage.sf, "write", fail_write)
+
+    with pytest.raises(OSError) as exc:
+        run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+    assert exc.value is error
+
+
+def test_chunked_run_reports_elapsed_from_each_call_start_without_accumulating_across_chunks(
+        tmp_path, monkeypatch):
+    import itertools
+
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
+    monkeypatch.setattr(
+        front_stage._chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
+
+    def fake_recognize(path, on_progress=None, **kwargs):
+        on_progress("認識中")
+        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+
+    monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
+    tick = 10.0
+    clock = itertools.count(0.0, tick)
+    monkeypatch.setattr(front_stage.time, "monotonic", lambda: next(clock))
+
+    elapsed_of_notes = []
+
+    def on_progress(stage, *, done, total, note, elapsed):
+        if note == "認識中":
+            elapsed_of_notes.append(elapsed)
+
+    run_front_stage(input_path, on_progress=on_progress,
+                    **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    assert elapsed_of_notes == [tick, tick]
 
 
 def test_slice_pcm_extracts_the_requested_time_range():
@@ -718,8 +803,6 @@ def test_concat_pcm_joins_slices_in_order():
 
 
 def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
-    # 音量解析段の分離後ボーカルの読み直し失敗は、利用者入力の読み込み失敗と混ざらないよう
-    # 専用例外へ包み、対象パスを保持する。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -744,8 +827,6 @@ def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeyp
 
 
 def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
-    # 長尺分割の経路は各チャンクのボーカルWAVを別実装で読むが、内部生成ファイルの読み直しである点は
-    # 同じなので同じ専用例外へ包む。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -761,12 +842,10 @@ def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path,
         front_stage._recognizer, "recognize",
         lambda path, **kw: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
 
-    # soundfile は入力の読み込みでも使うので、失敗させるのは分離後ボーカルの読み直しだけに限る。
     real_read = front_stage.sf.read
 
     def fail_on_vocal(path, *a, **kw):
         if str(path) == str(vocal_path):
-            # soundfile が読み込み失敗で実際に送出する例外型に合わせる。
             raise sf.LibsndfileError(1, prefix=str(vocal_path))
         return real_read(path, *a, **kw)
 
@@ -778,8 +857,6 @@ def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path,
 
 
 def test_input_read_failure_is_not_wrapped_in_dedicated_error(tmp_path, monkeypatch):
-    # 利用者入力の読み込み失敗は音声読み込みの例外のまま送出する(専用例外へ包まない)。
-    # 派生関係で通り抜けないよう、型そのものを固定する。
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
 
@@ -794,7 +871,6 @@ def test_input_read_failure_is_not_wrapped_in_dedicated_error(tmp_path, monkeypa
 
 
 def _stage_failure_kwargs(tmp_path, monkeypatch, *, failing_stage, error, chunked=False):
-    """分離または認識だけを失敗させた前段実行の材料を組み立てる。"""
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0 if chunked else 1.0)
     vocal_path = tmp_path / "vocal.wav"
@@ -823,15 +899,14 @@ def _stage_failure_kwargs(tmp_path, monkeypatch, *, failing_stage, error, chunke
 
 
 class _UnlistedError(Exception):
-    """除外一覧に無い、推論器が独自に定義しうる例外を模した型。"""
+    pass
 
 
 @pytest.mark.parametrize("chunked", [False, True])
 @pytest.mark.parametrize("failing_stage", ["separate", "recognize"])
 @pytest.mark.parametrize("error_type", [RuntimeError, ValueError, MemoryError, OSError, _UnlistedError])
-def test_bare_exception_from_inference_carries_failing_stage(
+def test_unclassified_exception_from_inference_becomes_stage_error_keeping_type_message_and_cause(
         tmp_path, monkeypatch, failing_stage, error_type, chunked):
-    # 除外対象以外の例外は、型を問わず、どの工程で失敗したかを持つ例外へ写像する。
     error = error_type("推論の失敗")
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, failing_stage=failing_stage, error=error, chunked=chunked)
@@ -839,7 +914,6 @@ def test_bare_exception_from_inference_carries_failing_stage(
     with pytest.raises(front_stage.StageExecutionError) as exc:
         run_front_stage(input_path, **kwargs)
     assert exc.value.stage == failing_stage
-    # 利用先が失敗の要旨を利用者へ示せるよう、元の例外の型名と文言を残し、原因も保持する。
     assert error_type.__name__ in str(exc.value)
     assert "推論の失敗" in str(exc.value)
     assert exc.value.__cause__ is error
@@ -856,7 +930,6 @@ def test_bare_exception_from_inference_carries_failing_stage(
 ])
 def test_classified_exceptions_from_inference_pass_through_unchanged(
         tmp_path, monkeypatch, failing_stage, error_factory, chunked):
-    # 既に分類が定まっている例外は写像せず、型そのままで送出する(終了コードの分岐を保つため)。
     error = error_factory()
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, failing_stage=failing_stage, error=error, chunked=chunked)
@@ -870,7 +943,6 @@ def test_classified_exceptions_from_inference_pass_through_unchanged(
 @pytest.mark.parametrize("failing_stage", ["separate", "recognize"])
 def test_keyboard_interrupt_from_inference_passes_through_unchanged(
         tmp_path, monkeypatch, failing_stage, chunked):
-    # 中断は工程の失敗ではないので、中断の経路へそのまま届ける。
     error = KeyboardInterrupt()
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, failing_stage=failing_stage, error=error, chunked=chunked)
@@ -882,7 +954,6 @@ def test_keyboard_interrupt_from_inference_passes_through_unchanged(
 
 @pytest.mark.parametrize("chunked", [False, True])
 def test_bare_exception_is_not_mapped_when_separation_is_skipped(tmp_path, monkeypatch, chunked):
-    # 分離しない指定では外部推論を呼ばないので、この呼び出しの失敗を工程失敗として報告しない。
     error = RuntimeError("一時ファイルを書けません")
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, failing_stage="separate", error=error, chunked=chunked)
@@ -895,7 +966,6 @@ def test_bare_exception_is_not_mapped_when_separation_is_skipped(tmp_path, monke
 
 @pytest.mark.parametrize("chunked", [False, True])
 def test_bare_exception_outside_inference_is_not_mapped_to_stage(tmp_path, monkeypatch, chunked):
-    # 写像するのは外部推論の呼び出しだけで、その外側(音量解析等)の失敗はそのまま通す。
     error = RuntimeError("rms failed")
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, failing_stage=None, error=error, chunked=chunked)
@@ -908,10 +978,8 @@ def test_bare_exception_outside_inference_is_not_mapped_to_stage(tmp_path, monke
 
 
 @pytest.mark.parametrize("chunked", [False, True])
-def test_bare_exception_right_after_inference_is_not_mapped_to_stage(
+def test_bare_exception_from_vocal_reread_right_after_inference_is_not_mapped_to_stage(
         tmp_path, monkeypatch, chunked):
-    # 推論呼び出しの直後に続く処理(内部生成ファイルの読み直し)まで写像範囲へ巻き込まないことを固定する。
-    # 長尺分割では推論と読み直しが同じ繰り返しの中にあるため、範囲が広いと工程失敗へ化ける。
     error = RuntimeError("read failed")
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, failing_stage=None, error=error, chunked=chunked)
@@ -924,14 +992,13 @@ def test_bare_exception_right_after_inference_is_not_mapped_to_stage(
 
 
 class _CallbackFailure(Exception):
-    """進捗の報告先が送出しうる失敗を模した型(推論の失敗と区別されることの検証用)。"""
+    pass
 
 
 @pytest.mark.parametrize("chunked", [False, True])
 @pytest.mark.parametrize("stage", ["separate", "recognize"])
 def test_progress_callback_failure_during_inference_passes_through_unchanged(
         tmp_path, monkeypatch, stage, chunked):
-    # 推論中に呼ぶ進捗の報告先が失敗しても、それは工程の失敗ではないので写像せずそのまま通す。
     error = _CallbackFailure("stdout is closed")
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0 if chunked else 1.0)

@@ -1,10 +1,3 @@
-"""公開データ型のテスト。
-
-各ステージをつなぐ正規化中間形式(AudioPcm/Segment/RmsEnvelope/AnalysisResult)の
-公開型が仕様どおりのフィールドを持つことを確認する。S1 出力(ボーカル WAV)は専用
-dataclass を設けず pathlib.Path で表す。
-"""
-
 import dataclasses
 import typing
 from pathlib import Path
@@ -15,18 +8,15 @@ import numpy as np
 def test_public_types_are_dataclasses():
     from vocal_analysis import AnalysisResult, AudioPcm, RmsEnvelope, Segment
 
-    # S1 出力(Path)以外の公開中間形式は Python の dataclass で表す。
     assert dataclasses.is_dataclass(AudioPcm)
     assert dataclasses.is_dataclass(Segment)
     assert dataclasses.is_dataclass(RmsEnvelope)
     assert dataclasses.is_dataclass(AnalysisResult)
 
 
-def test_public_type_field_contracts():
+def test_public_types_have_exactly_the_contracted_fields():
     from vocal_analysis import AnalysisResult, AudioPcm, RmsEnvelope, Segment
 
-    # 公開フィールドの集合を固定し、実装が余計なフィールドを足す/
-    # 必要なフィールドを落とす逸脱を検出する(名前の完全一致で確認する)。
     def field_names(cls):
         return {f.name for f in dataclasses.fields(cls)}
 
@@ -39,21 +29,15 @@ def test_public_type_field_contracts():
 def test_public_type_annotations_pin_key_contracts():
     from vocal_analysis import AnalysisResult, AudioPcm, RmsEnvelope, Segment
 
-    # 公開型の型注釈のうち契約価値の高いものを固定する。フィールド名一致だけでは実装が
-    # 注釈を緩めても通るため、注釈も検証する。表現差(Optional[X] と X|None 等)に頑健な
-    # get_origin/get_args で意味を確認し、注釈オブジェクトの厳密同値には依存しない。
     audio = typing.get_type_hints(AudioPcm)
     assert audio["samples"] is np.ndarray
     assert audio["sample_rate"] is int
 
     seg = typing.get_type_hints(Segment)
-    # type は vowel/consonant/gap の3値 Literal。
     assert typing.get_origin(seg["type"]) is typing.Literal
     assert typing.get_args(seg["type"]) == ("vowel", "consonant", "gap")
-    # 時刻は秒 float。
     assert seg["start_sec"] is float
     assert seg["end_sec"] is float
-    # phoneme(IPA)・confidence は Optional(gap は phoneme=None、confidence は任意)。
     assert set(typing.get_args(seg["phoneme"])) == {str, type(None)}
     assert set(typing.get_args(seg["confidence"])) == {float, type(None)}
 
@@ -64,7 +48,6 @@ def test_public_type_annotations_pin_key_contracts():
 
     res = typing.get_type_hints(AnalysisResult)
     assert res["vocal_wav"] is Path
-    # segments は list[Segment]。
     assert typing.get_origin(res["segments"]) is list
     assert typing.get_args(res["segments"]) == (Segment,)
     assert res["rms"] is RmsEnvelope
@@ -77,7 +60,6 @@ def test_audio_pcm_holds_samples_and_sample_rate():
     pcm = AudioPcm(samples=samples, sample_rate=44100)
 
     assert pcm.samples.dtype == np.float32
-    # 形状は (フレーム数, チャンネル数)。チャンネル数は shape[1] で得る。
     assert pcm.samples.shape == (100, 2)
     assert pcm.samples.shape[1] == 2
     assert pcm.sample_rate == 44100
@@ -104,7 +86,6 @@ def test_segment_vowel_carries_ipa_phoneme():
 def test_segment_gap_has_no_phoneme():
     from vocal_analysis import Segment
 
-    # gap は音素ラベルを持たない。confidence は任意。
     seg = Segment(type="gap", start_sec=0.0, end_sec=0.5, phoneme=None, confidence=None)
 
     assert seg.type == "gap"
@@ -115,7 +96,6 @@ def test_segment_gap_has_no_phoneme():
 def test_segment_consonant_carries_ipa_phoneme():
     from vocal_analysis import Segment
 
-    # type は vowel/consonant/gap の3種。子音も音素ラベル(IPA)を持つ。
     seg = Segment(type="consonant", start_sec=0.3, end_sec=0.4, phoneme="k", confidence=0.7)
 
     assert seg.type == "consonant"
@@ -131,7 +111,6 @@ def test_rms_envelope_holds_arrays_and_dynamic_range():
 
     assert np.allclose(rms.times_sec, times)
     assert np.allclose(rms.values, values)
-    # dynamic_range_db は正規化済み values からは復元できないため別フィールドで持つ。
     assert rms.dynamic_range_db == 18.0
 
 

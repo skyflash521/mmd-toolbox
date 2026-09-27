@@ -32,7 +32,7 @@
   [vocal_analysis](../../libs/vocal_analysis/vocal_analysis.md) に委譲する。前段を通しで実行する結線
   (呼び出し順序・失敗の分類・進捗の中継・長尺の自動分割・診断用中間生成物の書き出し)も同モジュールの
   前段実行エンジンへ委譲し、`song2vpr` 側には実行ポリシーと保存先の選択、受け取った進捗と失敗の
-  利用者向けの扱いが残る([vocal_analysis.md §11](../../libs/vocal_analysis/vocal_analysis.md#11-前段実行エンジン))。
+  利用者向けの扱いが残る([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。
 - **vpr の書き出し**は共有の形式I/Oモジュール [vpr](../../libs/vpr/vpr.md) に委譲する。`song2vpr` は vpr の
   バイナリ/直列化構造を直接扱わない。
 - **`song2vpr` 固有**: ピッチ推定、音符分割、歌詞/音素対応付け、テンポ推定、
@@ -90,7 +90,7 @@
 ```
 
 - **音声前段(vocal_analysis)**: ボーカル抽出・音素認識は `vocal_analysis` に委譲し、分離後ボーカルのPCMと
-  音素セグメント列・相対正規化RMSを得る([vocal_analysis.md §2](../../libs/vocal_analysis/vocal_analysis.md#2-共有出力正規化中間形式)〜[§6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3))。
+  音素セグメント列・相対正規化RMSを得る([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。
 - **ピッチ推定(`song2vpr` 固有)**: 分離後ボーカルから F0(基本周波数)と有声/無声を求める。ピッチ推定は
   `song2vmd` では不要なため `vocal_analysis` には含めず、`song2vpr` 固有処理として置く。
 - **音符分割・歌詞/音素対応付け(`song2vpr` 固有)**: F0・音素セグメント・RMS から音符を切り、各音符に
@@ -136,7 +136,7 @@ song2vpr INPUT [options]
 
 音声前段のバックエンド選択は共通引数群として CLI で全件公開する。引数の名前・意味・検証は共有側
 ([vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md))が定め、選択肢の追加・切り替えは
-`vocal_analysis` 側で行う([vocal_analysis.md §8](../../libs/vocal_analysis/vocal_analysis.md#8-外部ツール連携機構))。挙動パラメータの取り回しは
+`vocal_analysis` 側で行う([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。挙動パラメータの取り回しは
 [CLI インターフェース規約 §9](../../docs/conventions/cli-interface.md#9-入力出力とパラメータの取り回し) に従う。
 
 ### 4.3 進捗表示
@@ -144,7 +144,7 @@ song2vpr INPUT [options]
 重い処理(分離・認識・ピッチ推定)の間に何も表示されず無音になるのを避けるため、処理の段階を報告する。
 段は音声読み込み(`load`)・ボーカル分離(`separate`)・音素認識(`recognize`)・音量解析(`rms`)・
 ピッチ推定(`f0`)・音符化(`notes`)・書き出し(`write`)の7つ。前の4つは音声前段の実行エンジンから
-中継し([vocal_analysis.md §11](../../libs/vocal_analysis/vocal_analysis.md#11-前段実行エンジン))、後の3つは `song2vpr` 自身が報告する。
+中継し([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))、後の3つは `song2vpr` 自身が報告する。
 複数のツールで共有する段の工程名は[用語規約の処理工程の利用者向け名称](../../docs/conventions/terminology.md#処理工程の利用者向け名称)が正で、
 `song2vpr` 固有の `f0`・`notes` は同表に載せず本書が定める。
 有効条件・表記・停滞回避・副作用専用等の一般契約は
@@ -157,7 +157,7 @@ song2vpr INPUT [options]
 
 音声前段は処理中に標準エラーの出力先を一時的に差し替えることがあり、その間に人間向けのライブ表示が
 同じ標準エラーへ書くと書き込みに失敗しうる。これを避けるため、`song2vpr` は前段が公開する
-排他の仕組みを進捗表示へ渡す([vocal_analysis.md §8.1](../../libs/vocal_analysis/vocal_analysis.md#81-アダプタinterface))。
+排他の仕組みを進捗表示へ渡す([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。
 
 ### 4.4 機械モードとメタ操作(機械可読インターフェース)
 
@@ -209,7 +209,7 @@ song2vpr INPUT [options]
   [一時ファイル・中間生成物の配置規約 §2.2](../../docs/conventions/temporary-and-intermediate-files.md#22-非公開の内部一時領域) の対象であり、本節の対象外)。指定時のみ、
   保存先を出力に隣接するディレクトリに決めて音声前段の書き出しを有効にする
   ([§4.2](#42-オプション))。何がどの名前・形式で保存されるかは
-  [vocal_analysis.md §11.2](../../libs/vocal_analysis/vocal_analysis.md#112-診断用中間生成物の書き出し) が定める。置き場所・命名・有効化契約の一般規約は
+  [vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md) が定める。置き場所・命名・有効化契約の一般規約は
   同配置規約 [§2.3](../../docs/conventions/temporary-and-intermediate-files.md#23-利用者向けオプトイン診断用中間生成物) を正本とし、本機能はそこに従う。`--dry-run` と併用した場合も、
   最終 vpr の書き出しだけが抑制され、中間生成物の保存は実施する。書き込み失敗は
   [§9.3](#93-構造化エラー)の分類で報告する。保存先に前回の中間生成物が残っていても上書きガードの対象にせず、
@@ -288,7 +288,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
 - 音声前段(分離・認識・分離後ボーカル・RMS)は `vocal_analysis`、vpr 書き出しは `vpr`。`song2vpr` は両者を束ね、
   ピッチ推定・音符分割・歌詞/音素対応付け・テンポ推定という `song2vpr` 固有処理を担う。
 - 音声前段は、通しで実行する前段実行エンジンへ委譲する
-  ([vocal_analysis.md §11](../../libs/vocal_analysis/vocal_analysis.md#11-前段実行エンジン))。`song2vpr` は解決した設定・
+  ([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。`song2vpr` は解決した設定・
   長尺分割の実行ポリシー・中間生成物の保存先・進捗コールバックを渡し、共有出力と入力の音・分離後ボーカルの
   音・尺・強制分割の有無を受け取る。返る例外は[§9.3](#93-構造化エラー)の分類へ写す。
 - 時間軸: `vocal_analysis` の出力は秒。`vpr` は vpr のテンポに基づく時間表現(tick)を扱う。秒から tick への
@@ -317,7 +317,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
   含む発声のまとまりと、母音を伴わない撥音を指す(標準の音節の定義とは撥音の扱いが異なる)。同じ音高が続いていても別の音節に
   なれば別の音符にする(1音符が1つの発声に対応する下書きにするため)。撥音は語中・語末を問わず1つの音符にする。促音は後続の音節に含め、単独の音符にしない。gap セグメントは音節の
   切れ目とみなさない: gap は認識器が音素を割り当てなかった区間で、発声の継続中にも出る
-  ([vocal_analysis.md §5](../../libs/vocal_analysis/vocal_analysis.md#5-音素母音認識s2))。
+  ([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。
 - **音符は自分が属する音節を持つ**: 分割が決めた音節の帰属を音符が保持し、表示歌詞・音素列の付与
   ([§7.2](#72-歌詞音素の付与と音量の扱い))は音符区間との時間の重なりでなくこの帰属で行う(境界を跨ぐセグメントが隣の音符へ
   漏れないようにするため)。
@@ -355,13 +355,13 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
   音符があってよい(継続の音符は数えない)。IPA から VOCALOID の日本語音素の表記(X-SAMPA)への対応は `song2vpr` が持つ。
   `vpr` はフォーマット層で、歌詞/音素対応付けのような生成・
   判断を持たない([vpr.md](../../libs/vpr/vpr.md))。共有ドメイン層の `vocal_analysis` は VOCALOID の音素記号から
-  母音・カテゴリを得る写像を持つ([vocal_analysis.md §7](../../libs/vocal_analysis/vocal_analysis.md#7-音素5母音写像))。同じ記号系を扱う表が2か所に並ぶことになるが、
+  母音・カテゴリを得る写像を持つ([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。同じ記号系を扱う表が2か所に並ぶことになるが、
   こちらは vpr を書き出すときにだけ要り、使うのは `song2vpr` だけなので共有側へは置かない。
 - **表示歌詞(`--lyrics` なし)**: その音符が属する音節の頭子音と核の母音から、下記の**かな表**で
   表示歌詞を決める。核が撥音の音符には子音に依らず「ん」を入れる。頭子音が複数あるときは核に隣接する
   子音でかなを決め、残りの子音は音素列にだけ載せる(隣接する子音が `j` で、その前に別の子音があるときは、
   その子音の**拗音行**を使う)。母音も鼻音も得られない音符には「あ」を入れ、その件数を
-  診断に出す。母音の5母音への写像は共有側が定める([vocal_analysis.md §7](../../libs/vocal_analysis/vocal_analysis.md#7-音素5母音写像))。
+  診断に出す。母音の5母音への写像は共有側が定める([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。
 - **かな表**: 行は頭子音(認識器の音素語彙を写した VOCALOID の音素表記。「(なし)」は頭子音を
   持たない音節)、列は核の5母音。表は認識器の音素語彙(閉集合)と5母音の全組を覆う。
 
@@ -413,7 +413,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
   表示歌詞から音素を導き直さないことは保証しない。
 - **表示歌詞(`--lyrics` あり)**: 歌詞テキストをかな読みへ変換し、モーラ単位に分けて先頭から、
   音節の先頭の音符だけへ1音符=1モーラで対応付ける(継続の音符は `-` のまま)。かな読みへの変換は共有側へ委譲する
-  ([vocal_analysis.md §12](../../libs/vocal_analysis/vocal_analysis.md#12-日本語テキストのかな読み))。共通引数群の英語カタカナ化の方式([§4.2](#42-オプション))は音素認識に効くもので、
+  ([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。共通引数群の英語カタカナ化の方式([§4.2](#42-オプション))は音素認識に効くもので、
   この歌詞の読みには効かない(共有側が方式を選ばせないため)。読みは歌詞テキスト全体を1つのまとまりとして決める(行や段落へ切って
   求めると語の切れ目が変わり、同じ歌詞でも読みが変わるため)。歌詞ファイルは UTF-8 として読み、復号できなければ
   `lyrics_unreadable`([§9.3](#93-構造化エラー))で終わる。
@@ -453,7 +453,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
 - **音量の代表値**: 音符ごとに、相対正規化RMS から 0〜127 の整数で音量の代表値を求める(共有出力の
   相対正規化は無音を含む曲全体の分布を基準にしているため、発声区間どうしの差が出るように写す)。
   もとの値が曲の中での相対値なので、同じ歌唱を録音レベル違いで入れても近い値になる。共有側の正規化は
-  分布の下端を 0 へ写す([vocal_analysis.md §6](../../libs/vocal_analysis/vocal_analysis.md#6-強弱エンベロープs3))ので、代表値の 0 は「曲の中で最も小さい側にあり、この粒度では
+  分布の下端を 0 へ写す([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))ので、代表値の 0 は「曲の中で最も小さい側にあり、この粒度では
   差を持たない」ことを表す。この値は vpr へは載せず、[§7.1](#71-音符)の抑制で代表値が 0 の音符を落とす判定にだけ使う。
 - **ベロシティは中立値で固定する**: 音符のベロシティには音量の代表値を入れず、全音符へ 64 を入れる。
   VOCALOID のベロシティは音量の欄ではないため(解析に用いた実 vpr でも全音符が 64 で、音量は別の
@@ -570,7 +570,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
   `note` は補足文字列(無ければ `""`)、`elapsed` は段開始からの経過秒。各段は開始時に最低1本の
   progress を出す。ただし `--dry-run` では書き出しを行わないため `write` 段を報告しない。
   外部推論の内部進捗は、同じ段 id と `done`/`total` を保ったまま `note` を差し替えた progress として
-  追加で届く([vocal_analysis.md §11](../../libs/vocal_analysis/vocal_analysis.md#11-前段実行エンジン))。
+  追加で届く([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))。
 - **warning**: `{type:"warning", code, message}`。警告によっては、この3つに加えて件数や観測値を持つキーを
   伴う(どのキーを持つかは各警告の定義による)。仕様が定める警告は次のとおり。
   - `tempo_defaulted`: テンポを推定できず 120 BPM を仮置きした([§7.3](#73-テンポと拍子))。
@@ -581,7 +581,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
   - `no_notes`: 音符が1つも得られなかった。この場合も正常終了するため、入力や分離の選択を見直す
     手がかりとして知らせる(`--dry-run` でも出す)。
   - `forced_split`: 長尺の自動分割で、目標境界そのもので強制分割した境界があった。成立条件と分割の機構は
-    [vocal_analysis.md §11.1](../../libs/vocal_analysis/vocal_analysis.md#111-長尺の自動分割) が定める。
+    [vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md) が定める。
   - 資源逼迫の2件 `gpu_memory_oversubscribed`・`swap_detected`([§5.2](#52-資源逼迫の警告))、GPU を使えない構成の
     2件 `cpu_only_torch`・`cuda_unavailable`([§5.3](#53-gpu-を使えない構成の警告))。この4件は、成立条件と追加で持つ観測値のキーを
     [cli_resource_watch.md](../../libs/cli_resource_watch/cli_resource_watch.md) が定める。`song2vpr` は判定が返した観測値を
@@ -670,7 +670,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
 | 出力先に既存ファイルがある・`--overwrite` 未指定([§5](#5-入出力要件)) | `output_exists` | `"--output"` | 2 |
 | `--lyrics` のファイルを読めない | `lyrics_unreadable` | `"--lyrics"`(+ `path`) | 1 |
 | 出力書き込み失敗、または `--keep-intermediate` 指定時の中間生成物書き込み失敗(権限・不正パス・ディスク等の I/O 失敗) | `write_failed` | `"--output"` または `"--keep-intermediate"`(+ `path`) | 3 |
-| 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない([vocal_analysis.md §3](../../libs/vocal_analysis/vocal_analysis.md#3-入力読み込みs0)) | `decoder_missing` | `"input"` | 4 |
+| 標準の読み込みが対応しない形式で、フォールバック復号器(ffmpeg)が未検出のため復号を試みられない([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md)) | `decoder_missing` | `"input"` | 4 |
 | 分離・認識・かな読みのモデル取得/実行失敗 | `stage_failed`(+ `stage`) | `null` | 4 |
 | 音声前段の追加依存が未導入で取り込めない(理由1行は[vocal_analysis_cli.md](../../libs/vocal_analysis_cli/vocal_analysis_cli.md)が組み立てる) | `missing_dependency` | `null` | 4 |
 | 上記いずれにも当たらない想定外の内部エラー | `internal_error` | `null` | 1 |
@@ -681,7 +681,7 @@ NVIDIA GPU を積んだ機材で、導入されている推論ライブラリの
   ため、その別は載せない(委譲先の例外メッセージの文面から推し量って別を騙らない)。
   対象は、vocal_analysis が**どの段で起きたかを特定して**返す失敗(分離の失敗・認識の失敗と、それらの
   呼び出しから段付きで上がる失敗)と、歌詞のかな読み
-  ([vocal_analysis.md §12](../../libs/vocal_analysis/vocal_analysis.md#12-日本語テキストのかな読み))の失敗。`stage` は
+  ([vocal_analysis.md](../../libs/vocal_analysis/vocal_analysis.md))の失敗。`stage` は
   その失敗が起きた段の id とする。段を特定できない失敗(委譲先が内部で使う一時領域への書き込み失敗など)は
   この行では扱わず、`internal_error` が受ける。かな読みの失敗は音符へ歌詞を割り当てる段の失敗なので `stage` は
   `"notes"` になる。入力読み込みの失敗は `not_audio`・`decoder_missing` の行が引き取る。

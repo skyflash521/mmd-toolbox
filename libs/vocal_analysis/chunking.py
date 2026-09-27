@@ -1,28 +1,9 @@
-"""長尺分割の境界検出・セグメント結合。
-
-自動分割の純粋ロジックだけを持つ。実際の音声の切り出し・S0〜S2の呼び出し・RMSの曲全体基準での
-算出は、実音声を要する結線の関心事であり本モジュールの対象外。
-"""
-
 from .types import Segment
 
 
 def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_duration_sec,
                            search_window_sec=5.0, silence_threshold=0.06):
-    """長尺の分割境界を決める。
-
-    最初の目標境界は先頭から max_duration_sec 秒後、以降の目標境界は直前に確定した実境界
-    (無音点または強制分割点)から max_duration_sec 秒後とする。各目標境界の前後
-    search_window_sec 秒の探索窓内で最も静かな点(RMSが最小の点)を選び、その値が
-    silence_threshold 以下なら採用する。窓内の最小値が silence_threshold を超える場合は
-    無音が無いとみなし、目標境界そのもので強制分割する。
-
-    候補は前の実境界より後ろ(t > previous_boundary)に限ることで、無音点が繰り返し見つかっても
-    境界が前進し続けることを保証する(max_duration_sec が search_window_sec 以下でも停止しない)。
-
-    戻り値は (boundary_sec, forced) のタプル列。forced は探索窓内に無音が無く目標境界そのもので
-    強制分割したかどうかを境界ごとに示す。
-    """
+    """戻り値は (境界の秒, 無音が見つからず目標境界で強制分割したか) の列。"""
     if max_duration_sec <= 0 or duration_sec <= max_duration_sec:
         return []
 
@@ -48,17 +29,7 @@ def find_chunk_boundaries(duration_sec, rms_times_sec, rms_values, *, max_durati
 
 
 def merge_chunk_segments(chunk_segments, chunk_offsets_sec, boundaries_sec):
-    """チャンクごとのセグメント列を全曲セグメント列へ統合する。
-
-    各チャンクのセグメント(チャンクローカル時刻)を chunk_offsets_sec でグローバル時刻へ変換し、
-    隣接チャンクとのオーバーラップ区間は境界(boundaries_sec)で切り詰めて重複を除く。境界を
-    またぐ連続母音区間(type が "vowel" で同一 phoneme)だけを1区間へ結合する(同一チャンク内で
-    元々隣接する同一母音の結合は本関数の対象外)。
-
-    前提: len(chunk_offsets_sec) == len(chunk_segments)、
-    len(boundaries_sec) == len(chunk_segments) - 1(チャンク数nに対し境界はn-1個)。
-    呼び出し側(チャンク計画を作る側)がこの対応関係を保証する。
-    """
+    """chunk_offsets_sec はチャンクと同数、boundaries_sec はチャンク数より1つ少なく渡す。"""
     n = len(chunk_segments)
     boundary_set = set(boundaries_sec)
     global_segments = []
