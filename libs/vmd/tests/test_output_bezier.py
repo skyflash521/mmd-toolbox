@@ -1,15 +1,3 @@
-"""出力のベジェ再構築テスト。
-
-curve_mode="bezier" のとき、各出力区間 [前キー, 当キー] についてチャンネル別の
-ベジェ曲線を再フィットし、到達側(後側)キーの補間バイトに制御点を格納する。
-カメラ補間は 6 軸 24 バイト(各軸 ax,bx,ay,by = x1,x2,y1,y2)、ボーンは
-bone_interp_bytes のシフトコピー 64 バイト。回転はカメラが 3 軸共通の 1 曲線、
-ボーンが slerp 係数の 1 曲線。
-
-出力キーを vmd.interp.sample で再サンプルすると、格納した曲線で元の
-イージング動作が許容内に復元される(評価器は採否時と同じ _solve_factor を使う)。
-"""
-
 import math
 
 from vmd import interp
@@ -44,7 +32,6 @@ def _bone_linear():
 
 
 BL = _bone_linear()
-# balanced プリセット相当の許容値。
 TOLS = Tolerances(
     bone_pos=0.01,
     bone_rot=0.10,
@@ -112,11 +99,7 @@ def bone_track(source, ranges, **kw):
     return reduce_bone_track(source, ranges, TOLS, **opts)
 
 
-# --- camera_interp_bytes レイアウト -----------------------------------------
-
-
 def test_camera_interp_bytes_layout():
-    # 6 軸それぞれ cp=(x1,y1,x2,y2) を ax,bx,ay,by=(x1,x2,y1,y2) 順で 4 バイト。
     b = camera_interp_bytes(
         (1, 2, 3, 4),
         (5, 6, 7, 8),
@@ -126,20 +109,17 @@ def test_camera_interp_bytes_layout():
         (21, 22, 23, 24),
     )
     assert len(b) == 24
-    assert list(b[0:4]) == [1, 3, 2, 4]      # X位置: ax=x1,bx=x2,ay=y1,by=y2
-    assert list(b[4:8]) == [5, 7, 6, 8]      # Y位置
-    assert list(b[8:12]) == [9, 11, 10, 12]  # Z位置
-    assert list(b[12:16]) == [13, 15, 14, 16]  # 回転
-    assert list(b[16:20]) == [17, 19, 18, 20]  # 距離
-    assert list(b[20:24]) == [21, 23, 22, 24]  # 視野角
+    assert list(b[0:4]) == [1, 3, 2, 4]
+    assert list(b[4:8]) == [5, 7, 6, 8]
+    assert list(b[8:12]) == [9, 11, 10, 12]
+    assert list(b[12:16]) == [13, 15, 14, 16]
+    assert list(b[16:20]) == [17, 19, 18, 20]
+    assert list(b[20:24]) == [21, 23, 22, 24]
 
 
 def test_camera_interp_bytes_linear_matches_constant():
     b = camera_interp_bytes(*([_LINEAR_CP] * 6))
     assert b == CAMERA_LINEAR_INTERP
-
-
-# --- channel.curve ----------------------------------------------------------
 
 
 def test_scalar_curve_linear_mode_returns_linear_cp():
@@ -152,9 +132,8 @@ def test_scalar_curve_bezier_recovers_ease():
     assert ch.curve(0, 10) == EASE
 
 
-def test_scalar_curve_bezier_flat_segment_is_linear():
+def test_scalar_curve_bezier_equal_endpoints_is_linear():
     ch = LinearScalarChannel(0, [0.0, 1.0, -1.0, 0.0, 0.0], tol=1.0, mode="bezier")
-    # 端点同値(0→0)は正規化不能なので線形扱い。
     assert ch.curve(0, 4) == _LINEAR_CP
 
 
@@ -163,15 +142,15 @@ def test_fov_curve_bezier_recovers_ease():
     assert ch.curve(0, 10) == EASE
 
 
-def test_euclidean_curve_returns_three_axis_cps():
+def test_euclidean_curve_returns_per_axis_cps_linear_for_static_axes():
     ys = _eased(0.0, 100.0)
     vecs = [(0.0, y, 0.0) for y in ys]
     ch = EuclideanVectorChannel(0, vecs, tol=1.0, mode="bezier")
     cps = ch.curve(0, 10)
     assert len(cps) == 3
-    assert cps[0] == _LINEAR_CP   # X 軸は不動 → 線形
-    assert cps[1] == EASE         # Y 軸は ease
-    assert cps[2] == _LINEAR_CP   # Z 軸は不動 → 線形
+    assert cps[0] == _LINEAR_CP
+    assert cps[1] == EASE
+    assert cps[2] == _LINEAR_CP
 
 
 def test_camera_rotation_curve_shared_single_cp():
@@ -189,20 +168,14 @@ def test_bone_rotation_curve_slerp_coeff_cp():
     assert ch.curve(0, 10) == EASE
 
 
-# --- 統合: reduce_*_track の curve_mode=bezier -------------------------------
-
-
 def test_camera_distance_bezier_reduces_to_endpoints_and_reconstructs():
-    dist = _eased(-10.0, -110.0)  # 距離を ease で動かす(他チャンネルは不動)
+    dist = _eased(-10.0, -110.0)
     source = [cam(f, dist=dist[f]) for f in range(11)]
     bez = camera_track(source, [(0, 10)])
     lin = camera_track(source, [(0, 10)], curve_mode="linear")
-    # 1 本の曲線で表せるので bezier は両端の 2 キーへ、linear は多数に分割。
     assert frames(bez) == [0, 10]
     assert len(frames(lin)) > 2
-    # 到達キー(frame 10)に非線形の距離曲線が入る。
     assert bez[-1].interpolation[16:20] != bytes([20, 107, 20, 107])
-    # 出力を再サンプルすると元の距離が許容内に復元される。
     for f in range(11):
         assert abs(interp.sample(bez, "distance", f) - dist[f]) <= TOLS.camera_distance
 

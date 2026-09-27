@@ -1,14 +1,3 @@
-"""区間フィット結果のメモ化テスト。
-
-curve(a,b) と residual(a,b) は同一区間に対して同じベジェ曲線フィット
-(fit_bezier_curve / _fit_coeff_curve)を計算する。チャンネルはインスタンス単位で
-区間フィット結果をキャッシュし、同一区間の再フィットを避ける(挙動は不変=制御点は同一、
-フィット呼び出し回数だけが減る)。
-
-ここではモジュール関数の呼び出し回数を数え、同一区間 (a,b) に対する residual→curve→curve の
-連続呼び出しで実フィットがちょうど1回になることを確認する。
-"""
-
 import math
 
 from vmd import fit, interp
@@ -22,7 +11,6 @@ def _eased(v0, v1, n=11):
 
 
 def _count_calls(monkeypatch, name):
-    """fit モジュールの関数 name をラップして呼び出し回数を数える。"""
     counter = {"n": 0}
     orig = getattr(fit, name)
 
@@ -52,9 +40,7 @@ def test_fov_curve_fit_memoized(monkeypatch):
     assert calls["n"] == 1
 
 
-def test_euclidean_axis_fit_memoized(monkeypatch):
-    # Y 軸だけが動く(X/Z は端点同値=正規化不能でフィットを呼ばない)。
-    # よって実フィットは Y 軸の1区間ぶんで、residual→curve→curve で1回に収束する。
+def test_euclidean_moving_axis_fit_memoized_and_static_axes_not_fitted(monkeypatch):
     calls = _count_calls(monkeypatch, "fit_bezier_curve")
     ys = _eased(0.0, 100.0)
     vecs = [(0.0, y, 0.0) for y in ys]
@@ -93,8 +79,7 @@ def test_bone_rotation_coeff_fit_memoized(monkeypatch):
     assert calls["n"] == 1
 
 
-def test_memoized_curve_matches_unmemoized_scalar():
-    # メモ化しても制御点は不変(キャッシュ有無で同じ結果)。
+def test_memoized_curve_matches_first_fit_scalar():
     ch = fit.LinearScalarChannel(0, _eased(0.0, 100.0), tol=1.0, mode="bezier")
     first = ch.curve(0, 10)
     second = ch.curve(0, 10)
