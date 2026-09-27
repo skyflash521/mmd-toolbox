@@ -1,8 +1,3 @@
-"""MMD産テストデータが存在条件を満たすことの検査。
-
-1条件 = 1テスト。失敗した場合はテストデータの作り直しが必要。
-"""
-
 import pytest
 
 from vmd import read
@@ -27,15 +22,13 @@ class TestCameraBasicConditions:
     def test_camera_keys_at_least_3(self, camera_basic):
         assert len(camera_basic.camera) >= 3, REMAKE + "カメラキーが3個以上必要"
 
-    def test_has_default_interp_key(self, camera_basic):
-        # 区間の補間曲線は到達側(後側)キーに格納されるため、
-        # 先頭キーの補間曲線はどの区間にも使われず、判定の対象外
+    def test_has_default_interp_key_after_first(self, camera_basic):
         interps = [k.interpolation for k in camera_basic.camera[1:]]
         assert any(i == DEFAULT_CAMERA_INTERP for i in interps), (
             REMAKE + "補間曲線がデフォルト値のキー(2個目以降)が1個以上必要"
         )
 
-    def test_has_non_default_interp_key(self, camera_basic):
+    def test_has_non_default_interp_key_after_first(self, camera_basic):
         interps = [k.interpolation for k in camera_basic.camera[1:]]
         assert any(i != DEFAULT_CAMERA_INTERP for i in interps), (
             REMAKE + "補間曲線がデフォルト値でないキー(2個目以降)が1個以上必要"

@@ -1,10 +1,4 @@
-"""vmd-io のテスト。
-
-フィクスチャは宣言的リテラルのみ:
-- io層: VMD形式のレイアウトから手書きしたバイト列
-- 正規化: データモデルの直接構築
-"""
-
+import os
 import struct
 
 import pytest
@@ -20,114 +14,139 @@ from vmd import (
     write_file,
 )
 
-# ---------------------------------------------------------------------------
-# 手書きバイト列フィクスチャ
-# 値はフィールド取り違えを検出できるよう、すべて異なる識別可能な値にしてある。
-# 浮動小数点はf32で正確に表現できる値のみを使う。
-# ---------------------------------------------------------------------------
-
 MAGIC_V2 = b"Vocaloid Motion Data 0002".ljust(30, b"\x00")
 MAGIC_V1 = b"Vocaloid Motion Data file".ljust(30, b"\x00")
 CAMERA_MODEL_NAME = "カメラ・照明".encode("cp932").ljust(20, b"\x00")
+
+
+def _fields(**parts: bytes) -> bytes:
+    return b"".join(parts.values())
+
+
+def u8(n: int) -> bytes:
+    return struct.pack("<B", n)
 
 
 def u32(n: int) -> bytes:
     return struct.pack("<I", n)
 
 
-# --- カメラ系ファイル ---
+def f32(*values: float) -> bytes:
+    return struct.pack(f"<{len(values)}f", *values)
 
-CAMERA_INTERP = bytes(range(100, 124))  # 24バイト、全バイト識別可能
-CAMERA_KEY = (
-    u32(5)                                    # frame
-    + struct.pack("<f", -45.5)                # distance
-    + struct.pack("<3f", 1.0, 2.0, 3.0)       # カメラ中心
-    + struct.pack("<3f", 0.5, 0.25, -0.125)   # 回転(ラジアン)
-    + CAMERA_INTERP
-    + u32(30)                                 # 視野角
-    + struct.pack("<B", 1)                    # パースペクティブ(1=OFF)
+
+CAMERA_INTERP = bytes(range(100, 124))
+CAMERA_KEY = _fields(
+    frame=u32(5),
+    distance=f32(-45.5),
+    center=f32(1.0, 2.0, 3.0),
+    rotation_rad=f32(0.5, 0.25, -0.125),
+    interpolation=CAMERA_INTERP,
+    fov=u32(30),
+    perspective_off=u8(1),
 )
-LIGHT_KEY = struct.pack("<I3f3f", 8, 1.0, 0.5, 0.25, 0.0, -1.0, 0.5)
-SELF_SHADOW_KEY = struct.pack("<IBf", 9, 2, 0.0625)
+LIGHT_KEY = _fields(frame=u32(8), color=f32(1.0, 0.5, 0.25), position=f32(0.0, -1.0, 0.5))
+SELF_SHADOW_KEY = _fields(frame=u32(9), mode=u8(2), distance=f32(0.0625))
 IK_NAME = "左足ＩＫ".encode("cp932").ljust(20, b"\x00")
-IK_KEY = struct.pack("<IBI", 12, 1, 1) + IK_NAME + struct.pack("<B", 0)
+IK_KEY = _fields(frame=u32(12), display=u8(1), ik_bone_count=u32(1), name=IK_NAME, enable=u8(0))
 
-CAMERA_FILE = (
-    MAGIC_V2 + CAMERA_MODEL_NAME
-    + u32(0)                    # ボーン
-    + u32(0)                    # モーフ
-    + u32(1) + CAMERA_KEY
-    + u32(1) + LIGHT_KEY
-    + u32(1) + SELF_SHADOW_KEY
-    + u32(1) + IK_KEY
+CAMERA_FILE = _fields(
+    magic=MAGIC_V2,
+    model_name=CAMERA_MODEL_NAME,
+    bone_count=u32(0),
+    morph_count=u32(0),
+    camera=u32(1) + CAMERA_KEY,
+    light=u32(1) + LIGHT_KEY,
+    self_shadow=u32(1) + SELF_SHADOW_KEY,
+    ik=u32(1) + IK_KEY,
 )
 
-# セルフ影セクション境界で終わる旧版相当ファイル
-TRUNCATED_AT_SELF_SHADOW = (
-    MAGIC_V2 + CAMERA_MODEL_NAME
-    + u32(0) + u32(0)
-    + u32(1) + CAMERA_KEY
-    + u32(1) + LIGHT_KEY
+TRUNCATED_AT_SELF_SHADOW = _fields(
+    magic=MAGIC_V2,
+    model_name=CAMERA_MODEL_NAME,
+    bone_count=u32(0),
+    morph_count=u32(0),
+    camera=u32(1) + CAMERA_KEY,
+    light=u32(1) + LIGHT_KEY,
 )
-# IKセクション境界で終わる(セルフ影まで存在)
 TRUNCATED_AT_IK = TRUNCATED_AT_SELF_SHADOW + u32(1) + SELF_SHADOW_KEY
 
-# カメラキーの途中(61バイト中30バイト)で切れた不正ファイル
-TRUNCATED_MID_KEY = (
-    MAGIC_V2 + CAMERA_MODEL_NAME + u32(0) + u32(0) + u32(1) + CAMERA_KEY[:30]
+TRUNCATED_MID_KEY = _fields(
+    magic=MAGIC_V2,
+    model_name=CAMERA_MODEL_NAME,
+    bone_count=u32(0),
+    morph_count=u32(0),
+    camera=u32(1) + CAMERA_KEY[: len(CAMERA_KEY) // 2],
 )
 
-# 順不同のカメラキー(frame 20 → 10 の順で格納)
 DEFAULT_CAMERA_INTERP = bytes([20, 107, 20, 107]) * 6
 
 
 def cam_key_bytes(frame: int) -> bytes:
-    return (
-        u32(frame)
-        + struct.pack("<f", -30.0)
-        + struct.pack("<3f", 0.0, 0.0, 0.0)
-        + struct.pack("<3f", 0.0, 0.0, 0.0)
-        + DEFAULT_CAMERA_INTERP
-        + u32(30)
-        + struct.pack("<B", 0)
+    return _fields(
+        frame=u32(frame),
+        distance=f32(-30.0),
+        center=f32(0.0, 0.0, 0.0),
+        rotation_rad=f32(0.0, 0.0, 0.0),
+        interpolation=DEFAULT_CAMERA_INTERP,
+        fov=u32(30),
+        perspective_on=u8(0),
     )
 
 
-UNSORTED_FILE = (
-    MAGIC_V2 + CAMERA_MODEL_NAME
-    + u32(0) + u32(0)
-    + u32(2) + cam_key_bytes(20) + cam_key_bytes(10)
-    + u32(0) + u32(0) + u32(0)
+UNSORTED_FILE = _fields(
+    magic=MAGIC_V2,
+    model_name=CAMERA_MODEL_NAME,
+    bone_count=u32(0),
+    morph_count=u32(0),
+    camera=u32(2) + cam_key_bytes(20) + cam_key_bytes(10),
+    light_count=u32(0),
+    self_shadow_count=u32(0),
+    ik_count=u32(0),
 )
-
-# --- モデル系ファイル(物理フラグ付きボーンキー) ---
 
 MODEL_MODEL_NAME = "テストモデル".encode("cp932").ljust(20, b"\x00")
 BONE_NAME = "センター".encode("cp932").ljust(15, b"\x00")
 
-# 補間ブロック64バイト: 先頭16バイトの並びは
-# [X_x1 Y_x1 Z_x1 R_x1 / X_y1 Y_y1 Z_y1 R_y1 / X_x2 Y_x2 Z_x2 R_x2 / X_y2 Y_y2 Z_y2 R_y2]
-SEQ = bytes([10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33, 40, 41, 42, 43])
-# Byte[16]以降は1バイトずつ左シフトしたコピー+詰めパッド(旧仕様の01)
-BONE_INTERP = SEQ + SEQ[1:] + b"\x01" + SEQ[2:] + b"\x01\x00" + SEQ[3:] + b"\x01\x00\x00"
-# 物理フラグ: Byte[2], Byte[3](Z_x1, R_x1の位置)を (99, 15) で上書き
-PHYS_INTERP = BONE_INTERP[:2] + bytes([99, 15]) + BONE_INTERP[4:]
-
-BONE_KEY = (
-    BONE_NAME
-    + struct.pack("<I3f4f", 3, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
-    + PHYS_INTERP
+CONTROL_POINT_BYTES = bytes([10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33, 40, 41, 42, 43])
+BONE_INTERP = _fields(
+    body=CONTROL_POINT_BYTES,
+    shift1=CONTROL_POINT_BYTES[1:] + b"\x01",
+    shift2=CONTROL_POINT_BYTES[2:] + b"\x01\x00",
+    shift3=CONTROL_POINT_BYTES[3:] + b"\x01\x00\x00",
 )
-MORPH_KEY = "まばたき".encode("cp932").ljust(15, b"\x00") + struct.pack("<If", 7, 1.0)
+PHYSICS_FLAG_BYTES = bytes([99, 15])
+PHYS_INTERP = BONE_INTERP[:2] + PHYSICS_FLAG_BYTES + BONE_INTERP[4:]
 
-MODEL_FILE = (
-    MAGIC_V2 + MODEL_MODEL_NAME
-    + u32(1) + BONE_KEY
-    + u32(1) + MORPH_KEY
-    + u32(0) + u32(0) + u32(0) + u32(0)
-)
+def _bone_key(name_raw: bytes) -> bytes:
+    return _fields(
+        name=name_raw,
+        frame=u32(3),
+        position=f32(0.0, 1.0, 0.0),
+        rotation=f32(0.0, 0.0, 0.0, 1.0),
+        interpolation=PHYS_INTERP,
+    )
 
-# フィクスチャ自己検査(VMD形式のキーサイズと一致すること)
+
+BONE_KEY = _bone_key(BONE_NAME)
+MORPH_KEY = _fields(name="まばたき".encode("cp932").ljust(15, b"\x00"), frame=u32(7), weight=f32(1.0))
+
+
+def _model_file(bone_key: bytes) -> bytes:
+    return _fields(
+        magic=MAGIC_V2,
+        model_name=MODEL_MODEL_NAME,
+        bone=u32(1) + bone_key,
+        morph=u32(1) + MORPH_KEY,
+        camera_count=u32(0),
+        light_count=u32(0),
+        self_shadow_count=u32(0),
+        ik_count=u32(0),
+    )
+
+
+MODEL_FILE = _model_file(BONE_KEY)
+
 assert len(MAGIC_V2) == 30 and len(CAMERA_MODEL_NAME) == 20
 assert len(CAMERA_KEY) == 61
 assert len(LIGHT_KEY) == 28
@@ -137,9 +156,8 @@ assert len(BONE_KEY) == 111
 assert len(MORPH_KEY) == 23
 
 
-# ---------------------------------------------------------------------------
-# テスト6: フィールド単位assert(手書きバイト列との双方向比較)
-# ---------------------------------------------------------------------------
+def _model_file_with_bone_name(name_raw: bytes) -> bytes:
+    return _model_file(_bone_key(name_raw))
 
 
 class TestFieldAssert:
@@ -213,11 +231,6 @@ class TestFieldAssert:
         assert write(doc) == MODEL_FILE
 
 
-# ---------------------------------------------------------------------------
-# テスト1: ラウンドトリップ(バイト一致)
-# ---------------------------------------------------------------------------
-
-
 class TestRoundtrip:
     def test_camera_basic(self, camera_basic_bytes):
         doc, _ = read(camera_basic_bytes)
@@ -248,10 +261,25 @@ class TestRoundtrip:
         doc, _ = read(MODEL_FILE)
         assert write(doc) == MODEL_FILE
 
+    def test_bytes_after_name_terminator_preserved(self):
+        name_raw = "センター".encode("cp932") + b"\x00XYZ".ljust(15 - len("センター".encode("cp932")), b"\x00")
+        data = _model_file_with_bone_name(name_raw)
+        doc, _ = read(data)
+        assert doc.bone[0].name_raw == name_raw
+        assert doc.bone[0].name == "センター"
+        assert write(doc) == data
 
-# ---------------------------------------------------------------------------
-# write_file: 原子書き出し
-# ---------------------------------------------------------------------------
+
+class TestNameDecoding:
+    def test_undecodable_name_warns_with_location_and_keeps_raw(self):
+        name_raw = b"\x81".ljust(15, b"\x00")
+        doc, warnings = read(_model_file_with_bone_name(name_raw))
+        assert doc.bone[0].name_raw == name_raw
+        assert doc.bone[0].name == "�"
+        decode_warnings = [w for w in warnings if w.code == "decode-error"]
+        assert len(decode_warnings) == 1
+        w = decode_warnings[0]
+        assert (w.section, w.key_index, w.frame) == ("bone", 0, 3)
 
 
 class TestWriteFile:
@@ -261,9 +289,7 @@ class TestWriteFile:
         write_file(doc, out)
         assert out.read_bytes() == write(doc) == CAMERA_FILE
 
-    def test_overwrite_in_place_replaces_atomically(self, tmp_path):
-        # 既存ファイル(=入力と同一パス)への上書きで内容が置き換わり、
-        # 一時ファイルが残らないこと
+    def test_overwrite_in_place_replaces_and_leaves_no_temp_file(self, tmp_path):
         target = tmp_path / "cam.vmd"
         target.write_bytes(MODEL_FILE)
         doc, _ = read(CAMERA_FILE)
@@ -271,21 +297,25 @@ class TestWriteFile:
         assert target.read_bytes() == CAMERA_FILE
         assert list(tmp_path.glob("*.tmp")) == []
 
+    def test_failed_write_keeps_existing_file_and_removes_temp_file(self, tmp_path, monkeypatch):
+        target = tmp_path / "cam.vmd"
+        target.write_bytes(MODEL_FILE)
+        doc, _ = read(CAMERA_FILE)
 
-# ---------------------------------------------------------------------------
-# テスト2: v1拒否
-# ---------------------------------------------------------------------------
+        def fail_replace(src, dst):
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(os, "replace", fail_replace)
+        with pytest.raises(OSError):
+            write_file(doc, target)
+        assert target.read_bytes() == MODEL_FILE
+        assert list(tmp_path.glob("*.tmp")) == []
 
 
 class TestV1Reject:
     def test_v1_rejected_with_specific_message(self):
         with pytest.raises(VmdFormatError, match="v1"):
             read(MAGIC_V1)
-
-
-# ---------------------------------------------------------------------------
-# テスト4: エラー
-# ---------------------------------------------------------------------------
 
 
 class TestErrors:
@@ -297,14 +327,17 @@ class TestErrors:
         with pytest.raises(VmdFormatError):
             read(b"")
 
-    def test_truncated_mid_keyframe(self):
-        with pytest.raises(VmdFormatError):
+    def test_truncated_mid_keyframe_reports_offset(self):
+        with pytest.raises(VmdFormatError, match="offset"):
             read(TRUNCATED_MID_KEY)
 
+    def test_trailing_bytes_after_ik_section(self):
+        with pytest.raises(VmdFormatError):
+            read(CAMERA_FILE + b"\x00")
 
-# ---------------------------------------------------------------------------
-# テスト3: 正規化(データモデル直接構築)
-# ---------------------------------------------------------------------------
+    def test_missing_file_raises_os_error_not_format_error(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            read(tmp_path / "missing.vmd")
 
 
 def make_cam(frame: int, fov: int = 30) -> CameraKey:
@@ -363,6 +396,14 @@ class TestNormalize:
         a = [k for k in ndoc.bone if k.name == "A"][0]
         assert a.position[0] == 9.0
 
+    def test_names_equal_after_decoding_but_different_raw_bytes_are_distinct(self):
+        plain = make_bone("A", 5)
+        trailing = BoneKey(b"A\x00X".ljust(15, b"\x00"), 5, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_INTERP)
+        assert plain.name == trailing.name
+        ndoc, warnings = normalize(VmdDocument(bone=[plain, trailing]))
+        assert len(ndoc.bone) == 2
+        assert not any(w.code == "normalize-duplicate" for w in warnings)
+
     def test_sections_limited_leaves_others_untouched(self):
         doc = VmdDocument(
             camera=[make_cam(30), make_cam(10)],
@@ -379,17 +420,11 @@ class TestNormalize:
         assert warnings == []
 
 
-# ---------------------------------------------------------------------------
-# テスト5: 物理フラグ付きボーン補間の制御点復元
-# ---------------------------------------------------------------------------
-
-
 class TestPhysicsFlagControlPoints:
     def test_control_points_restored_from_shifted_copy(self):
         doc, _ = read(MODEL_FILE)
         cp = doc.bone[0].control_points()
         assert cp["X"] == (10, 20, 30, 40)
         assert cp["Y"] == (11, 21, 31, 41)
-        # Z_x1, R_x1 は物理フラグで上書きされており、シフトコピー側から復元される
         assert cp["Z"] == (12, 22, 32, 42)
         assert cp["R"] == (13, 23, 33, 43)
