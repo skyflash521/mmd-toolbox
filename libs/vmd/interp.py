@@ -1,16 +1,9 @@
-"""補間曲線評価・サンプリング。
-
-入力キー列はフレーム昇順前提(正規化済みであること)。
-"""
-
 import math
 
 import numpy as np
 
 from .types import CameraKey
 
-# カメラ補間ブロック(24バイト)内の各チャンネルのオフセット。
-# 各チャンネルは ax, bx, ay, by の順で4バイト(始点X, 終点X, 始点Y, 終点Y)。
 CAMERA_CHANNEL_OFFSET = {
     "pos_x": 0,
     "pos_y": 4,
@@ -24,23 +17,12 @@ _POS_INDEX = {"pos_x": 0, "pos_y": 1, "pos_z": 2}
 _BONE_CHANNEL = {"pos_x": "X", "pos_y": "Y", "pos_z": "Z", "rot": "R"}
 
 
-# ---------------------------------------------------------------------------
-# ベジェ評価
-# ---------------------------------------------------------------------------
-
-
 def _bezier(s: float, c1: float, c2: float) -> float:
-    """端点 0,1 固定の3次ベジェの1成分。c1,c2 は [0,1] 正規化済み制御点。"""
     u = 1.0 - s
     return 3 * u * u * s * c1 + 3 * u * s * s * c2 + s * s * s
 
 
 def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
-    """制御点 (x1,y1),(x2,y2)(0..127)・正規化時間 x∈[0,1] → 補間係数 y∈[0,1]。
-
-    X(s)=x をニュートン法で解き、非収束時は二分法にフォールバックする。
-    Xは単調増加前提(MMDの補間曲線は時間方向に単調)。
-    """
     if x <= 0.0:
         return 0.0
     if x >= 1.0:
@@ -55,7 +37,7 @@ def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
         u = 1.0 - s
         return 3.0 * (px1 * u * u + 2.0 * (px2 - px1) * u * s + (1.0 - px2) * s * s)
 
-    s = x  # 初期値
+    s = x
     converged = False
     for _ in range(20):
         err = fx(s) - x
@@ -83,7 +65,6 @@ def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
 
 
 def _slerp(q0, q1, t: float):
-    """クォータニオン (x,y,z,w) の球面線形補間。"""
     a = [float(c) for c in q0]
     b = [float(c) for c in q1]
     na = math.sqrt(sum(c * c for c in a))
@@ -105,13 +86,7 @@ def _slerp(q0, q1, t: float):
     return tuple(s0 * x + s1 * y for x, y in zip(a, b, strict=True))
 
 
-# ---------------------------------------------------------------------------
-# チャンネル別の制御点・値
-# ---------------------------------------------------------------------------
-
-
 def _control_points(arriving_key, channel: str, is_camera: bool):
-    """区間の到達側(後側)キーから制御点 (x1,y1,x2,y2) を取り出す。"""
     if is_camera:
         off = CAMERA_CHANNEL_OFFSET[channel]
         ax, bx, ay, by = arriving_key.interpolation[off : off + 4]
@@ -120,7 +95,6 @@ def _control_points(arriving_key, channel: str, is_camera: bool):
 
 
 def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
-    """補間係数 y で区間 [k0, k1] のチャンネル値を算出する。"""
     if channel in _POS_INDEX:
         i = _POS_INDEX[channel]
         return k0.position[i] + (k1.position[i] - k0.position[i]) * y
@@ -130,7 +104,7 @@ def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
         return float(k0.fov) + (float(k1.fov) - float(k0.fov)) * y
     if channel == "rot":
         if is_camera:
-            # オイラー各軸を共通の補間曲線で独立に線形補間(クォータニオン化しない)
+            # MMD はカメラの角度をクォータニオンにせず、各軸を同じ補間係数で線形補間する。
             return tuple(
                 k0.rotation[i] + (k1.rotation[i] - k0.rotation[i]) * y for i in range(3)
             )
@@ -139,25 +113,21 @@ def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
 
 
 def _find_segment(keys, frame: int) -> int:
-    """keys[i].frame <= frame < keys[i+1].frame となる i を返す。"""
     for i in range(len(keys) - 1):
         if keys[i].frame <= frame < keys[i + 1].frame:
             return i
     return len(keys) - 2
 
 
-# ---------------------------------------------------------------------------
-# 公開API
-# ---------------------------------------------------------------------------
-
-
 def sample(keys, channel: str, frame: int):
-    """1チャンネルを1フレームで評価する。"""
+    """keys はフレーム昇順であること。
+
+    channel "rot" は、カメラなら角度3成分(ラジアン)、ボーンなら正規化したクォータニオンを返す。
+    """
     if not keys:
         raise ValueError("キー列が空")
     is_camera = isinstance(keys[0], CameraKey)
 
-    # 範囲外・単一キーは端キーの値で一定(境界規約)
     if frame <= keys[0].frame or len(keys) == 1:
         k = keys[0]
         return _interp_value(k, k, channel, is_camera, 0.0)
@@ -176,9 +146,9 @@ def sample(keys, channel: str, frame: int):
 
 
 def sample_range(keys, channel: str, frame_start: int, frame_end: int):
-    """[frame_start, frame_end] を1フレーム間隔(両端含む)で評価する。
+    """keys はフレーム昇順であること。
 
-    スカラーチャンネルは numpy 配列、回転チャンネルは値のリストを返す。
+    両端を含む。channel "rot" は値のリスト、それ以外は numpy 配列を返す。
     """
     vals = [sample(keys, channel, f) for f in range(frame_start, frame_end + 1)]
     if vals and isinstance(vals[0], tuple):
@@ -187,7 +157,6 @@ def sample_range(keys, channel: str, frame_start: int, frame_end: int):
 
 
 def _bake_segment(k0, k1, fa, fb, frame_start, positions, rotations):
-    """区間 [k0, k1] 内のフレーム fa..fb(両端含む)を評価して出力へ書き込む。"""
     span = k1.frame - k0.frame
     count = fb - fa + 1
     cps = k1.control_points()
@@ -199,7 +168,7 @@ def _bake_segment(k0, k1, fa, fb, frame_start, positions, rotations):
         if ys is None:
             x1, y1, x2, y2 = cp
             if x1 == y1 and x2 == y2:
-                ys = xs  # 線形ファストパス: y = x
+                ys = xs
             else:
                 ys = [_solve_factor(x1, y1, x2, y2, x) for x in xs]
             factor_cache[cp] = ys
@@ -209,12 +178,11 @@ def _bake_segment(k0, k1, fa, fb, frame_start, positions, rotations):
     for i, ch in enumerate(("X", "Y", "Z")):
         v0, v1 = k0.position[i], k1.position[i]
         if v0 == v1:
-            axes.append([v0] * count)  # 定数ファストパス
+            axes.append([v0] * count)
         else:
             ys = _factors(cps[ch])
             axes.append([v0 + (v1 - v0) * y for y in ys])
     if k0.rotation == k1.rotation:
-        # 定数ファストパス(正規化後の端値。一般解も同じ値を返す)
         rot = _slerp(k0.rotation, k0.rotation, 0.0)
         rots = [rot] * count
     else:
@@ -227,12 +195,10 @@ def _bake_segment(k0, k1, fa, fb, frame_start, positions, rotations):
 
 
 def bake_bone_track(keys, frame_start: int, frame_end: int):
-    """ボーントラック全チャンネルを [frame_start, frame_end] で密ベイクする。
+    """keys はフレーム昇順であること。
 
-    1フレーム間隔・両端含む。positions は (x, y, z) のリスト、rotations は
-    クォータニオン (x, y, z, w) のリストを返す。評価は sample と同一意味論
-    (境界規約・到達側キーの補間曲線・回転は正規化して返す)。区間を単調に
-    掃引し、フレームごとの区間探索を避ける。
+    [frame_start, frame_end] の各フレームの位置 (x, y, z) のリストと、正規化したクォータニオンの
+    リストを組で返す。
     """
     if not keys:
         raise ValueError("キー列が空")
@@ -249,7 +215,6 @@ def bake_bone_track(keys, frame_start: int, frame_end: int):
             positions[i] = pos
             rotations[i] = rot
 
-    # 単一キーは全域で端値一定(境界規約)
     if len(keys) == 1:
         _fill(0, total, keys[0])
         return positions, rotations
@@ -258,13 +223,11 @@ def bake_bone_track(keys, frame_start: int, frame_end: int):
     last_f = keys[-1].frame
     f = frame_start
 
-    # 最初のキー以前(最初のキー自身を含む)は端キーの値で一定
     if f <= first_f:
         upto = min(first_f, frame_end)
         _fill(0, upto - frame_start + 1, keys[0])
         f = upto + 1
 
-    # 区間掃引(first_f < f < last_f)
     seg = 0
     while f <= frame_end and f < last_f:
         while keys[seg + 1].frame <= f:
@@ -274,14 +237,13 @@ def bake_bone_track(keys, frame_start: int, frame_end: int):
         _bake_segment(k0, k1, f, fb, frame_start, positions, rotations)
         f = fb + 1
 
-    # 最後のキー以後は端キーの値で一定
     if f <= frame_end:
         _fill(f - frame_start, total, keys[-1])
     return positions, rotations
 
 
 def sample_camera(keys, frame: int) -> dict:
-    """カメラ全チャンネルを1フレームで評価する。"""
+    """keys はフレーム昇順であること。"""
     return {
         "distance": sample(keys, "distance", frame),
         "position": (

@@ -1,11 +1,3 @@
-"""vmd-interp のテスト。
-
-独立実装との数値クロスバリデーションのため、本ファイル末尾近くに
-実装から独立に書いた素朴なベジェ評価器 _ref_factor を置く。これは
-二分法のみで X(s)=x を解き、ベルンスタイン基底で Y(s) を直接計算する——
-読めば正しさが確認できる「テストの底」として機能する。
-"""
-
 import math
 
 import numpy as np
@@ -14,22 +6,13 @@ import pytest
 from vmd import interp, normalize, read
 from vmd.types import BoneKey, CameraKey
 
-# ---------------------------------------------------------------------------
-# 独立実装(クロスバリデーションの基準)
-# ---------------------------------------------------------------------------
-
 
 def _bernstein(t: float, c1: float, c2: float) -> float:
-    """端点 0,1 固定の3次ベジェの1成分。制御点 c1,c2 は [0,1] 正規化済み。"""
     u = 1.0 - t
     return 3 * u * u * t * c1 + 3 * u * t * t * c2 + t * t * t
 
 
 def _ref_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
-    """制御点 (x1,y1),(x2,y2)(0..127)・正規化時間 x∈[0,1] → 補間係数 y∈[0,1]。
-
-    X(s)=x を二分法で解き(Xは単調増加前提)、y=Y(s) を返す。
-    """
     px1, py1, px2, py2 = x1 / 127.0, y1 / 127.0, x2 / 127.0, y2 / 127.0
     lo, hi = 0.0, 1.0
     for _ in range(60):
@@ -61,19 +44,10 @@ def _ref_slerp(q0, q1, t):
     return tuple(s0 * a + s1 * b)
 
 
-# ---------------------------------------------------------------------------
-# フィクスチャ用ヘルパー(宣言的にキーを組み立てる)
-# ---------------------------------------------------------------------------
-
-LINEAR = (20, 20, 107, 107)  # MMDデフォルト。制御点 (20,20),(107,107) → y=x
+LINEAR = (20, 20, 107, 107)
 
 
 def cam_interp(per_channel: dict) -> bytes:
-    """チャンネル -> (x1,y1,x2,y2) からカメラ補間ブロック24バイトを組む。
-
-    格納順は ax,bx,ay,by(始点X,終点X,始点Y,終点Y)= x1,x2,y1,y2。
-    未指定チャンネルは線形。
-    """
     b = bytearray(24)
     for ch, off in interp.CAMERA_CHANNEL_OFFSET.items():
         x1, y1, x2, y2 = per_channel.get(ch, LINEAR)
@@ -97,23 +71,13 @@ def cam_key(
 
 
 def bone_interp_linear_rot() -> bytes:
-    """R(回転)チャンネルが線形のボーン補間ブロック64バイト。
-
-    types.control_points() の R は (b[18], b[7], b[11], b[15]) = (x1,y1,x2,y2)。
-    回転スラープ検証専用(他チャンネルは参照しない)。
-    """
     b = bytearray(64)
-    b[18], b[7], b[11], b[15] = 20, 20, 107, 107
+    b[18], b[7], b[11], b[15] = LINEAR
     return bytes(b)
 
 
 def bone_key(frame, *, position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0)):
     return BoneKey(b"\x00" * 15, frame, position, rotation, bone_interp_linear_rot())
-
-
-# ---------------------------------------------------------------------------
-# テスト1: 線形の補間曲線 = 解析解(線形補間)
-# ---------------------------------------------------------------------------
 
 
 class TestLinearCurve:
@@ -132,19 +96,14 @@ class TestLinearCurve:
         assert interp.sample(keys, "distance", 25) == pytest.approx(9.0, abs=1e-9)
 
 
-# ---------------------------------------------------------------------------
-# テスト2: 極端な制御点でソルバが正しく動作する
-# ---------------------------------------------------------------------------
-
-
 class TestExtremeControlPoints:
     @pytest.mark.parametrize(
         "cp",
         [
-            (0, 0, 127, 127),    # 端点まで張り付き
-            (5, 122, 122, 5),    # 急峻なS字
-            (0, 127, 127, 0),    # 強い非単調Y
-            (0, 64, 127, 64),    # 片側が平坦
+            pytest.param((0, 0, 127, 127), id="control_points_at_corners"),
+            pytest.param((5, 122, 122, 5), id="fast_slow_fast"),
+            pytest.param((0, 127, 127, 0), id="y_control_points_at_opposite_corners"),
+            pytest.param((0, 64, 127, 64), id="flat_middle"),
         ],
     )
     def test_matches_reference(self, cp):
@@ -163,27 +122,20 @@ class TestExtremeControlPoints:
         assert all(b >= a - 1e-9 for a, b in zip(vals, vals[1:], strict=False))
 
 
-# ---------------------------------------------------------------------------
-# テスト3: 区間の補間に後側キーのパラメーターが使われる
-# ---------------------------------------------------------------------------
-
-
 class TestLaterKeyParams:
-    def test_segment_uses_arriving_key_curve(self):
-        front = (0, 127, 127, 0)   # key0 に持たせる(誤って使われたら検出される)
-        mid = (5, 122, 122, 5)     # key1 の曲線。区間 [0,10] はこれを使うべき
+    def test_segment_uses_arriving_key_curve_not_departing(self):
+        departing = (0, 127, 127, 0)
+        arriving = (5, 122, 122, 5)
         keys = [
-            cam_key(0, distance=0.0, curves={"distance": front}),
-            cam_key(10, distance=10.0, curves={"distance": mid}),
-            cam_key(20, distance=20.0),  # 線形
+            cam_key(0, distance=0.0, curves={"distance": departing}),
+            cam_key(10, distance=10.0, curves={"distance": arriving}),
+            cam_key(20, distance=20.0),
         ]
-        # 区間 [0,10]: 後側キー(frame10, mid曲線)を使う
         for f in range(1, 10):
-            expected = 10.0 * _ref_factor(*mid, f / 10.0)
+            expected = 10.0 * _ref_factor(*arriving, f / 10.0)
             got = interp.sample(keys, "distance", f)
             assert got == pytest.approx(expected, abs=1e-4)
-            # 前側キーの曲線とは異なる値になる(取り違え検出)
-            wrong = 10.0 * _ref_factor(*front, f / 10.0)
+            wrong = 10.0 * _ref_factor(*departing, f / 10.0)
             if abs(expected - wrong) > 1e-3:
                 assert abs(got - wrong) > 1e-4
 
@@ -191,32 +143,26 @@ class TestLaterKeyParams:
         keys = [
             cam_key(0, distance=0.0),
             cam_key(10, distance=10.0, curves={"distance": (5, 122, 122, 5)}),
-            cam_key(20, distance=20.0),  # 線形 → 区間[10,20]は線形
+            cam_key(20, distance=20.0),
         ]
         assert interp.sample(keys, "distance", 15) == pytest.approx(15.0, abs=1e-6)
 
 
-# ---------------------------------------------------------------------------
-# テスト4: カメラ回転は3軸独立・共通の補間曲線(クォータニオン化しない)
-# ---------------------------------------------------------------------------
-
-
 class TestCameraRotation:
-    def test_three_axes_share_one_curve(self):
-        rot_cp = (10, 117, 117, 10)  # 非線形
+    def test_three_euler_axes_share_one_curve(self):
+        rot_cp = (10, 117, 117, 10)
         keys = [
             cam_key(0, rotation=(0.0, 0.0, 0.0), curves={"rot": rot_cp}),
             cam_key(10, rotation=(0.3, -0.6, 1.2), curves={"rot": rot_cp}),
         ]
         y = _ref_factor(*rot_cp, 0.5)
         result = interp.sample(keys, "rot", 5)
-        assert len(result) == 3  # オイラー角3軸(クォータニオンではない)
+        assert len(result) == 3
         assert result[0] == pytest.approx(0.3 * y, abs=1e-4)
         assert result[1] == pytest.approx(-0.6 * y, abs=1e-4)
         assert result[2] == pytest.approx(1.2 * y, abs=1e-4)
 
     def test_euler_lerp_not_slerp(self):
-        # オイラー線形補間では各軸が独立に比例する。共通yなので比が保たれる。
         keys = [
             cam_key(0, rotation=(0.0, 0.0, 0.0)),
             cam_key(10, rotation=(1.0, 2.0, 4.0)),
@@ -224,11 +170,6 @@ class TestCameraRotation:
         rx, ry, rz = interp.sample(keys, "rot", 5)
         assert ry == pytest.approx(2.0 * rx, abs=1e-6)
         assert rz == pytest.approx(4.0 * rx, abs=1e-6)
-
-
-# ---------------------------------------------------------------------------
-# テスト5: 範囲外フレームは端キーの値
-# ---------------------------------------------------------------------------
 
 
 class TestOutOfRange:
@@ -245,27 +186,26 @@ class TestOutOfRange:
         for f in (0, 7, 50):
             assert interp.sample(keys, "distance", f) == pytest.approx(3.5, abs=1e-9)
 
-    def test_adjacent_frame_segment_keeps_endpoints(self):
-        # フレーム差1の区間は中間点が現れず、両端の値のみ(値ジャンプ保持)
+    def test_adjacent_frame_segment_keeps_value_jump(self):
         keys = [cam_key(10, distance=1.0), cam_key(11, distance=9.0)]
         assert interp.sample(keys, "distance", 10) == pytest.approx(1.0, abs=1e-9)
         assert interp.sample(keys, "distance", 11) == pytest.approx(9.0, abs=1e-9)
 
 
-# ---------------------------------------------------------------------------
-# ボーン回転スラープ(カメラ回転=オイラー線形 と異なる値パス)
-# ---------------------------------------------------------------------------
+class TestFov:
+    def test_fov_between_keys_is_not_rounded(self):
+        keys = [cam_key(0, fov=30), cam_key(2, fov=31)]
+        assert interp.sample(keys, "fov", 1) == pytest.approx(30.5, abs=1e-9)
 
 
 class TestBoneRotationSlerp:
     def test_slerp_midpoint(self):
-        q0 = (0.0, 0.0, 0.0, 1.0)  # 単位
-        q1 = (0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4))  # Z軸90°
+        q0 = (0.0, 0.0, 0.0, 1.0)
+        q1 = (0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4))
         keys = [bone_key(0, rotation=q0), bone_key(10, rotation=q1)]
-        got = interp.sample(keys, "rot", 5)  # 線形R → t=0.5
+        got = interp.sample(keys, "rot", 5)
         expected = _ref_slerp(q0, q1, 0.5)
         assert len(got) == 4
-        # 符号の自由度を吸収して比較
         gv = np.array(got)
         ev = np.array(expected)
         if np.dot(gv, ev) < 0:
@@ -273,25 +213,15 @@ class TestBoneRotationSlerp:
         assert gv == pytest.approx(ev, abs=1e-4)
 
 
-# ---------------------------------------------------------------------------
-# sample_range(ベイク用途の一括評価)
-# ---------------------------------------------------------------------------
-
-
 class TestSampleRange:
     def test_inclusive_length_and_values(self):
         keys = [cam_key(0, distance=0.0), cam_key(10, distance=10.0)]
         arr = interp.sample_range(keys, "distance", 0, 10)
-        assert len(arr) == 11  # 両端含む
+        assert len(arr) == 11
         for f, v in enumerate(arr):
             assert float(v) == pytest.approx(interp.sample(keys, "distance", f), abs=1e-9)
 
 
-# ---------------------------------------------------------------------------
-# テスト6: 独立実装との数値クロスバリデーション
-# ---------------------------------------------------------------------------
-
-# (x1,y1,x2,y2)。Xが単調増加(x1<=x2)になる構成のみ。
 GRID = [
     (20, 20, 107, 107),
     (0, 0, 127, 127),
@@ -314,7 +244,6 @@ class TestCrossValidationSynthetic:
 
 
 def _cam_cp(interp_bytes: bytes, channel: str):
-    """カメラ補間ブロックからチャンネルの制御点 (x1,y1,x2,y2) を独立に取り出す。"""
     off = interp.CAMERA_CHANNEL_OFFSET[channel]
     ax, bx, ay, by = interp_bytes[off : off + 4]
     return (ax, ay, bx, by)
@@ -323,8 +252,6 @@ def _cam_cp(interp_bytes: bytes, channel: str):
 class TestCrossValidationRealFile:
     def test_camera_basic_all_channels(self, camera_basic_bytes):
         doc, _ = read(camera_basic_bytes)
-        # sample() はフレーム昇順を前提とする。
-        # 実ファイルのカメラキーはファイル内で順不同なので正規化してから渡す。
         doc, _ = normalize(doc, ["camera"])
         keys = doc.camera
         assert len(keys) >= 3
@@ -343,14 +270,12 @@ class TestCrossValidationRealFile:
             frames = sorted({k0.frame + 1, k0.frame + span // 2, k1.frame - 1})
             for f in frames:
                 x = (f - k0.frame) / span
-                # スカラー5チャンネル
                 for ch, get in scalar.items():
                     fac = _ref_factor(*_cam_cp(k1.interpolation, ch), x)
                     expected = get(k0) + (get(k1) - get(k0)) * fac
                     assert interp.sample(keys, ch, f) == pytest.approx(expected, abs=1e-4), (
                         f"{ch} at frame {f}"
                     )
-                # 回転(共通曲線で3軸)
                 rfac = _ref_factor(*_cam_cp(k1.interpolation, "rot"), x)
                 got_rot = interp.sample(keys, "rot", f)
                 for i in range(3):
@@ -360,11 +285,6 @@ class TestCrossValidationRealFile:
                     )
                 checked += 1
         assert checked > 0, "検証対象の区間がない(テストデータの作り直しが必要)"
-
-
-# ---------------------------------------------------------------------------
-# sample_camera(全チャンネル一括評価)
-# ---------------------------------------------------------------------------
 
 
 class TestSampleCamera:
