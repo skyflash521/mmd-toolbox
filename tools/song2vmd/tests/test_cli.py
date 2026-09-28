@@ -1,13 +1,3 @@
-"""song2vmd CLI 骨組みのテスト。
-
-範囲は CLI の起動・引数解析・検証・出力先解決・上書きガードと `--dry-run` の(出力を書かない)経路に
-限る。実際の音声処理パイプライン(`pipeline.run`)は決定論的なスタブに差し替え、引数の受理・検証・
-出力先解決だけを対象にする(パイプラインの実データ配線は test_cli_run.py で検証する)。
-
-終了コード: 0 正常 / 1 入力不正 / 2 引数エラー(未知オプション・範囲不正・
-上書きガード等) / 3 出力書き込み失敗 / 4 音声前段の外部依存の失敗 / 130 協調的な中断。
-"""
-
 import re
 
 import pytest
@@ -37,15 +27,10 @@ def _stub_pipeline_result():
 
 @pytest.fixture(autouse=True)
 def _stub_pipeline_run(monkeypatch):
-    """cli.py の引数解析・検証だけを対象にするため、実処理(pipeline.run)を決定論的スタブへ差し替える。"""
     monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: _stub_pipeline_result())
 
 
-# --- 主要オプションの受理と --dry-run の空実行 -------------------------------
-
-
 def test_parses_full_option_set_in_dry_run(tmp_path):
-    """主要オプションを一通り受理し、--dry-run が 0 で空実行する。"""
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
     rc = cli.main([
@@ -74,7 +59,6 @@ def test_parses_full_option_set_in_dry_run(tmp_path):
 
 
 def test_dry_run_writes_no_output(tmp_path):
-    """--dry-run は出力 VMD を書かない。"""
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
     rc = cli.main([src, "-o", str(out), "--dry-run"])
@@ -82,16 +66,21 @@ def test_dry_run_writes_no_output(tmp_path):
     assert not out.exists()
 
 
-def test_default_output_is_vmd_alongside_input(tmp_path):
-    """既定出力は <入力名>.vmd。--dry-run では書かないがパス解決でエラーにならない。"""
+def test_dry_run_without_output_option_writes_nothing_next_to_input(tmp_path):
     src = _touch(tmp_path / "song.wav")
     rc = cli.main([src, "--dry-run"])
     assert rc == 0
     assert not (tmp_path / "song.vmd").exists()
 
 
+def test_default_output_replaces_input_extension_with_vmd(tmp_path):
+    src = _touch(tmp_path / "song.mp3")
+    rc = cli.main([src])
+    assert rc == 0
+    assert (tmp_path / "song.vmd").is_file()
+
+
 def test_n_morph_defaults_to_off(tmp_path):
-    """--n-morph/--no-n-morph 無指定の既定は off(撥音を無音に倒す)。"""
     src = _touch(tmp_path / "in.wav")
     parser = cli._build_parser()
     args = parser.parse_args([src, "--dry-run"])
@@ -133,8 +122,7 @@ def test_style_default_is_pop(tmp_path):
     assert args.style == "pop"
 
 
-def test_open_max_and_preset_dependent_defaults_are_none(tmp_path):
-    """プリセット依存の既定(--open-max・--coarticulation・--anticipation・--min-hold)は未指定時 None。"""
+def test_preset_dependent_options_default_to_none(tmp_path):
     src = _touch(tmp_path / "in.wav")
     parser = cli._build_parser()
     args = parser.parse_args([src, "--dry-run"])
@@ -144,12 +132,14 @@ def test_open_max_and_preset_dependent_defaults_are_none(tmp_path):
     assert args.min_hold is None
 
 
-# --- 引数エラー(argparse 検出。終了コード2)---------------------------------
-
-
 def test_unknown_option_is_arg_error(tmp_path):
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--bogus"]) == 2
+
+
+def test_abbreviated_option_is_arg_error(tmp_path):
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--over", "--dry-run"]) == 2
 
 
 def test_missing_positional_is_arg_error():
@@ -172,31 +162,26 @@ def test_unknown_separator_is_arg_error(tmp_path):
 
 
 def test_recognizer_model_id_accepts_any_string(tmp_path):
-    """--recognizer-model-id は安定idでなく自由な文字列。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--recognizer-model-id", "anything/goes", "--dry-run"]) == 0
 
 
 def test_recognizer_model_revision_without_model_id_is_arg_error(tmp_path):
-    """--recognizer-model-revision だけの指定は対象が無く無意味なので引数エラー。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--recognizer-model-revision", "abc123", "--dry-run"]) == 2
 
 
 def test_explicit_recognizer_retry_flag_is_accepted(tmp_path):
-    """既定onの明示形 --recognizer-retry は単独で受理される。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--recognizer-retry", "--dry-run"]) == 0
 
 
 def test_forced_aligner_default_needs_no_sofa_args(tmp_path):
-    """--forced-aligner既定(wav2vec2-ctc-forcedalign)は--sofa-*が一切無くても成功する。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--dry-run"]) == 0
 
 
 def test_forced_aligner_sofa_without_sofa_python_is_arg_error(tmp_path):
-    """--forced-aligner sofa-forcedalign選択時、--sofa-python欠落は引数エラー(最初の欠落を報告)。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([
         src, "--forced-aligner", "sofa-forcedalign",
@@ -205,7 +190,6 @@ def test_forced_aligner_sofa_without_sofa_python_is_arg_error(tmp_path):
 
 
 def test_forced_aligner_sofa_without_sofa_root_is_arg_error(tmp_path):
-    """--sofa-pythonがあっても--sofa-root欠落は引数エラー。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([
         src, "--forced-aligner", "sofa-forcedalign",
@@ -214,7 +198,6 @@ def test_forced_aligner_sofa_without_sofa_root_is_arg_error(tmp_path):
 
 
 def test_forced_aligner_sofa_without_checkpoint_is_arg_error(tmp_path):
-    """--sofa-python・--sofa-rootがあっても--sofa-checkpoint欠落は引数エラー。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([
         src, "--forced-aligner", "sofa-forcedalign",
@@ -222,8 +205,7 @@ def test_forced_aligner_sofa_without_checkpoint_is_arg_error(tmp_path):
     ]) == 2
 
 
-def test_forced_aligner_sofa_with_all_sofa_args_is_accepted(tmp_path):
-    """--forced-aligner sofa-forcedalign選択時、--sofa-*3つが揃えば成功する(--sofa-timeoutは既定値可)。"""
+def test_forced_aligner_sofa_with_three_sofa_paths_and_default_timeout_is_accepted(tmp_path):
     src = _touch(tmp_path / "in.wav")
     assert cli.main([
         src, "--forced-aligner", "sofa-forcedalign",
@@ -233,7 +215,6 @@ def test_forced_aligner_sofa_with_all_sofa_args_is_accepted(tmp_path):
 
 
 def test_forced_aligner_sofa_timeout_zero_is_arg_error(tmp_path):
-    """--sofa-timeoutは正の数値のみ(0以下は無意味)。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([
         src, "--forced-aligner", "sofa-forcedalign",
@@ -248,7 +229,6 @@ def test_forced_aligner_unknown_choice_is_arg_error(tmp_path):
 
 
 def test_describe_succeeds_without_forced_aligner_specified():
-    """--describeは--forced-aligner未指定・--sofa-*無しでも成功する(音声を読まない自己記述)。"""
     assert cli.main(["--describe"]) == 0
 
 
@@ -271,12 +251,9 @@ def test_int_option_non_numeric_is_arg_error(tmp_path, opt):
     ("--silence-threshold", "a:0.5"), ("--silence-threshold", "1.5:0.5"),
     ("--silence-threshold", "0.9:0.1"),
 ])
-def test_option_value_error_states_the_reason_in_japanese(tmp_path, opt, value, capsys):
-    # 引数エラーの理由は利用者に伝わる日本語で出す。検証子の実体がそのまま文字列化されると、
-    # 実行ごとに変わるアドレスが理由の代わりに出て何も伝わらない。
+def test_option_value_error_states_the_reason_in_japanese_without_object_repr(tmp_path, opt, value, capsys):
     src = _touch(tmp_path / "in.wav")
-    # 負数の書式に当てはまらない負の値(コロン区切りの複合値)は、単独で置くと argparse が
-    # オプション名と解釈するので、等号で1トークンにして渡す。
+    # argparse は負数の書式に当てはまらない "-" 始まりの値をオプション名と解釈する。
     given = [f"{opt}={value}"] if value.startswith("-") else [opt, value]
     assert cli.main([src, *given, "--dry-run"]) == 2
     line = capsys.readouterr().err
@@ -322,7 +299,6 @@ def test_max_duration_negative_is_arg_error(tmp_path):
 
 
 def test_max_duration_zero_is_accepted(tmp_path):
-    """0 は長尺分割の無効化を意味する有効値。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--max-duration", "0", "--dry-run"]) == 0
 
@@ -345,7 +321,6 @@ def test_silence_threshold_malformed_is_arg_error(tmp_path, text):
 
 
 def test_silence_threshold_on_not_less_than_off_is_arg_error(tmp_path):
-    """下降側(ON)は上昇側(OFF)未満でなければならない(無音ヒステリシスの意味上の制約)。"""
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--silence-threshold", "0.10:0.06", "--dry-run"]) == 2
     assert cli.main([src, "--silence-threshold", "0.10:0.10", "--dry-run"]) == 2
@@ -356,14 +331,12 @@ def test_model_name_over_20_bytes_is_arg_error(tmp_path):
     assert cli.main([src, "--model-name", "x" * 21, "--dry-run"]) == 2
 
 
-def test_model_name_multibyte_over_20_bytes_is_arg_error(tmp_path):
-    """制約はバイト長。cp932 で2バイトの文字11個=22バイトは引数エラー。"""
+def test_model_name_of_eleven_double_byte_characters_is_arg_error(tmp_path):
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--model-name", "あ" * 11, "--dry-run"]) == 2
 
 
-def test_model_name_multibyte_at_20_byte_limit_is_accepted(tmp_path):
-    """cp932 で2バイトの文字10個=20バイトちょうどは受理する。"""
+def test_model_name_of_ten_double_byte_characters_is_accepted(tmp_path):
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--model-name", "あ" * 10, "--dry-run"]) == 0
 
@@ -378,18 +351,12 @@ def test_model_name_at_20_byte_limit_is_accepted(tmp_path):
     assert cli.main([src, "--model-name", "x" * 20, "--dry-run"]) == 0
 
 
-# --- 上書きガード -----------------------------------------------------------
-
-
-def test_overwrite_guard_blocks_input_overwrite(tmp_path):
-    """出力先が入力と同一パスのとき、--overwrite 無しは引数エラー。"""
+def test_overwrite_guard_blocks_output_equal_to_existing_input(tmp_path):
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "-o", src, "--dry-run"]) == 2
 
 
 def test_overwrite_guard_allows_missing_same_path(tmp_path):
-    """入力・出力が同一の未存在パスなら、出力先に既存ファイルが無いためガードは発火しない
-    (後続の入力検証が別途コード1/4等で弾く)。"""
     missing = str(tmp_path / "missing.wav")
     assert cli.main([missing, "-o", missing, "--dry-run"]) != 2
 
@@ -400,19 +367,15 @@ def test_overwrite_flag_allows_input_overwrite(tmp_path):
 
 
 def test_existing_separate_output_requires_overwrite(tmp_path):
-    """保護対象は出力先の既存ファイル全般。入力と別パスの既存出力もガード対象。"""
     src = _touch(tmp_path / "in.wav")
-    out = _touch(tmp_path / "out.vmd")  # 既存だが入力とは別パス
+    out = _touch(tmp_path / "out.vmd")
     assert cli.main([src, "-o", out, "--dry-run"]) == 2
 
 
 def test_existing_separate_output_allowed_with_overwrite(tmp_path):
     src = _touch(tmp_path / "in.wav")
-    out = _touch(tmp_path / "out.vmd")  # 既存だが入力とは別パス
+    out = _touch(tmp_path / "out.vmd")
     assert cli.main([src, "-o", out, "--overwrite", "--dry-run"]) == 0
-
-
-# --- メタ操作(--version・--help)--------------------------------------------
 
 
 def test_version_prints_and_exits_zero(capsys):
@@ -432,3 +395,11 @@ def test_help_lists_key_flags(capsys):
                  "--separate-vocals", "--separator", "--recognizer-model-id", "--vowel-gain",
                  "--silence-threshold", "--no-n-morph"):
         assert flag in text
+
+
+def test_main_installs_the_sigbreak_handler(tmp_path, monkeypatch):
+    installed = []
+    monkeypatch.setattr(cli, "install_sigbreak_handler", lambda: installed.append(True))
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--dry-run"]) == 0
+    assert installed == [True]

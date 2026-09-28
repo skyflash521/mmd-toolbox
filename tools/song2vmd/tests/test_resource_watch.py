@@ -1,10 +1,3 @@
-"""song2vmd の資源逼迫・GPU 構成の警告の文言のテスト。
-
-何を観測しどの事実で警告が成立するかの検証は共有の cli_resource_watch が担う。ここでは
-song2vmd が組み立てる本文——公開する4コードすべてで、観測値を人間向け1行へ載せ、勧める対処を
-song2vmd のオプション名で書くこと——だけを検証する。
-"""
-
 from song2vmd.resource_watch import warning_texts
 
 
@@ -14,7 +7,7 @@ def test_gpu_oversubscription_texts_carry_observed_values_and_remedy():
         {"stage": "separate", "reserved_mib": 5600, "free_at_start_mib": 4000, "total_mib": 8192})
     assert message == "GPUメモリの要求量が空き容量を超過しました"
     assert "5600MiB" in human_text and "4000MiB" in human_text
-    assert "--device cpu" in human_text  # 勧める対処は song2vmd のオプション名で書く
+    assert "--device cpu" in human_text
 
 
 def test_swap_detection_texts_carry_observed_values_and_remedy():

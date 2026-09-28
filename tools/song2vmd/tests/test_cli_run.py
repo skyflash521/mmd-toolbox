@@ -1,11 +1,3 @@
-"""song2vmd CLI のパイプライン配線テスト。
-
-cli.py の _run() が pipeline.run() を正しい引数で呼び、その結果(PipelineResult)を
---dry-run の人間向けレポート/機械モードの result イベント、VMD 書き出し、警告発行、
-エラー変換(音声前段が返す各失敗・中断)へ正しく橋渡しすることを検証する。
-pipeline.run 自体はモックし、実音声処理は行わない。
-"""
-
 import builtins
 import json
 import os
@@ -41,21 +33,9 @@ from vocal_analysis.separator import SeparationError
 
 @pytest.fixture(autouse=True)
 def _isolate_gpu_environment(monkeypatch):
-    """GPU 構成の警告が読む外部環境を各テストから切り離す。
-
-    cli は既定(`--device auto`)の実行で、環境変数 CUDA_VISIBLE_DEVICES・PATH 上の nvidia-smi・
-    torch の状態から GPU を使えない構成を判定して警告を出す。切り離さないと、NVIDIA GPU を積んだ
-    機材に基本手順どおり CPU 専用版の torch を入れた開発者(この警告が対象とする構成そのもの)で、
-    イベント数や標準エラーの行数を数える既存テストが落ちる。nvidia-smi を不在に倒しておけば
-    どの機材でも警告は出ず、警告そのものを検証するテストは各自で上書きすればよい。
-
-    CUDA_VISIBLE_DEVICES はこのフィクスチャが専有する。値を要するテストは monkeypatch を使わず
-    os.environ へ直接入れること。monkeypatch の取り消しはすべてのフィクスチャの解除より後に走る
-    ため、monkeypatch.setenv を使うとこのフィクスチャの復元がその後に上書きされ、外部の値が
-    プロセスから消える。cli.main が --device cpu のときに os.environ を直接書き換える
-    (CUDA のデバイス集合はプロセス内の最初の照会以降固定されるので、パイプライン起動前に設定する
-    必要がある)ぶんも、この退避と復元で片付く。
-    """
+    """CUDA_VISIBLE_DEVICES はこのフィクスチャが退避・復元する。値を要するテストは os.environ へ
+    直接入れること(monkeypatch の取り消しはすべてのフィクスチャの解除より後に走るので、
+    monkeypatch.setenv の復元はこのフィクスチャの復元を上書きする)。"""
     monkeypatch.setattr(_torch_config.shutil, "which", lambda name: None)
     saved = os.environ.pop("CUDA_VISIBLE_DEVICES", None)
     yield
@@ -98,9 +78,6 @@ def _events_of(capsysbinary):
     return [json.loads(ln) for ln in capsysbinary.readouterr().out.decode("utf-8").splitlines() if ln]
 
 
-# --- pipeline.run への引数の受け渡し -------------------------------------------
-
-
 def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)
@@ -119,8 +96,6 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["separator_name"] == "audio-separator-htdemucs-ft"
     assert kwargs["chunking"] == ChunkingPolicy(max_duration_sec=300.0)
     assert kwargs["use_n_morph"] is False
-    # --vowel-gain の既定 1:1:1:1:1 は presets.resolve での乗算後もプリセット値のまま。
-    # pipeline.run へは style_gen.vowel_scale として渡る。
     assert kwargs["style_gen"].vowel_scale == _presets.resolve("pop")[1].vowel_scale
     assert kwargs["intensity_curve"] == 0.6
     assert kwargs["silence_on"] == 0.06
@@ -131,8 +106,28 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["sofa_aligner"] is None
 
 
+def test_silence_threshold_off_side_does_not_reach_pipeline(tmp_path, monkeypatch):
+    src = _touch(tmp_path / "in.wav")
+    runs = []
+    for text in ("0.06:0.10", "0.06:0.90"):
+        captured = _capture_run_kwargs(monkeypatch)
+        assert cli.main([src, "--silence-threshold", text, "--dry-run"]) == 0
+        runs.append({k: v for k, v in captured["kwargs"].items() if k != "progress"})
+    assert runs[0] == runs[1]
+
+
+def test_dry_run_report_shows_both_silence_threshold_sides(tmp_path, monkeypatch, capsys):
+    src = _touch(tmp_path / "in.wav")
+    _capture_run_kwargs(monkeypatch)
+
+    rc = cli.main([src, "--silence-threshold", "0.05:0.12", "--dry-run"])
+    assert rc == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "silence_threshold_on: 0.05" in lines
+    assert "silence_threshold_off: 0.12" in lines
+
+
 def test_run_builds_sofa_aligner_config_from_cli_options(tmp_path, monkeypatch):
-    """--forced-aligner sofa-forcedalign選択時、--sofa-*からSofaAlignerConfigが組み立てられる。"""
     from pathlib import Path
 
     from vocal_analysis import SofaAlignerConfig
@@ -185,8 +180,6 @@ def test_run_passes_default_english_katakana_method(tmp_path, monkeypatch):
 
 
 def test_english_katakana_method_option_selects_tinyllama(tmp_path, monkeypatch):
-    """--english-katakana-method tinyllama-katakana-converter を指定すると、
-    pipeline.run へその方式が渡る(recognize()を経て実際に選択できることの配線検証)。"""
     src = _touch(tmp_path / "in.wav")
     captured = _capture_run_kwargs(monkeypatch)
 
@@ -197,12 +190,7 @@ def test_english_katakana_method_option_selects_tinyllama(tmp_path, monkeypatch)
     assert captured["kwargs"]["english_katakana_method"] == "tinyllama-katakana-converter"
 
 
-def _capture_cvd_at_run(monkeypatch):
-    """pipeline.run 呼び出し時点の CUDA_VISIBLE_DEVICES を捕捉する。
-
-    --device の設定はパイプライン起動前(最初のCUDA照会前)に済んでいなければ効かないため、
-    設定の有無だけでなく「pipeline.run より前」というタイミングを呼び出し時点の観測で検証する。
-    """
+def _capture_cvd_at_pipeline_start(monkeypatch):
     seen = {}
 
     def fake_run(input_path, **kwargs):
@@ -215,35 +203,33 @@ def _capture_cvd_at_run(monkeypatch):
 
 def test_device_cpu_hides_cuda_before_pipeline_runs(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
-    seen = _capture_cvd_at_run(monkeypatch)
+    seen = _capture_cvd_at_pipeline_start(monkeypatch)
 
     rc = cli.main([src, "--device", "cpu", "--dry-run"])
     assert rc == 0
     assert seen["cvd"] == "-1"
 
 
-def test_device_auto_default_leaves_environment_untouched(tmp_path, monkeypatch):
-    """既定(auto)は環境に触れない。利用者が自分で設定した CUDA_VISIBLE_DEVICES も壊さない。"""
+def test_device_auto_default_keeps_user_cuda_visible_devices(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # 復元はフィクスチャが行う
-    seen = _capture_cvd_at_run(monkeypatch)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    seen = _capture_cvd_at_pipeline_start(monkeypatch)
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 0
     assert seen["cvd"] == "0"
 
 
-def test_device_rejects_unknown_value(tmp_path, monkeypatch, capsys):
+def test_device_unknown_value_is_arg_error_without_starting_pipeline(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
-    seen = _capture_cvd_at_run(monkeypatch)
+    seen = _capture_cvd_at_pipeline_start(monkeypatch)
 
     rc = cli.main([src, "--device", "gpu", "--dry-run"])
     assert rc == 2
-    assert "cvd" not in seen  # 引数エラーで pipeline は起動しない
+    assert "cvd" not in seen
 
 
-def _force_gpu_oversubscription(monkeypatch):
-    """資源逼迫のGPU probe を、2回目の判定で超過が成立する系列(バイト値)に差し替える。"""
+def _force_gpu_oversubscription_on_second_check(monkeypatch):
     mib = 2**20
     seq = iter([(4000 * mib, 8192 * mib, 0), (4000 * mib, 8192 * mib, 5600 * mib)])
     monkeypatch.setattr(_watch_module, "_default_gpu_probe",
@@ -251,8 +237,7 @@ def _force_gpu_oversubscription(monkeypatch):
     monkeypatch.setattr(_watch_module, "_default_ram_probe", lambda: (0, 0, 0))
 
 
-def _fake_run_with_stages(monkeypatch):
-    """pipeline.run を、progress へ2段(load→separate)を報告するフェイクへ差し替える。"""
+def _fake_run_reporting_load_then_separate(monkeypatch):
 
     def fake_run(input_path, **kwargs):
         kwargs["progress"].stage("load")
@@ -262,10 +247,11 @@ def _fake_run_with_stages(monkeypatch):
     monkeypatch.setattr(cli._pipeline, "run", fake_run)
 
 
-def test_resource_warning_emitted_as_machine_event(tmp_path, monkeypatch, capsysbinary):
+def test_resource_warning_emitted_as_machine_event_without_changing_result(
+        tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
-    _fake_run_with_stages(monkeypatch)
+    _force_gpu_oversubscription_on_second_check(monkeypatch)
+    _fake_run_reporting_load_then_separate(monkeypatch)
 
     rc = cli.main([src, "--machine", "--dry-run"])
     assert rc == 0
@@ -277,14 +263,13 @@ def test_resource_warning_emitted_as_machine_event(tmp_path, monkeypatch, capsys
     assert warning["stage"] == "separate"
     assert warning["reserved_mib"] == 5600 and warning["free_at_start_mib"] == 4000
     assert warning["total_mib"] == 8192
-    # 警告は診断・終了を変えない: result で正常終端する。
     assert events[-1]["type"] == "result"
 
 
 def test_resource_warning_printed_to_stderr_in_human_mode(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
-    _fake_run_with_stages(monkeypatch)
+    _force_gpu_oversubscription_on_second_check(monkeypatch)
+    _fake_run_reporting_load_then_separate(monkeypatch)
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 0
@@ -294,11 +279,9 @@ def test_resource_warning_printed_to_stderr_in_human_mode(tmp_path, monkeypatch,
 
 
 def test_resource_warning_closes_live_line_before_stderr_write(tmp_path, monkeypatch):
-    """人間向け警告は、ライブ進捗行の消去(close)→標準エラーへの書き込みの順で出る
-    (ライブ行と警告行の混線防止の順序保証)。"""
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
-    _fake_run_with_stages(monkeypatch)
+    _force_gpu_oversubscription_on_second_check(monkeypatch)
+    _fake_run_reporting_load_then_separate(monkeypatch)
     order = []
 
     class _OrderReporter:
@@ -356,9 +339,6 @@ def test_run_passes_preset_overrides_through(tmp_path, monkeypatch):
     assert captured["kwargs"]["style_gen"] == style_gen
 
 
-# --- --dry-run: 人間向けレポート / 機械モード inspect --------------------------
-
-
 def test_dry_run_non_machine_prints_report_text_to_stdout(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result(keys=5))
@@ -396,9 +376,6 @@ def test_dry_run_does_not_write_vmd(tmp_path, monkeypatch):
     assert not out.exists()
 
 
-# --- 通常実行: VMD書き出し・機械モード result ---------------------------------
-
-
 def test_normal_run_writes_vmd_and_returns_zero(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
@@ -424,9 +401,6 @@ def test_normal_run_machine_emits_run_result(tmp_path, monkeypatch, capsysbinary
     assert r["mode"] == "run"
     assert r["output"] == str(out)
     assert r["keys"] == 4
-
-
-# --- --verbose: 通常実行での診断レポート追加表示 --------------------------------
 
 
 def test_verbose_normal_run_writes_vmd_and_prints_report(tmp_path, monkeypatch, capsys):
@@ -464,9 +438,7 @@ def test_verbose_machine_run_does_not_print_report_text(tmp_path, monkeypatch, c
     assert results[0]["mode"] == "run"
 
 
-def test_normal_run_emits_write_progress_stage_before_writing(tmp_path, monkeypatch, capsysbinary):
-    # VMD書き出し(段id "write")はcli.py自身の責務なので、pipeline.run()の
-    # 内部でなくcli.py側でprogress.stage("write")を発行する必要がある。
+def test_normal_run_emits_write_progress_stage(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
     _capture_run_kwargs(monkeypatch, result=_make_result())
@@ -475,9 +447,6 @@ def test_normal_run_emits_write_progress_stage_before_writing(tmp_path, monkeypa
     assert rc == 0
     stages = [e["stage"] for e in _events_of(capsysbinary) if e["type"] == "progress"]
     assert "write" in stages
-
-
-# --- low_dynamics_suppressed 警告 ----------------------------------------------
 
 
 def test_low_dynamics_suppressed_warning_emitted_in_machine_mode(tmp_path, monkeypatch, capsysbinary):
@@ -511,8 +480,6 @@ def test_low_dynamics_suppressed_warning_printed_to_stderr_non_machine(tmp_path,
 
 
 def test_low_dynamics_suppressed_warning_survives_quiet(tmp_path, monkeypatch, capsys):
-    # --quiet は進捗表示だけを抑制し、警告は抑制しない。--quiet指定時も
-    # 警告そのものは実際に残ることを検証する。
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
 
@@ -522,9 +489,7 @@ def test_low_dynamics_suppressed_warning_survives_quiet(tmp_path, monkeypatch, c
     assert "low_dynamics_suppressed" in err or "ダイナミックレンジ" in err
 
 
-def test_human_warning_line_uses_common_format(tmp_path, monkeypatch, capsys):
-    # 警告行は共通コードのラベルで1行にまとめて標準エラーへ出す(安定コードは機械モードの
-    # warning イベントと同じ値)。通常実行(--dry-run なし)で標準出力には何も漏らさない。
+def test_low_dynamics_human_warning_is_one_code_prefixed_stderr_line(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
     _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
@@ -539,13 +504,10 @@ def test_human_warning_line_uses_common_format(tmp_path, monkeypatch, capsys):
     assert lines[0].startswith(prefix)
     body = lines[0][len(prefix):]
     assert body.strip()
-    assert body.lstrip() == body  # 接頭辞直後に空白文字(タブ・全角空白等)が無い
+    assert body.lstrip() == body
 
 
-# --- forced_split 警告 ----------------------------------------------------------
-
-
-def test_forced_split_warning_emitted_in_machine_mode(tmp_path, monkeypatch, capsysbinary):
+def test_forced_split_warning_emitted_in_machine_mode_without_stage_key(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result(forced_split=True))
 
@@ -554,7 +516,7 @@ def test_forced_split_warning_emitted_in_machine_mode(tmp_path, monkeypatch, cap
     warnings = [e for e in _events_of(capsysbinary) if e["type"] == "warning"]
     assert len(warnings) == 1
     assert warnings[0]["code"] == "forced_split"
-    assert "stage" not in warnings[0]  # low_dynamics_suppressedと同じ形でstageキーは持たない
+    assert "stage" not in warnings[0]
 
 
 def test_no_forced_split_warning_when_not_forced(tmp_path, monkeypatch, capsysbinary):
@@ -577,7 +539,6 @@ def test_forced_split_warning_printed_to_stderr_non_machine(tmp_path, monkeypatc
 
 
 def test_forced_split_warning_survives_quiet(tmp_path, monkeypatch, capsys):
-    # --quiet は進捗表示だけを抑制し、警告は抑制しない(low_dynamics_suppressedと同じ扱い)。
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result(forced_split=True))
 
@@ -587,9 +548,7 @@ def test_forced_split_warning_survives_quiet(tmp_path, monkeypatch, capsys):
     assert "forced_split" in err
 
 
-def test_forced_split_human_warning_line_uses_common_format_and_appears_once(tmp_path, monkeypatch, capsys):
-    # low_dynamics_suppressedのtest_human_warning_line_uses_common_formatと対になる検証:
-    # 警告行は共通コードのラベルで実行につき1行だけ標準エラーへ出す。
+def test_forced_split_human_warning_is_one_code_prefixed_stderr_line(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
     _capture_run_kwargs(monkeypatch, result=_make_result(forced_split=True))
@@ -604,10 +563,7 @@ def test_forced_split_human_warning_line_uses_common_format_and_appears_once(tmp
     assert lines[0].startswith(prefix)
     body = lines[0][len(prefix):]
     assert body.strip()
-    assert body.lstrip() == body  # 接頭辞直後に空白文字(タブ・全角空白等)が無い
-
-
-# --- エラー変換(音声前段の失敗。12.3) -----------------------------------------
+    assert body.lstrip() == body
 
 
 def test_audio_load_error_maps_to_decoder_missing(tmp_path, monkeypatch):
@@ -637,9 +593,7 @@ def test_audio_load_error_machine_mode_emits_decoder_missing_error(tmp_path, mon
     assert events[-1]["exit_code"] == 4
 
 
-def test_audio_load_error_maps_to_not_audio(tmp_path, monkeypatch, capsysbinary):
-    # ffmpeg変換失敗・変換後ファイルの再読み込み失敗など、復号器不在でなく入力そのものが壊れている
-    # ケースはdecoder_missingでなくnot_audio(終了コード1)にする。
+def test_broken_input_audio_maps_to_not_audio_with_exit_code_one(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
         cli._pipeline, "run",
@@ -656,8 +610,6 @@ def test_audio_load_error_maps_to_not_audio(tmp_path, monkeypatch, capsysbinary)
 
 def test_intermediate_read_error_maps_to_not_audio_with_path_and_no_field(
         tmp_path, monkeypatch, capsysbinary):
-    # 内部生成ファイルの読み直し失敗も not_audio だが、利用者入力を指す field は載せず、
-    # 対象ファイルを path に載せる(利用者入力の不備として指し示さない)。
     src = _touch(tmp_path / "in.wav")
     vocal = tmp_path / "vocal.wav"
     monkeypatch.setattr(
@@ -731,8 +683,6 @@ def test_recognizer_model_revision_without_id_machine_mode_emits_bad_argument(tm
 def test_forced_aligner_sofa_all_missing_machine_mode_reports_only_first_field(
     tmp_path, monkeypatch, capsysbinary
 ):
-    """sofa-python・sofa-root・sofa-checkpointが全て欠落していても、走査順で最初の1件だけ報告する
-    (複数欠落を1つのエラーへまとめて返す設計は採らない)。"""
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch)
 
@@ -744,9 +694,6 @@ def test_forced_aligner_sofa_all_missing_machine_mode_reports_only_first_field(
     assert events[0]["code"] == "bad_argument"
     assert events[0]["field"] == "--sofa-python"
     assert events[0]["exit_code"] == 2
-
-
-# --- 中断(KeyboardInterrupt。12.4) ---------------------------------------------
 
 
 def test_keyboard_interrupt_during_pipeline_is_cancelled_130_non_machine(tmp_path, monkeypatch, capsys):
@@ -771,21 +718,19 @@ def test_keyboard_interrupt_during_pipeline_is_cancelled_130_machine(tmp_path, m
     assert events[0]["exit_code"] == 130
 
 
-# --- 書き込み失敗(write_failed。12.3) -----------------------------------------
-
-
-def test_write_failure_maps_to_write_failed(tmp_path, monkeypatch):
+def test_write_to_missing_parent_directory_maps_to_write_failed(tmp_path, monkeypatch):
     src = _touch(tmp_path / "in.wav")
-    out = tmp_path / "missing_parent" / "out.vmd"  # 親ディレクトリが無い→書き込み失敗
+    out = tmp_path / "missing_parent" / "out.vmd"
     _capture_run_kwargs(monkeypatch, result=_make_result())
 
     rc = cli.main([src, "-o", str(out)])
     assert rc == 3
 
 
-def test_write_failure_machine_mode_emits_write_failed_error(tmp_path, monkeypatch, capsysbinary):
+def test_write_to_missing_parent_directory_machine_mode_emits_write_failed_error(
+        tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
-    out = tmp_path / "missing_parent" / "out.vmd"  # 親ディレクトリが無い→書き込み失敗
+    out = tmp_path / "missing_parent" / "out.vmd"
     _capture_run_kwargs(monkeypatch, result=_make_result())
 
     rc = cli.main([src, "-o", str(out), "--machine"])
@@ -798,15 +743,8 @@ def test_write_failure_machine_mode_emits_write_failed_error(tmp_path, monkeypat
     assert events[-1]["exit_code"] == 3
 
 
-# --- 進捗ライブ表示の終端処理(全終了経路で close、正常終了時のみ完了行) -------------------
-
-
 class _SpyProgressRouter:
-    """進捗の振り分けの差し替え。close/summary の呼び出しを、共有の calls リストへ記録する
-    (下記 spy_progress フィクスチャが標準エラーへの print 呼び出しも同じリストへ記録するため、
-    close とエラー行表示の相対順序を1本のタイムラインで検証できる)。"""
-
-    calls = None  # クラス変数: monkeypatch 先のコンストラクタから書けるよう、テストごとにリセットする
+    calls = None
 
     def __init__(self, **kwargs):
         pass
@@ -823,6 +761,7 @@ class _SpyProgressRouter:
 
 @pytest.fixture
 def spy_progress(monkeypatch):
+    """close・summary・標準エラーへの print・レポート生成を、呼ばれた順に1本のリストへ記録して返す。"""
     calls = []
     _SpyProgressRouter.calls = calls
     monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _SpyProgressRouter())
@@ -834,12 +773,8 @@ def spy_progress(monkeypatch):
             calls.append(("stderr_print", args[0]))
         real_print(*args, **kwargs)
 
-    # 警告行は CLI 本体が、エラー行は共有基盤の失敗報告ヘルパが書くため、モジュール単位でなく
-    # 組み込みの print を差し替えて両方を1本のタイムラインへ載せる。
     monkeypatch.setattr(builtins, "print", spy_print)
 
-    # --dry-run の人間向けレポート生成呼び出しも同じタイムラインへ記録し、close との
-    # 相対順序(ライブ行を消してからレポートを書く)を検証できるようにする。
     real_render = cli._report.render_report_text
 
     def spy_render(*args, **kwargs):
@@ -857,15 +792,11 @@ def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch,
 
     rc = cli.main([src, "-o", str(out)])
     assert rc == 0
-    # close は冪等なので、正常終了の明示的な close/summary の後に、全終了経路を保証する
-    # 保険としての再呼び出しが続いてもよい(先頭2件の順序だけを固定する)。
     assert spy_progress[:2] == ["close", ("summary", f"完了 {out}")]
     assert all(call == "close" for call in spy_progress[2:])
 
 
-def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, spy_progress):
-    # --dry-run は VMD を書かないため完了行を出さない(close はライブ行の終端として必ず呼ぶ)。
-    # close はレポート生成(標準出力とライブ行が同じ端末で連結しうる)より前でなければならない。
+def test_dry_run_closes_progress_before_report_without_completion_line(tmp_path, monkeypatch, spy_progress):
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result())
 
@@ -878,8 +809,6 @@ def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, 
 
 
 def test_low_dynamics_warning_closes_progress_before_stderr_print(tmp_path, monkeypatch, spy_progress):
-    # low_dynamics 警告(非機械モード)は、標準エラーがライブ行と同じ端末につながるため、
-    # close でライブ行を消してから出す。
     src = _touch(tmp_path / "in.wav")
     _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
 
@@ -904,7 +833,6 @@ def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatc
 
     rc = cli.main([src, "--dry-run"])
     assert rc == 4
-    # close がエラー行の標準エラー出力より前に呼ばれる(ライブ行を消してからエラーを表示する)。
     assert spy_progress[0] == "close"
     assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
 
@@ -942,13 +870,7 @@ def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypa
     assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
 
 
-# --- GPU を使えない構成の警告 ---------------------------------------------------
-
-
-def test_run_emits_cpu_only_torch_warning_before_pipeline(tmp_path, monkeypatch, capsysbinary):
-    # 数分かかる処理を終えてから伝えても手遅れなので、パイプライン起動より前に出す。判定の呼び出し
-    # 順ではなく、イベントストリーム上で警告が処理開始の progress より前に現れることで固定する
-    # (判定だけ先に行い送出を後ろへ動かす実装を通さないため)。
+def test_cpu_only_torch_warning_precedes_first_progress_event(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
         cli, "torch_gpu_warning",
@@ -969,12 +891,8 @@ def test_run_emits_cpu_only_torch_warning_before_pipeline(tmp_path, monkeypatch,
     assert types.index(("warning", "cpu_only_torch")) < next(
         i for i, (kind, _) in enumerate(types) if kind == "progress")
     warning = next(e for e in events if e.get("type") == "warning")
-    # 本文は song2vmd 側の組み立てが与える(判定は安定コードと観測値だけを返す)。
     assert warning["message"] == warning_texts("cpu_only_torch", {"torch_version": "2.13.0"})[0]
     assert warning["torch_version"] == "2.13.0"
-
-
-# --- 外部推論から漏れた例外・想定外例外の報告 ----------------------------------
 
 
 def _raise_from_pipeline(monkeypatch, error):
@@ -983,7 +901,8 @@ def _raise_from_pipeline(monkeypatch, error):
 
 
 @pytest.mark.parametrize("stage", ["separate", "recognize"])
-def test_stage_execution_error_maps_to_stage_failed(tmp_path, monkeypatch, capsysbinary, stage):
+def test_stage_execution_error_maps_to_stage_failed_with_only_stage_as_extra_key(
+        tmp_path, monkeypatch, capsysbinary, stage):
     src = _touch(tmp_path / "in.wav")
     _raise_from_pipeline(
         monkeypatch,
@@ -999,14 +918,12 @@ def test_stage_execution_error_maps_to_stage_failed(tmp_path, monkeypatch, capsy
     assert events[-1]["path"] is None
     assert events[-1]["exit_code"] == 4
     assert "CUDA out of memory" in events[-1]["message"]
-    # stage を追加で持つのは stage_failed だけなので、キー集合そのものを固定する。
     assert set(events[-1]) == {"type", "code", "exit_code", "field", "path", "message", "stage"}
 
 
 @pytest.mark.parametrize("stage, stage_label", [("separate", "ボーカル分離"), ("recognize", "音素認識")])
-def test_stage_execution_error_reports_single_line_without_machine(
+def test_stage_execution_error_names_the_stage_label_in_one_human_line(
         tmp_path, monkeypatch, capsys, stage, stage_label):
-    # 非機械モードには stage キーが無いので、どの工程で失敗したかは1行のエラー文言で示す。
     src = _touch(tmp_path / "in.wav")
     _raise_from_pipeline(
         monkeypatch, StageExecutionError("RuntimeError: CUDA out of memory", stage=stage))
@@ -1023,8 +940,7 @@ def test_stage_execution_error_reports_single_line_without_machine(
     assert "Traceback" not in captured.err
 
 
-def test_progress_emit_error_is_not_reported_as_stage_failed(tmp_path, monkeypatch, capsysbinary):
-    # 進捗送出の失敗は工程の失敗ではないので、終了コードは内部エラーの1のままにする。
+def test_progress_emit_error_is_reported_as_internal_error_not_stage_failed(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     _raise_from_pipeline(monkeypatch, ProgressEmitError("stdout is closed"))
 
@@ -1034,8 +950,7 @@ def test_progress_emit_error_is_not_reported_as_stage_failed(tmp_path, monkeypat
     assert events[-1]["code"] == "internal_error"
 
 
-def test_unexpected_exception_reports_internal_error(tmp_path, monkeypatch, capsysbinary):
-    # 想定外例外はトレースバックを漏らさず internal_error の終端イベントで終える。
+def test_unexpected_exception_reports_internal_error_without_traceback(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     _raise_from_pipeline(monkeypatch, RuntimeError("unexpected"))
 

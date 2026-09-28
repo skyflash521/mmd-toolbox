@@ -1,11 +1,3 @@
-"""song2vmd レポート/診断のテスト。
-
-口形イベント列・音素セグメント列・EventDiagnostics から診断データ(Diagnostics)を組み立てる
-report.build_diagnostics と、それを人間向けテキスト(--dry-run)・機械モード result ペイロード
-(--machine の mode:"run"/"inspect")へ整形する各関数を検証する。実際の音声処理・外部呼び出しは
-対象外(合成データのみを扱う純粋ロジック)。
-"""
-
 import pytest
 
 from lipsync import MouthEvent, MouthShape
@@ -29,13 +21,9 @@ def diag_of(**overrides):
     )
     kw.update(overrides)
     if "mora_event_group_sizes" not in overrides:
-        # 明示指定が無ければ、各MouthEventを1モーラ(分割なし)として自動導出する。
         mora_count = sum(1 for e in kw["mouth_events"] if e.shape in report._MORA_SHAPES)
         kw["mora_event_group_sizes"] = [1] * mora_count
     return report.build_diagnostics(**kw)
-
-
-# --- build_diagnostics --------------------------------------------------------
 
 
 def test_phonemes_counts_vowel_and_consonant_segments_not_gap():
@@ -98,22 +86,17 @@ def test_weak_vowels_comes_from_event_diagnostics():
     assert diag.weak_vowels == 5
 
 
-def test_low_dynamics_comes_from_event_diagnostics():
-    # low_dynamicsは機械モードのresultペイロードには載せない(呼び出し側のwarningイベント判定専用)
-    # ため、result_run_fields/result_inspect_fieldsのキー集合検証とは別に
-    # Diagnostics自体のフィールドとして直接検証する。
-    assert diag_of(
-        event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=True, merged_morae=0)
-    ).low_dynamics is True
+def test_low_dynamics_comes_from_event_diagnostics_and_stays_out_of_result_payload():
+    diag = diag_of(
+        event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=True, merged_morae=0))
+    assert diag.low_dynamics is True
+    assert "low_dynamics" not in report.result_run_fields(diag, output="x.vmd")
     assert diag_of(
         event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0)
     ).low_dynamics is False
 
 
 def test_forced_split_is_a_diagnostics_field_not_in_result_payload():
-    # forced_splitはlow_dynamicsと同じ位置づけ(機械モードのresultペイロードには含めない、
-    # 呼び出し側のwarningイベント判定専用のDiagnosticsフィールド)。build_diagnosticsは
-    # forced_splitを必須キーワード引数として受け取る。
     kw = dict(
         segments=[], mouth_events=[], mora_event_group_sizes=[],
         event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
@@ -133,10 +116,7 @@ def test_mora_details_lists_only_vowel_like_events_with_shape_and_hold():
     ]
 
 
-# --- render_report_text -------------------------------------------------------
-
-
-def test_render_report_text_includes_backends_style_params_and_stats():
+def test_render_report_text_lists_backends_params_stats_and_morae_in_report_order():
     diag = diag_of(
         segments=[seg("vowel", 0.0, 0.5)], mouth_events=[mev(MouthShape.A, 0, 15, 0.6)],
         event_diagnostics=events.EventDiagnostics(weak_vowels=1, low_dynamics=False, merged_morae=2),
@@ -145,9 +125,6 @@ def test_render_report_text_includes_backends_style_params_and_stats():
         duration_sec=0.5, keys=4,
     )
     text = report.render_report_text(diag, {"open_lo": 0.2, "open_hi": 0.55})
-    # 定めた列挙順(バックエンド・style・params → 分離有無・音素数・モーラ数・被覆率 →
-    # モーラごとの明細・併合数・減衰数 → 閉口区間数・最大開き量・生成キー数・尺)どおりであることを、
-    # 各行の出現順(部分文字列の存在でなく行インデックス)で確認する。
     lines = text.splitlines()
 
     def index_of(substring):
@@ -162,12 +139,10 @@ def test_render_report_text_includes_backends_style_params_and_stats():
         "max_opening: 0.6000", "keys: 4", "duration_sec: 0.500",
     ]
     indices = [index_of(s) for s in order]
-    assert indices == sorted(indices)  # 仕様6.7の列挙順どおりに単調増加
+    assert indices == sorted(indices)
 
 
-def test_render_report_text_includes_english_katakana_method_backend():
-    # 機械モードの result が返すバックエンドと同じ集合を人間向けにも出す(採用構成が読み取れないと
-    # 診断に使えない)。並びは他のバックエンドに続けて style の前。
+def test_render_report_text_places_english_katakana_method_between_forced_aligner_and_style():
     diag = diag_of(
         segments=[seg("vowel", 0.0, 0.5)], mouth_events=[mev(MouthShape.A, 0, 15, 0.6)],
         event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0),
@@ -184,10 +159,7 @@ def test_render_report_text_includes_english_katakana_method_backend():
     assert index_of("english_katakana_method: katakana-w") < index_of("style: ballad")
 
 
-# --- result_run_fields / result_inspect_fields ---------------------------------
-
-
-def test_result_run_fields_has_exactly_the_12_1_keys_with_diag_values_transcribed():
+def test_result_run_fields_has_exactly_the_run_keys_with_diag_values_transcribed():
     diag = diag_of(
         segments=[seg("vowel", 0.0, 0.5), seg("gap", 0.5, 0.6)],
         mouth_events=[mev(MouthShape.A, 0, 15, 0.6), mev(MouthShape.SILENCE, 15, 18)],
@@ -246,13 +218,6 @@ def test_result_inspect_fields_adds_input_metadata_and_null_output_with_diag_val
     assert fields["duration_sec"] == diag.duration_sec == 1.0
 
 
-# --- 長時間モーラのサブウィンドウ分割時のモーラ単位集計 -------------------------
-#
-# events.confirm_mouth_events の3件目の戻り値(母音的口形ユニットごとの生成MouthEvent数の
-# 列)を build_diagnostics が受け取り、morae・mora_details をサブウィンドウ単位でなく実際の
-# モーラ単位で集計することを検証する。
-
-
 def test_split_mora_counts_as_one_mora_with_averaged_open_amount_and_summed_hold_frames():
     mouth_events = [
         mev(MouthShape.A, 0, 10, 0.2),
@@ -264,11 +229,10 @@ def test_split_mora_counts_as_one_mora_with_averaged_open_amount_and_summed_hold
     assert len(diag.mora_details) == 1
     assert diag.mora_details[0].shape == "a"
     assert diag.mora_details[0].open_amount == pytest.approx((0.2 + 0.5 + 0.8) / 3)
-    assert diag.mora_details[0].hold_frames == pytest.approx(40.0)  # 40-0 の合計
+    assert diag.mora_details[0].hold_frames == pytest.approx(40.0)
 
 
-def test_unsplit_morae_alongside_split_mora_count_correctly():
-    # 分割されない短いモーラ(先頭・末尾)と分割されたモーラ(中央、2分割)が混在する場合の集計。
+def test_unsplit_morae_around_a_split_mora_are_counted_separately():
     mouth_events = [
         mev(MouthShape.I, 0, 5, 0.3),
         mev(MouthShape.A, 5, 15, 0.2),
@@ -279,11 +243,10 @@ def test_unsplit_morae_alongside_split_mora_count_correctly():
     assert diag.morae == 3
     assert [m.shape for m in diag.mora_details] == ["i", "a", "o"]
     assert diag.mora_details[1].open_amount == pytest.approx((0.2 + 0.6) / 2)
-    assert diag.mora_details[1].hold_frames == pytest.approx(25.0)  # 30-5 の合計
+    assert diag.mora_details[1].hold_frames == pytest.approx(25.0)
 
 
-def test_closed_ranges_and_max_opening_unaffected_by_split():
-    # closed_ranges・max_openingは分割数列の影響を受けず、全MouthEventを対象に集計する。
+def test_closed_ranges_and_max_opening_count_every_event_regardless_of_split():
     mouth_events = [
         mev(MouthShape.A, 0, 10, 0.2), mev(MouthShape.A, 10, 20, 0.9),
         mev(MouthShape.BILABIAL, 20, 22), mev(MouthShape.SILENCE, 22, 30),

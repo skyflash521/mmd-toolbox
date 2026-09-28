@@ -1,11 +1,3 @@
-"""song2vmd のモーフ生成・VMD組み立てのテスト。
-
-口形イベント列(MouthEvent)を共有モジュール lipsync へ渡してモーフキーを生成し、モーフキーのみの
-VmdDocument を組み立てる morphs.build_vmd_document を検証する。共有モーフ生成コア(lipsync)自体の
-正しさ・回帰は lipsync 側の既知値フィクスチャが担保するため、ここでは song2vmd 側の接続
-(lipsync 呼び出し・VmdDocument 組み立て・0F中立キー・正規化・cp932エンコード)だけを検証する。
-"""
-
 import pytest
 
 from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape
@@ -18,12 +10,7 @@ def ev(shape, start, end, open_amount=0.0, consonant_class=ConsonantClass.NONE):
                        consonant_class=consonant_class)
 
 
-def test_build_vmd_document_calls_lipsync_generate_morph_keys(monkeypatch):
-    """lipsyncへの接続を、実際の母音合成結果に依存せず直接検証する。
-
-    generate_morph_keys を差し替え、同一の events・params が渡ること、返した MorphKey が
-    そのまま VmdDocument.morph へ入ることを確認する(共有モーフ生成コア自体の正しさは対象外)。
-    """
+def test_build_vmd_document_passes_events_to_lipsync_and_stores_returned_keys(monkeypatch):
     events = [ev(MouthShape.A, 0, 10, open_amount=0.5)]
     params = GenerationParams()
     captured = {}
@@ -65,9 +52,7 @@ def test_empty_model_name_produces_all_zero_padding():
     assert document.model_name_raw == b"\x00" * 20
 
 
-def test_frame0_neutral_key_exists_for_every_used_morph():
-    # 最初の実キーがフレーム0より後にある場合でも、使用モーフには0Fの中立キーが補われる
-    # (vmd.ensure_frame0_neutral_keys)。
+def test_frame0_neutral_key_exists_for_every_used_morph_even_when_first_key_is_later():
     events = [
         ev(MouthShape.SILENCE, 0, 10),
         ev(MouthShape.A, 10, 30, open_amount=0.6),
@@ -109,7 +94,7 @@ def test_empty_events_produce_empty_morph_document():
     assert document.morph == []
 
 
-def test_round_trip_write_and_read(tmp_path):
+def test_round_trip_write_and_read_keeps_keys_within_float32_precision(tmp_path):
     events = [
         ev(MouthShape.SILENCE, 0, 5),
         ev(MouthShape.A, 5, 20, open_amount=0.6),
@@ -122,7 +107,6 @@ def test_round_trip_write_and_read(tmp_path):
     read_back, warnings = io.read(str(out))
     assert warnings == []
     assert read_back.model_name == "テスト"
-    # weight はファイル格納が float32 なので、往復で float64 と厳密一致しないことがある(丸め誤差)。
     read_morphs = sorted((key.name, key.frame) for key in read_back.morph)
     expected_names_frames = sorted((key.name, key.frame) for key in document.morph)
     assert read_morphs == expected_names_frames
