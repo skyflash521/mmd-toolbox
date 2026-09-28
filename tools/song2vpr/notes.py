@@ -1,49 +1,28 @@
-"""song2vpr の音符分割。
+"""区間はフレームの添字で持ち、秒へ写すのは最後の1回に限る。
 
-時刻ごとの音高と音素セグメントから、音符の区間と音高を切る。表示歌詞・音素列・強弱の付与は
-この後の段が、秒から tick への量子化はさらにその後が持つので、ここは区間と音高だけを決める。
-
-区間はフレームの添字で組み立て、秒へ写すのは最後の1回だけにする。隣接の判定を時刻の一致で行うと、
-同じ実数を別の順序で計算した値どうしの比較になり、丸めの向き次第で休符を挟んでいない音符が
-隣接と見なされないことがあるため。
+秒どうしの一致で隣接を判定すると、計算順の違う実数の丸めで休符を挟まない音符を隣接と見なさないことがある。
 """
 
 from dataclasses import dataclass, field
 
 import numpy as np
 
-# これより短い音符は独立させず、隣接する音符へ吸収する(人が1音として歌っていない長さのため)。
-_MIN_DURATION_SEC = 0.08
+_MIN_NOTE_DURATION_SEC = 0.08
 
-# 音高の変わり目と確定するために、新しい音高が同じまま続くことを求める長さ(保持長)。
-# 短い滞在まで切れ目にすると1つの発声が細かな継続の音符へ割れ、人の作る下書きの粒度から
-# 離れるため、下書きで別の音符として書かれる音高の滞在の長さに合わせて置く。音符として
-# 残す最小長(吸収)とは役割が違うので別の値で持つ。
-_PITCH_HOLD_SEC = 0.34
+_PITCH_CHANGE_HOLD_SEC = 0.34
 
-# 撥音の音素記号。母音を伴わずに1つの音節をなすので、音節の核として母音と同じに扱う。
-# 付与の段も音節の核を見分けるのに使うので、同じ判定を2か所で持たないよう公開する。
 MORAIC_NASAL = "ɴ"
 
-# 核へ届く音符を含まない連続成分は、先頭がその音節の核の終端からこれを超えて離れていれば落とす。
-_MAX_START_AFTER_NUCLEUS_SEC = 2.0
+_MAX_UNATTACHED_START_AFTER_NUCLEUS_SEC = 2.0
 
 
 @dataclass
 class Diagnostics:
-    """分割の過程で数えた件数。利用者向けの診断へ出す。"""
-
     suppressed_notes: int = 0
 
 
 @dataclass(frozen=True)
 class SplitResult:
-    """音符列と、音節ごとのセグメント帰属と、その分割で数えた件数。
-
-    syllable_segments は音節番号を添字とし、その音節に属するセグメントを時間順に持つ。付与の段は
-    これを使って音素列と表示歌詞を決める(音符区間との時間の重なりで決め直さない)。
-    """
-
     notes: "list[Note]" = field(default_factory=list)
     syllable_segments: "list[list]" = field(default_factory=list)
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
@@ -51,8 +30,6 @@ class SplitResult:
 
 @dataclass(frozen=True)
 class Note:
-    """音符の区間と音高と、自分が属する音節。区間は半開区間 [start_sec, end_sec) として扱う。"""
-
     start_sec: float
     end_sec: float
     midi: int
@@ -60,85 +37,58 @@ class Note:
 
 
 def _is_syllable_nucleus(segment):
-    """音節の核か。母音と、母音を伴わない撥音がこれに当たる。"""
     return segment.type == "vowel" or (segment.type == "consonant"
                                        and segment.phoneme == MORAIC_NASAL)
 
 
 def _syllable_index_per_frame(times_sec, segments):
-    """各フレームに、それが属する音節の通し番号を割り当てる。
-
-    子音フレームは**後続**の音節の番号を持つ。音節の頭の子音をその音符へ含めるためで、直前の
-    音節へ寄せると音符の音素列から頭の子音が落ちる。gap フレームは直前の音節を引き継ぐ
-    (gap は認識器が音素を割り当てなかった区間で、発声の継続中にも出るため切れ目にしない)。
-    """
-    index = np.full(len(times_sec), -1)
+    syllable_index = np.full(len(times_sec), -1)
     is_consonant = np.zeros(len(times_sec), dtype=bool)
 
     nuclei = [s for s in segments if _is_syllable_nucleus(s)]
     for number, segment in enumerate(nuclei):
         covered = (times_sec >= segment.start_sec) & (times_sec < segment.end_sec)
-        index[covered] = number
+        syllable_index[covered] = number
     for segment in segments:
         if segment.type == "consonant" and not _is_syllable_nucleus(segment):
             is_consonant |= (times_sec >= segment.start_sec) & (times_sec < segment.end_sec)
 
-    # 各フレームにとっての後続の核(終端がそのフレームより後にある最初の核)の番号。核の区間から
-    # 直に決める。フレームの被覆から数えると、刻みより短い核はどのフレームも覆わないため番号が
-    # 現れず、その核を頭とする子音が直前の音節へ倒れてセグメント側の帰属と食い違う。
     ends = np.array([segment.end_sec for segment in nuclei], dtype=float)
-    following = np.searchsorted(ends, times_sec, side="right")
-    following = np.where(following < len(nuclei), following, -1)
-    # 各フレームにとっての直前の核(そのフレームまでに始まっている最後の核)の番号。
+    following_nucleus = np.searchsorted(ends, times_sec, side="right")
+    following_nucleus = np.where(following_nucleus < len(nuclei), following_nucleus, -1)
     starts = np.array([segment.start_sec for segment in nuclei], dtype=float)
-    preceding = np.searchsorted(starts, times_sec, side="right") - 1
+    preceding_nucleus = np.searchsorted(starts, times_sec, side="right") - 1
 
-    index = np.where((index < 0) & is_consonant, following, index)
-    # 残り(gap)は直前の音節を引き継ぐ。引き継ぎだけだと、フレームを覆わない核をまたいでも番号が
-    # 進まないので、区間の上で直前にある核の番号と、前のフレームから引き継いだ番号の大きい方を採る
-    # (頭の子音が先に後続の音節を指しているときは、その番号を保つ)。
-    for i in range(len(index)):
-        if index[i] < 0:
-            index[i] = max(int(preceding[i]), int(index[i - 1]) if i > 0 else -1)
-    return index, is_consonant
+    syllable_index = np.where((syllable_index < 0) & is_consonant, following_nucleus,
+                              syllable_index)
+    for i in range(len(syllable_index)):
+        if syllable_index[i] < 0:
+            syllable_index[i] = max(int(preceding_nucleus[i]),
+                                    int(syllable_index[i - 1]) if i > 0 else -1)
+    return syllable_index, is_consonant
 
 
 def _segments_per_syllable(segments, nuclei):
-    """各音節に属するセグメントを時間順に並べる。
-
-    フレーム単位の帰属と同じ規則にする: 核は自分の音節、頭の子音は後続の音節、後続の核が無い
-    子音は直前の音節。音素を割り当てなかった区間(gap)はどの音節にも入れない(音素列に載せない
-    ものを帰属させても使い道が無い)。
-    """
     result = [[] for _ in nuclei]
-    number = 0  # 次に現れる核の番号
-    pending = []  # 後続の核へ付ける子音
+    next_nucleus = 0
+    leading_consonants = []
     for segment in segments:
-        if number < len(nuclei) and segment is nuclei[number]:
-            result[number] = [*pending, segment]
-            pending = []
-            number += 1
+        if next_nucleus < len(nuclei) and segment is nuclei[next_nucleus]:
+            result[next_nucleus] = [*leading_consonants, segment]
+            leading_consonants = []
+            next_nucleus += 1
         elif segment.type == "consonant":
-            pending.append(segment)
-    if pending and result:
-        result[-1].extend(pending)
+            leading_consonants.append(segment)
+    if leading_consonants and result:
+        result[-1].extend(leading_consonants)
     return result
 
 
 def _voiced_spans(track, syllable_index, frame_sec):
-    """有声フレームを、音節の切り替わりと、続く音高の変化で区切る。
-
-    丸めた音高が変わっても、新しい値が保持長ぶん同じまま続かなければ区切らない。ビブラートや
-    しゃくりの瞬間的な動きや、人が1音として歌わない短い滞在まで切れ目にすると、1つの発声が
-    細かな継続の音符へ割れて人の作る下書きから離れるため。音符の音高は、フレームごとに半音へ
-    丸めた値の最頻値(同数なら低い方)にする(揺れをまたぐ区間でも、最も長く歌われた音高になる)。
-    """
     voiced = np.asarray(track.voiced)
-    # 丸めた値と最頻値を同じ列から求め、欠測を 0 へ倒す寛容さを両方で揃える。
     values = np.nan_to_num(np.asarray(track.midi, dtype=float), nan=0.0)
     rounded = np.where(voiced, np.rint(values), np.nan)
-    # 保持長をフレーム数へ直すときは切り上げる(保持長に満たない継続で区切らないため)。
-    held_frames = max(1, int(np.ceil(_PITCH_HOLD_SEC / frame_sec)))
+    held_frames = max(1, int(np.ceil(_PITCH_CHANGE_HOLD_SEC / frame_sec)))
 
     spans = []
     start = None
@@ -147,7 +97,7 @@ def _voiced_spans(track, syllable_index, frame_sec):
     def close(stop):
         window = np.rint(values[start:stop]).astype(int)
         counts = np.bincount(window - window.min())
-        # argmax は同数の最初の要素を返すので、同数なら低い方の半音になる。
+        # argmax は同数の最初の要素を返す。
         spans.append([start, stop, int(window.min() + counts.argmax()),
                       int(syllable_index[start])])
 
@@ -173,38 +123,24 @@ def _voiced_spans(track, syllable_index, frame_sec):
 
 
 def _extend_to_leading_consonants(spans, syllable_index, is_consonant):
-    """各音符の開始を、同じ音節の頭にある子音フレームまで前へ伸ばす。
-
-    無声の子音でも音符へ含める(音符の音素列から音節の頭が落ちないようにするため)。前の音符の
-    終わりは越えない。
-    """
     for position, span in enumerate(spans):
         lo = span[0]
-        # 直前の音符の終わりを越えない。音節の番号が先に変わるので通常はここへ届かないが、
-        # 音符どうしを重ねないことをこの段だけで保証する。
-        limit = spans[position - 1][1] if position > 0 else 0
-        while lo > limit and is_consonant[lo - 1] and syllable_index[lo - 1] == syllable_index[span[0]]:
+        previous_end = spans[position - 1][1] if position > 0 else 0
+        while (lo > previous_end and is_consonant[lo - 1]
+               and syllable_index[lo - 1] == syllable_index[span[0]]):
             lo -= 1
         span[0] = lo
     return spans
 
 
 def _absorb_short_spans(spans, frame_sec):
-    """最小長に満たない音符を、休符を挟まず連続する**同じ音節**の隣接音符へ吸収する。
-
-    同じ音高の隣接があれば併合し、無ければ音高が最も近い隣接へ寄せる(距離が同じなら直前側)。
-    吸収では吸収先の音高を保ち、短音符の区間を足して延長する。吸収先が無い(休符または別の音節で
-    隔てられた)短音符は、そのまま単独の音符として残す。音節をまたいでまとめると音節=モーラが
-    消えるので、別の音節しか隣に無い場合は残す方を採る。
-    """
     result = [list(span) for span in spans]
     changed = True
     while changed:
         changed = False
         for i, (lo, hi, midi, syllable) in enumerate(result):
-            if (hi - lo) * frame_sec >= _MIN_DURATION_SEC:
+            if (hi - lo) * frame_sec >= _MIN_NOTE_DURATION_SEC:
                 continue
-            # 隣接はフレームの添字で決める(境界が接していれば休符を挟んでいない)。
             before = (i - 1 if i > 0 and result[i - 1][1] == lo and result[i - 1][3] == syllable
                       else None)
             after = (i + 1 if i + 1 < len(result) and result[i + 1][0] == hi
@@ -235,8 +171,7 @@ def _absorb_short_spans(spans, frame_sec):
     return result
 
 
-def _components(spans):
-    """同じ音節に属し切れ目なく続く音符の並び(連続成分)へ区切る。"""
+def _same_syllable_runs(spans):
     result = []
     for span in spans:
         if result and result[-1][-1][1] == span[0] and result[-1][-1][3] == span[3]:
@@ -247,36 +182,24 @@ def _components(spans):
 
 
 def _suppress_unattached(spans, times, nuclei):
-    """音節と結びつかない音符を落とす。落とした数を第2の戻り値で返す。
-
-    落とすのは、どの音節にも属さない有声区間と、核へ届く音符を含まない連続成分のうち先頭が
-    核の終端から離れて始まるもの(成分の全件)。核へ届く音符(核と重なる音符・頭子音を含むため
-    核の開始より前から始まる音符)を含む成分は、その音符の開始が核の終端以前なので、成分の先頭は
-    さらにそれ以前になる。つまり離れの判定だけで必ず残り、届くかどうかを別に見る必要はない。
-    """
     kept = []
-    for component in _components(spans):
-        syllable = component[0][3]
-        start_sec = float(times[component[0][0]])
+    for run in _same_syllable_runs(spans):
+        syllable = run[0][3]
+        start_sec = float(times[run[0][0]])
         if syllable < 0:
             continue
-        if start_sec - nuclei[syllable].end_sec > _MAX_START_AFTER_NUCLEUS_SEC:
+        if start_sec - nuclei[syllable].end_sec > _MAX_UNATTACHED_START_AFTER_NUCLEUS_SEC:
             continue
-        kept += component
-    return kept, len(spans) - len(kept)
+        kept += run
+    suppressed_count = len(spans) - len(kept)
+    return kept, suppressed_count
 
 
 def split(track, segments, *, frame_sec=None) -> SplitResult:
-    """時刻ごとの音高と音素セグメントから音符の区間と音高を決める。
-
-    frame_sec は時刻の刻み(省略時は track の時刻列から求める)。音符の区間は互いに重ならず、
-    長さは正になる。音節と結びつかず落とした音符は、件数を診断に出す(内部の規則によるもので、
-    呼び出し側からは数えられないため)。まとめる先が無く短いまま残った音符はそのまま返し、
-    tick へ写した後の配り直しに委ねる。
-    """
+    """切れ目なく続く音符は、前の end_sec と次の start_sec が同じ値になる。"""
     times = np.asarray(track.times_sec)
     if len(times) < 2:
-        return SplitResult()  # 刻みを決められない長さの入力からは音符を作らない
+        return SplitResult()
     if frame_sec is None:
         frame_sec = float(times[1] - times[0])
 
@@ -287,8 +210,6 @@ def split(track, segments, *, frame_sec=None) -> SplitResult:
     spans = _absorb_short_spans(spans, frame_sec)
     spans, suppressed = _suppress_unattached(spans, times, nuclei)
 
-    # 終端は次のフレームの時刻をそのまま使う(切れ目なく続く音符が同じ値を共有し、後段が
-    # 「前の終わり == 次の始まり」で連続を判定できる)。末尾だけは次のフレームが無いので刻みを足す。
     result = [Note(start_sec=float(times[lo]),
                    end_sec=float(times[hi]) if hi < len(times)
                    else float(times[hi - 1]) + frame_sec,

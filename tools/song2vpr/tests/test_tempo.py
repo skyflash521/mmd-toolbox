@@ -1,9 +1,3 @@
-"""song2vpr のテンポ推定と拍子の決め方のテスト。
-
-既知の拍で合成した信号から BPM が得られることと、指定値と推定値の組み合わせが規則どおりに
-なることを検証する。拍子は推定しないので、指定の有無で決まることを見る。
-"""
-
 import numpy as np
 import pytest
 
@@ -14,12 +8,11 @@ SR = 22050
 
 
 def _click_track(bpm, seconds=8.0, offset_sec=0.0, accent_every=None, sample_rate=SR):
-    """既知の拍でクリックを並べた信号。accent_every を与えるとその周期の拍だけ強くする。"""
     n = int(seconds * sample_rate)
     samples = np.zeros(n, dtype=np.float32)
     period = 60.0 / bpm
     rng = np.random.default_rng(0)
-    samples += rng.normal(0.0, 0.001, n).astype(np.float32)  # 無音区間を作らない程度の床
+    samples += rng.normal(0.0, 0.001, n).astype(np.float32)
     index = 0
     while True:
         at = offset_sec + index * period
@@ -41,7 +34,6 @@ def _silence(seconds=8.0, sample_rate=SR):
 
 
 def _subdivided_click_track(bpm, subdivisions, sub_amp, seconds=16.0, sample_rate=SR):
-    """拍クリック(振幅1.0)の間へ、拍を subdivisions 等分する弱いクリックを重ねた信号。"""
     n = int(seconds * sample_rate)
     samples = np.zeros(n, dtype=np.float32)
     rng = np.random.default_rng(0)
@@ -69,9 +61,6 @@ def _subdivided_click_track(bpm, subdivisions, sub_amp, seconds=16.0, sample_rat
     return AudioPcm(samples=samples[:, None], sample_rate=sample_rate)
 
 
-# --- BPM の推定 --------------------------------------------------------------
-
-
 @pytest.mark.parametrize("bpm", [90.0, 120.0, 150.0])
 def test_bpm_is_estimated_from_the_beats(bpm):
     result = tempo.estimate(_click_track(bpm))
@@ -79,57 +68,27 @@ def test_bpm_is_estimated_from_the_beats(bpm):
 
 
 def test_estimated_bpm_is_not_an_octave_off():
-    """1/2 倍・2 倍のピークではなく、人が拍と感じる帯域を選ぶ。"""
     result = tempo.estimate(_click_track(120.0))
     assert 60.0 < result.bpm < 240.0
 
 
-def test_a_fast_beat_is_not_taken_at_half_speed():
-    """帯域の重みの中心から離れた速い拍を、半分のテンポとして採らない。
-
-    この入力は相関だけ見れば正解の候補が半分の候補に勝つので、覆しているのは重みになる。重みは
-    候補どうしのタイブレークなので、この優位を覆さない幅にする。狭い幅を落とす主張なので、幅の
-    下限を押さえる。同じくオクターブ誤りを見る `test_estimated_bpm_is_not_an_octave_off` は入力が
-    重みの中心にあり、正解の候補が重みで最も高く評価されるので、幅を狭める側では破れない。広げる側
-    では破れるが、`test_a_slow_beat_is_not_taken_at_half_speed` の入力より緩いところで破れる。
-
-    16 秒にするのは長さが判定条件のため。既定の 8 秒では狭い幅でも正解を採るので、落としたい幅が
-    通ってしまう。
-    """
+def test_a_fast_beat_far_above_the_weight_centre_is_not_taken_at_half_speed():
     result = tempo.estimate(_click_track(190.0, seconds=16.0))
     assert result.bpm == pytest.approx(190.0, rel=0.03)
 
 
-def test_a_slow_beat_is_not_taken_at_half_speed():
-    """帯域の重みの中心から離れた遅い拍を、半分のテンポとして採らない。
-
-    この入力は相関だけ見れば半分の候補の方が高く、正解を保っているのは中心へ寄せる重みになる。
-    幅を広げるほどその働きが弱まり、広げすぎるとこの入力が半分へ倒れる。したがってこの主張は幅の
-    上限を押さえ、`test_a_fast_beat_is_not_taken_at_half_speed` が押さえる下限と対になる。
-    倍の周期には相関がほとんど無いので、倍へ倒れる側は幅を拘束しない。
-    """
+def test_a_slow_beat_far_below_the_weight_centre_is_not_taken_at_half_speed():
     result = tempo.estimate(_click_track(90.0, seconds=16.0))
     assert result.bpm == pytest.approx(90.0, rel=0.03)
 
 
 def test_given_tempo_is_used_as_is():
-    """--tempo 指定時はその値を曲全体で一定に使う(推定しない)。"""
     result = tempo.estimate(_click_track(90.0), tempo_bpm=140.0)
     assert result.bpm == 140.0
     assert not result.tempo_defaulted
 
 
-# --- 半分読みの昇格 ----------------------------------------------------------
-
-
-def test_a_fast_plain_beat_folded_to_half_is_promoted_back():
-    """半分へ倒れた速い素の拍は、倍へ昇格して戻す。
-
-    200 BPM の素の拍は、120 中心の重みが倍の周期(=半分のテンポ)を選ばせる帯にある。
-    採用テンポの拍の中間に同格の拍が並ぶ(線形の流束で表拍と裏拍の強さが釣り合い、
-    倍のテンポ側の周期=採用周期の半分にも同等の周期性がある)証拠が揃うときだけ倍へ
-    昇格する。昇格後も採用値は形式が格納できる粒度に載る。
-    """
+def test_a_fast_plain_beat_folded_to_half_is_promoted_back_to_a_storable_bpm():
     result = tempo.estimate(_click_track(200.0, seconds=16.0))
     assert result.bpm == pytest.approx(200.0, rel=0.03)
     assert result.bpm * 100 == round(result.bpm * 100)
@@ -137,11 +96,6 @@ def test_a_fast_plain_beat_folded_to_half_is_promoted_back():
 
 
 def test_eighth_subdivisions_do_not_promote_the_correct_tempo():
-    """8分の細分が強くても、正しく読めたテンポを倍へ昇格しない。
-
-    細分は倍のグリッドの裏拍を埋めるが、表拍との強さの差が線形の流束に残るので
-    同格とは判定されない。
-    """
     result = tempo.estimate(_subdivided_click_track(120.0, 2, 0.7))
     assert result.bpm == pytest.approx(120.0, rel=0.03)
 
@@ -151,28 +105,17 @@ def test_sixteenth_subdivisions_do_not_promote_the_correct_tempo():
     assert result.bpm == pytest.approx(100.0, rel=0.03)
 
 
-def test_promotion_does_not_exceed_the_target_cap():
-    """昇格先が上限を超えるときは昇格せず、採用した半分のテンポを保つ。
-
-    上限は、半分読みが実際に起きる帯の上端より上、かつ正しく読めた通常の曲の倍が
-    入り込まない位置に置く。真のテンポが上限より上の素の拍(270 BPM)は半分へ倒れた
-    まま残る(安全側)。
-    """
+def test_promotion_above_the_target_cap_is_skipped_keeping_the_half_tempo():
     result = tempo.estimate(_click_track(270.0, seconds=16.0))
     assert result.bpm == pytest.approx(135.0, rel=0.03)
 
 
 def test_given_tempo_is_never_promoted():
-    """指定されたテンポには昇格判定を掛けず、そのまま使う。"""
     result = tempo.estimate(_click_track(200.0, seconds=16.0), tempo_bpm=100.0)
     assert result.bpm == 100.0
 
 
-# --- 拍子 --------------------------------------------------------------------
-
-
-def test_numerator_is_four_unless_it_is_given():
-    """拍子を指定しなければ 4 を使う。3拍ごとのアクセントがあっても 3 にはしない。"""
+def test_numerator_is_four_unless_given_even_with_accents_every_three_beats():
     result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))
     assert result.numerator == 4
 
@@ -187,11 +130,7 @@ def test_given_time_signature_is_used_as_is():
     assert (result.numerator, result.denominator) == (6, 8)
 
 
-# --- 周期が得られない入力 ----------------------------------------------------
-
-
-def test_silence_falls_back_to_the_default_tempo():
-    """周期を取り出せない入力では既定へ倒し、そのことを報告する。"""
+def test_silence_falls_back_to_the_default_tempo_and_reports_it():
     result = tempo.estimate(_silence())
     assert result.bpm == 120.0
     assert (result.numerator, result.denominator) == (4, 4)
@@ -199,7 +138,6 @@ def test_silence_falls_back_to_the_default_tempo():
 
 
 def test_default_keeps_the_given_time_signature():
-    """テンポが既定へ倒れても、指定された拍子はそのまま使う。"""
     result = tempo.estimate(_silence(), time_signature=(3, 4))
     assert result.bpm == 120.0
     assert (result.numerator, result.denominator) == (3, 4)
@@ -207,30 +145,23 @@ def test_default_keeps_the_given_time_signature():
 
 
 def test_given_tempo_is_not_defaulted_on_silence():
-    """テンポを指定していれば、周期が取れなくても既定へ倒さない。"""
     result = tempo.estimate(_silence(), tempo_bpm=100.0)
     assert result.bpm == 100.0
     assert not result.tempo_defaulted
 
 
 def test_the_time_signature_is_the_default_even_without_a_usable_period():
-    """拍子は音声から決めないので、周期が取れない入力でも指定が無ければ 4/4 になる。"""
     result = tempo.estimate(_silence(), tempo_bpm=100.0)
     assert not result.tempo_defaulted
     assert (result.numerator, result.denominator) == (4, 4)
 
 
-# --- 秒から tick への変換 ----------------------------------------------------
-
-
 def test_tick_conversion_starts_at_the_input_origin():
-    """入力音声の 0 秒が tick の 0(小節線に合わせて音符をずらさない)。"""
     result = tempo.estimate(_click_track(120.0))
     assert result.to_tick(0.0) == 0
 
 
-def test_tick_conversion_follows_the_adopted_tempo():
-    """120 BPM なら四分音符1つ(0.5秒)が分解能ちょうどになる。"""
+def test_a_quarter_note_at_120_bpm_is_one_resolution_of_ticks():
     result = tempo.estimate(_click_track(120.0), tempo_bpm=120.0)
     assert result.to_tick(0.5) == result.resolution
 
@@ -242,24 +173,16 @@ def test_tick_conversion_is_monotonic():
     assert len(set(ticks)) == len(ticks)
 
 
-def test_adopted_tempo_is_representable_in_the_output_format():
-    """採用テンポは形式が格納できる粒度へ丸めた値(出力と診断が食い違わないようにする)。
-
-    形式はテンポを BPM の 100 倍の整数で持つので、採用値もその粒度に載る必要がある。
-    """
+def test_adopted_tempo_is_rounded_to_hundredths_of_a_bpm():
     result = tempo.estimate(_click_track(120.0), tempo_bpm=120.005)
     assert result.bpm * 100 == round(result.bpm * 100)
-    assert result.bpm != 120.005  # 丸めずにそのまま持つ実装を落とす
+    assert result.bpm != 120.005
 
 
 def test_resolution_matches_the_format_layer():
-    """分解能は形式が固定する値。書き出し側とずれると音符の位置が丸ごとずれた vpr になる。"""
     from vpr.constants import RESOLUTION
 
     assert tempo.RESOLUTION == RESOLUTION
-
-
-# --- 決定論 ------------------------------------------------------------------
 
 
 def test_same_input_gives_the_same_estimate():
@@ -270,38 +193,28 @@ def test_same_input_gives_the_same_estimate():
            (second.bpm, second.numerator, second.denominator)
 
 
-# --- 採用値の出どころ --------------------------------------------------------
-
-
 def test_given_values_are_reported_as_options():
     result = tempo.estimate(_click_track(120.0), tempo_bpm=96.0, time_signature=(3, 4))
     assert (result.tempo_source, result.time_signature_source) == ("option", "option")
 
 
 def test_the_unspecified_time_signature_is_reported_as_the_default():
-    """テンポは音声から推定するが、拍子は指定が無ければ既定として報告する。"""
     result = tempo.estimate(_click_track(120.0, seconds=16.0, accent_every=3))
     assert (result.tempo_source, result.time_signature_source) == ("estimated", "default")
 
 
 def test_values_not_taken_from_the_audio_are_reported_as_defaults():
-    """テンポは推定できなかったとき、拍子は指定が無いときに、どちらも既定として報告する。"""
     result = tempo.estimate(_silence())
     assert (result.tempo_source, result.time_signature_source) == ("default", "default")
 
 
-def test_the_two_ways_of_telling_the_fallback_agree():
-    """出どころと仮置きの真偽は同じ事実を指す(食い違うと警告と診断がずれる)。"""
+def test_tempo_source_default_agrees_with_tempo_defaulted():
     for result in (tempo.estimate(_silence()),
                    tempo.estimate(_silence(), tempo_bpm=100.0),
                    tempo.estimate(_click_track(120.0))):
         assert result.tempo_defaulted == (result.tempo_source == "default")
 
 
-# --- 拍の位相を公開しない ----------------------------------------------------
-
-
 def test_estimate_does_not_expose_a_beat_phase():
-    """採用したテンポと拍子には拍の位相を含めない(出力にも診断にも消費者が無い)。"""
     result = tempo.estimate(_click_track(120.0))
     assert not hasattr(result, "beat_offset_sec")

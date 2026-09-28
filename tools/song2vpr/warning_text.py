@@ -1,12 +1,3 @@
-"""song2vpr が出す警告の文言。
-
-警告のコードと観測値から、機械モードの warning イベント本文と、観測値を併記した人間向け1行を
-組み立てる。文言をツール側に置くのは、勧める対処が song2vpr のオプション名に依存するため。
-資源逼迫・GPU 構成について何を観測しどの事実で警告が成立するかは共有の cli_resource_watch が持ち、
-それ以外の警告は song2vpr 自身が処理の結果から判定する。
-"""
-
-
 def _gpu_memory_oversubscribed(fields):
     message = "GPUメモリの要求量が空き容量を超過しました"
     return message, (
@@ -73,5 +64,5 @@ _BUILDERS = {
 
 
 def warning_texts(code, fields):
-    """警告のコードと観測値から (機械モードの本文, 人間向け1行) を組み立てる。"""
+    """戻り値は (機械モードの warning イベント本文, 人間向け1行)。"""
     return _BUILDERS[code](fields)

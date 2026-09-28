@@ -1,25 +1,12 @@
-"""追加依存(vocal-analysis extra)が未導入のときの起動のテスト。
-
-コンソールスクリプトは追加依存なしの導入でも登録されるため、依存が揃わない環境から起動されうる。
-その場合にトレースバックを出さず、理由1行(または機械モードの error イベント)と終了コード4で終える
-ことを検証する。判定を終了へ反映するのは引数の検証をすべて終えた後なので、メタ操作(`--help`/
-`--version`/`--describe`)と引数エラーは依存の有無に依らず先に成立する。
-
-依存を実際に外して起動することはできないため、取り込み結果を保持するモジュール変数を差し替えて
-未導入状態を再現する。あわせて、取り込みに失敗すれば未定義になる名前をモジュールから外す。名前が
-定義されたままだと、ガードより前の経路が誤ってそれらを参照する回帰が入っても検出できない。
-"""
-
 import json
 
 import pytest
 
 from song2vpr import cli
 
-_MISSING = ModuleNotFoundError("No module named 'soundfile'", name="soundfile")
+_MISSING_SOUNDFILE = ModuleNotFoundError("No module named 'soundfile'", name="soundfile")
 
-# 追加依存を要する取り込みが与える名前。取り込みが失敗した環境では未定義になる。
-_GUARDED_NAMES = (
+_NAMES_BOUND_BY_EXTRA_IMPORTS = (
     "_pipeline", "_pitch",
     "AudioLoadError", "IntermediateReadError", "IntermediateWriteError",
     "RecognitionError", "SeparationError", "StageExecutionError",
@@ -28,20 +15,16 @@ _GUARDED_NAMES = (
 
 @pytest.fixture
 def missing_dependency(monkeypatch):
-    monkeypatch.setattr(cli, "_MISSING_DEPENDENCY", _MISSING)
-    for name in _GUARDED_NAMES:
+    monkeypatch.setattr(cli, "_MISSING_DEPENDENCY", _MISSING_SOUNDFILE)
+    for name in _NAMES_BOUND_BY_EXTRA_IMPORTS:
         monkeypatch.delattr(cli, name)
 
 
-def test_guarded_names_are_bound_in_dev_environment():
-    # 宣言した名前が実装から消える・別名になると、上のフィクスチャが再現する未導入状態が
-    # 実態とずれる。開発インストールでは全て束縛されていることをここで別に見る。
-    assert [name for name in _GUARDED_NAMES if not hasattr(cli, name)] == []
+def test_names_bound_by_extra_imports_are_bound_in_dev_environment():
+    assert [name for name in _NAMES_BOUND_BY_EXTRA_IMPORTS if not hasattr(cli, name)] == []
 
 
-def test_dependencies_present_in_dev_environment():
-    # 開発インストール(extra 込み)では未導入判定が立たないこと。取り込み失敗を握り潰したまま
-    # 気付かない状態を防ぐ。
+def test_missing_dependency_is_none_in_dev_environment():
     assert cli._MISSING_DEPENDENCY is None
 
 
@@ -55,8 +38,8 @@ def test_human_message_is_single_line_without_traceback(tmp_path, capsys, missin
     assert "Traceback" not in captured.err
 
 
-def test_human_message_names_module_and_install_command(tmp_path, capsys, missing_dependency):
-    """理由1行は不足モジュール名と、その extra を導入する pip のコマンドを示す(ツール名は入れない)。"""
+def test_human_message_names_module_and_pip_install_command_without_tool_name(tmp_path, capsys,
+                                                                              missing_dependency):
     cli.main([str(tmp_path / "in.wav")])
     line = capsys.readouterr().err
     assert "soundfile" in line
@@ -86,7 +69,6 @@ def test_lyrics_are_read_after_the_dependency_guard(tmp_path, capsysbinary, miss
 
 
 def test_help_succeeds_without_dependency(capsys, missing_dependency):
-    """オプション定義の組み立ては追加依存を要さない取り込みだけで済む。"""
     assert cli.main(["--help"]) == 0
     captured = capsys.readouterr()
     assert "--separate-vocals" in captured.out
@@ -109,8 +91,7 @@ def test_describe_succeeds_without_dependency(capsysbinary, missing_dependency):
     assert events[-1]["mode"] == "describe"
 
 
-def _argv_before_guard(tmp_path, case):
-    """依存ガードより前に終了コード2で終わる経路の argv。"""
+def _argv_rejected_with_code_2_before_dependency_guard(tmp_path, case):
     src = tmp_path / "in.wav"
     src.write_bytes(b"")
     if case == "unknown_option":
@@ -132,8 +113,7 @@ def _argv_before_guard(tmp_path, case):
 
 @pytest.mark.parametrize("case", ["unknown_option", "missing_input", "value_error",
                                   "combination", "output_exists", "output_is_directory"])
-def test_argument_checks_precede_dependency_guard(tmp_path, capsys, missing_dependency, case):
-    """引数の検証と出力先のガードは処理の開始前なので、依存が無くても終了コード2で終わる。"""
-    assert cli.main(_argv_before_guard(tmp_path, case)) == 2
-    # 終了コード2が依存の不足を理由にしたものでないこと。
+def test_argument_checks_precede_dependency_guard_without_blaming_the_dependency(
+        tmp_path, capsys, missing_dependency, case):
+    assert cli.main(_argv_rejected_with_code_2_before_dependency_guard(tmp_path, case)) == 2
     assert "soundfile" not in capsys.readouterr().err

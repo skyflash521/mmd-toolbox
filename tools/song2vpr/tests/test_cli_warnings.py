@@ -1,10 +1,3 @@
-"""song2vpr CLI の警告の接続のテスト。
-
-資源逼迫(GPUメモリの超過・スワップ)と GPU を使えない構成の判定は共有の cli_resource_watch が持つ。
-ここでは song2vpr 側の接続——判定を呼ぶ位置、成立した警告を機械モードの warning イベントと人間向け
-1行へ振り分けること、警告が出力・終了コード・診断を変えないこと——を検証する。
-"""
-
 import json
 import types
 
@@ -28,8 +21,7 @@ def _events(capsysbinary):
     return [json.loads(ln) for ln in capsysbinary.readouterr().out.decode("utf-8").split("\n") if ln]
 
 
-def _force_gpu_oversubscription(monkeypatch):
-    """GPU の観測を、2回目の判定で超過が成立する系列(バイト値)へ差し替える。"""
+def _force_gpu_oversubscription_from_the_second_probe(monkeypatch):
     seq = iter([(4000 * _MIB, 8192 * _MIB, 0), (4000 * _MIB, 8192 * _MIB, 5600 * _MIB)])
     monkeypatch.setattr(_watch_module, "_default_gpu_probe",
                         lambda: next(seq, (4000 * _MIB, 8192 * _MIB, 5600 * _MIB)))
@@ -37,7 +29,6 @@ def _force_gpu_oversubscription(monkeypatch):
 
 
 def _stub_pipeline_reporting_stages(monkeypatch, stages=("load", "separate")):
-    """パイプラインを、渡された中継先へ段を報告するだけのスタブへ差し替える。"""
     def fake_run(input_path, **kwargs):
         for stage in stages:
             kwargs["progress"].stage(stage)
@@ -46,13 +37,10 @@ def _stub_pipeline_reporting_stages(monkeypatch, stages=("load", "separate")):
     monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run))
 
 
-# --- 資源逼迫の警告 ----------------------------------------------------------
-
-
-def test_resource_warning_is_emitted_as_a_machine_event(tmp_path, monkeypatch, capsysbinary):
-    """成立した警告は、観測値を載せた warning イベントで出る。"""
+def test_resource_warning_is_emitted_as_a_machine_event_with_observed_values(tmp_path, monkeypatch,
+                                                                             capsysbinary):
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
+    _force_gpu_oversubscription_from_the_second_probe(monkeypatch)
     _stub_pipeline_reporting_stages(monkeypatch)
 
     assert cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr")]) == 0
@@ -65,23 +53,22 @@ def test_resource_warning_is_emitted_as_a_machine_event(tmp_path, monkeypatch, c
     assert warnings[0]["total_mib"] == 8192
 
 
-def test_resource_warning_is_printed_to_stderr_in_human_mode(tmp_path, monkeypatch, capsys):
-    """非機械モードでは標準エラーへ1行出す(観測値と対処を添える)。"""
+def test_resource_warning_is_printed_to_stderr_with_values_and_remedy_in_human_mode(tmp_path, monkeypatch,
+                                                                                    capsys):
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
+    _force_gpu_oversubscription_from_the_second_probe(monkeypatch)
     _stub_pipeline_reporting_stages(monkeypatch)
 
     assert cli.main([src, "-o", str(tmp_path / "out.vpr")]) == 0
     captured = capsys.readouterr()
-    assert captured.out == ""  # 人間向けの警告は標準出力を汚さない
+    assert captured.out == ""
     assert "warning: gpu_memory_oversubscribed:" in captured.err
     assert "5600MiB" in captured.err and "--device cpu" in captured.err
 
 
 def test_resource_warning_survives_quiet(tmp_path, monkeypatch, capsys):
-    """--quiet は進捗表示だけを抑制する(警告は抑制しない)。"""
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
+    _force_gpu_oversubscription_from_the_second_probe(monkeypatch)
     _stub_pipeline_reporting_stages(monkeypatch)
 
     assert cli.main([src, "-o", str(tmp_path / "out.vpr"), "--quiet"]) == 0
@@ -89,9 +76,8 @@ def test_resource_warning_survives_quiet(tmp_path, monkeypatch, capsys):
 
 
 def test_human_warning_closes_the_live_line_before_writing(tmp_path, monkeypatch):
-    """人間向けの警告は、ライブ進捗行の消去→標準エラーへの書き込みの順で出す(混線の防止)。"""
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
+    _force_gpu_oversubscription_from_the_second_probe(monkeypatch)
     _stub_pipeline_reporting_stages(monkeypatch)
     order = []
 
@@ -121,15 +107,12 @@ def test_human_warning_closes_the_live_line_before_writing(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("outcome,expected", [
-    (None, 0), (KeyboardInterrupt(), 130), (RuntimeError("boom"), 1),
-    (SeparationError("分離に失敗"), 4),
+    pytest.param(None, 0, id="success"),
+    pytest.param(KeyboardInterrupt(), 130, id="interrupted"),
+    pytest.param(RuntimeError("boom"), 1, id="unexpected_failure"),
+    pytest.param(SeparationError("分離に失敗"), 4, id="classified_failure"),
 ])
 def test_live_line_is_closed_on_every_exit(tmp_path, monkeypatch, outcome, expected):
-    """終了時はライブ進捗行を消す(進捗の途中経過を画面に残さない)。
-
-    正常終了・中断・想定外の失敗・分類済みの失敗のいずれでも消す。節ごとに消す形だと、後から増えた
-    経路が漏れる。
-    """
     src = _touch(tmp_path / "in.wav")
     closed = []
 
@@ -156,23 +139,15 @@ def test_live_line_is_closed_on_every_exit(tmp_path, monkeypatch, outcome, expec
 
 
 def test_resource_warning_does_not_change_the_exit_code(tmp_path, monkeypatch, capsysbinary):
-    """警告は副作用専用で、終了コードを変えない。"""
     src = _touch(tmp_path / "in.wav")
-    _force_gpu_oversubscription(monkeypatch)
+    _force_gpu_oversubscription_from_the_second_probe(monkeypatch)
     _stub_pipeline_reporting_stages(monkeypatch)
 
     assert cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr"), "--dry-run"]) == 0
 
 
-# --- GPU を使えない構成の警告 ------------------------------------------------
-
-
-def test_gpu_configuration_warning_precedes_the_processing(tmp_path, monkeypatch, capsysbinary):
-    """数分かかる処理を終えてから伝えても手遅れなので、処理の開始より前に出す。
-
-    判定の呼び出し順ではなくイベントストリーム上の並びで固定する(判定だけ先に行い、送出を後ろへ
-    動かす実装を通さないため)。
-    """
+def test_gpu_configuration_warning_precedes_the_first_progress_event_in_the_stream(tmp_path, monkeypatch,
+                                                                                   capsysbinary):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(cli, "torch_gpu_warning",
                         lambda device: ("cpu_only_torch", {"torch_version": "2.13.0"}))
@@ -197,22 +172,18 @@ def test_gpu_configuration_warning_carries_the_torch_version(tmp_path, monkeypat
     assert warning["torch_version"] == "2.13.0+cu126"
 
 
-def test_no_gpu_configuration_warning_when_it_does_not_hold(tmp_path, monkeypatch, capsysbinary):
-    """判定が何も返さない構成では警告を出さない。"""
+def test_no_gpu_configuration_warning_when_the_check_returns_none(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(cli, "torch_gpu_warning", lambda device: None)
     _stub_pipeline_reporting_stages(monkeypatch, stages=("load",))
 
     assert cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr")]) == 0
-    # 前段の代役が短い無音なので、音符0件とテンポの仮置きの警告が出る。いずれも
-    # GPU 構成の判定とは無関係なので、判定対象を GPU の2コードへ絞る。
     gpu_codes = {"cpu_only_torch", "cuda_unavailable"}
     assert not [e for e in _events(capsysbinary)
                 if e["type"] == "warning" and e["code"] in gpu_codes]
 
 
 def test_gpu_configuration_check_receives_the_selected_device(tmp_path, monkeypatch, capsysbinary):
-    """判定へ渡すのは利用者が選んだ実行デバイス(CPU 実行では判定しないと共有側が決める)。"""
     src = _touch(tmp_path / "in.wav")
     seen = []
     monkeypatch.setattr(cli, "torch_gpu_warning", lambda device: seen.append(device))

@@ -1,9 +1,3 @@
-"""song2vpr CLI の処理経路のテスト。
-
-パイプラインが送出する失敗を仕様の `code`・`field`・`path`・終了コードへ写すこと、および中間生成物の
-保存先の決め方を検証する。パイプライン自体は差し替え、CLI が持つ写像と組み立てだけを見る。
-"""
-
 import json
 import types
 
@@ -34,7 +28,6 @@ def _machine_error(capsysbinary):
 
 
 def _stub_pipeline(monkeypatch, raises=None, captured=None):
-    """パイプラインを差し替える。raises を渡すとその例外を送出し、渡さなければ引数を記録する。"""
     def fake_run(input_path, **kwargs):
         if captured is not None:
             captured["input_path"] = input_path
@@ -43,8 +36,6 @@ def _stub_pipeline(monkeypatch, raises=None, captured=None):
             raise raises
         return front_stage_result()
 
-    # モジュールごと差し替える(取り込みが追加依存のガードの内側にあるため、属性を差し替えるより
-    # 取り込みの構造に左右されない)。
     monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run))
 
 
@@ -54,15 +45,8 @@ def _run_machine(tmp_path, monkeypatch, exc, extra=()):
     return cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr"), *extra])
 
 
-# --- 成功経路の終端 ----------------------------------------------------------
-
-
-def test_machine_success_path_terminates_with_a_result(tmp_path, monkeypatch, capsysbinary):
-    """前段を終えた実行も、ストリームを result か error のちょうど1つで終端する。
-
-    入力不正で終わる側は別のテストが見ている。こちらはパイプラインを差し替えて前段を成功させ、
-    成功して終わる実行の終端を見る。
-    """
+def test_machine_success_path_ends_with_exactly_one_terminal_event(tmp_path, monkeypatch,
+                                                                   capsysbinary):
     src = _touch(tmp_path / "in.wav")
     _stub_pipeline(monkeypatch)
     assert cli.main(["--machine", src, "-o", str(tmp_path / "out.vpr")]) == 0
@@ -70,12 +54,8 @@ def test_machine_success_path_terminates_with_a_result(tmp_path, monkeypatch, ca
     assert sum(1 for e in events if e["type"] in ("result", "error")) == 1
 
 
-# --- 失敗の写像 --------------------------------------------------------------
-
-
-def test_intermediate_read_failure_is_not_attributed_to_the_user_input(tmp_path, monkeypatch,
-                                                                      capsysbinary):
-    """内部生成ファイルの読み直し失敗は、利用者入力を指す field を載せず対象を path に載せる。"""
+def test_intermediate_read_failure_has_null_field_and_the_intermediate_path(tmp_path, monkeypatch,
+                                                                           capsysbinary):
     exc = IntermediateReadError("読み直しに失敗", path=str(tmp_path / "vocal.wav"))
     assert _run_machine(tmp_path, monkeypatch, exc) == 1
     event = _machine_error(capsysbinary)
@@ -94,8 +74,7 @@ def test_input_load_failure_points_at_the_input(tmp_path, monkeypatch, capsysbin
     assert event["exit_code"] == 1
 
 
-def test_missing_decoder_is_an_environment_failure(tmp_path, monkeypatch, capsysbinary):
-    """復号器の未検出は入力の不備ではなく環境の不足なので、終了コードは4。"""
+def test_missing_decoder_exits_with_the_environment_failure_code_4(tmp_path, monkeypatch, capsysbinary):
     exc = AudioLoadError("復号器が見つからない", reason="decoder_missing")
     assert _run_machine(tmp_path, monkeypatch, exc) == 4
     event = _machine_error(capsysbinary)
@@ -129,9 +108,8 @@ def test_recognition_failure_names_the_recognition_stage(tmp_path, monkeypatch, 
     assert event["stage"] == "recognize"
 
 
-def test_intermediate_write_failure_points_at_the_option_that_asked_for_it(tmp_path, monkeypatch,
-                                                                          capsysbinary):
-    """中間生成物の書き込み失敗は、保存を要求したオプションと保存先を示す。"""
+def test_intermediate_write_failure_names_keep_intermediate_and_its_directory(tmp_path, monkeypatch,
+                                                                              capsysbinary):
     exc = IntermediateWriteError("書き込みに失敗")
     out = str(tmp_path / "out.vpr")
     assert _run_machine(tmp_path, monkeypatch, exc, extra=["--keep-intermediate"]) == 3
@@ -142,8 +120,7 @@ def test_intermediate_write_failure_points_at_the_option_that_asked_for_it(tmp_p
     assert event["exit_code"] == 3
 
 
-def test_stage_failure_message_names_the_stage_in_human_terms(tmp_path, monkeypatch, capsys):
-    """非機械モードでも、どの工程で失敗したかを利用者向けの工程名で1行示す。"""
+def test_non_machine_stage_failure_is_one_line_naming_the_stage_label(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
     _stub_pipeline(monkeypatch, raises=StageExecutionError("推論に失敗", stage="separate"))
     assert cli.main([src, "-o", str(tmp_path / "out.vpr")]) == 4
@@ -153,11 +130,7 @@ def test_stage_failure_message_names_the_stage_in_human_terms(tmp_path, monkeypa
     assert "ボーカル分離" in lines[0]
 
 
-# --- 中間生成物の保存先 ------------------------------------------------------
-
-
-def test_intermediate_directory_is_adjacent_to_the_output(tmp_path, monkeypatch):
-    """保存先は出力に隣接する <出力ファイル名>.intermediate。"""
+def test_intermediate_directory_is_the_output_path_plus_intermediate_suffix(tmp_path, monkeypatch):
     captured = {}
     src = _touch(tmp_path / "in.wav")
     out = str(tmp_path / "out.vpr")
@@ -177,7 +150,6 @@ def test_intermediate_is_not_saved_without_the_option(tmp_path, monkeypatch):
 
 
 def test_intermediate_is_saved_even_in_dry_run(tmp_path, monkeypatch):
-    """--dry-run が抑制するのは最終 vpr の書き出しだけで、中間生成物の保存は行う。"""
     captured = {}
     src = _touch(tmp_path / "in.wav")
     out = str(tmp_path / "out.vpr")
@@ -198,11 +170,7 @@ def test_leftover_intermediate_directory_does_not_need_overwrite(tmp_path, monke
     assert cli.main([src, "-o", out, "--keep-intermediate"]) == 0
 
 
-# --- 前段へ渡す設定の解決 ----------------------------------------------------
-
-
 def test_resolved_front_stage_settings_are_passed_through(tmp_path, monkeypatch):
-    """CLI が共通引数群から解決した設定を、そのままパイプラインへ渡す。"""
     captured = {}
     src = _touch(tmp_path / "in.wav")
     _stub_pipeline(monkeypatch, captured=captured)

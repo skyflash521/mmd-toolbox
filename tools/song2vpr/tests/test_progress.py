@@ -1,10 +1,3 @@
-"""song2vpr の段ラベル表と、進捗の振り分けの構築設定のテスト。
-
-振り分けそのもの(機械/非機械の分岐・同一段の継続・送出失敗の区別)の実体と検証は共有の
-cli_progress_router が持つ。ここでは song2vpr が渡す設定——段ラベル表と標準エラーの排他ロック——と、
-ラベル表の中身だけを検証する。
-"""
-
 import io
 
 import pytest
@@ -30,16 +23,13 @@ def test_stage_label_returns_unknown_id_as_is():
     assert progress.stage_label("未知の工程") == "未知の工程"
 
 
-def test_label_table_covers_exactly_the_documented_stages():
-    # 段を足してラベルを足し忘れると、利用者向けの表示に生の id が出る。
+def test_label_table_covers_exactly_the_seven_stages():
     assert set(progress.STAGE_LABELS) == {
         "load", "separate", "recognize", "rms", "f0", "notes", "write"}
 
 
 @pytest.mark.parametrize("machine,quiet", [(True, False), (False, True), (False, False)])
 def test_build_router_passes_labels_and_stderr_write_lock(monkeypatch, machine, quiet):
-    # 音声前段は処理中に標準エラーの出力先を一時的に差し替えるので、同じ排他を進捗表示へ渡さないと
-    # ライブ行の書き込みが失敗しうる。
     captured = {}
 
     def fake_router(**kwargs):
