@@ -276,6 +276,18 @@ def test_dry_run_report_lists_bone_categories_and_foot_ik_candidates(tmp_path, m
     assert "右足ＩＫ" in data["foot_ik_candidates"]
 
 
+def test_dry_run_report_summarizes_cleaning_change_per_category(tmp_path, monkeypatch):
+    src = tmp_path / "in.vmd"
+    _write_all_sections_doc(src)
+    untouched = _dry_run_report(src, monkeypatch, "--no-denoise", "--no-foot-ik-stabilize")
+    assert untouched["categories"]
+    for c in untouched["categories"]:
+        assert c["max_pos_change"] == 0.0
+        assert c["max_rot_change_deg"] == 0.0
+    cleaned = _dry_run_report(src, monkeypatch)
+    assert all("max_pos_change" in c for c in cleaned["categories"])
+
+
 def test_report_reflects_denoise_flag(tmp_path, monkeypatch):
     src = tmp_path / "in.vmd"
     _write_all_sections_doc(src)

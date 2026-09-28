@@ -69,8 +69,50 @@ def _stabilization(bone_keys, clean_strength, denoise_on, suppression):
             )
         tracks[name] = (category, [k.frame for k in ks], positions)
     if not tracks:
-        return {}
-    return footik.stabilize_foot_ik(tracks, suppression)
+        return {}, {}
+    frames_by_name = {name: frames for name, (_category, frames, _positions) in tracks.items()}
+    return footik.stabilize_foot_ik(tracks, suppression), frames_by_name
+
+
+def _unit(q):
+    norm = math.sqrt(sum(c * c for c in q))
+    return tuple(c / norm for c in q)
+
+
+def _rotation_change_deg(q_before, q_after) -> float:
+    return _quat_angle_deg(_unit(q_after), _unit(q_before))
+
+
+def _position_and_rotation_changes(keys, cleaned_keys) -> tuple[list[float], list[float]]:
+    cleaned_by_frame = {k.frame: k for k in cleaned_keys}
+    pos_changes = []
+    rot_changes_deg = []
+    for k in keys:
+        c = cleaned_by_frame.get(k.frame)
+        if c is None:
+            continue
+        pos_changes.append(math.dist(k.position, c.position))
+        rot_changes_deg.append(_rotation_change_deg(k.rotation, c.rotation))
+    return pos_changes, rot_changes_deg
+
+
+def _max_and_mean(values) -> tuple[float, float]:
+    if not values:
+        return 0.0, 0.0
+    return max(values), sum(values) / len(values)
+
+
+def _category_summaries(per_category) -> list[dict]:
+    summaries = []
+    for category, acc in per_category.items():
+        summary = {"category": category, "bones": acc["bones"], "protected_frames": acc["protected_frames"]}
+        if acc["has_change"]:
+            summary["max_pos_change"], summary["mean_pos_change"] = _max_and_mean(acc["pos_changes"])
+            summary["max_rot_change_deg"], summary["mean_rot_change_deg"] = _max_and_mean(acc["rot_changes_deg"])
+        if acc["lock_ratios"]:
+            summary["lock_applied_ratio"] = sum(acc["lock_ratios"]) / len(acc["lock_ratios"])
+        summaries.append(summary)
+    return summaries
 
 
 def _reduction_rate(input_count, output_count):
@@ -81,7 +123,11 @@ def _reduction_rate(input_count, output_count):
 
 def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, foot_ik_stabilize=True,
                  reduction: dict[str, dict] | None = None, suppression=1.0,
-                 pose_denoise: dict | None = None):
+                 pose_denoise: dict | None = None, cleaned_bone_keys=None, denoised_bone_keys=None):
+    """cleaned_bone_keys はノイズ軽減と足IK接地安定化を終えた、キーフレーム圧縮前のボーンキー。渡すと、
+    bone_keys からの変更量をボーンごとと種別ごとに集計する。denoised_bone_keys はノイズ軽減を終えた、足IK
+    接地安定化前のボーンキー。渡すと接地の診断をこれから作り、渡さなければ bone_keys にボーン単位のノイズ
+    軽減をかけて作る。"""
     order = []
     groups = {}
     for k in bone_keys:
@@ -89,8 +135,17 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
             groups[k.name] = []
             order.append(k.name)
         groups[k.name].append(k)
+    cleaned_groups = {}
+    for k in cleaned_bone_keys or ():
+        cleaned_groups.setdefault(k.name, []).append(k)
+    per_category = {}
 
-    stab = _stabilization(bone_keys, clean_strength, denoise, suppression) if foot_ik_stabilize else {}
+    if not foot_ik_stabilize:
+        stab, stab_frames = {}, {}
+    elif denoised_bone_keys is not None:
+        stab, stab_frames = _stabilization(denoised_bone_keys, clean_strength, False, suppression)
+    else:
+        stab, stab_frames = _stabilization(bone_keys, clean_strength, denoise, suppression)
 
     bones = []
     foot_ik = []
@@ -114,16 +169,32 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
             "protected_frames": protected_frames,
             "cleaning": presets.resolve_cleaning(clean_strength, category),
         }
+        acc = per_category.setdefault(category, {
+            "bones": 0, "protected_frames": 0, "has_change": cleaned_bone_keys is not None,
+            "pos_changes": [], "rot_changes_deg": [], "lock_ratios": [],
+        })
+        acc["bones"] += 1
+        acc["protected_frames"] += protected_frames
+        if cleaned_bone_keys is not None:
+            pos_changes, rot_changes_deg = _position_and_rotation_changes(keys, cleaned_groups.get(name, []))
+            max_pos, mean_pos = _max_and_mean(pos_changes)
+            max_rot, mean_rot = _max_and_mean(rot_changes_deg)
+            entry["clean_change"] = {
+                "max_pos": max_pos, "mean_pos": mean_pos, "max_rot_deg": max_rot, "mean_rot_deg": mean_rot,
+            }
+            acc["pos_changes"].extend(pos_changes)
+            acc["rot_changes_deg"].extend(rot_changes_deg)
         if name in stab:
             ts = stab[name]
             entry["grounding_candidates"] = len(ts.grounding.candidate_frames)
             entry["grounding_segments"] = [
-                [keys[s.start].frame, keys[s.end].frame] for s in ts.grounding.segments
+                [stab_frames[name][s.start], stab_frames[name][s.end]] for s in ts.grounding.segments
             ]
             entry["max_change"] = ts.max_change
             entry["mean_change"] = ts.mean_change
             entry["lock_applied_ratio"] = ts.lock_applied_ratio
             entry["clamp_warnings"] = len(ts.warnings)
+            acc["lock_ratios"].append(ts.lock_applied_ratio)
         if reduction is not None and name in reduction:
             r = reduction[name]
             entry["reduction"] = {
@@ -149,6 +220,7 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
         "reduce": reduction is not None,
         "range": [min(all_frames), max(all_frames)] if all_frames else [],
         "bones": bones,
+        "categories": _category_summaries(per_category),
         "foot_ik_candidates": foot_ik,
         "toe_ik_candidates": toe_ik,
     }
@@ -193,6 +265,16 @@ def format_dry_run(report):
                 f" cuts={r['cuts']} tol=[{r['tol_pos']:.4g},{r['tol_rot']:.4g}]"
                 f" err_pos={err_pos:.4g} err_rot={e['rot_deg']:.4g}deg"
             )
+        lines.append(line)
+    for c in report["categories"]:
+        line = f"種別 {c['category']}: bones={c['bones']} protected={c['protected_frames']}"
+        if "max_pos_change" in c:
+            line += (
+                f" max_pos={c['max_pos_change']:.4g} mean_pos={c['mean_pos_change']:.4g}"
+                f" max_rot={c['max_rot_change_deg']:.4g}deg mean_rot={c['mean_rot_change_deg']:.4g}deg"
+            )
+        if "lock_applied_ratio" in c:
+            line += f" lock_rate={c['lock_applied_ratio']:.2f}"
         lines.append(line)
     lines.append(f"足IK候補: {report['foot_ik_candidates']}")
     lines.append(f"つま先IK候補: {report['toe_ik_candidates']}")

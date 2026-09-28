@@ -519,3 +519,85 @@ def test_format_dry_run_shows_values_and_candidates():
     bone_line_plus_candidate_list = 2
     assert text.count("右足ＩＫ") >= bone_line_plus_candidate_list
     assert text.count("右つま先ＩＫ") >= bone_line_plus_candidate_list
+
+
+def _two_arm_bones_and_cleaned():
+    keys = [bone(n, f) for n in ("右手首", "左手首") for f in range(3)]
+    cleaned = [
+        bone("右手首", 0), bone("右手首", 1, pos=(0.3, 0.0, 0.0)), bone("右手首", 2),
+        bone("左手首", 0), bone("左手首", 1), bone("左手首", 2, rot=_quat_y(6.0)),
+    ]
+    return keys, cleaned
+
+
+def test_report_records_change_from_input_to_cleaned_keys_per_bone():
+    keys, cleaned = _two_arm_bones_and_cleaned()
+    rep = report.build_report(keys, denoise=False, foot_ik_stabilize=False, cleaned_bone_keys=cleaned)
+    right = _entry(rep, "右手首")["clean_change"]
+    assert right["max_pos"] == pytest.approx(0.3)
+    assert right["mean_pos"] == pytest.approx(0.1)
+    assert right["max_rot_deg"] == pytest.approx(0.0)
+    left = _entry(rep, "左手首")["clean_change"]
+    assert left["max_rot_deg"] == pytest.approx(6.0)
+    assert left["mean_rot_deg"] == pytest.approx(2.0)
+
+
+def test_report_summarizes_change_over_all_frames_of_each_category():
+    keys, cleaned = _two_arm_bones_and_cleaned()
+    rep = report.build_report(keys, denoise=False, foot_ik_stabilize=False, cleaned_bone_keys=cleaned)
+    arms = next(c for c in rep["categories"] if c["category"] == "arms")
+    assert arms["bones"] == 2
+    assert arms["max_pos_change"] == pytest.approx(0.3)
+    assert arms["mean_pos_change"] == pytest.approx(0.3 / 6)
+    assert arms["max_rot_change_deg"] == pytest.approx(6.0)
+    assert arms["mean_rot_change_deg"] == pytest.approx(6.0 / 6)
+    assert "lock_applied_ratio" not in arms
+
+
+def test_report_category_summary_sums_protected_frames_and_averages_lock_ratio():
+    keys = _slow_grounded_ramp_frames_0_to_10("右足ＩＫ") + [bone("左足ＩＫ", f) for f in range(11)]
+    rep = report.build_report(keys, denoise=False)
+    foot = next(c for c in rep["categories"] if c["category"] == "foot_ik")
+    entries = [_entry(rep, "右足ＩＫ"), _entry(rep, "左足ＩＫ")]
+    assert foot["protected_frames"] == sum(e["protected_frames"] for e in entries)
+    assert foot["lock_applied_ratio"] == pytest.approx(sum(e["lock_applied_ratio"] for e in entries) / 2)
+
+
+def test_report_without_cleaned_keys_has_no_change_statistics():
+    keys, _cleaned = _two_arm_bones_and_cleaned()
+    rep = report.build_report(keys, denoise=False, foot_ik_stabilize=False)
+    assert "clean_change" not in _entry(rep, "右手首")
+    arms = next(c for c in rep["categories"] if c["category"] == "arms")
+    assert "max_pos_change" not in arms
+
+
+def test_format_dry_run_shows_category_summary_line():
+    keys, cleaned = _two_arm_bones_and_cleaned()
+    rep = report.build_report(keys, denoise=False, foot_ik_stabilize=False, cleaned_bone_keys=cleaned)
+    line = next(x for x in report.format_dry_run(rep).splitlines() if x.startswith("種別 arms"))
+    assert "bones=2" in line
+    assert "max_pos=0.3" in line
+    assert "max_rot=6deg" in line
+
+
+def test_rotation_change_is_zero_for_unchanged_non_unit_quaternion():
+    keys = [bone("右手首", 0, rot=(0.0, 0.0, 0.0, 0.5))]
+    rep = report.build_report(keys, denoise=False, foot_ik_stabilize=False, cleaned_bone_keys=keys)
+    assert _entry(rep, "右手首")["clean_change"]["max_rot_deg"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_grounding_diagnostics_come_from_denoised_keys_when_given():
+    fast = [bone("右足ＩＫ", f, pos=(3.0 * f, 0.0, 0.0)) for f in range(11)]
+    rep = report.build_report(
+        fast, denoise=True, denoised_bone_keys=_slow_grounded_ramp_frames_0_to_10(),
+    )
+    e = _entry(rep, "右足ＩＫ")
+    assert e["grounding_candidates"] == 11
+    assert e["lock_applied_ratio"] == pytest.approx(1.0)
+
+
+def test_grounding_segments_use_frames_of_denoised_keys_when_ranges_differ():
+    short_input = [bone("右足ＩＫ", f) for f in range(100, 111)]
+    expanded = [bone("右足ＩＫ", f) for f in range(0, 111)]
+    rep = report.build_report(short_input, denoise=True, denoised_bone_keys=expanded)
+    assert _entry(rep, "右足ＩＫ")["grounding_segments"] == [[0, 110]]

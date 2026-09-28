@@ -467,9 +467,11 @@ def _run(args, machine, emitter, fail):
                 new_bone = _clean_bones(dense_bone, args.clean_strength)
         else:
             new_bone = dense_bone
+        denoised_bone = new_bone
         if args.foot_ik_stabilize:
             reporter.stage("foot_ik")
             new_bone = _stabilize_bones(new_bone, args.foot_slide_suppression)
+        cleaned_bone = new_bone
         if args.reduce:
             reduce_start = time.monotonic()
             reporter.stage("reduce")
@@ -500,6 +502,8 @@ def _run(args, machine, emitter, fail):
             reduction=reduction_diag,
             suppression=args.foot_slide_suppression,
             pose_denoise=pose_diag,
+            cleaned_bone_keys=cleaned_bone,
+            denoised_bone_keys=denoised_bone,
         )
         print(report.format_dry_run(rep))
 
