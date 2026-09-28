@@ -125,6 +125,14 @@ def test_machine_error_bad_argument_value_error_names_the_option(tmp_path, capsy
     assert event["field"] == "--max-duration"
 
 
+def test_machine_error_time_signature_denominator_names_the_option(tmp_path, capsysbinary):
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main(["--machine", src, "--time-signature", "4/3"]) == 2
+    event = machine_error(capsysbinary)
+    assert event["code"] == "bad_argument"
+    assert event["field"] == "--time-signature"
+
+
 def test_machine_error_combination_check_names_the_option(tmp_path, capsysbinary):
     """組み合わせ検証の違反は、共有側が返す対象引数の長形式フラグ名を field に載せる。"""
     src = _touch(tmp_path / "in.wav")

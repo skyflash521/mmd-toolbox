@@ -239,6 +239,33 @@ def test_unreadable_lyrics_fail_before_the_front_stage_runs(tmp_path, monkeypatc
     assert (event["code"], event["field"]) == ("lyrics_unreadable", "--lyrics")
 
 
+def test_lyrics_that_do_not_decode_as_utf8_are_unreadable(tmp_path, monkeypatch, capsysbinary):
+    _stub_pipeline(monkeypatch)
+    lyrics = tmp_path / "lyrics.txt"
+    lyrics.write_bytes("ゆき".encode("cp932"))
+    assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr"),
+                     "--lyrics", str(lyrics)]) == 1
+    event = _events(capsysbinary)[-1]
+    assert (event["code"], event["field"], event["exit_code"]) == (
+        "lyrics_unreadable", "--lyrics", 1)
+
+
+def test_the_lyrics_are_read_as_one_text(tmp_path, monkeypatch):
+    _stub_pipeline(monkeypatch)
+    readings = []
+
+    def to_kana_reading(text):
+        readings.append(text)
+        return "ゆき"
+
+    monkeypatch.setattr("vocal_analysis.reading.to_kana_reading", to_kana_reading)
+    lyrics = tmp_path / "lyrics.txt"
+    lyrics.write_text("雪\n降る\n", encoding="utf-8")
+    assert cli.main([_source(tmp_path), "-o", str(tmp_path / "song.vpr"),
+                     "--lyrics", str(lyrics)]) == 0
+    assert readings == ["雪\n降る\n"]
+
+
 # --- --dry-run ---------------------------------------------------------------
 
 
@@ -281,6 +308,31 @@ def test_no_notes_warns_and_still_succeeds(tmp_path, monkeypatch, capsysbinary):
     assert cli.main(["--machine", _source(tmp_path), "-o", str(output)]) == 0
     assert _notes_of(output)[1] == []
     assert any(e["type"] == "warning" and e["code"] == "no_notes" for e in _events(capsysbinary))
+
+
+def test_no_notes_warns_in_dry_run_too(tmp_path, monkeypatch, capsysbinary):
+    silence = AudioPcm(samples=np.zeros((_RATE // 2, 1), dtype=np.float32), sample_rate=_RATE)
+    _stub_pipeline(monkeypatch, _front_stage(pcm=silence, segments=[], duration_sec=0.5))
+
+    assert cli.main(["--machine", "--dry-run", _source(tmp_path),
+                     "-o", str(tmp_path / "song.vpr")]) == 0
+    assert any(e["type"] == "warning" and e["code"] == "no_notes" for e in _events(capsysbinary))
+
+
+@pytest.mark.parametrize("quiet", [False, True])
+def test_quiet_reaches_the_progress_display(tmp_path, monkeypatch, quiet):
+    _stub_pipeline(monkeypatch)
+    received = {}
+
+    def build_router(**kwargs):
+        received.update(kwargs)
+        return _SpyProgressRouter()
+
+    _SpyProgressRouter.calls = []
+    monkeypatch.setattr(cli._progress, "build_router", build_router)
+    argv = [_source(tmp_path), "-o", str(tmp_path / "song.vpr")] + (["--quiet"] if quiet else [])
+    assert cli.main(argv) == 0
+    assert received["quiet"] is quiet
 
 
 # --- 結線した値から出す警告と失敗 ----------------------------------------------

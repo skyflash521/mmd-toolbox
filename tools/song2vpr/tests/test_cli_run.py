@@ -187,6 +187,17 @@ def test_intermediate_is_saved_even_in_dry_run(tmp_path, monkeypatch):
     assert captured["kwargs"]["keep_intermediate_dir"] == f"{out}.intermediate"
 
 
+def test_leftover_intermediate_directory_does_not_need_overwrite(tmp_path, monkeypatch):
+    src = _touch(tmp_path / "in.wav")
+    out = str(tmp_path / "out.vpr")
+    leftover = tmp_path / "out.vpr.intermediate"
+    leftover.mkdir()
+    (leftover / "vocal.wav").write_bytes(b"")
+    _stub_pipeline(monkeypatch)
+
+    assert cli.main([src, "-o", out, "--keep-intermediate"]) == 0
+
+
 # --- 前段へ渡す設定の解決 ----------------------------------------------------
 
 

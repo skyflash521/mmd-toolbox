@@ -72,6 +72,13 @@ def test_gap_and_unlabelled_segments_are_excluded_from_the_phonemes():
     assert result.notes[0].phonemes == ["a"]
 
 
+def test_symbols_without_a_vpr_notation_are_excluded_from_the_phonemes():
+    result = lyrics.annotate([_note(0.0, 0.4)],
+                             _one_syllable(_consonant(0.0, 0.1, "θ"), _vowel(0.1, 0.4, "a")),
+                             _flat_rms())
+    assert result.notes[0].phonemes == ["a"]
+
+
 def test_phonemes_may_be_empty():
     """除外の結果として空になっても許容する。"""
     result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(_gap(0.0, 0.4)), _flat_rms())
@@ -141,6 +148,11 @@ def test_a_continuation_note_carries_the_continuation_mark():
     (["v"], "a", "ば"),  # ヴ表記は受理を確認できていないので調音の近い行を使う
     (["k", "j"], "a", "きゃ"),  # 隣接する子音が j のときは前の子音の拗音行
     (["ɾ", "j"], "o̞", "りょ"),
+    (["ɡ", "j"], "a", "ぎゃ"),
+    (["b", "j"], "ɯ", "びゅ"),
+    (["p", "j"], "o̞", "ぴょ"),
+    (["m", "j"], "a", "みゃ"),
+    (["h", "j"], "a", "ひゃ"),
     (["s", "j"], "a", "や"),  # 拗音行を持たない子音は j の行
     (["t", "k"], "a", "か"),  # 頭子音が複数なら核に隣接する子音で決める
 ])
@@ -297,6 +309,21 @@ def test_mora_split_rules(text, expected):
     assert [note.lyric for note in result.notes] == expected
 
 
+@pytest.mark.parametrize("reading,expected", [
+    pytest.param("ゃ", ["ゃ"], id="small_kana_without_previous_stands_alone"),
+    pytest.param("かっん", ["か", "っん"], id="sokuon_joins_following_moraic_nasal"),
+    pytest.param("んゃ", ["んゃ"], id="small_kana_joins_preceding_moraic_nasal"),
+    pytest.param("か ー", ["か", "ー"], id="long_mark_does_not_join_across_skipped_char"),
+    pytest.param("かっ い", ["かっ", "い"], id="sokuon_does_not_join_across_skipped_char"),
+    pytest.param("っ", ["っ"], id="sokuon_without_neighbours_stands_alone"),
+])
+def test_mora_split_rules_on_the_reading_as_given(monkeypatch, reading, expected):
+    monkeypatch.setattr("vocal_analysis.reading.to_kana_reading", lambda text: reading)
+    source, segments = _syllable_per_note(len(expected))
+    result = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="歌詞")
+    assert [note.lyric for note in result.notes] == expected
+
+
 def test_more_notes_than_morae_fall_back_to_the_vowel_kana():
     source, segments = _syllable_per_note(2, phoneme="i")
     result = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さ")
@@ -437,6 +464,20 @@ def test_moraic_nasal_from_the_given_lyrics_is_not_counted():
                              lyrics_text="ん")
     assert result.notes[0].lyric == "ん"
     assert result.diagnostics.moraic_nasal_notes == 0
+
+
+def test_undetermined_vowel_from_the_given_lyrics_is_not_counted():
+    result = lyrics.annotate([_note(0.0, 0.2)], _one_syllable(_gap(0.0, 0.2)), _flat_rms(),
+                             lyrics_text="か")
+    assert result.notes[0].lyric == "か"
+    assert result.diagnostics.undetermined_vowel_notes == 0
+
+
+def test_continuation_notes_are_not_counted_as_undetermined_vowels():
+    result = lyrics.annotate([_note(0.0, 0.2), _note(0.2, 0.4, midi=71)],
+                             _one_syllable(_gap(0.0, 0.4)), _flat_rms())
+    assert [note.lyric for note in result.notes] == ["あ", "-"]
+    assert result.diagnostics.undetermined_vowel_notes == 1
 
 
 def test_notes_without_phonemes_are_counted():

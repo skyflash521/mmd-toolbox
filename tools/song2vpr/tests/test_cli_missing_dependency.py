@@ -76,6 +76,15 @@ def test_machine_mode_reports_missing_dependency(tmp_path, capsysbinary, missing
     assert "soundfile" in events[0]["message"]
 
 
+def test_lyrics_are_read_after_the_dependency_guard(tmp_path, capsysbinary, missing_dependency):
+    src = tmp_path / "in.wav"
+    src.write_bytes(b"")
+    assert cli.main(["--machine", str(src), "--lyrics", str(tmp_path / "無い.txt")]) == 4
+    text = capsysbinary.readouterr().out.decode("utf-8")
+    events = [json.loads(ln) for ln in text.split("\n") if ln]
+    assert events[-1]["code"] == "missing_dependency"
+
+
 def test_help_succeeds_without_dependency(capsys, missing_dependency):
     """オプション定義の組み立ては追加依存を要さない取り込みだけで済む。"""
     assert cli.main(["--help"]) == 0

@@ -116,6 +116,17 @@ def test_moraic_nasal_becomes_its_own_note():
     assert result[1].start_sec == pytest.approx(0.3, abs=FRAME)
 
 
+def test_geminate_closure_joins_the_following_syllable():
+    track = _track([(0.3, 69), (0.15, None), (0.25, 69)])
+    closure, onset = _consonant(0.3, 0.4, "k"), _consonant(0.4, 0.45, "k")
+    segments = [_vowel(0.0, 0.3, "a"), closure, onset, _vowel(0.45, 0.7, "a")]
+    split = notes.split(track, segments)
+    assert len(split.notes) == 2
+    assert split.notes[1].start_sec == pytest.approx(0.3, abs=FRAME)
+    assert closure in split.syllable_segments[split.notes[1].syllable]
+    assert closure not in split.syllable_segments[split.notes[0].syllable]
+
+
 def test_syllable_head_goes_to_its_vowel_even_before_a_moraic_nasal():
     """「かん」のような並びで、頭の子音は母音の音符へ、撥音は独立した音符になる。"""
     track = _track([(0.1, None), (0.3, 69), (0.2, 69)])

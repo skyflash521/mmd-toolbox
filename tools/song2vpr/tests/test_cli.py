@@ -198,6 +198,37 @@ def test_max_duration_negative_is_arg_error(tmp_path):
     assert cli.main([src, "--max-duration=-1", "--dry-run"]) == 2
 
 
+@pytest.mark.parametrize("value", ["0.01", "300"])
+def test_tempo_from_the_storable_minimum_upward_is_accepted(tmp_path, value):
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--tempo", value, "--dry-run"]) == 0
+
+
+@pytest.mark.parametrize("value", ["0", "0.009", "-120", "abc", "nan", "inf", "-inf"])
+def test_tempo_below_the_storable_minimum_or_not_finite_is_arg_error(tmp_path, value):
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, f"--tempo={value}", "--dry-run"]) == 2
+
+
+@pytest.mark.parametrize("value", ["3/4", "6/8", "1/1", "4/128"])
+def test_time_signature_with_a_power_of_two_denominator_is_accepted(tmp_path, value):
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--time-signature", value, "--dry-run"]) == 0
+
+
+@pytest.mark.parametrize("value", [
+    pytest.param("4/3", id="denominator_not_power_of_two"),
+    pytest.param("4/256", id="beat_not_whole_ticks"),
+    pytest.param("0/4", id="numerator_not_positive"),
+    pytest.param("4/0", id="denominator_not_positive"),
+    pytest.param("4", id="not_numerator_slash_denominator"),
+    pytest.param("a/4", id="numerator_not_integer"),
+])
+def test_time_signature_outside_the_accepted_set_is_arg_error(tmp_path, value):
+    src = _touch(tmp_path / "in.wav")
+    assert cli.main([src, "--time-signature", value, "--dry-run"]) == 2
+
+
 @pytest.mark.parametrize("opt, value", [
     ("--max-duration", "abc"), ("--max-duration", "nan"), ("--sofa-timeout", "abc"),
     ("--sofa-timeout", "0"),

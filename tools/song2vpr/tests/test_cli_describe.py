@@ -150,6 +150,10 @@ def test_option_help_is_non_empty(capsysbinary):
         assert option["help"]
 
 
+def test_time_signature_help_tells_the_power_of_two_denominator(capsysbinary):
+    assert "2の冪" in _options_by_name(capsysbinary)["--time-signature"]["help"]
+
+
 # --- options の値 ------------------------------------------------------------
 
 
