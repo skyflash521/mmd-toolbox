@@ -1,10 +1,3 @@
-"""shakevmd CLI 移植性のテスト。
-
-機械モード標準出力の UTF-8・改行 LF 固定、非ASCIIパスの受理と生成、人間向け標準エラーの
-符号化安全性(ロケール符号化で表せない文字でもプロセスを落とさない)、標準出力へ書けない場合に
-例外を漏らさないことを検証する。テストは決定論的・外部依存なしで行う。
-"""
-
 import io
 import sys
 
@@ -16,9 +9,7 @@ from vmd.types import BoneKey, CameraKey, VmdDocument
 
 LINEAR = bytes([20, 107, 20, 107]) * 6
 
-# cp932(Windows のロケール符号化)で表せない文字(絵文字 U+1F3A5)。ロケール符号化外の文字を
-# 人間向け標準エラーへ書く経路を作り、符号化安全性を検証するために使う。
-UNREP = "\U0001f3a5"
+CHAR_NOT_IN_CP932 = "\U0001f3a5"
 
 
 def cam(frame, dist=-30.0, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0), fov=30, persp=0):
@@ -37,23 +28,18 @@ def write_input(path, keys=KEYS, **doc_kwargs):
     return str(path)
 
 
-# --- 機械モード標準出力: UTF-8 + 改行 LF 固定 ---------------------
-
-
 def test_machine_stdout_uses_lf_only(tmp_path, capsysbinary):
-    # 機械モードの各行は LF(\n)終端で、\r を一切含まない(CRLF 変換なし。バイト列で検証)。
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"])
     assert rc == 0
     raw = capsysbinary.readouterr().out
     assert raw.endswith(b"\n")
-    assert b"\r" not in raw                        # CR を混入させない(CRLF 変換なし)
+    assert b"\r" not in raw
     for line in raw.split(b"\n")[:-1]:
-        assert line and not line.endswith(b"\r")   # 各行が非空で CR 終端でない
+        assert line and not line.endswith(b"\r")
 
 
 def test_machine_stdout_non_ascii_is_utf8(tmp_path, capsysbinary):
-    # 非ASCII(日本語の出力パス・警告メッセージ)を UTF-8 のまま出す(ロケール符号化に依存しない)。
     bone = [BoneKey(name_raw=b"bone".ljust(15, b"\x00"), frame=0,
                     position=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0),
                     interpolation=bytes(64))]
@@ -62,66 +48,46 @@ def test_machine_stdout_non_ascii_is_utf8(tmp_path, capsysbinary):
     rc = cli.main([inp, "-o", str(out), "--machine", "--no-smooth"])
     assert rc == 0
     raw = capsysbinary.readouterr().out
-    # 出力パスの日本語が UTF-8 バイトで載る(ensure_ascii=False 相当・\uXXXX へエスケープしない)。
     assert "出力".encode("utf-8") in raw
-    # 非カメラセクション透過の警告メッセージ(日本語)も UTF-8 で載る。
     assert "カメラ以外".encode("utf-8") in raw
-    text = raw.decode("utf-8")                      # UTF-8 として復号できる
+    text = raw.decode("utf-8")
     assert "出力" in text and "カメラ以外" in text
 
 
-# --- 非ASCIIパスの受理・生成 -------------------------------------
-
-
 def test_non_ascii_path_roundtrip(tmp_path):
-    # 日本語ファイル名の入力を受理し、日本語ファイル名の出力を生成できる。
     inp = write_input(tmp_path / "手ぶれ入力.vmd")
     out = tmp_path / "手ぶれ出力.vmd"
     rc = cli.main([inp, "-o", str(out), "--no-smooth"])
     assert rc == 0
     assert out.exists()
-    doc, _ = vmd_io.read(str(out))                 # 生成物が妥当な VMD として読める
+    doc, _ = vmd_io.read(str(out))
     assert doc.camera
 
 
-# --- 人間向け標準エラーの符号化安全性 ---------------------------
-# ロケール符号化(cp932)相当へ差し替えた標準エラーの下で、表せない文字を含む人間向け出力
-# (argparse 使用法エラー・fail() の error 行・警告ループの warning 行)が UnicodeEncodeError で
-# 本体を異常終了/internal_error へ落とさないことを検証する。この符号化安全性は cli.py が標準エラーの
-# エラーハンドラを backslashreplace へ緩めることで担い、緩和が無ければ各経路は例外で失敗する。
-
-
 def _cp932_stderr(monkeypatch):
-    """sys.stderr をロケール符号化(cp932)相当・strict へ差し替える。"""
     wrapper = io.TextIOWrapper(io.BytesIO(), encoding="cp932", errors="strict", newline="")
     monkeypatch.setattr(sys, "stderr", wrapper)
     return wrapper
 
 
 def test_stderr_safe_argparse_usage_error(monkeypatch):
-    # (a) argparse 使用法エラー経路: 表せない文字を含む不正引数値。argparse の文言を載せたエラー行が
-    # 符号化に失敗せず、引数エラー(2)で終える(例外を漏らさない)。
     _cp932_stderr(monkeypatch)
-    rc = cli.main(["in.vmd", "--seed", UNREP])
+    rc = cli.main(["in.vmd", "--seed", CHAR_NOT_IN_CP932])
     assert rc == 2
 
 
 def test_stderr_safe_fail_path(tmp_path, monkeypatch):
-    # (b) fail() 経路: 表せない文字を含むパス。上書きガードの fail() メッセージが符号化に失敗せず、
-    # 引数エラー(2)で終える(符号化失敗を internal_error(1)へ落とさない)。
-    p = write_input(tmp_path / (UNREP + ".vmd"))  # 出力先に既存ファイルがある状態を作る
+    p = write_input(tmp_path / (CHAR_NOT_IN_CP932 + ".vmd"))
     _cp932_stderr(monkeypatch)
-    rc = cli.main([p, "-o", p])   # 入力=出力・既存・--overwrite 未指定 → output_exists(2)
+    rc = cli.main([p, "-o", p])
     assert rc == 2
 
 
 def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
-    # (c) 警告ループ経路: 表せない文字を含む警告文。warning 行が符号化に失敗せず本体は正常終了(0)
-    # する(符号化失敗を internal_error(1)へ落とさない)。emitter 非経由の人間向け stderr を突く。
     def fake_bake(camera_keys, *a, **k):
         return bake_mod.BakeResult(
             camera_keys=list(camera_keys),
-            warnings=[ShakeWarning("passthrough_test", "警告" + UNREP, None)],
+            warnings=[ShakeWarning("passthrough_test", "警告" + CHAR_NOT_IN_CP932, None)],
             resolved=[(0, 60)],
         )
     monkeypatch.setattr(cli, "bake", fake_bake)
@@ -131,12 +97,7 @@ def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
     assert rc == 0
 
 
-# --- 標準出力へ書けない場合 ---------------------------------------
-
-
 class _UnwritableStdout:
-    """buffer への書き込みが常に失敗する標準出力(呼び出し側がパイプを先に閉じた状況)。"""
-
     class _Buffer:
         def write(self, _data):
             raise OSError("broken pipe")
@@ -147,14 +108,10 @@ class _UnwritableStdout:
 
 def test_broken_stdout_in_machine_mode_reports_reason_without_traceback(tmp_path, monkeypatch,
                                                                        capsys):
-    # 標準出力へ書けないと終端イベントを出せないが、例外をトレースバックのまま漏らさず、標準エラーへ
-    # 理由1行だけを出し、その時点で確定している失敗の終了コードで終える。
-    # 差し替えは CLI 呼び出しの区間だけに限り、標準エラーを読み出す前に元へ戻す。
     with monkeypatch.context() as m:
         m.setattr(sys, "stdout", _UnwritableStdout())
         rc = cli.main([str(tmp_path / "nope.vmd"), "--machine"])
-    assert rc == 1  # 入力不在の終了コード(標準出力へ書けないことで変わらない)
+    assert rc == 1
     err = capsys.readouterr().err.splitlines()
-    assert len(err) == 1  # 理由1行だけ(トレースバック等の余分な行が無い)
-    # 報告する理由は元の失敗のまま(標準出力へ書けなかったこと自体を理由に差し替えない)。
+    assert len(err) == 1
     assert err[0].startswith("error: ") and "入力を VMD として読めない" in err[0]
