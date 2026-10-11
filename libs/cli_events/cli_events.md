@@ -3,7 +3,8 @@
 層: **共有ドメイン層**([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))。
 
 CLI ツールが共有する、機械モードのイベント送出、argparse の使用法エラーの引き取り、失敗報告の経路、
-Windows の `CTRL_BREAK_EVENT` を `KeyboardInterrupt` へ橋渡しする処理を提供する。機械モードの出力契約の
+Windows の `CTRL_BREAK_EVENT` を `KeyboardInterrupt` へ橋渡しする処理、`main` の骨格(終端の振り分けと終了コード)、
+共通フラグの登録、出力先ガード、警告行の表示を提供する。機械モードの出力契約の
 正本は [CLI インターフェース規約](../../docs/conventions/cli-interface.md)。
 
 ## 既知の限界

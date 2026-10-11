@@ -3,7 +3,8 @@
 層: **共有ドメイン層**([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))。
 
 音声前段 [vocal_analysis](../vocal_analysis/vocal_analysis.md) を CLI から駆動するための共通引数群を定義し、検証と、
-vocal_analysis へ渡す設定への解決までを担う。音声前段の実行そのものは持たない。
+vocal_analysis へ渡す設定への解決までを担う。あわせて、音声前段の工程ラベル、進捗ルータの構築、
+前段の例外から終了コードへの写像を担う。音声前段の実行そのものは持たない。
 
 ## 対象範囲
 
