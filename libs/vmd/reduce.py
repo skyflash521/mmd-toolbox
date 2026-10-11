@@ -125,18 +125,17 @@ def verify_camera_track(source_keys, output_keys, ranges, tols):
     """許容を超えたフレームを昇順のリストで返す。"""
     bad = set()
     for f0, f1 in ranges:
-        for f in range(f0, f1 + 1):
-            s = interp.sample_camera(source_keys, f)
-            o = interp.sample_camera(output_keys, f)
-            if math.dist(s["position"], o["position"]) > tols.camera_pos:
+        sp, sd, sf, sr = _camera_series(source_keys, f0, f1)
+        op, od, of, orot = _camera_series(output_keys, f0, f1)
+        for j, f in enumerate(range(f0, f1 + 1)):
+            if math.dist(sp[j], op[j]) > tols.camera_pos:
                 bad.add(f)
-            elif abs(s["distance"] - o["distance"]) > tols.camera_distance:
+            elif abs(sd[j] - od[j]) > tols.camera_distance:
                 bad.add(f)
-            elif abs(o["fov"] - s["fov"]) > tols.camera_fov:
+            elif abs(of[j] - sf[j]) > tols.camera_fov:
                 bad.add(f)
             elif (
-                max(_angle_diff_deg(s["rotation"][i], o["rotation"][i]) for i in range(3))
-                > tols.camera_rot
+                max(_angle_diff_deg(sr[j][i], orot[j][i]) for i in range(3)) > tols.camera_rot
             ):
                 bad.add(f)
     return sorted(bad)
@@ -146,25 +145,14 @@ def verify_bone_track(source_keys, output_keys, ranges, tols):
     """許容を超えたフレームを昇順のリストで返す。"""
     bad = set()
     for f0, f1 in ranges:
-        for f in range(f0, f1 + 1):
-            sp = (
-                interp.sample(source_keys, "pos_x", f),
-                interp.sample(source_keys, "pos_y", f),
-                interp.sample(source_keys, "pos_z", f),
-            )
-            op = (
-                interp.sample(output_keys, "pos_x", f),
-                interp.sample(output_keys, "pos_y", f),
-                interp.sample(output_keys, "pos_z", f),
-            )
-            if math.dist(sp, op) > tols.bone_pos:
+        sp = _sampled_positions(source_keys, f0, f1)
+        op = _sampled_positions(output_keys, f0, f1)
+        sq = interp.sample_range(source_keys, "rot", f0, f1)
+        oq = interp.sample_range(output_keys, "rot", f0, f1)
+        for j, f in enumerate(range(f0, f1 + 1)):
+            if math.dist(sp[j], op[j]) > tols.bone_pos:
                 bad.add(f)
-            elif (
-                quat.angle_deg(
-                    interp.sample(source_keys, "rot", f), interp.sample(output_keys, "rot", f)
-                )
-                > tols.bone_rot
-            ):
+            elif quat.angle_deg(sq[j], oq[j]) > tols.bone_rot:
                 bad.add(f)
     return sorted(bad)
 
@@ -187,16 +175,16 @@ def measure_camera_errors(source_keys, output_keys, ranges):
     m = {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "distance": 0.0, "fov": 0.0, "rot_deg": 0.0}
     axes = ("pos_x", "pos_y", "pos_z")
     for f0, f1 in ranges:
-        for f in range(f0, f1 + 1):
-            s = interp.sample_camera(source_keys, f)
-            o = interp.sample_camera(output_keys, f)
+        sp, sd, sf, sr = _camera_series(source_keys, f0, f1)
+        op, od, of, orot = _camera_series(output_keys, f0, f1)
+        for j in range(f1 - f0 + 1):
             for i, ax in enumerate(axes):
-                m[ax] = max(m[ax], abs(s["position"][i] - o["position"][i]))
-            m["distance"] = max(m["distance"], abs(s["distance"] - o["distance"]))
-            m["fov"] = max(m["fov"], abs(o["fov"] - s["fov"]))
+                m[ax] = max(m[ax], abs(sp[j][i] - op[j][i]))
+            m["distance"] = max(m["distance"], abs(sd[j] - od[j]))
+            m["fov"] = max(m["fov"], abs(of[j] - sf[j]))
             m["rot_deg"] = max(
                 m["rot_deg"],
-                max(_angle_diff_deg(s["rotation"][i], o["rotation"][i]) for i in range(3)),
+                max(_angle_diff_deg(sr[j][i], orot[j][i]) for i in range(3)),
             )
     return m
 
@@ -205,17 +193,14 @@ def measure_bone_errors(source_keys, output_keys, ranges):
     m = {"pos_x": 0.0, "pos_y": 0.0, "pos_z": 0.0, "rot_deg": 0.0}
     axes = ("pos_x", "pos_y", "pos_z")
     for f0, f1 in ranges:
-        for f in range(f0, f1 + 1):
-            for ax in axes:
-                m[ax] = max(
-                    m[ax], abs(interp.sample(source_keys, ax, f) - interp.sample(output_keys, ax, f))
-                )
-            m["rot_deg"] = max(
-                m["rot_deg"],
-                quat.angle_deg(
-                    interp.sample(source_keys, "rot", f), interp.sample(output_keys, "rot", f)
-                ),
-            )
+        sp = _sampled_positions(source_keys, f0, f1)
+        op = _sampled_positions(output_keys, f0, f1)
+        sq = interp.sample_range(source_keys, "rot", f0, f1)
+        oq = interp.sample_range(output_keys, "rot", f0, f1)
+        for j in range(f1 - f0 + 1):
+            for i, ax in enumerate(axes):
+                m[ax] = max(m[ax], abs(sp[j][i] - op[j][i]))
+            m["rot_deg"] = max(m["rot_deg"], quat.angle_deg(sq[j], oq[j]))
     return m
 
 
@@ -225,18 +210,7 @@ def _nearest_source_before(source_keys, frame):
 
 
 def _camera_seam_interp(source_keys, a, b, tols, force_bezier=False):
-    rng = range(a, b + 1)
-    positions = [
-        (
-            interp.sample(source_keys, "pos_x", f),
-            interp.sample(source_keys, "pos_y", f),
-            interp.sample(source_keys, "pos_z", f),
-        )
-        for f in rng
-    ]
-    distances = [interp.sample(source_keys, "distance", f) for f in rng]
-    fovs = [interp.sample(source_keys, "fov", f) for f in rng]
-    eulers = [interp.sample(source_keys, "rot", f) for f in rng]
+    positions, distances, fovs, eulers = _camera_series(source_keys, a, b)
     pos_ch = EuclideanVectorChannel(a, positions, tols.camera_pos, mode="bezier", force_bezier=force_bezier)
     dist_ch = LinearScalarChannel(a, distances, tols.camera_distance, mode="bezier", force_bezier=force_bezier)
     fov_ch = FovChannel(a, fovs, tols.camera_fov, mode="bezier", force_bezier=force_bezier)
@@ -298,16 +272,8 @@ def _apply_c1_bone(keys, source_keys):
 
 
 def _bone_seam_interp(source_keys, a, b, tols):
-    rng = range(a, b + 1)
-    positions = [
-        (
-            interp.sample(source_keys, "pos_x", f),
-            interp.sample(source_keys, "pos_y", f),
-            interp.sample(source_keys, "pos_z", f),
-        )
-        for f in rng
-    ]
-    quats = [interp.sample(source_keys, "rot", f) for f in rng]
+    positions = _sampled_positions(source_keys, a, b)
+    quats = list(interp.sample_range(source_keys, "rot", a, b))
     pos_ch = EuclideanVectorChannel(a, positions, tols.bone_pos, mode="bezier")
     rot_ch = BoneRotationChannel(a, quats, tols.bone_rot, mode="bezier")
     pos_ch.label, rot_ch.label = "position", "rotation"
@@ -427,14 +393,18 @@ def _boundary_with_predecessor(frames, f0):
 
 
 def _sampled_positions(source_keys, f0, f1):
-    return [
-        (
-            interp.sample(source_keys, "pos_x", f),
-            interp.sample(source_keys, "pos_y", f),
-            interp.sample(source_keys, "pos_z", f),
-        )
-        for f in range(f0, f1 + 1)
-    ]
+    xs = interp.sample_range(source_keys, "pos_x", f0, f1).tolist()
+    ys = interp.sample_range(source_keys, "pos_y", f0, f1).tolist()
+    zs = interp.sample_range(source_keys, "pos_z", f0, f1).tolist()
+    return list(zip(xs, ys, zs, strict=True))
+
+
+def _camera_series(keys, f0, f1):
+    positions = _sampled_positions(keys, f0, f1)
+    distances = interp.sample_range(keys, "distance", f0, f1).tolist()
+    fovs = interp.sample_range(keys, "fov", f0, f1).tolist()
+    eulers = list(interp.sample_range(keys, "rot", f0, f1))
+    return positions, distances, fovs, eulers
 
 
 def reduce_camera_track(
@@ -471,10 +441,7 @@ def reduce_camera_track(
     total_frames = sum(f1 - f0 for f0, f1 in ranges)
     progress_base = 0
     for f0, f1 in ranges:
-        positions = _sampled_positions(source_keys, f0, f1)
-        distances = [interp.sample(source_keys, "distance", f) for f in range(f0, f1 + 1)]
-        fovs = [interp.sample(source_keys, "fov", f) for f in range(f0, f1 + 1)]
-        eulers = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
+        positions, distances, fovs, eulers = _camera_series(source_keys, f0, f1)
         persp = perspective_series(source_keys, f0, f1)
 
         cuts = detect_cuts_camera(f0, positions, eulers, distances, cut_thresholds)
@@ -596,7 +563,7 @@ def reduce_bone_track(
         reset_fit_counters()
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
-        quats = [interp.sample(source_keys, "rot", f) for f in range(f0, f1 + 1)]
+        quats = list(interp.sample_range(source_keys, "rot", f0, f1))
 
         cuts = detect_cuts_bone(f0, positions, quats, cut_thresholds)
         if not no_cut_detect:

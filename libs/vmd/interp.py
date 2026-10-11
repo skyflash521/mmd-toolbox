@@ -1,3 +1,4 @@
+from bisect import bisect_right
 
 import numpy as np
 
@@ -93,9 +94,9 @@ def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
 
 
 def _find_segment(keys, frame: int) -> int:
-    for i in range(len(keys) - 1):
-        if keys[i].frame <= frame < keys[i + 1].frame:
-            return i
+    i = bisect_right(keys, frame, key=lambda k: k.frame) - 1
+    if 0 <= i < len(keys) - 1:
+        return i
     return len(keys) - 2
 
 
@@ -125,12 +126,57 @@ def sample(keys, channel: str, frame: int):
     return _interp_value(k0, k1, channel, is_camera, y)
 
 
+def _segment_values(k0, k1, channel: str, is_camera: bool, ys):
+    if channel in _POS_INDEX:
+        i = _POS_INDEX[channel]
+        v0, v1 = k0.position[i], k1.position[i]
+        return [v0 + (v1 - v0) * y for y in ys]
+    if channel == "distance":
+        v0, v1 = k0.distance, k1.distance
+        return [v0 + (v1 - v0) * y for y in ys]
+    if channel == "fov":
+        v0, v1 = float(k0.fov), float(k1.fov)
+        return [v0 + (v1 - v0) * y for y in ys]
+    if channel == "rot":
+        r0, r1 = k0.rotation, k1.rotation
+        if is_camera:
+            return [tuple(r0[i] + (r1[i] - r0[i]) * y for i in range(3)) for y in ys]
+        return [slerp(r0, r1, y) for y in ys]
+    raise ValueError(f"未知のチャンネル: {channel}")
+
+
 def sample_range(keys, channel: str, frame_start: int, frame_end: int):
     """keys はフレーム昇順であること。
 
     両端を含む。channel "rot" は値のリスト、それ以外は numpy 配列を返す。
     """
-    vals = [sample(keys, channel, f) for f in range(frame_start, frame_end + 1)]
+    if frame_end < frame_start:
+        return np.array([], dtype=float)
+    if not keys:
+        raise ValueError("キー列が空")
+    is_camera = isinstance(keys[0], CameraKey)
+    first_f = keys[0].frame
+    last_f = keys[-1].frame
+
+    vals = []
+    f = frame_start
+    if f <= first_f or len(keys) == 1:
+        upto = frame_end if len(keys) == 1 else min(first_f, frame_end)
+        k = keys[0]
+        vals.extend(_interp_value(k, k, channel, is_camera, 0.0) for _ in range(f, upto + 1))
+        f = upto + 1
+    while f <= frame_end and f < last_f:
+        i = _find_segment(keys, f)
+        k0, k1 = keys[i], keys[i + 1]
+        fb = min(k1.frame - 1, frame_end)
+        span = k1.frame - k0.frame
+        cp = _control_points(k1, channel, is_camera)
+        ys = [_solve_factor(*cp, (g - k0.frame) / span) for g in range(f, fb + 1)]
+        vals.extend(_segment_values(k0, k1, channel, is_camera, ys))
+        f = fb + 1
+    if f <= frame_end:
+        k = keys[-1]
+        vals.extend(_interp_value(k, k, channel, is_camera, 0.0) for _ in range(f, frame_end + 1))
     if vals and isinstance(vals[0], tuple):
         return vals
     return np.array(vals, dtype=float)
