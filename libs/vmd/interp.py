@@ -69,8 +69,8 @@ def _slerp(q0, q1, t: float):
     b = [float(c) for c in q1]
     na = math.sqrt(sum(c * c for c in a))
     nb = math.sqrt(sum(c * c for c in b))
-    a = [c / na for c in a]
-    b = [c / nb for c in b]
+    a = [c / na for c in a] if na > 0.0 else [0.0, 0.0, 0.0, 1.0]
+    b = [c / nb for c in b] if nb > 0.0 else [0.0, 0.0, 0.0, 1.0]
     d = sum(x * y for x, y in zip(a, b, strict=True))
     if d < 0.0:
         b = [-c for c in b]

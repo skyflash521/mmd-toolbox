@@ -184,8 +184,12 @@ def read(src: str | Path | bytes) -> tuple[VmdDocument, list[VmdWarning]]:
         doc.ik_property.append(IkPropertyKey(frame, display, ik_bones))
 
     if not r.at_end():
-        raise VmdFormatError(
-            f"末尾に余分なデータがある(offset {r.pos}, 残り {len(data) - r.pos} bytes)"
+        doc.trailing_raw = data[r.pos :]
+        warnings.append(
+            VmdWarning(
+                code="trailing-bytes",
+                message=f"末尾に余分なデータがある(offset {r.pos}, {len(doc.trailing_raw)} bytes)。保持して書き戻す",
+            )
         )
     return doc, warnings
 
@@ -196,45 +200,73 @@ def _fixed(raw: bytes, size: int, what: str) -> bytes:
     return raw
 
 
+def _pack(section: str, index: int, fmt: str, *values) -> bytes:
+    try:
+        return struct.pack(fmt, *values)
+    except (struct.error, OverflowError) as e:
+        raise VmdFormatError(
+            f"{section} キー {index} の値が格納範囲外: {e}",
+            section=section,
+            key_index=index,
+        ) from e
+
+
+def _check_section_flags(doc: VmdDocument) -> None:
+    if not doc.has_self_shadow_section and doc.self_shadow:
+        raise VmdFormatError(
+            "セルフ影セクションなしなのにセルフ影キーがある",
+            section="self_shadow",
+            key_index=0,
+        )
+    if not (doc.has_self_shadow_section and doc.has_ik_section) and doc.ik_property:
+        raise VmdFormatError(
+            "IKセクションが書き出されないのにIKキーがある",
+            section="ik_property",
+            key_index=0,
+        )
+
+
 def write(doc: VmdDocument) -> bytes:
+    _check_section_flags(doc)
     out = bytearray()
     out += _fixed(doc.magic_raw, _MAGIC_SIZE, "magic")
     out += _fixed(doc.model_name_raw, _MODEL_NAME_SIZE, "モデル名")
 
     out += struct.pack("<I", len(doc.bone))
-    for k in doc.bone:
+    for i, k in enumerate(doc.bone):
         out += _fixed(k.name_raw, _BONE_NAME_SIZE, "ボーン名")
-        out += struct.pack("<I3f4f", k.frame, *k.position, *k.rotation)
+        out += _pack("bone", i, "<I3f4f", k.frame, *k.position, *k.rotation)
         out += _fixed(k.interpolation, _BONE_INTERP_SIZE, "ボーン補間ブロック")
 
     out += struct.pack("<I", len(doc.morph))
-    for k in doc.morph:
+    for i, k in enumerate(doc.morph):
         out += _fixed(k.name_raw, _MORPH_NAME_SIZE, "モーフ名")
-        out += struct.pack("<If", k.frame, k.weight)
+        out += _pack("morph", i, "<If", k.frame, k.weight)
 
     out += struct.pack("<I", len(doc.camera))
-    for k in doc.camera:
-        out += struct.pack("<If3f3f", k.frame, k.distance, *k.position, *k.rotation)
+    for i, k in enumerate(doc.camera):
+        out += _pack("camera", i, "<If3f3f", k.frame, k.distance, *k.position, *k.rotation)
         out += _fixed(k.interpolation, _CAMERA_INTERP_SIZE, "カメラ補間ブロック")
-        out += struct.pack("<IB", k.fov, k.perspective)
+        out += _pack("camera", i, "<IB", k.fov, k.perspective)
 
     out += struct.pack("<I", len(doc.light))
-    for k in doc.light:
-        out += struct.pack("<I3f3f", k.frame, *k.color, *k.position)
+    for i, k in enumerate(doc.light):
+        out += _pack("light", i, "<I3f3f", k.frame, *k.color, *k.position)
 
     if doc.has_self_shadow_section:
         out += struct.pack("<I", len(doc.self_shadow))
-        for k in doc.self_shadow:
-            out += struct.pack("<IBf", k.frame, k.mode, k.distance)
+        for i, k in enumerate(doc.self_shadow):
+            out += _pack("self_shadow", i, "<IBf", k.frame, k.mode, k.distance)
 
         if doc.has_ik_section:
             out += struct.pack("<I", len(doc.ik_property))
-            for k in doc.ik_property:
-                out += struct.pack("<IBI", k.frame, k.display, len(k.ik_bones))
+            for i, k in enumerate(doc.ik_property):
+                out += _pack("ik_property", i, "<IBI", k.frame, k.display, len(k.ik_bones))
                 for ik in k.ik_bones:
                     out += _fixed(ik.name_raw, _IK_BONE_NAME_SIZE, "IKボーン名")
-                    out += struct.pack("<B", ik.enable)
+                    out += _pack("ik_property", i, "<B", ik.enable)
 
+    out += doc.trailing_raw
     return bytes(out)
 
 

@@ -297,6 +297,8 @@ def _quat_dot(a, b):
 
 def _quat_normalize(q):
     n = math.sqrt(sum(c * c for c in q))
+    if n == 0.0:
+        return (0.0, 0.0, 0.0, 1.0)
     return tuple(c / n for c in q)
 
 

@@ -5,7 +5,24 @@ MAGIC_V1_PREFIX = b"Vocaloid Motion Data file"
 
 
 class VmdFormatError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        section: str | None = None,
+        key_index: int | None = None,
+    ):
+        super().__init__(message)
+        self.section = section
+        self.key_index = key_index
+
+
+class VmdValueError(Exception):
+    def __init__(self, message: str, *, section: str, index: int, field: str):
+        super().__init__(message)
+        self.section = section
+        self.index = index
+        self.field = field
 
 
 @dataclass
@@ -124,6 +141,7 @@ class VmdDocument:
     ik_property: list[IkPropertyKey] = field(default_factory=list)
     has_self_shadow_section: bool = True
     has_ik_section: bool = True
+    trailing_raw: bytes = b""
 
     @property
     def model_name(self) -> str:

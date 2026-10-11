@@ -331,9 +331,10 @@ class TestErrors:
         with pytest.raises(VmdFormatError, match="offset"):
             read(TRUNCATED_MID_KEY)
 
-    def test_trailing_bytes_after_ik_section(self):
-        with pytest.raises(VmdFormatError):
-            read(CAMERA_FILE + b"\x00")
+    def test_trailing_bytes_after_ik_section_are_kept_with_warning(self):
+        doc, warnings = read(CAMERA_FILE + b"\x00")
+        assert doc.trailing_raw == b"\x00"
+        assert [w.code for w in warnings if w.code == "trailing-bytes"] == ["trailing-bytes"]
 
     def test_missing_file_raises_os_error_not_format_error(self, tmp_path):
         with pytest.raises(FileNotFoundError):

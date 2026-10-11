@@ -15,7 +15,7 @@ from cli_progress_router import ProgressRouter
 from shakevmd import __version__, cuts, presets
 from shakevmd.bake import RangeOverlapError, bake
 from shakevmd.warn import ShakeWarning
-from vmd import interp, io
+from vmd import VmdFormatError, interp, io
 from vmd.reduce import Tolerances, reduce_camera_track
 
 _HARD_DEFAULTS = {
@@ -540,7 +540,7 @@ def _run(args, machine, emitter, fail) -> int:
 
         try:
             io.write_file(doc, output)
-        except OverflowError:
+        except (OverflowError, VmdFormatError):
             return fail("value_overflow", "値が大きすぎて書き込み時に float32 で溢れた", 2)
         except Exception as e:
             return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}",
