@@ -4,7 +4,8 @@ from mocapvmd.default_profile import (
     ROLE_TO_INDEX,
     build_default_model,
 )
-from pmx.pose import evaluate_fk, sample_local_poses
+from mocapvmd.pose_sampling import sample_local_poses
+from pmx.pose import evaluate_fk
 from pmx.types import PmxModel
 
 _REQUIRED_ROLES = {

@@ -8,7 +8,8 @@ from mocapvmd.markers import (
     extract_markers,
 )
 from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
-from pmx.pose import WorldBonePose, evaluate_fk_range
+from mocapvmd.pose_sampling import evaluate_fk_range
+from pmx.pose import WorldBonePose
 
 from .helpers import bone, build_standard_pmx
 

@@ -10,7 +10,8 @@ from mocapvmd.pose_fit import (
     FitResult,
     fit,
 )
-from pmx.pose import evaluate_fk, sample_local_poses
+from mocapvmd.pose_sampling import sample_local_poses
+from pmx.pose import evaluate_fk
 
 
 def _dense(profile, tracks, frames):

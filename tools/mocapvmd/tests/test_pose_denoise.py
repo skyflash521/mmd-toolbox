@@ -5,7 +5,8 @@ import pytest
 from mocapvmd.markers import extract_markers
 from mocapvmd.model_profile import STANDARD_BONE_NAMES, load_mocap_profile
 from mocapvmd.pose_denoise import apply_pose_denoise
-from pmx.pose import evaluate_fk, sample_local_poses
+from mocapvmd.pose_sampling import sample_local_poses
+from pmx.pose import evaluate_fk
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey
 

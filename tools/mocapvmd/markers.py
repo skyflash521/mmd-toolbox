@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from pmx.pose import evaluate_fk_range
+from .pose_sampling import evaluate_fk_range
 
 Vec3 = tuple[float, float, float]
 

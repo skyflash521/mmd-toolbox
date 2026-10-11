@@ -1,6 +1,6 @@
 import math
 
-from pmx.pose import evaluate_fk, sample_local_poses
+from pmx.pose import evaluate_fk
 from vmd import quat
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey
@@ -8,6 +8,7 @@ from vmd.types import BoneKey
 from . import marker_denoise, pose_fit
 from .markers import extract_markers
 from .model_profile import load_mocap_profile
+from .pose_sampling import sample_local_poses
 
 
 def _collect_diagnostics(out, profile, model, pmx_path, n, dense, world, fitted,
