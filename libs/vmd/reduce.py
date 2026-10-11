@@ -1,6 +1,5 @@
 import dataclasses
 import math
-import os
 
 from vmd import interp, quat
 from vmd.cuts import (
@@ -268,9 +267,6 @@ def _camera_seam_interp(source_keys, a, b, tols, force_bezier=False):
     return camera_interp_bytes(
         cp_x, cp_y, cp_z, rot_ch.curve(a, b), dist_ch.curve(a, b), fov_ch.curve(a, b)
     )
-
-
-_C1_SMOOTHING = os.environ.get("MOCAP_C1_SMOOTHING", "1") != "0"
 
 
 def _bone_channel_cp(interp_bytes, c):
@@ -603,6 +599,7 @@ def reduce_bone_track(
     strict,
     curve_mode="linear",
     diagnostics=None,
+    c1_smoothing=True,
 ):
     """source_keys はフレーム昇順であること。ranges の外のキーも含めたキー列をフレーム順で返す。
 
@@ -650,7 +647,7 @@ def reduce_bone_track(
         added_counts = [] if record else None
         while True:
             keys = build_bone_keys(source_keys, sorted(range_frames), segment_interp)
-            if curve_mode == "bezier" and _C1_SMOOTHING:
+            if curve_mode == "bezier" and c1_smoothing:
                 c1_keys = _apply_c1_bone(keys, source_keys)
                 if not strict or not verify_bone_track(source_keys, c1_keys, [(f0, f1)], tols):
                     keys = c1_keys

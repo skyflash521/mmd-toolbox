@@ -700,7 +700,7 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
             out.extend(
                 reduce_bone_track(
                     ks, track_ranges, tols, cut_thresholds=cut_thresholds,
-                    diagnostics=diag, **cut_kw
+                    diagnostics=diag, c1_smoothing=True, **cut_kw
                 )
             )
             if diagnostics_out is not None:

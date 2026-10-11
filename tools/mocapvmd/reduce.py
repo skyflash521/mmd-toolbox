@@ -34,6 +34,7 @@ def _reduce_track(ks, tol_pos, tol_rot, curve_mode, want_diag) -> tuple[list[Bon
             strict=False,
             curve_mode=curve_mode,
             diagnostics=diag,
+            c1_smoothing=True,
         )
     )
     if not want_diag:
