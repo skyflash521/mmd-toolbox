@@ -22,6 +22,8 @@ from . import __version__, classify, denoise, footik, presets, reduce, report
 from .model_profile import MocapModelProfileError
 from .pose_denoise import apply_pose_denoise
 
+_REDUCE_BEAT_INTERVAL = 0.1
+
 _STAGE_LABELS = {
     "denoise": "ノイズ軽減",
     "foot_ik": "足IK接地安定化",
@@ -476,9 +478,21 @@ def _run(args, machine, emitter, fail):
             reduce_start = time.monotonic()
             reporter.stage("reduce")
 
+            reduce_state = {"done": 0, "total": None, "beat": reduce_start}
+
             def reduce_cb(done, total):
+                reduce_state["done"], reduce_state["total"] = done, total
                 reporter.stage("reduce", done=done, total=total,
                                elapsed=time.monotonic() - reduce_start)
+
+            def track_cb(frames_done, frames_total):
+                now = time.monotonic()
+                if now - reduce_state["beat"] < _REDUCE_BEAT_INTERVAL:
+                    return
+                reduce_state["beat"] = now
+                reporter.stage("reduce", done=reduce_state["done"], total=reduce_state["total"],
+                               note="" if machine else f"{frames_done}/{frames_total}",
+                               elapsed=now - reduce_start)
 
             new_bone = reduce.reduce_bones(
                 new_bone,
@@ -488,6 +502,7 @@ def _run(args, machine, emitter, fail):
                 curve_mode=args.curve_mode,
                 diagnostics_out=reduction_diag,
                 progress=reduce_cb,
+                track_progress=track_cb,
             )
     finally:
         reporter.close()

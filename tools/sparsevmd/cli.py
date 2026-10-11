@@ -312,6 +312,9 @@ def _describe_presets():
     return out
 
 
+_BEAT_INTERVAL = 0.1
+
+
 def _machine_progress(emitter, stage) -> Callable[..., None]:
     """戻り値は (done, total, note="") を受けるコールバック。"""
     start = time.monotonic()
@@ -689,6 +692,7 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
     if reporter is not None and total:
         reporter.stage("キーフレーム圧縮")
     done = 0
+    last_beat = 0.0
     out = []
     for name, keys in groups.items():
         ks = sorted(keys, key=lambda k: k.frame)
@@ -697,10 +701,21 @@ def _reduce_bones(bone_keys, selected, global_ranges, tols, cut_thresholds, cut_
                 reporter.update(done, total, note=name)
             track_ranges = ranges.intersect(global_ranges, ks[0].frame, ks[-1].frame)
             diag = {} if diagnostics_out is not None else None
+            track_cb = None
+            if reporter is not None or on_progress is not None:
+                def track_cb(frames_done, frames_total, phase="", name=name, done=done):
+                    nonlocal last_beat
+                    note = f"{name} {frames_done}/{frames_total}" + (f" {phase}" if phase else "")
+                    if reporter is not None:
+                        reporter.update(done, total, note=note)
+                    now = time.monotonic()
+                    if on_progress is not None and now - last_beat >= _BEAT_INTERVAL:
+                        last_beat = now
+                        on_progress(done, total, name)
             out.extend(
                 reduce_bone_track(
                     ks, track_ranges, tols, cut_thresholds=cut_thresholds,
-                    diagnostics=diag, c1_smoothing=True, **cut_kw
+                    diagnostics=diag, c1_smoothing=True, progress=track_cb, **cut_kw
                 )
             )
             if diagnostics_out is not None:

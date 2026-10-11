@@ -548,10 +548,13 @@ def reduce_bone_track(
     curve_mode="linear",
     diagnostics=None,
     c1_smoothing=True,
+    progress=None,
 ):
     """source_keys はフレーム昇順であること。ranges の外のキーも含めたキー列をフレーム順で返す。
 
     cut_thresholds は (位置, 回転[度])。curve_mode と diagnostics の扱いは reduce_camera_track と同じ。
+    progress(処理済みフレーム数, 総フレーム数, 段階名) を渡すと処理の経過を通知する。段階名は出力後検証の
+    間だけ "出力後検証" で、それ以外は空文字列。
     """
     reduced = []
     diag_cuts = set()
@@ -561,6 +564,8 @@ def reduce_bone_track(
     diag_verify = [] if diagnostics is not None else None
     if diagnostics is not None:
         reset_fit_counters()
+    total_frames = sum(f1 - f0 for f0, f1 in ranges)
+    progress_base = 0
     for f0, f1 in ranges:
         positions = _sampled_positions(source_keys, f0, f1)
         quats = list(interp.sample_range(source_keys, "rot", f0, f1))
@@ -580,9 +585,17 @@ def reduce_bone_track(
         rot_ch = BoneRotationChannel(f0, quats, tols.bone_rot, mode=curve_mode)
         pos_ch.label, rot_ch.label = "position", "rotation"
         channels = [pos_ch, rot_ch]
+        range_progress = None
+        if progress is not None:
+            def range_progress(done, _span, note="", base=progress_base):
+                progress(base + done, total_frames, note)
         range_frames = set(
-            reduce_track(bounds, channels, min_seg, max_seg, strict, splits=diag_splits, caps=diag_caps)
+            reduce_track(
+                bounds, channels, min_seg, max_seg, strict,
+                splits=diag_splits, caps=diag_caps, progress=range_progress,
+            )
         )
+        progress_base += f1 - f0
 
         segment_interp = None
         if curve_mode == "bezier":
@@ -590,6 +603,8 @@ def reduce_bone_track(
                 cp_x, cp_y, cp_z = pos_ch.curve(a, b)
                 return bone_interp_bytes(cp_x, cp_y, cp_z, rot_ch.curve(a, b))
 
+        if progress is not None:
+            progress(progress_base, total_frames, "出力後検証")
         record = diag_verify is not None
         bad_counts = [] if record else None
         added_counts = [] if record else None
