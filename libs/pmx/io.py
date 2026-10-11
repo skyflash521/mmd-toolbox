@@ -279,6 +279,8 @@ def _read_bone(r: _Reader, encoding: str, bone_index_size: int) -> PmxBone:
     en_raw, en = _read_textbuf(r, encoding)
     position = r.f32x3()
     parent = r.index(bone_index_size)
+    if parent < -1:
+        raise PmxFormatError(f"ボーンの親 index {parent} が範囲外")
     r.take(_size(deform_layer=_INT))
     flags = r.u16()
     if flags & _FLAG_TAIL_IS_BONE:
@@ -353,6 +355,25 @@ def _uninterpreted_flag_warning(bone: PmxBone, bone_index: int) -> PmxWarning:
     )
 
 
+def _check_parents(bones: list[PmxBone]) -> None:
+    for i, bone in enumerate(bones):
+        if bone.parent is not None and bone.parent >= len(bones):
+            raise PmxFormatError(
+                f"ボーン {i} の親 index {bone.parent} がボーン数 {len(bones)} の範囲外"
+            )
+    verified = [False] * len(bones)
+    for start in range(len(bones)):
+        path: set[int] = set()
+        i: int | None = start
+        while i is not None and not verified[i]:
+            if i in path:
+                raise PmxFormatError(f"ボーン {i} の親をたどると循環する")
+            path.add(i)
+            i = bones[i].parent
+        for j in path:
+            verified[j] = True
+
+
 def read_pmx(source: str | Path | bytes) -> PmxModel:
     if isinstance(source, (str, Path)):
         data = Path(source).read_bytes()
@@ -384,6 +405,7 @@ def read_pmx(source: str | Path | bytes) -> PmxModel:
         name_to_index.setdefault(bone.name, i)
         if bone.flags & _UNINTERPRETED_FLAGS:
             warnings.append(_uninterpreted_flag_warning(bone, i))
+    _check_parents(bones)
 
     for _ in range(r.count()):
         _skip_morph(r, idx)

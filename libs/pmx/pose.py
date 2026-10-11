@@ -92,17 +92,14 @@ def evaluate_fk(model, local_poses):
     bones = model.bones
     world_mats: list[np.ndarray | None] = [None] * len(bones)
 
-    def world_of(i: int) -> np.ndarray:
-        cached = world_mats[i]
-        if cached is not None:
-            return cached
+    def compute(i: int) -> None:
         bone = bones[i]
         lp = local_poses[i]
         if bone.parent is None:
             parent_mat = np.eye(4)
             parent_pos = (0.0, 0.0, 0.0)
         else:
-            parent_mat = world_of(bone.parent)
+            parent_mat = world_mats[bone.parent]
             parent_pos = bones[bone.parent].position
         base_offset = (
             bone.position[0] - parent_pos[0],
@@ -121,9 +118,17 @@ def evaluate_fk(model, local_poses):
         local_mat = np.eye(4)
         local_mat[:3, :3] = _quat_to_matrix(rotation)
         local_mat[:3, 3] = translation
-        world_mat = parent_mat @ local_mat
-        world_mats[i] = world_mat
-        return world_mat
+        world_mats[i] = parent_mat @ local_mat
+
+    def world_of(i: int) -> np.ndarray:
+        pending = []
+        j: int | None = i
+        while j is not None and world_mats[j] is None:
+            pending.append(j)
+            j = bones[j].parent
+        for k in reversed(pending):
+            compute(k)
+        return world_mats[i]
 
     results = []
     for i in range(len(bones)):
