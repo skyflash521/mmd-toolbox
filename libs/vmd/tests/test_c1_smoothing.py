@@ -21,8 +21,11 @@ def _sine_position_src(n=41, amp=5.0, w=0.4, rot_deg_per_frame=0.0):
     return keys
 
 
-def _reduce(src, tols, *, strict, c1, monkeypatch, curve_mode="bezier"):
-    monkeypatch.setattr(reducer, "_C1_SMOOTHING", c1)
+_DEFAULT = object()
+
+
+def _reduce(src, tols, *, strict, c1=_DEFAULT, curve_mode="bezier"):
+    extra = {} if c1 is _DEFAULT else {"c1_smoothing": c1}
     return reduce_bone_track(
         src,
         [(0, src[-1].frame)],
@@ -34,44 +37,45 @@ def _reduce(src, tols, *, strict, c1, monkeypatch, curve_mode="bezier"):
         max_seg=180,
         strict=strict,
         curve_mode=curve_mode,
+        **extra,
     )
 
 
-def test_c1_keeps_key_frames_and_changes_some_interior_interpolation(monkeypatch):
+def test_c1_keeps_key_frames_and_changes_some_interior_interpolation():
     src = _sine_position_src()
     tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
-    off = _reduce(src, tols, strict=False, c1=False, monkeypatch=monkeypatch)
-    on = _reduce(src, tols, strict=False, c1=True, monkeypatch=monkeypatch)
+    off = _reduce(src, tols, strict=False, c1=False)
+    on = _reduce(src, tols, strict=False, c1=True)
     assert [k.frame for k in off] == [k.frame for k in on]
     assert any(off[i].interpolation != on[i].interpolation for i in range(1, len(on) - 1))
 
 
-def test_c1_leaves_rotation_control_points_unchanged(monkeypatch):
+def test_c1_leaves_rotation_control_points_unchanged():
     src = _sine_position_src(rot_deg_per_frame=2.0)
     tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
-    base = _reduce(src, tols, strict=False, c1=False, monkeypatch=monkeypatch)
+    base = _reduce(src, tols, strict=False, c1=False)
     smoothed = reducer._apply_c1_bone(base, src)
     assert [k.control_points()["R"] for k in smoothed] == [k.control_points()["R"] for k in base]
 
 
-def test_c1_not_applied_in_linear_mode(monkeypatch):
+def test_c1_not_applied_in_linear_mode():
     src = _sine_position_src()
     tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
-    keys = _reduce(src, tols, strict=False, c1=True, monkeypatch=monkeypatch, curve_mode="linear")
+    keys = _reduce(src, tols, strict=False, c1=True, curve_mode="linear")
     assert all(k.interpolation == BONE_LINEAR_INTERP for k in keys)
 
 
-def test_c1_output_within_tolerance_nonstrict(monkeypatch):
+def test_c1_output_within_tolerance_nonstrict():
     src = _sine_position_src()
     tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
-    keys = _reduce(src, tols, strict=False, c1=True, monkeypatch=monkeypatch)
+    keys = _reduce(src, tols, strict=False, c1=True)
     assert verify_bone_track(src, keys, [(0, src[-1].frame)], tols) == []
 
 
-def test_c1_pos_control_points_within_0_127_and_x_monotonic(monkeypatch):
+def test_c1_pos_control_points_within_0_127_and_x_monotonic():
     src = _sine_position_src()
     tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
-    keys = _reduce(src, tols, strict=False, c1=True, monkeypatch=monkeypatch)
+    keys = _reduce(src, tols, strict=False, c1=True)
     for k in keys:
         cps = k.control_points()
         for ch in ("X", "Y", "Z"):
@@ -81,15 +85,32 @@ def test_c1_pos_control_points_within_0_127_and_x_monotonic(monkeypatch):
             assert x1 <= x2
 
 
-def test_c1_strict_keeps_original_fit_when_c1_breaks_tolerance(monkeypatch):
+def test_c1_strict_keeps_original_fit_when_c1_breaks_tolerance():
     src = _sine_position_src()
     rng = [(0, src[-1].frame)]
     tols = build_bone_tolerances(bone_pos=0.2, bone_rot=5.0)
-    base = _reduce(src, tols, strict=True, c1=False, monkeypatch=monkeypatch)
+    base = _reduce(src, tols, strict=True, c1=False)
     assert verify_bone_track(src, base, rng, tols) == []
     candidate = reducer._apply_c1_bone(base, src)
     assert verify_bone_track(src, candidate, rng, tols) != []
-    keys = _reduce(src, tols, strict=True, c1=True, monkeypatch=monkeypatch)
+    keys = _reduce(src, tols, strict=True, c1=True)
     assert verify_bone_track(src, keys, rng, tols) == []
     assert [k.frame for k in keys] == [k.frame for k in base]
     assert [k.interpolation for k in keys] == [k.interpolation for k in base]
+
+
+def test_c1_default_matches_explicit_true():
+    src = _sine_position_src()
+    tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
+    default = _reduce(src, tols, strict=False)
+    on = _reduce(src, tols, strict=False, c1=True)
+    assert [(k.frame, k.interpolation) for k in default] == [(k.frame, k.interpolation) for k in on]
+
+
+def test_c1_false_differs_from_default_in_interior_interpolation():
+    src = _sine_position_src()
+    tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
+    default = _reduce(src, tols, strict=False)
+    off = _reduce(src, tols, strict=False, c1=False)
+    assert [k.frame for k in off] == [k.frame for k in default]
+    assert any(off[i].interpolation != default[i].interpolation for i in range(1, len(off) - 1))
