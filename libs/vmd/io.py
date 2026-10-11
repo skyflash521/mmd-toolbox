@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .types import (
+    BONE_LINEAR_INTERP,
     MAGIC_V1_PREFIX,
     MAGIC_V2_PREFIX,
     BoneKey,
@@ -362,8 +363,6 @@ def _neutral_morph(name_raw: bytes) -> MorphKey:
 
 
 def _neutral_bone(name_raw: bytes) -> BoneKey:
-    from .reduce import BONE_LINEAR_INTERP
-
     return BoneKey(name_raw, 0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
 
 

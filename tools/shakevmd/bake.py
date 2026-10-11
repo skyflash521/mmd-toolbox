@@ -6,6 +6,7 @@ import numpy as np
 from shakevmd import cuts, motion, noise
 from shakevmd.warn import ShakeWarning
 from vmd import camera, interp
+from vmd.types import CAMERA_LINEAR_INTERP as LINEAR_CAMERA_INTERP
 from vmd.types import CameraKey
 
 
@@ -34,8 +35,6 @@ def apply_gaze_shake(camera_key, rot_noise, pos_noise=(0.0, 0.0, 0.0), naive=Fal
     center = cam_pos - offset
     return {"position": tuple(center), "rotation": new_rot}
 
-
-LINEAR_CAMERA_INTERP = bytes([20, 107, 20, 107]) * 6
 
 FPS = 30.0
 

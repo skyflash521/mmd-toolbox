@@ -146,3 +146,29 @@ class VmdDocument:
     @property
     def model_name(self) -> str:
         return _decode_name(self.model_name_raw)
+
+
+def camera_interp_bytes(cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
+    """各引数は補間曲線の制御点 (x1, y1, x2, y2)。cp_x・cp_y・cp_z は位置の各軸、cp_r は回転、cp_l は距離、
+    cp_v は視野角。"""
+    out = bytearray()
+    for x1, y1, x2, y2 in (cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
+        out += bytes([x1, x2, y1, y2])
+    return bytes(out)
+
+
+def bone_interp_bytes(x_cp, y_cp, z_cp, r_cp):
+    """各引数は補間曲線の制御点 (x1, y1, x2, y2)。x_cp・y_cp・z_cp は位置の各軸、r_cp は回転。"""
+    first = [cp[i] for i in range(4) for cp in (x_cp, y_cp, z_cp, r_cp)]
+    b = bytearray(64)
+    b[0:16] = bytes(first)
+    b[16:31] = bytes(first[1:16])
+    b[32:46] = bytes(first[2:16])
+    b[48:61] = bytes(first[3:16])
+    # 詰めパッドの値は MMD の版によって異なる。
+    return bytes(b)
+
+
+_LINEAR_CP = (20, 20, 107, 107)
+CAMERA_LINEAR_INTERP = camera_interp_bytes(*([_LINEAR_CP] * 6))
+BONE_LINEAR_INTERP = bone_interp_bytes(_LINEAR_CP, _LINEAR_CP, _LINEAR_CP, _LINEAR_CP)
