@@ -194,6 +194,7 @@ def _notes(raw_notes, part_pos, part_path) -> list[Note]:
                 is_protected=_optional(note, "isProtected", False) is True,
                 vibrato=_vibrato(note, start_tick, duration_tick),
                 ai_expression=_ai_expression(note),
+                source_index=i,
             )
         )
     notes.sort(key=lambda note: note.start_tick)

@@ -29,6 +29,20 @@ def _pair_up(raw_items, count, fallback):
     return items
 
 
+def _match_notes(raw_notes, notes):
+    used: set[int] = set()
+    matched = []
+    for note in notes:
+        index = note.source_index
+        if (index is not None and 0 <= index < len(raw_notes) and index not in used
+                and isinstance(raw_notes[index], dict)):
+            used.add(index)
+            matched.append((copy.deepcopy(raw_notes[index]), note))
+        else:
+            matched.append((template.note(), note))
+    return matched
+
+
 def _check_note(note, path):
     if not _MIDI_RANGE[0] <= note.pitch <= _MIDI_RANGE[1]:
         raise VprFormatError("音高が MIDI の範囲を外れています",
@@ -124,10 +138,10 @@ def _write_part(raw, part, path):
     raw["pos"] = part.start_tick
     raw["duration"] = part.duration_tick
 
-    notes = _pair_up(raw.get("notes") or [], len(part.notes), template.note)
-    for i, (raw_note, note) in enumerate(
-            zip(notes, sorted(part.notes, key=lambda n: n.start_tick), strict=True)):
+    notes = _match_notes(raw.get("notes") or [], sorted(part.notes, key=lambda n: n.start_tick))
+    for i, (raw_note, note) in enumerate(notes):
         _write_note(raw_note, note, part.start_tick, f"{path}.notes[{i}]")
+    notes = [raw_note for raw_note, _ in notes]
     raw["notes"] = notes
     raw["controllers"] = _write_controllers(raw.get("controllers") or [], part.controllers,
                                             part.start_tick)
@@ -144,7 +158,6 @@ def _write_part(raw, part, path):
 def _write_tracks(raw_tracks, tracks):
     singing = [i for i, track in enumerate(raw_tracks)
                if isinstance(track, dict) and track.get("type") == SINGING_TRACK_TYPE]
-    source = copy.deepcopy(raw_tracks[singing[0]]) if singing else template.singing_track()
 
     result = [copy.deepcopy(track) for track in raw_tracks]
     for index in reversed(singing[len(tracks):]):
@@ -153,8 +166,7 @@ def _write_tracks(raw_tracks, tracks):
             if isinstance(track, dict) and track.get("type") == SINGING_TRACK_TYPE]
     insert_at = kept[-1] + 1 if kept else len(result)
     while len(kept) < len(tracks):
-        addition = copy.deepcopy(source)
-        addition["type"] = SINGING_TRACK_TYPE
+        addition = template.singing_track()
         result.insert(insert_at, addition)
         insert_at += 1
         kept = [i for i, track in enumerate(result)

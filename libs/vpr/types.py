@@ -51,7 +51,10 @@ class NoteAiExpression:
 
 @dataclass
 class Note:
-    """start_tick はプロジェクト絶対 tick(パート相対ではない)。pitch は MIDI ノート番号。"""
+    """start_tick はプロジェクト絶対 tick(パート相対ではない)。pitch は MIDI ノート番号。
+
+    source_index は読み時の生配列上の位置で、比較に使わない。読んだ音符でなければ None。
+    """
 
     start_tick: int
     duration_tick: int
@@ -62,6 +65,7 @@ class Note:
     is_protected: bool = field(default=False, kw_only=True)
     vibrato: NoteVibrato | None = None
     ai_expression: NoteAiExpression | None = None
+    source_index: int | None = field(default=None, compare=False, kw_only=True)
 
 
 @dataclass
