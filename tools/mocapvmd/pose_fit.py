@@ -5,6 +5,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from pmx.pose import LocalBonePose, evaluate_fk
+from vmd import quat
 
 
 @dataclass
@@ -56,22 +57,6 @@ def _rotvec_to_quat(dr):
     return (dr[0] * s, dr[1] * s, dr[2] * s, math.cos(angle / 2.0))
 
 
-def _quat_mul(a, b):
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
-
-
-def _quat_normalize(q):
-    n = math.sqrt(q[0] ** 2 + q[1] ** 2 + q[2] ** 2 + q[3] ** 2)
-    return (q[0] / n, q[1] / n, q[2] / n, q[3] / n) if n > 0 else (0.0, 0.0, 0.0, 1.0)
-
-
 def _apply(local, pos_idx, rot_idx, x):
     pos_corr = {idx: x[i * 3 : i * 3 + 3] for i, idx in enumerate(pos_idx)}
     base = len(pos_idx) * 3
@@ -84,7 +69,7 @@ def _apply(local, pos_idx, rot_idx, x):
             dp = pos_corr[bi]
             position = (position[0] + dp[0], position[1] + dp[1], position[2] + dp[2])
         if bi in rot_corr:
-            rotation = _quat_normalize(_quat_mul(_rotvec_to_quat(rot_corr[bi]), rotation))
+            rotation = quat.normalize(quat.multiply(_rotvec_to_quat(rot_corr[bi]), rotation))
         out.append(LocalBonePose(position=position, rotation=rotation))
     return tuple(out)
 

@@ -2,7 +2,7 @@ import dataclasses
 import math
 import os
 
-from vmd import interp
+from vmd import interp, quat
 from vmd.cuts import (
     assemble_boundaries,
     detect_cuts_bone,
@@ -15,7 +15,6 @@ from vmd.fit import (
     EuclideanVectorChannel,
     FovChannel,
     LinearScalarChannel,
-    _quat_angle_deg,
     _round_half_up,
     read_fit_counters,
     read_fit_counters_by_category,
@@ -181,7 +180,7 @@ def verify_bone_track(source_keys, output_keys, ranges, tols):
             if math.dist(sp, op) > tols.bone_pos:
                 bad.add(f)
             elif (
-                _quat_angle_deg(
+                quat.angle_deg(
                     interp.sample(source_keys, "rot", f), interp.sample(output_keys, "rot", f)
                 )
                 > tols.bone_rot
@@ -233,7 +232,7 @@ def measure_bone_errors(source_keys, output_keys, ranges):
                 )
             m["rot_deg"] = max(
                 m["rot_deg"],
-                _quat_angle_deg(
+                quat.angle_deg(
                     interp.sample(source_keys, "rot", f), interp.sample(output_keys, "rot", f)
                 ),
             )

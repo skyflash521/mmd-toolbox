@@ -1,12 +1,7 @@
 import math
 
 from mocapvmd import classify, denoise, footik, presets
-
-
-def _quat_angle_deg(q1, q0):
-    dot = abs(sum(a * b for a, b in zip(q1, q0, strict=True)))
-    dot = min(1.0, dot)
-    return math.degrees(2.0 * math.acos(dot))
+from vmd import quat
 
 
 def _max_speed_and_angular_speed_deg_per_frame(keys) -> tuple[float, float]:
@@ -17,7 +12,7 @@ def _max_speed_and_angular_speed_deg_per_frame(keys) -> tuple[float, float]:
         if gap <= 0:
             continue
         max_speed = max(max_speed, math.dist(a.position, b.position) / gap)
-        max_ang = max(max_ang, _quat_angle_deg(a.rotation, b.rotation) / gap)
+        max_ang = max(max_ang, quat.angle_deg(a.rotation, b.rotation) / gap)
     return max_speed, max_ang
 
 
@@ -74,13 +69,8 @@ def _stabilization(bone_keys, clean_strength, denoise_on, suppression):
     return footik.stabilize_foot_ik(tracks, suppression), frames_by_name
 
 
-def _unit(q):
-    norm = math.sqrt(sum(c * c for c in q))
-    return tuple(c / norm for c in q)
-
-
 def _rotation_change_deg(q_before, q_after) -> float:
-    return _quat_angle_deg(_unit(q_after), _unit(q_before))
+    return quat.angle_deg(q_after, q_before)
 
 
 def _position_and_rotation_changes(keys, cleaned_keys) -> tuple[list[float], list[float]]:

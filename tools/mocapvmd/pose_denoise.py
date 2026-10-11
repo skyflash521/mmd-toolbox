@@ -1,18 +1,13 @@
 import math
 
 from pmx.pose import evaluate_fk, sample_local_poses
+from vmd import quat
 from vmd.reduce import BONE_LINEAR_INTERP
 from vmd.types import BoneKey
 
 from . import marker_denoise, pose_fit
 from .markers import extract_markers
 from .model_profile import load_mocap_profile
-
-
-def _quat_angle_deg(q1, q0):
-    dot = abs(sum(a * b for a, b in zip(q1, q0, strict=True)))
-    dot = min(1.0, dot)
-    return math.degrees(2.0 * math.acos(dot))
 
 
 def _collect_diagnostics(out, profile, model, pmx_path, n, dense, world, fitted,
@@ -45,7 +40,7 @@ def _collect_diagnostics(out, profile, model, pmx_path, n, dense, world, fitted,
         err_before.append(sum(eb) / len(eb) if eb else 0.0)
         err_after.append(sum(ea) / len(ea) if ea else 0.0)
         for bi, (dl, fl) in enumerate(zip(dense[f], fitted.poses[f], strict=True)):
-            ang = _quat_angle_deg(dl.rotation, fl.rotation)
+            ang = quat.angle_deg(dl.rotation, fl.rotation)
             if ang > max_rot_deg:
                 max_rot_deg = ang
             if bi in position_fitted_bone_indices:

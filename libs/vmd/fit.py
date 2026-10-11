@@ -3,7 +3,8 @@ import math
 import numpy as np
 from scipy.optimize import least_squares
 
-from vmd import interp
+from vmd import interp, quat
+from vmd.quat import angle_deg as _quat_angle_deg  # noqa: F401
 
 ControlPoints = tuple[int, int, int, int]
 
@@ -291,56 +292,6 @@ class FovChannel:
         return True
 
 
-def _quat_dot(a, b):
-    return sum(x * y for x, y in zip(a, b, strict=True))
-
-
-def _quat_normalize(q):
-    n = math.sqrt(sum(c * c for c in q))
-    if n == 0.0:
-        return (0.0, 0.0, 0.0, 1.0)
-    return tuple(c / n for c in q)
-
-
-def _quat_conj(q):
-    return (-q[0], -q[1], -q[2], q[3])
-
-
-def _quat_mul(a, b):
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
-
-
-def _quat_slerp(q0, q1, t):
-    """q0・q1 は単位クォータニオンであること。"""
-    d = _quat_dot(q0, q1)
-    if d < 0.0:
-        q1 = tuple(-c for c in q1)
-        d = -d
-    if d > 0.9995:
-        r = tuple(q0[i] + t * (q1[i] - q0[i]) for i in range(4))
-        return _quat_normalize(r)
-    th0 = math.acos(d)
-    th = th0 * t
-    s0 = math.sin(th0 - th) / math.sin(th0)
-    s1 = math.sin(th) / math.sin(th0)
-    return tuple(s0 * q0[i] + s1 * q1[i] for i in range(4))
-
-
-def _quat_angle_deg(a, b):
-    """a・b は単位クォータニオンであること。"""
-    r = _quat_mul(b, _quat_conj(a))
-    v = math.sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2])
-    # 2·acos(|dot|) は微小角で丸め誤差が増幅し、libm の実装差で結果が揺れる。
-    return math.degrees(2.0 * math.atan2(v, abs(r[3])))
-
-
 class CameraRotationChannel:
     def __init__(self, frame_start, eulers, tol, mode="linear", force_bezier=False):
         self.frame_start = frame_start
@@ -454,8 +405,8 @@ class BoneRotationChannel:
         self.frame_start = frame_start
         aligned = []
         for q in quats:
-            qn = _quat_normalize(q)
-            if aligned and _quat_dot(qn, aligned[-1]) < 0.0:
+            qn = quat.normalize(q)
+            if aligned and quat.dot(qn, aligned[-1]) < 0.0:
                 qn = tuple(-c for c in qn)
             aligned.append(qn)
         self.quats = aligned
@@ -474,8 +425,8 @@ class BoneRotationChannel:
         if self.mode == "bezier":
             cp = self.curve(a, b)
             errs = {
-                f: _quat_angle_deg(
-                    self._q(f), _quat_slerp(q0, q1, interp._solve_factor(*cp, (f - a) / span))
+                f: quat.angle_deg(
+                    self._q(f), quat.slerp(q0, q1, interp._solve_factor(*cp, (f - a) / span))
                 )
                 for f in internal
             }
@@ -483,7 +434,7 @@ class BoneRotationChannel:
             errs = {}
             for f in internal:
                 t = (f - a) / span
-                errs[f] = _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, t))
+                errs[f] = quat.angle_deg(self._q(f), quat.slerp(q0, q1, t))
         if not errs:
             return (0.0, None)
         max_err = max(errs.values())
@@ -495,7 +446,7 @@ class BoneRotationChannel:
         return (max_err, worst)
 
     def _rel_axis(self, frame):
-        rel = _quat_mul(self._q(frame), _quat_conj(self._q(frame - 1)))
+        rel = quat.multiply(self._q(frame), quat.conjugate(self._q(frame - 1)))
         return rel[:3]
 
     def _is_reversal(self, frame):
@@ -526,7 +477,7 @@ class BoneRotationChannel:
 
         def _resid_at(coeff):
             return [
-                _quat_angle_deg(self._q(f), _quat_slerp(q0, q1, coeff((f - a) / span)))
+                quat.angle_deg(self._q(f), quat.slerp(q0, q1, coeff((f - a) / span)))
                 for f in internal
             ]
 
@@ -540,7 +491,7 @@ class BoneRotationChannel:
     def is_constant(self, a, b):
         q0 = self._q(a)
         for f in range(a + 1, b + 1):
-            if _quat_angle_deg(self._q(f), q0) > _CONST_EPS_DEG:
+            if quat.angle_deg(self._q(f), q0) > _CONST_EPS_DEG:
                 return False
         return True
 
@@ -598,49 +549,6 @@ def _bezier_inits(n_samples):
     return _BEZIER_INITS_LARGE if n_samples >= _LSQ_LOOSEN_MIN_SAMPLES else _BEZIER_INITS
 
 
-def _bez(s, c1, c2):
-    u = 1.0 - s
-    return 3 * u * u * s * c1 + 3 * u * s * s * c2 + s * s * s
-
-
-def _bezier_y_at(px1, py1, px2, py2, x):
-    if x <= 0.0:
-        return 0.0
-    if x >= 1.0:
-        return 1.0
-
-    def fx(s):
-        return _bez(s, px1, px2)
-
-    def dfx(s):
-        u = 1.0 - s
-        return 3.0 * (px1 * u * u + 2.0 * (px2 - px1) * u * s + (1.0 - px2) * s * s)
-
-    s = x
-    converged = False
-    for _ in range(20):
-        err = fx(s) - x
-        if abs(err) < 1e-9:
-            converged = True
-            break
-        d = dfx(s)
-        if d <= 1e-12:
-            break
-        s -= err / d
-        if s < 0.0 or s > 1.0:
-            break
-    if not converged or s < 0.0 or s > 1.0 or abs(fx(s) - x) > 1e-6:
-        lo, hi = 0.0, 1.0
-        for _ in range(60):
-            mid = (lo + hi) / 2.0
-            if fx(mid) < x:
-                lo = mid
-            else:
-                hi = mid
-        s = (lo + hi) / 2.0
-    return _bez(s, py1, py2)
-
-
 def _initial_solution(init):
     ix1, iy1, ix2, iy2 = init
     t0 = (ix2 - ix1) / (1.0 - ix1) if ix1 < 1.0 else 0.0
@@ -675,7 +583,7 @@ def fit_bezier_curve(xs, ys, early_exit_err=None, category=None, skip_fastpath=F
     def residual(v):
         x1, t, y1, y2 = v
         x2 = x1 + (1.0 - x1) * t
-        return [_bezier_y_at(x1, y1, x2, y2, x) - y for x, y in zip(xs, ys, strict=True)]
+        return [interp.bezier_y_at(x1, y1, x2, y2, x) - y for x, y in zip(xs, ys, strict=True)]
 
     def quantized_err(cp):
         return max(abs(interp._solve_factor(*cp, x) - y) for x, y in zip(xs, ys, strict=True))
@@ -728,7 +636,7 @@ def _fit_coeff_curve(xs, resid_at, early_exit_err=None, category=None, skip_fast
     def residual(v):
         x1, t, y1, y2 = v
         x2 = x1 + (1.0 - x1) * t
-        return resid_at(lambda x: _bezier_y_at(x1, y1, x2, y2, x))
+        return resid_at(lambda x: interp.bezier_y_at(x1, y1, x2, y2, x))
 
     def quantized_err(cp):
         res = resid_at(lambda x: interp._solve_factor(*cp, x))

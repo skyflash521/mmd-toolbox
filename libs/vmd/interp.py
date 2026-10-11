@@ -1,7 +1,7 @@
-import math
 
 import numpy as np
 
+from .quat import slerp
 from .types import CameraKey
 
 CAMERA_CHANNEL_OFFSET = {
@@ -23,12 +23,14 @@ def _bezier(s: float, c1: float, c2: float) -> float:
 
 
 def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
+    return bezier_y_at(x1 / 127.0, y1 / 127.0, x2 / 127.0, y2 / 127.0, x)
+
+
+def bezier_y_at(px1: float, py1: float, px2: float, py2: float, x: float) -> float:
     if x <= 0.0:
         return 0.0
     if x >= 1.0:
         return 1.0
-
-    px1, py1, px2, py2 = x1 / 127.0, y1 / 127.0, x2 / 127.0, y2 / 127.0
 
     def fx(s: float) -> float:
         return _bezier(s, px1, px2)
@@ -64,28 +66,6 @@ def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
     return _bezier(s, py1, py2)
 
 
-def _slerp(q0, q1, t: float):
-    a = [float(c) for c in q0]
-    b = [float(c) for c in q1]
-    na = math.sqrt(sum(c * c for c in a))
-    nb = math.sqrt(sum(c * c for c in b))
-    a = [c / na for c in a] if na > 0.0 else [0.0, 0.0, 0.0, 1.0]
-    b = [c / nb for c in b] if nb > 0.0 else [0.0, 0.0, 0.0, 1.0]
-    d = sum(x * y for x, y in zip(a, b, strict=True))
-    if d < 0.0:
-        b = [-c for c in b]
-        d = -d
-    if d > 0.9995:
-        r = [x + t * (y - x) for x, y in zip(a, b, strict=True)]
-        n = math.sqrt(sum(c * c for c in r))
-        return tuple(c / n for c in r)
-    th0 = math.acos(d)
-    th = th0 * t
-    s0 = math.sin(th0 - th) / math.sin(th0)
-    s1 = math.sin(th) / math.sin(th0)
-    return tuple(s0 * x + s1 * y for x, y in zip(a, b, strict=True))
-
-
 def _control_points(arriving_key, channel: str, is_camera: bool):
     if is_camera:
         off = CAMERA_CHANNEL_OFFSET[channel]
@@ -108,7 +88,7 @@ def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
             return tuple(
                 k0.rotation[i] + (k1.rotation[i] - k0.rotation[i]) * y for i in range(3)
             )
-        return _slerp(k0.rotation, k1.rotation, y)
+        return slerp(k0.rotation, k1.rotation, y)
     raise ValueError(f"未知のチャンネル: {channel}")
 
 
@@ -183,10 +163,10 @@ def _bake_segment(k0, k1, fa, fb, frame_start, positions, rotations):
             ys = _factors(cps[ch])
             axes.append([v0 + (v1 - v0) * y for y in ys])
     if k0.rotation == k1.rotation:
-        rot = _slerp(k0.rotation, k0.rotation, 0.0)
+        rot = slerp(k0.rotation, k0.rotation, 0.0)
         rots = [rot] * count
     else:
-        rots = [_slerp(k0.rotation, k1.rotation, y) for y in _factors(cps["R"])]
+        rots = [slerp(k0.rotation, k1.rotation, y) for y in _factors(cps["R"])]
 
     base = fa - frame_start
     for j in range(count):
@@ -210,7 +190,7 @@ def bake_bone_track(keys, frame_start: int, frame_end: int):
 
     def _fill(i0, i1, key):
         pos = key.position
-        rot = _slerp(key.rotation, key.rotation, 0.0)
+        rot = slerp(key.rotation, key.rotation, 0.0)
         for i in range(i0, i1):
             positions[i] = pos
             rotations[i] = rot

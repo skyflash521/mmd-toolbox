@@ -5,6 +5,7 @@ import numpy as np
 from scipy.ndimage import median_filter
 from scipy.signal import savgol_filter
 
+from vmd import quat
 from vmd.cuts import detect_cuts_bone
 
 POS_SPIKE = 0.3
@@ -12,7 +13,6 @@ ROT_SPIKE_DEG = 5.0
 CUT_THRESHOLDS = (1.0, 30.0)
 MIN_ACCENT_STEPS = 2
 ZERO_EPS = 1e-9
-_NLERP_DOT_THRESHOLD = 0.9995
 
 RelativeFrame = int
 Axis = int
@@ -30,38 +30,8 @@ class NoiseDetection:
     cuts: set[RelativeFrame]
 
 
-def _qnorm(q):
-    return math.sqrt(sum(c * c for c in q))
-
-
-def _qnormalize(q):
-    return tuple(c / _qnorm(q) for c in q)
-
-
-def _qconj(q):
-    x, y, z, w = q
-    return (-x, -y, -z, w)
-
-
-def _qmul(a, b):
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
-
-
-def _qangle_deg(a, b):
-    d = abs(sum(x * y for x, y in zip(a, b, strict=True)))
-    d = min(1.0, d)
-    return math.degrees(2.0 * math.acos(d))
-
-
 def _relative_rotation_vector_rad(q_prev, q_cur):
-    rel = _qnormalize(_qmul(_qconj(q_prev), q_cur))
+    rel = quat.normalize(quat.multiply(quat.conjugate(q_prev), q_cur))
     if rel[3] < 0.0:
         rel = tuple(-c for c in rel)
     x, y, z, w = rel
@@ -81,25 +51,11 @@ def _vdot(a, b):
     return sum(x * y for x, y in zip(a, b, strict=True))
 
 
-def _slerp(a, b, t):
-    d = _vdot(a, b)
-    if d < 0.0:
-        b = tuple(-c for c in b)
-        d = -d
-    if d > _NLERP_DOT_THRESHOLD:
-        return _qnormalize(tuple(a[k] + t * (b[k] - a[k]) for k in range(4)))
-    th0 = math.acos(d)
-    th = th0 * t
-    s0 = math.sin(th0 - th) / math.sin(th0)
-    s1 = math.sin(th) / math.sin(th0)
-    return tuple(s0 * a[k] + s1 * b[k] for k in range(4))
-
-
 def _clamp_rot(orig, target, max_deg):
-    ang = _qangle_deg(orig, target)
+    ang = quat.angle_deg(orig, target)
     if ang <= max_deg:
         return target
-    return _slerp(orig, target, max_deg / ang)
+    return quat.slerp(orig, target, max_deg / ang)
 
 
 def validate_bone_values(positions, rotations):
@@ -112,7 +68,7 @@ def validate_bone_values(positions, rotations):
     for q in rotations:
         if not all(math.isfinite(c) for c in q):
             raise ValueError("回転に非有限値が含まれます")
-        if _qnorm(q) < ZERO_EPS:
+        if math.sqrt(quat.dot(q, q)) < ZERO_EPS:
             raise ValueError("ノルムがゼロの quaternion が含まれます")
 
 
@@ -179,7 +135,7 @@ def _rot_reference(rots, segs, window):
                     q = tuple(-c for c in q)
                 for c in range(4):
                     acc[c] += q[c]
-            ref[i] = _qnormalize(tuple(acc))
+            ref[i] = quat.normalize(tuple(acc))
     return ref
 
 
@@ -237,7 +193,7 @@ def detect_noise_events(positions, rotations, *, pos_window, rot_window):
         return NoiseDetection(set(), set(), set(), set(), set(), set(), set(), set())
 
     pos = np.asarray(positions, dtype=float).reshape(n, 3)
-    rots = [_qnormalize(tuple(float(c) for c in q)) for q in rotations]
+    rots = [quat.normalize(tuple(float(c) for c in q)) for q in rotations]
 
     raw_cuts = detect_cuts_bone(0, positions, rots, CUT_THRESHOLDS)
     cuts = {f for f in raw_cuts if 0 < f < n}
@@ -271,7 +227,7 @@ def detect_noise_events(positions, rotations, *, pos_window, rot_window):
         if not _effective_window_or_zero(e - s + 1, rot_window):
             continue
         for i in range(s, e + 1):
-            if _qangle_deg(rots[i], rot_ref[i]) > ROT_SPIKE_DEG:
+            if quat.angle_deg(rots[i], rot_ref[i]) > ROT_SPIKE_DEG:
                 rot_candidates.add(i)
 
     pos_accent = _pos_accent(pos, segs)
@@ -332,7 +288,7 @@ def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength,
         return [], []
 
     pos = np.asarray(positions, dtype=float).reshape(n, 3)
-    rots = [_qnormalize(tuple(float(c) for c in q)) for q in rotations]
+    rots = [quat.normalize(tuple(float(c) for c in q)) for q in rotations]
     segs = _inclusive_segments_split_before_cuts(det.cuts, n)
 
     smoothed = _pos_smoothed(pos, segs, pos_window)
@@ -355,7 +311,7 @@ def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength,
         if i in det.boundaries or i in det.rot_accent:
             out_rot.append(rots[i])
             continue
-        target = _slerp(rots[i], rot_mean[i], rot_strength)
+        target = quat.slerp(rots[i], rot_mean[i], rot_strength)
         out_rot.append(_clamp_rot(rots[i], target, ROT_SPIKE_DEG))
 
     return out_pos, out_rot

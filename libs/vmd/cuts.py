@@ -1,16 +1,12 @@
 import math
 
+from vmd import quat
+
 
 def _axis_angle_deg(r1, r0):
     d = math.degrees(r1 - r0)
     d = (d + 180.0) % 360.0 - 180.0
     return abs(d)
-
-
-def _quat_angle_deg(q1, q0):
-    dot = abs(sum(a * b for a, b in zip(q1, q0, strict=True)))
-    dot = min(1.0, dot)
-    return math.degrees(2.0 * math.acos(dot))
 
 
 def detect_cuts_camera(start_frame, positions, rotations, distances, thresholds):
@@ -32,7 +28,7 @@ def detect_cuts_bone(start_frame, positions, rotations, thresholds):
     cuts = set()
     for i in range(1, len(positions)):
         pos_d = math.dist(positions[i], positions[i - 1])
-        rot_d = _quat_angle_deg(rotations[i], rotations[i - 1])
+        rot_d = quat.angle_deg(rotations[i], rotations[i - 1])
         if pos_d > pos_t or rot_d > rot_t:
             cuts.add(start_frame + i)
     return cuts
