@@ -2,6 +2,7 @@ import re
 
 import pytest
 
+from cli_events import run as cli_events_run
 from song2vmd import cli
 from song2vmd import events as _events
 from song2vmd import pipeline as _pipeline
@@ -399,7 +400,7 @@ def test_help_lists_key_flags(capsys):
 
 def test_main_installs_the_sigbreak_handler(tmp_path, monkeypatch):
     installed = []
-    monkeypatch.setattr(cli, "install_sigbreak_handler", lambda: installed.append(True))
+    monkeypatch.setattr(cli_events_run, "install_sigbreak_handler", lambda: installed.append(True))
     src = _touch(tmp_path / "in.wav")
     assert cli.main([src, "--dry-run"]) == 0
     assert installed == [True]

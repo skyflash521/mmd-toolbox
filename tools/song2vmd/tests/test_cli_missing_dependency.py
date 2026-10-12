@@ -6,10 +6,7 @@ from song2vmd import cli
 
 _MISSING = ModuleNotFoundError("No module named 'soundfile'", name="soundfile")
 
-_NAMES_UNDEFINED_WITHOUT_EXTRA = (
-    "AudioLoadError", "IntermediateReadError", "IntermediateWriteError", "RecognitionError",
-    "SeparationError", "StageExecutionError", "_pipeline",
-)
+_NAMES_UNDEFINED_WITHOUT_EXTRA = ("_pipeline",)
 
 
 @pytest.fixture

@@ -99,7 +99,7 @@ def test_human_warning_closes_the_live_line_before_writing(tmp_path, monkeypatch
         def flush(self):
             pass
 
-    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _OrderReporter())
+    monkeypatch.setattr(cli._va_cli, "build_router", lambda **kwargs: _OrderReporter())
     monkeypatch.setattr(cli.sys, "stderr", _OrderStderr())
 
     assert cli.main([src, "-o", str(tmp_path / "out.vpr")]) == 0
@@ -131,7 +131,7 @@ def test_live_line_is_closed_on_every_exit(tmp_path, monkeypatch, outcome, expec
             raise outcome
         return front_stage_result()
 
-    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _Reporter())
+    monkeypatch.setattr(cli._va_cli, "build_router", lambda **kwargs: _Reporter())
     monkeypatch.setattr(cli, "_pipeline", types.SimpleNamespace(run=fake_run))
 
     assert cli.main([src, "-o", str(tmp_path / "out.vpr")]) == expected

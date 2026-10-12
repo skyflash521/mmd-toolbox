@@ -1,9 +1,7 @@
-import io
-
 import pytest
 
+import vocal_analysis_cli
 from song2vmd import progress
-from vocal_analysis.quiet import STDERR_WRITE_LOCK
 
 
 @pytest.mark.parametrize("stage_id,label", [
@@ -16,32 +14,9 @@ from vocal_analysis.quiet import STDERR_WRITE_LOCK
     ("write", "書き出し"),
 ])
 def test_stage_label_maps_each_stage_id(stage_id, label):
-    assert progress.stage_label(stage_id) == label
+    assert vocal_analysis_cli.stage_label(stage_id, progress.EXTRA_STAGE_LABELS) == label
 
 
-def test_stage_label_returns_unknown_id_as_is():
-    assert progress.stage_label("未知の工程") == "未知の工程"
-
-
-def test_label_table_covers_exactly_the_documented_stages():
-    assert set(progress.STAGE_LABELS) == {
-        "load", "separate", "recognize", "rms", "events", "generate", "write"}
-
-
-@pytest.mark.parametrize("machine,quiet", [(True, False), (False, True), (False, False)])
-def test_build_router_passes_labels_and_stderr_write_lock(monkeypatch, machine, quiet):
-    captured = {}
-
-    def fake_router(**kwargs):
-        captured.update(kwargs)
-        return "router"
-
-    monkeypatch.setattr(progress, "ProgressRouter", fake_router)
-    stream = io.StringIO()
-    emitter = object()
-    assert progress.build_router(
-        machine=machine, quiet=quiet, emitter=emitter, stream=stream) == "router"
-    assert captured == {
-        "machine": machine, "quiet": quiet, "emitter": emitter, "stream": stream,
-        "labels": progress.STAGE_LABELS, "write_lock": STDERR_WRITE_LOCK,
-    }
+def test_extra_labels_hold_only_song2vmd_specific_stages():
+    assert set(progress.EXTRA_STAGE_LABELS) == {"events", "generate"}
+    assert not set(progress.EXTRA_STAGE_LABELS) & set(vocal_analysis_cli.FRONT_STAGE_LABELS)

@@ -7,13 +7,13 @@ import pytest
 
 from cli_progress_router import ProgressEmitError
 from cli_resource_watch import torch_config as _torch_config
+from cli_resource_watch import warning_texts
 from cli_resource_watch import watch as _watch_module
 from song2vmd import __version__, cli
 from song2vmd import events as _events
 from song2vmd import pipeline as _pipeline
 from song2vmd import presets as _presets
 from song2vmd import report as _report
-from song2vmd.resource_watch import warning_texts
 from vmd import VmdDocument
 from vmd import read as vmd_read
 from vocal_analysis import (
@@ -302,7 +302,7 @@ def test_resource_warning_closes_live_line_before_stderr_write(tmp_path, monkeyp
         def flush(self):
             pass
 
-    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _OrderReporter())
+    monkeypatch.setattr(cli._va_cli, "build_router", lambda **kwargs: _OrderReporter())
     monkeypatch.setattr(cli.sys, "stderr", _OrderStderr())
 
     rc = cli.main([src, "--dry-run"])
@@ -764,7 +764,7 @@ def spy_progress(monkeypatch):
     """close・summary・標準エラーへの print・レポート生成を、呼ばれた順に1本のリストへ記録して返す。"""
     calls = []
     _SpyProgressRouter.calls = calls
-    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _SpyProgressRouter())
+    monkeypatch.setattr(cli._va_cli, "build_router", lambda **kwargs: _SpyProgressRouter())
 
     real_print = print
 

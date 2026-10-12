@@ -6,11 +6,7 @@ from song2vpr import cli
 
 _MISSING_SOUNDFILE = ModuleNotFoundError("No module named 'soundfile'", name="soundfile")
 
-_NAMES_BOUND_BY_EXTRA_IMPORTS = (
-    "_pipeline", "_pitch",
-    "AudioLoadError", "IntermediateReadError", "IntermediateWriteError",
-    "RecognitionError", "SeparationError", "StageExecutionError",
-)
+_NAMES_BOUND_BY_EXTRA_IMPORTS = ("_pipeline", "_pitch", "RecognitionError")
 
 
 @pytest.fixture

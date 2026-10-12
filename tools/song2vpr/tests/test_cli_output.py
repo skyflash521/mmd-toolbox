@@ -67,7 +67,7 @@ class _SpyProgressRouter:
 def progress_calls(monkeypatch):
     calls = []
     _SpyProgressRouter.calls = calls
-    monkeypatch.setattr(cli._progress, "build_router", lambda **kwargs: _SpyProgressRouter())
+    monkeypatch.setattr(cli._va_cli, "build_router", lambda **kwargs: _SpyProgressRouter())
     return calls
 
 
@@ -283,7 +283,7 @@ def test_quiet_reaches_the_progress_display(tmp_path, monkeypatch, quiet):
         return _SpyProgressRouter()
 
     _SpyProgressRouter.calls = []
-    monkeypatch.setattr(cli._progress, "build_router", build_router)
+    monkeypatch.setattr(cli._va_cli, "build_router", build_router)
     argv = [_source(tmp_path), "-o", str(tmp_path / "song.vpr")] + (["--quiet"] if quiet else [])
     assert cli.main(argv) == 0
     assert received["quiet"] is quiet
