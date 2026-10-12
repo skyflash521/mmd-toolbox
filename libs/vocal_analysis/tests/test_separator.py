@@ -104,6 +104,34 @@ def test_separate_always_mode_returns_existing_vocal_wav_path(monkeypatch):
     assert calls["model_filename"] == "htdemucs_ft.yaml"
 
 
+def test_separate_releases_separator_and_gpu_memory_through_model_store(monkeypatch):
+    import gc
+    import weakref
+
+    from vocal_analysis import model_store
+    from vocal_analysis import separator as separator_module
+
+    calls = {}
+    refs = []
+    observed = []
+
+    def fake_build_separator(output_dir):
+        separator_obj = _FakeSeparator(calls)
+        refs.append(weakref.ref(separator_obj))
+        return separator_obj
+
+    def fake_release_gpu_memory():
+        gc.collect()
+        observed.append(refs[0]() is None)
+
+    monkeypatch.setattr(separator_module, "_build_separator", fake_build_separator)
+    monkeypatch.setattr(model_store, "release_gpu_memory", fake_release_gpu_memory)
+
+    separator_module.separate(_make_pcm(), mode="always")
+
+    assert observed == [True]
+
+
 def test_separate_dispatches_registered_separator_id(monkeypatch):
     from vocal_analysis import DEFAULT_SEPARATOR
     from vocal_analysis import separator as separator_module

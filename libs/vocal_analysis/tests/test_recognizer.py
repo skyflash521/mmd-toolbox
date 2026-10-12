@@ -396,7 +396,9 @@ def test_resolve_transcription_normalizes_whole_text_repetition_to_3_5_morae_per
     assert words is None
 
 
-def test_resolve_transcription_repetition_rescue_passes_english_katakana_method(monkeypatch):
+def test_resolve_transcription_density_judgement_uses_converter_free_g2p_regardless_of_session_method(monkeypatch):
+    import inspect
+
     from vocal_analysis import recognizer as R
 
     g2p_methods = []
@@ -408,12 +410,12 @@ def test_resolve_transcription_repetition_rescue_passes_english_katakana_method(
     monkeypatch.setattr(R, "_g2p", g2p)
     text, words = R._resolve_transcription(
         np.zeros(16000, dtype=np.float32), 10.0, "ラ" * 400, None,
-        R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False,
-        english_katakana_method="tinyllama-katakana-converter")
+        R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False)
 
+    assert "english_katakana_method" not in inspect.signature(R._resolve_transcription).parameters
     assert text == "ラ" * 35
     assert len(g2p_methods) >= 1
-    assert all(m == "tinyllama-katakana-converter" for m in g2p_methods)
+    assert all(m == "arpakana" for m in g2p_methods)
 
 
 def test_resolve_transcription_rescue_keeps_normal_density_text(monkeypatch):
@@ -1238,37 +1240,27 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
         katakana_module._conversion_cache.clear()
 
 
-def _fake_file_count_bar(tqdm_class, n=2):
-    import tqdm.auto
-
-    # huggingface_hub は tqdm_class に tqdm.auto.tqdm の派生を求める。
-    assert issubclass(tqdm_class, tqdm.auto.tqdm)
-    # snapshot_download のファイル数バーは unit を持たず、キャッシュ済みでもファイル数ぶん進む。
-    bar = tqdm_class(total=n, desc=f"Fetching {n} files")
-    for _ in range(n):
-        bar.update(1)
-    bar.close()
-
-
-def test_load_model_and_processor_reports_live_download_percentage(monkeypatch):
-    pytest.importorskip("torch")
-    pytest.importorskip("transformers")
-    from vocal_analysis import recognizer as recognizer_module
-
-    calls = []
-    timeline = []
-
+def _fake_hf_download(byte_updates):
     def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
-        calls.append((repo_id, revision))
-        timeline.append("snapshot")
-        _fake_file_count_bar(tqdm_class)
+        import tqdm.auto
+
+        assert issubclass(tqdm_class, tqdm.auto.tqdm)
+        file_bar = tqdm_class(total=2, desc="Fetching 2 files")
+        file_bar.update(1)
+        file_bar.update(1)
+        file_bar.close()
         byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
-        byte_bar.total += 100
-        byte_bar.update(40)
-        byte_bar.update(60)
+        if byte_updates:
+            byte_bar.total += sum(byte_updates)
+        for n in byte_updates:
+            byte_bar.update(n)
         byte_bar.close()
 
-    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
+    return fake_snapshot_download
+
+
+def _install_fake_ctc_loaders(monkeypatch, timeline):
+    import transformers
 
     class _FakeTokenizer:
         pad_token_id = 0
@@ -1286,29 +1278,38 @@ def test_load_model_and_processor_reports_live_download_percentage(monkeypatch):
         def eval(self):
             return self
 
-    def fake_processor_from_pretrained(*a, **k):
+    def processor_from_pretrained(*a, **k):
         timeline.append("processor")
         return _FakeProc()
 
-    def fake_model_from_pretrained(*a, **k):
+    def model_from_pretrained(*a, **k):
         timeline.append("model")
         return _FakeModel()
 
-    monkeypatch.setattr(recognizer_module, "_transformers_auto_processor_from_pretrained",
-                        fake_processor_from_pretrained)
-    monkeypatch.setattr(recognizer_module, "_transformers_auto_model_for_ctc_from_pretrained",
-                        fake_model_from_pretrained)
+    monkeypatch.setattr(transformers.AutoProcessor, "from_pretrained", processor_from_pretrained)
+    monkeypatch.setattr(transformers.AutoModelForCTC, "from_pretrained", model_from_pretrained)
 
-    def on_progress(note):
-        timeline.append(("on_progress", note))
 
-    recognizer_module._load_model_and_processor(on_progress=on_progress)
+def test_load_phoneme_model_reports_live_download_percentage(monkeypatch):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from vocal_analysis import RECOGNIZER_CONFIG, alignment, model_store
 
-    model_id = recognizer_module.RECOGNIZER_CONFIG.model_id
-    model_revision = recognizer_module.RECOGNIZER_CONFIG.model_revision
-    assert calls == [(model_id, model_revision)]
+    timeline = []
+    base_download = _fake_hf_download([40, 60])
+
+    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+        timeline.append(("snapshot", repo_id, revision))
+        base_download(repo_id, revision=revision, tqdm_class=tqdm_class)
+
+    monkeypatch.setattr(model_store, "hf_snapshot_download", fake_snapshot_download)
+    _install_fake_ctc_loaders(monkeypatch, timeline)
+
+    alignment.load_phoneme_model(on_progress=lambda note: timeline.append(("on_progress", note)))
+
+    model_id = RECOGNIZER_CONFIG.model_id
     assert timeline == [
-        "snapshot",
+        ("snapshot", model_id, RECOGNIZER_CONFIG.model_revision),
         ("on_progress", f"ダウンロード中: {model_id} 40%"),
         ("on_progress", f"ダウンロード中: {model_id} 100%"),
         ("on_progress", f"音素モデル読み込み中: {model_id}"),
@@ -1317,80 +1318,45 @@ def test_load_model_and_processor_reports_live_download_percentage(monkeypatch):
     ]
 
 
-def test_load_model_and_processor_shows_loading_note_but_no_download_note_when_already_cached(monkeypatch):
+def test_load_phoneme_model_shows_loading_note_but_no_download_note_when_already_cached(monkeypatch):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
-    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis import RECOGNIZER_CONFIG, alignment, model_store
 
-    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
-        _fake_file_count_bar(tqdm_class)
-        byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
-        byte_bar.close()
+    monkeypatch.setattr(model_store, "hf_snapshot_download", _fake_hf_download([]))
+    _install_fake_ctc_loaders(monkeypatch, [])
+    notes = []
 
-    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
+    alignment.load_phoneme_model(on_progress=notes.append)
 
-    class _FakeTokenizer:
-        pad_token_id = 0
-
-        def get_vocab(self):
-            return {}
-
-    class _FakeProc:
-        tokenizer = _FakeTokenizer()
-
-    class _FakeModel:
-        def to(self, device):
-            return self
-
-        def eval(self):
-            return self
-
-    monkeypatch.setattr(recognizer_module, "_transformers_auto_processor_from_pretrained",
-                        lambda *a, **k: _FakeProc())
-    monkeypatch.setattr(recognizer_module, "_transformers_auto_model_for_ctc_from_pretrained",
-                        lambda *a, **k: _FakeModel())
-
-    calls = []
-    recognizer_module._load_model_and_processor(on_progress=lambda note: calls.append(note))
-
-    model_id = recognizer_module.RECOGNIZER_CONFIG.model_id
-    assert calls == [f"音素モデル読み込み中: {model_id}"]
+    assert notes == [f"音素モデル読み込み中: {RECOGNIZER_CONFIG.model_id}"]
 
 
-def test_load_content_recognizer_pipeline_reports_live_download_percentage(monkeypatch):
+def test_load_pipeline_reports_live_download_percentage(monkeypatch):
     pytest.importorskip("torch")
-    pytest.importorskip("transformers")
-    from vocal_analysis import ContentRecognizerModel
-    from vocal_analysis import recognizer as recognizer_module
+    transformers = pytest.importorskip("transformers")
+    from vocal_analysis import ContentRecognizerModel, model_store, transcription
 
-    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
-    calls = []
     timeline = []
+    base_download = _fake_hf_download([100])
 
     def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
-        calls.append((repo_id, revision))
-        timeline.append("snapshot")
-        _fake_file_count_bar(tqdm_class)
-        byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
-        byte_bar.total += 100
-        byte_bar.update(100)
-        byte_bar.close()
+        timeline.append(("snapshot", repo_id, revision))
+        base_download(repo_id, revision=revision, tqdm_class=tqdm_class)
 
     def fake_transformers_pipeline(*a, **k):
         timeline.append("pipeline")
         return object()
 
-    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
-    monkeypatch.setattr(recognizer_module, "_transformers_pipeline", fake_transformers_pipeline)
+    monkeypatch.setattr(model_store, "hf_snapshot_download", fake_snapshot_download)
+    monkeypatch.setattr(transformers, "pipeline", fake_transformers_pipeline)
 
-    content_recognizer_model = ContentRecognizerModel(model_id="dummy/model", model_revision="main")
-    recognizer_module._load_content_recognizer_pipeline(
-        content_recognizer_model, on_progress=lambda note: timeline.append(("on_progress", note))
-    )
+    transcription.load_pipeline(
+        ContentRecognizerModel(model_id="dummy/model", model_revision="main"),
+        on_progress=lambda note: timeline.append(("on_progress", note)))
 
-    assert calls == [("dummy/model", "main")]
     assert timeline == [
-        "snapshot",
+        ("snapshot", "dummy/model", "main"),
         ("on_progress", "ダウンロード中: dummy/model 100%"),
         ("on_progress", "内容認識モデル読み込み中: dummy/model"),
         "pipeline",
@@ -1398,97 +1364,30 @@ def test_load_content_recognizer_pipeline_reports_live_download_percentage(monke
     ]
 
 
-def test_load_content_recognizer_pipeline_shows_loading_note_but_no_download_note_when_already_cached(
-    monkeypatch,
-):
+def test_load_pipeline_shows_loading_note_but_no_download_note_when_already_cached(monkeypatch):
     pytest.importorskip("torch")
-    pytest.importorskip("transformers")
-    from vocal_analysis import ContentRecognizerModel
-    from vocal_analysis import recognizer as recognizer_module
+    transformers = pytest.importorskip("transformers")
+    from vocal_analysis import ContentRecognizerModel, model_store, transcription
 
-    monkeypatch.setattr(recognizer_module, "_content_recognizer_pipeline_cache", None)
+    monkeypatch.setattr(model_store, "hf_snapshot_download", _fake_hf_download([]))
+    monkeypatch.setattr(transformers, "pipeline", lambda *a, **k: object())
+    notes = []
 
-    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
-        _fake_file_count_bar(tqdm_class)
-        byte_bar = tqdm_class(total=0, desc="Downloading (incomplete total...)", unit="B", unit_scale=True)
-        byte_bar.close()
+    transcription.load_pipeline(
+        ContentRecognizerModel(model_id="dummy/model", model_revision="main"), on_progress=notes.append)
 
-    monkeypatch.setattr(recognizer_module, "_hf_snapshot_download", fake_snapshot_download)
-    monkeypatch.setattr(recognizer_module, "_transformers_pipeline", lambda *a, **k: object())
-
-    calls = []
-    content_recognizer_model = ContentRecognizerModel(model_id="dummy/model", model_revision="main")
-    recognizer_module._load_content_recognizer_pipeline(
-        content_recognizer_model, on_progress=lambda note: calls.append(note)
-    )
-
-    assert calls == ["内容認識モデル読み込み中: dummy/model"]
+    assert notes == ["内容認識モデル読み込み中: dummy/model"]
 
 
-def test_prepare_english_katakana_conversion_arpakana_does_nothing(monkeypatch):
-    import vocal_analysis.recognizer as R
+def test_load_pipeline_without_on_progress_does_not_prefetch(monkeypatch):
+    pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    from vocal_analysis import ContentRecognizerModel, model_store, transcription
 
-    monkeypatch.setattr(
-        R, "uncached_target_words",
-        lambda text, method: (_ for _ in ()).throw(AssertionError("arpakanaでは対象語検出を行わない")),
-    )
-    monkeypatch.setattr(
-        R, "_release_content_recognizer_pipeline",
-        lambda: (_ for _ in ()).throw(AssertionError("arpakanaでは内容認識モデルを解放しない")),
-    )
+    def fail_download(*args, **kwargs):
+        raise AssertionError("on_progress が無いときは事前取得しない")
 
-    R._prepare_english_katakana_conversion("hello を見上げて", "arpakana")
+    monkeypatch.setattr(model_store, "hf_snapshot_download", fail_download)
+    monkeypatch.setattr(transformers, "pipeline", lambda *a, **k: object())
 
-
-def test_prepare_english_katakana_conversion_tinyllama_releases_pipeline_before_converting(monkeypatch):
-    import vocal_analysis.recognizer as R
-
-    calls = []
-    monkeypatch.setattr(R, "uncached_target_words", lambda text, method: ["hello"])
-    monkeypatch.setattr(
-        R, "_release_content_recognizer_pipeline", lambda: calls.append("release_pipeline")
-    )
-    monkeypatch.setattr(
-        R, "convert_words",
-        lambda words, method, **kwargs: calls.append(("convert", tuple(words), method)),
-    )
-
-    R._prepare_english_katakana_conversion("hello を見上げて", "tinyllama-katakana-converter")
-
-    assert calls == [
-        "release_pipeline",
-        ("convert", ("hello",), "tinyllama-katakana-converter"),
-    ]
-
-
-def test_prepare_english_katakana_conversion_tinyllama_forwards_on_progress_to_convert_words(monkeypatch):
-    import vocal_analysis.recognizer as R
-
-    monkeypatch.setattr(R, "uncached_target_words", lambda text, method: ["hello"])
-    monkeypatch.setattr(R, "_release_content_recognizer_pipeline", lambda: None)
-    captured = {}
-    monkeypatch.setattr(
-        R, "convert_words",
-        lambda words, method, on_progress=None: captured.setdefault("on_progress", on_progress),
-    )
-
-    sentinel = lambda note: None  # noqa: E731
-    R._prepare_english_katakana_conversion("hello を見上げて", "tinyllama-katakana-converter", on_progress=sentinel)
-
-    assert captured["on_progress"] is sentinel
-
-
-def test_prepare_english_katakana_conversion_tinyllama_skips_release_when_no_uncached_words(monkeypatch):
-    import vocal_analysis.recognizer as R
-
-    monkeypatch.setattr(R, "uncached_target_words", lambda text, method: [])
-    monkeypatch.setattr(
-        R, "_release_content_recognizer_pipeline",
-        lambda: (_ for _ in ()).throw(AssertionError("未変換対象語が無ければ解放しない")),
-    )
-    monkeypatch.setattr(
-        R, "convert_words",
-        lambda words, method: (_ for _ in ()).throw(AssertionError("未変換対象語が無ければ変換しない")),
-    )
-
-    R._prepare_english_katakana_conversion("hello を見上げて", "tinyllama-katakana-converter")
+    transcription.load_pipeline(ContentRecognizerModel(model_id="dummy/model", model_revision="main"))

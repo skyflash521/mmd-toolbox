@@ -444,12 +444,209 @@ def test_convert_words_arpakana_does_not_release_model(monkeypatch):
     assert release_calls == []
 
 
+class _CountingKatakanaModel:
+    device = "cpu"
+
+    def to(self, device):
+        return self
+
+    def eval(self):
+        return self
+
+    def generate(self, **inputs):
+        import torch
+
+        return torch.zeros((1, 5), dtype=torch.long)
+
+
+class _CountingKatakanaTokenizer:
+    def __call__(self, prompt, return_tensors=None):
+        import torch
+
+        class _Inputs(dict):
+            def to(self, device):
+                return self
+
+        return _Inputs(input_ids=torch.zeros((1, 3), dtype=torch.long))
+
+    def decode(self, ids, skip_special_tokens=True):
+        return "スカイ"
+
+
+@pytest.fixture
+def counting_katakana_model(monkeypatch):
+    import weakref
+
+    import transformers
+
+    import vocal_analysis.english_katakana as module
+    from vocal_analysis import model_store
+
+    class _Loads:
+        count = 0
+        refs = []
+
+        def alive(self):
+            import gc
+
+            gc.collect()
+            return any(ref() is not None for ref in self.refs)
+
+    loads = _Loads()
+
+    def from_pretrained_model(*args, **kwargs):
+        loads.count += 1
+        model = _CountingKatakanaModel()
+        loads.refs.append(weakref.ref(model))
+        return model
+
+    monkeypatch.setattr(module, "_katakana_model_cache", None)
+    monkeypatch.setattr(module, "_lookup_cmudict_phonemes", lambda word: "S K AY1")
+    monkeypatch.setattr(model_store, "select_device", lambda: "cpu")
+    monkeypatch.setattr(model_store, "release_gpu_memory", lambda: None)
+    monkeypatch.setattr(
+        transformers, "AutoTokenizer",
+        type("_Tokenizers", (), {"from_pretrained": staticmethod(lambda *a, **k: _CountingKatakanaTokenizer())}))
+    monkeypatch.setattr(
+        transformers, "AutoModelForCausalLM",
+        type("_Models", (), {"from_pretrained": staticmethod(from_pretrained_model)}))
+    loads.refs = []
+    return loads
+
+
+def test_convert_words_without_keep_model_reloads_converter_for_each_call(counting_katakana_model):
+    import vocal_analysis.english_katakana as module
+
+    module.convert_words(["sky"], method="tinyllama-katakana-converter")
+    assert counting_katakana_model.alive() is False
+    module.convert_words(["moon"], method="tinyllama-katakana-converter")
+
+    assert counting_katakana_model.count == 2
+    assert counting_katakana_model.alive() is False
+
+
+def test_convert_words_keep_model_holds_converter_across_calls_until_explicit_release(counting_katakana_model):
+    import vocal_analysis.english_katakana as module
+
+    module.convert_words(["sky"], method="tinyllama-katakana-converter", keep_model=True)
+    assert counting_katakana_model.alive() is True
+    module.convert_words(["moon"], method="tinyllama-katakana-converter", keep_model=True)
+
+    assert counting_katakana_model.count == 1
+    assert counting_katakana_model.alive() is True
+    assert module._conversion_cache[("tinyllama-katakana-converter", "sky")] == "スカイ"
+    assert module._conversion_cache[("tinyllama-katakana-converter", "moon")] == "スカイ"
+
+    module.release_katakana_model()
+
+    assert counting_katakana_model.alive() is False
+
+
+def test_convert_words_keep_model_does_not_release_even_when_conversion_fails(counting_katakana_model, monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    def raising_lookup(word):
+        raise OSError("辞書取得失敗")
+
+    module.convert_words(["sky"], method="tinyllama-katakana-converter", keep_model=True)
+    monkeypatch.setattr(module, "_lookup_cmudict_phonemes", raising_lookup)
+
+    with pytest.raises(OSError):
+        module.convert_words(["moon"], method="tinyllama-katakana-converter", keep_model=True)
+
+    assert counting_katakana_model.alive() is True
+
+
+def test_convert_words_keep_model_with_arpakana_loads_no_converter(counting_katakana_model):
+    import vocal_analysis.english_katakana as module
+
+    module.convert_words(["sky"], method="arpakana", keep_model=True)
+
+    assert counting_katakana_model.count == 0
+
+
+def test_convert_words_rejects_positional_keep_model():
+    import vocal_analysis.english_katakana as module
+
+    with pytest.raises(TypeError):
+        module.convert_words(["sky"], "arpakana", None, True)
+
+
 def test_release_katakana_model_clears_process_cache(monkeypatch):
     import vocal_analysis.english_katakana as module
 
     module._katakana_model_cache = (object(), object())
     module.release_katakana_model()
     assert module._katakana_model_cache is None
+
+
+def test_release_katakana_model_frees_gpu_memory_through_model_store(monkeypatch):
+    import vocal_analysis.english_katakana as module
+    from vocal_analysis import model_store
+
+    calls = []
+    monkeypatch.setattr(model_store, "release_gpu_memory", lambda: calls.append("release"))
+    monkeypatch.setattr(module, "_katakana_model_cache", (object(), object()))
+
+    module.release_katakana_model()
+
+    assert calls == ["release"]
+
+
+def test_release_katakana_model_without_loaded_model_does_not_touch_gpu(monkeypatch):
+    import vocal_analysis.english_katakana as module
+    from vocal_analysis import model_store
+
+    monkeypatch.setattr(
+        model_store, "release_gpu_memory",
+        lambda: (_ for _ in ()).throw(AssertionError("未ロードなら GPU メモリを触らない")))
+    monkeypatch.setattr(module, "_katakana_model_cache", None)
+
+    module.release_katakana_model()
+
+
+def test_load_katakana_model_downloads_through_model_store(monkeypatch):
+    import transformers
+
+    import vocal_analysis.english_katakana as module
+    from vocal_analysis import model_store
+    from vocal_analysis.config import ENGLISH_KATAKANA_MODEL
+
+    class _FakeModel:
+        def to(self, target):
+            return self
+
+        def eval(self):
+            return self
+
+    prefetch_calls = []
+
+    def fake_prefetch(repo_id, revision, on_progress):
+        prefetch_calls.append((repo_id, revision))
+        on_progress("ダウンロード中: dummy 100%")
+        return True
+
+    monkeypatch.setattr(module, "_katakana_model_cache", None)
+    monkeypatch.setattr(model_store, "select_device", lambda: "cpu")
+    monkeypatch.setattr(model_store, "prefetch_with_progress", fake_prefetch)
+    monkeypatch.setattr(
+        transformers, "AutoTokenizer",
+        type("_FakeTokenizerLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: object())}),
+    )
+    monkeypatch.setattr(
+        transformers, "AutoModelForCausalLM",
+        type("_FakeModelLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: _FakeModel())}),
+    )
+    notes = []
+
+    module._load_katakana_model(on_progress=notes.append)
+
+    assert prefetch_calls == [(ENGLISH_KATAKANA_MODEL.model_id, ENGLISH_KATAKANA_MODEL.model_revision)]
+    assert notes == [
+        "ダウンロード中: dummy 100%",
+        f"カタカナ生成モデル読み込み中: {ENGLISH_KATAKANA_MODEL.model_id}",
+        "",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -461,6 +658,7 @@ def test_load_katakana_model_selects_dtype_by_device(monkeypatch, device, expect
     import transformers
 
     import vocal_analysis.english_katakana as module
+    from vocal_analysis import model_store
 
     captured = {}
 
@@ -477,7 +675,7 @@ def test_load_katakana_model_selects_dtype_by_device(monkeypatch, device, expect
         return _FakeModel()
 
     monkeypatch.setattr(module, "_katakana_model_cache", None)
-    monkeypatch.setattr(module, "_select_katakana_model_device", lambda: device)
+    monkeypatch.setattr(model_store, "select_device", lambda: device)
     monkeypatch.setattr(
         transformers, "AutoTokenizer",
         type("_FakeTokenizerLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: object())}),
@@ -497,6 +695,7 @@ def test_load_katakana_model_shows_loading_note_but_no_download_note_when_alread
     import transformers
 
     import vocal_analysis.english_katakana as module
+    from vocal_analysis import model_store
     from vocal_analysis.config import ENGLISH_KATAKANA_MODEL
 
     class _FakeModel:
@@ -507,7 +706,7 @@ def test_load_katakana_model_shows_loading_note_but_no_download_note_when_alread
             return self
 
     monkeypatch.setattr(module, "_katakana_model_cache", None)
-    monkeypatch.setattr(module, "_select_katakana_model_device", lambda: "cpu")
+    monkeypatch.setattr(model_store, "select_device", lambda: "cpu")
     monkeypatch.setattr(
         transformers, "AutoTokenizer",
         type("_FakeTokenizerLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: object())}),
@@ -516,7 +715,7 @@ def test_load_katakana_model_shows_loading_note_but_no_download_note_when_alread
         transformers, "AutoModelForCausalLM",
         type("_FakeModelLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: _FakeModel())}),
     )
-    monkeypatch.setattr(module, "_hf_snapshot_download", lambda repo_id, *, revision=None, tqdm_class=None: None)
+    monkeypatch.setattr(model_store, "hf_snapshot_download", lambda repo_id, *, revision=None, tqdm_class=None: None)
 
     notes = []
     module._load_katakana_model(on_progress=notes.append)
