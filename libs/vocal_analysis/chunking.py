@@ -44,7 +44,7 @@ def merge_chunk_segments(chunk_segments, chunk_offsets_sec, boundaries_sec):
                 continue
             global_segments.append(Segment(
                 type=s.type, start_sec=clipped_start, end_sec=clipped_end,
-                phoneme=s.phoneme, confidence=s.confidence,
+                phoneme=s.phoneme,
             ))
 
     merged = []
@@ -54,7 +54,7 @@ def merge_chunk_segments(chunk_segments, chunk_offsets_sec, boundaries_sec):
                 and merged[-1].phoneme == s.phoneme and merged[-1].end_sec == s.start_sec):
             prev = merged[-1]
             merged[-1] = Segment(type=prev.type, start_sec=prev.start_sec, end_sec=s.end_sec,
-                                  phoneme=prev.phoneme, confidence=None)
+                                  phoneme=prev.phoneme)
         else:
             merged.append(s)
     return merged

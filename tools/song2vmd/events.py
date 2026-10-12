@@ -5,16 +5,17 @@ from typing import Literal
 import numpy as np
 
 from lipsync import ApertureClass, ConsonantClass, MouthEvent, MouthShape
-from vocal_analysis.phonemes import espeak_ipa_to_vowel
+from vocal_analysis.phonemes import (
+    espeak_ipa_to_vowel,
+    is_bilabial,
+    is_moraic_nasal,
+    is_palatalized,
+    is_rounded,
+)
 
 FRAME_RATE = 30.0
 
-_BILABIAL_PHONEMES = frozenset({"m", "mʲ", "b", "bʲ", "p", "pʲ"})
-_MORAIC_NASAL_PHONEME = "ɴ"
-
-_ROUNDED_PHONEMES = frozenset({"ɸ", "w"})
 _SPREAD_PHONEMES = frozenset({"ɕ", "tɕ", "dʑ", "ɲ", "ç"})
-_PALATALIZED_SUFFIX = "ʲ"
 
 _FIRM_CLOSURE_PHONEMES = frozenset({"t", "d", "n", "ts", "ɲ"})
 _NARROW_CHANNEL_PHONEMES = frozenset({"s", "z", "ɕ", "tɕ", "dʑ", "ç", "j"})
@@ -35,9 +36,7 @@ _ONSET_SLOPE_UNIT_SEC = 0.010
 _ONSET_SLOPE_PER_10MS = 0.15
 _ONSET_SMOOTH_WINDOW_SEC = 0.03
 _ONSET_MIN_SPAN_SEC = 1.0 / FRAME_RATE
-_WEAK_CONFIDENCE_THRESHOLD = 0.5
-_WEAK_RMS_WITH_CONFIDENCE = 0.3
-_WEAK_RMS_WITHOUT_CONFIDENCE = 0.2
+_WEAK_RMS_THRESHOLD = 0.2
 _WEAK_SCALE = 0.5
 
 _LONG_MORA_THRESHOLD_SEC = 1.0
@@ -55,9 +54,9 @@ _MORA_KINDS = frozenset({"vowel", "n"})
 def _consonant_class(phoneme):
     if phoneme is None:
         return ConsonantClass.NONE
-    if phoneme in _ROUNDED_PHONEMES:
+    if is_rounded(phoneme):
         return ConsonantClass.ROUNDED
-    if phoneme in _SPREAD_PHONEMES or phoneme.endswith(_PALATALIZED_SUFFIX):
+    if phoneme in _SPREAD_PHONEMES or is_palatalized(phoneme):
         return ConsonantClass.SPREAD
     return ConsonantClass.NEUTRAL
 
@@ -87,7 +86,6 @@ class _Unit:
     start_sec: float
     end_sec: float
     letter: str | None = None
-    confidence: float | None = None
     head_consonant_phoneme: str | None = None
     aperture_consonant_run: tuple[str, ...] = ()
     nucleus_start_sec: float | None = None
@@ -167,7 +165,7 @@ def _classify_phonetic(segments, use_n_morph):
             else:
                 units.append(_Unit(
                     "vowel", start, seg.end_sec, letter=letter,
-                    confidence=seg.confidence, head_consonant_phoneme=last_consonant_phoneme,
+                    head_consonant_phoneme=last_consonant_phoneme,
                     aperture_consonant_run=tuple(aperture_run),
                     nucleus_start_sec=seg.start_sec, nucleus_end_sec=seg.end_sec,
                 ))
@@ -176,12 +174,12 @@ def _classify_phonetic(segments, use_n_morph):
             last_consonant_phoneme = None
         elif seg.type == "consonant":
             last_consonant_phoneme = seg.phoneme
-            if seg.phoneme in _BILABIAL_PHONEMES:
+            if is_bilabial(seg.phoneme):
                 start = absorbed_consonant_start if absorbed_consonant_start is not None else seg.start_sec
                 units.append(_Unit("bilabial", start, seg.end_sec))
                 absorbed_consonant_start = None
                 aperture_run = []
-            elif seg.phoneme == _MORAIC_NASAL_PHONEME:
+            elif is_moraic_nasal(seg.phoneme):
                 start = absorbed_consonant_start if absorbed_consonant_start is not None else seg.start_sec
                 kind = "n" if use_n_morph else "silence"
                 units.append(_Unit(
@@ -357,10 +355,8 @@ def _map_open_amount_continuous(normalized, *, open_lo, open_hi, open_max, inten
     return floor + (cap - floor) * (normalized ** intensity_curve)
 
 
-def _is_weak_vowel(confidence, rms_value):
-    if confidence is not None:
-        return confidence < _WEAK_CONFIDENCE_THRESHOLD and rms_value < _WEAK_RMS_WITH_CONFIDENCE
-    return rms_value < _WEAK_RMS_WITHOUT_CONFIDENCE
+def _is_weak_vowel(rms_value):
+    return rms_value < _WEAK_RMS_THRESHOLD
 
 
 def _percentile_bounds(values):
@@ -403,7 +399,7 @@ def confirm_mouth_events(segments, rms, *, open_lo, open_hi, open_max, intensity
     weak_vowels = 0
     for u, mora_rms in zip(units, mora_rms_raw, strict=True):
         if u.kind in _MORA_KINDS:
-            is_weak = u.kind == "vowel" and _is_weak_vowel(u.confidence, mora_rms)
+            is_weak = u.kind == "vowel" and _is_weak_vowel(mora_rms)
             if is_weak:
                 weak_vowels += 1
             if u.kind == "vowel":

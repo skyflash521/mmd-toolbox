@@ -512,7 +512,6 @@ def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: f
             start_sec=start_frame * frame_duration_sec,
             end_sec=end_frame * frame_duration_sec,
             phoneme=phoneme,
-            confidence=None,
         )
         if segments and segments[-1].type == new_segment.type and segments[-1].phoneme == new_segment.phoneme:
             prev = segments[-1]
@@ -521,7 +520,6 @@ def _path_to_segments(path: list[int], symbols: list[str], frame_duration_sec: f
                 start_sec=prev.start_sec,
                 end_sec=new_segment.end_sec,
                 phoneme=prev.phoneme,
-                confidence=None,
             )
         else:
             segments.append(new_segment)
@@ -535,7 +533,7 @@ def _merge_adjacent_segments(segments: list[Segment]) -> list[Segment]:
             prev = merged[-1]
             merged[-1] = Segment(
                 type=prev.type, start_sec=prev.start_sec, end_sec=seg.end_sec,
-                phoneme=prev.phoneme, confidence=None,
+                phoneme=prev.phoneme,
             )
         else:
             merged.append(seg)
@@ -592,7 +590,7 @@ def _align_wav2vec2_job(
         last = local_segments[-1]
         local_segments[-1] = Segment(
             type=last.type, start_sec=last.start_sec, end_sec=trim_hi_sec - trim_lo_sec,
-            phoneme=last.phoneme, confidence=None,
+            phoneme=last.phoneme,
         )
     return [
         Segment(
@@ -600,7 +598,6 @@ def _align_wav2vec2_job(
             start_sec=seg.start_sec + trim_lo_sec,
             end_sec=seg.end_sec + trim_lo_sec,
             phoneme=seg.phoneme,
-            confidence=None,
         )
         for seg in local_segments
     ]
@@ -673,7 +670,7 @@ def recognize(
 
         if _is_segment_silent(chunk_samples, threshold):
             all_segments.append(
-                Segment(type="gap", start_sec=start_sec, end_sec=end_sec, phoneme=None, confidence=None)
+                Segment(type="gap", start_sec=start_sec, end_sec=end_sec, phoneme=None)
             )
             continue
 
@@ -683,7 +680,7 @@ def recognize(
         trim_hi_sec = start_sec + trim_hi / RECOGNIZER_CONFIG.sample_rate if trimmed_tail else end_sec
         if trim_lo > 0:
             all_segments.append(
-                Segment(type="gap", start_sec=start_sec, end_sec=trim_lo_sec, phoneme=None, confidence=None)
+                Segment(type="gap", start_sec=start_sec, end_sec=trim_lo_sec, phoneme=None)
             )
         chunk_samples = chunk_samples[trim_lo:trim_hi]
 
@@ -721,11 +718,11 @@ def recognize(
 
         if not text.strip():
             all_segments.append(
-                Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None, confidence=None)
+                Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None)
             )
             if trimmed_tail:
                 all_segments.append(
-                    Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
+                    Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None)
                 )
             continue
 
@@ -747,11 +744,11 @@ def recognize(
 
         if _is_hallucinated_phoneme_density(len(phonemes), trim_duration_sec):
             all_segments.append(
-                Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None, confidence=None)
+                Segment(type="gap", start_sec=trim_lo_sec, end_sec=trim_hi_sec, phoneme=None)
             )
             if trimmed_tail:
                 all_segments.append(
-                    Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
+                    Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None)
                 )
             continue
 
@@ -784,7 +781,6 @@ def recognize(
                             start_sec=trim_lo_sec + gap_start,
                             end_sec=trim_lo_sec + gap_end,
                             phoneme=None,
-                            confidence=None,
                         )
                     )
                 for word_phonemes, w_start, w_end in valid_words:
@@ -806,7 +802,7 @@ def recognize(
 
         if trimmed_tail:
             all_segments.append(
-                Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None, confidence=None)
+                Segment(type="gap", start_sec=trim_hi_sec, end_sec=end_sec, phoneme=None)
             )
 
     if forced_aligner == "wav2vec2-ctc-forcedalign":
@@ -846,7 +842,6 @@ def recognize(
                         start_sec=seg.start_sec + offset_sec,
                         end_sec=seg.end_sec + offset_sec,
                         phoneme=seg.phoneme,
-                        confidence=None,
                     )
                 )
         all_segments.sort(key=lambda seg: (seg.start_sec, seg.end_sec))

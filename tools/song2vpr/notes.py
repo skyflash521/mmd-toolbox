@@ -7,11 +7,11 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from vocal_analysis.phonemes import is_moraic_nasal
+
 _MIN_NOTE_DURATION_SEC = 0.08
 
 _PITCH_CHANGE_HOLD_SEC = 0.34
-
-MORAIC_NASAL = "ɴ"
 
 _MAX_UNATTACHED_START_AFTER_NUCLEUS_SEC = 2.0
 
@@ -38,7 +38,7 @@ class Note:
 
 def _is_syllable_nucleus(segment):
     return segment.type == "vowel" or (segment.type == "consonant"
-                                       and segment.phoneme == MORAIC_NASAL)
+                                       and is_moraic_nasal(segment.phoneme))
 
 
 def _syllable_index_per_frame(times_sec, segments):

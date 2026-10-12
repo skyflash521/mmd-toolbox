@@ -318,6 +318,6 @@ def _segments_from_raw(raw_segments: list[tuple[float, float, str]]) -> list[Seg
     for start, end, symbol in raw_segments:
         seg_type, phoneme = _map_symbol_to_segment_fields(symbol)
         segments.append(
-            Segment(type=seg_type, start_sec=start, end_sec=end, phoneme=phoneme, confidence=None)
+            Segment(type=seg_type, start_sec=start, end_sec=end, phoneme=phoneme)
         )
     return segments

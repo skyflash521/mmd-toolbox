@@ -3,9 +3,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from vocal_analysis.phonemes import espeak_ipa_to_vowel
-
-from .notes import MORAIC_NASAL
+from vocal_analysis.phonemes import espeak_ipa_to_vowel, is_moraic_nasal
 
 # vpr の音素表現は VOCALOID 日本語の X-SAMPA。
 IPA_TO_VPR_PHONEME = {
@@ -120,7 +118,7 @@ def _vpr_phonemes_of(segments):
 def _nucleus_of(segments):
     for segment in segments:
         if segment.type == "vowel" or (segment.type == "consonant"
-                                       and segment.phoneme == MORAIC_NASAL):
+                                       and is_moraic_nasal(segment.phoneme)):
             return segment
     return None
 
@@ -139,7 +137,7 @@ def _kana_row(head_consonants):
 
 def _lyric_of(segments, diagnostics):
     nucleus = _nucleus_of(segments)
-    if nucleus is not None and nucleus.phoneme == MORAIC_NASAL:
+    if nucleus is not None and is_moraic_nasal(nucleus.phoneme):
         diagnostics.moraic_nasal_notes += 1
         return _MORAIC_NASAL_KANA
 

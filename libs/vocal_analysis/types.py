@@ -16,13 +16,12 @@ class AudioPcm:
 
 @dataclass
 class Segment:
-    """phoneme は母音・子音なら IPA、gap なら None。confidence は 0〜1。"""
+    """phoneme は母音・子音なら IPA、gap なら None。"""
 
     type: Literal["vowel", "consonant", "gap"]
     start_sec: float
     end_sec: float
     phoneme: str | None
-    confidence: float | None
 
 
 # np.ndarray の == は要素ごとの配列を返し、真偽値として評価すると ValueError になる。

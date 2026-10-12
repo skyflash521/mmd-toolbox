@@ -79,3 +79,24 @@ _G2P_TO_VOCAB_SYMBOL: dict[str, str] = {
     "w": "w", "v": "v", "N": "ɴ",
 }
 _BLANK_G2P_SYMBOLS = frozenset({"pau", "cl"})
+
+_MORAIC_NASAL_SYMBOL = "ɴ"
+_BILABIAL_SYMBOLS = frozenset({"m", "mʲ", "b", "bʲ", "p", "pʲ"})
+_ROUNDED_SYMBOLS = frozenset({"ɸ", "w"})
+_PALATALIZATION_MARK = "ʲ"
+
+
+def is_moraic_nasal(symbol: str | None) -> bool:
+    return symbol == _MORAIC_NASAL_SYMBOL
+
+
+def is_bilabial(symbol: str | None) -> bool:
+    return symbol in _BILABIAL_SYMBOLS
+
+
+def is_rounded(symbol: str | None) -> bool:
+    return symbol in _ROUNDED_SYMBOLS
+
+
+def is_palatalized(symbol: str | None) -> bool:
+    return symbol is not None and symbol.endswith(_PALATALIZATION_MARK)
