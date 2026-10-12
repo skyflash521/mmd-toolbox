@@ -3,10 +3,9 @@ from pathlib import Path
 
 import numpy as np
 
+from vocal_analysis.phonemes import xsampa_vowel_letter
 from vpr.rests import rest_intervals
 from vpr.types import Part, TempoEvent
-
-from .phonemes import xsampa_vowel_letter
 
 _HTK_100NS_UNITS_PER_SECOND = 1e7
 
