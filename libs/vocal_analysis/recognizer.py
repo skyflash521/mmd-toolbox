@@ -55,7 +55,7 @@ def _gap(start_sec: float, end_sec: float) -> Segment:
 
 
 class RecognizerSession:
-    """全チャンクの書き起こし(transcribe)を終えてから全チャンクのアライメント(align)を行う。内容認識
+    """辞書の準備(prepare_dictionary)の後、全チャンクの書き起こし(transcribe)を終えてから全チャンクのアライメント(align)を行う。内容認識
     パイプライン・英単語の変換モデル・音素モデルのロードは、セッション全体で各最大1回。アライメントを
     始めたセッションでは書き起こせない。"""
 
@@ -104,6 +104,14 @@ class RecognizerSession:
         self._plans.clear()
         if holding_models:
             model_store.release_gpu_memory()
+
+    def prepare_dictionary(self, on_progress: Callable[[str], None] | None = None) -> None:
+        """英単語の変換に使う発音辞書を使える状態にする。無ければ取得し、on_progress に「辞書取得中」を渡す。
+        transcribe・align は辞書を取得しないので、辞書が要る処理の前に呼ぶ。取得できないときは
+        RecognitionError。"""
+        if self._closed:
+            raise RuntimeError("閉じたセッションは使えません")
+        transcription.prepare_dictionary(on_progress)
 
     def transcribe(
         self, vocal_wav_path: Path, on_progress: Callable[[str], None] | None = None
@@ -344,5 +352,6 @@ def recognize(
         content_recognizer_model, retry=retry, forced_aligner=forced_aligner,
         sofa_aligner=sofa_aligner, english_katakana_method=english_katakana_method,
     ) as session:
+        session.prepare_dictionary(on_progress=on_progress)
         return session.align(
             session.transcribe(vocal_wav_path, on_progress=on_progress), on_progress=on_progress)

@@ -53,18 +53,35 @@ _cmudict_cache = None
 
 
 def _get_cmudict_entries():
+    """辞書が無いときは LookupError。取得は ensure_cmudict が行う。"""
     global _cmudict_cache
     if _cmudict_cache is None:
-        import nltk
         from nltk.corpus import cmudict
 
         # nltk の cmudict.dict() は呼ぶたびに辞書全体を作り直す。
-        try:
-            _cmudict_cache = cmudict.dict()
-        except LookupError:
-            nltk.download("cmudict", quiet=True)
-            _cmudict_cache = cmudict.dict()
+        _cmudict_cache = cmudict.dict()
     return _cmudict_cache
+
+
+def ensure_cmudict(on_progress: Callable[[str], None] | None = None) -> None:
+    """CMUdict を使える状態にする。無ければ on_progress("辞書取得中") の後に取得する。取得できないときは
+    ImportError(nltk なし)、OSError(取得失敗)、LookupError(取得後も無い)。"""
+    global _cmudict_cache
+    if _cmudict_cache is not None:
+        return
+
+    import nltk
+    from nltk.corpus import cmudict
+
+    try:
+        _cmudict_cache = cmudict.dict()
+        return
+    except LookupError:
+        pass
+    if on_progress is not None:
+        on_progress("辞書取得中")
+    nltk.download("cmudict", quiet=True)
+    _cmudict_cache = cmudict.dict()
 
 
 def _lookup_cmudict_phonemes(word: str) -> str | None:

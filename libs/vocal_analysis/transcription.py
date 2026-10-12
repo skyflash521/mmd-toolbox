@@ -128,6 +128,15 @@ def _katakana_conversion_errors():
         ) from e
 
 
+def prepare_dictionary(on_progress: Callable[[str], None] | None = None) -> None:
+    """英単語の変換に使う発音辞書を使える状態にする。失敗は RecognitionError にする。"""
+    with _katakana_conversion_errors():
+        try:
+            english_katakana.ensure_cmudict(on_progress)
+        except OSError as e:
+            raise RecognitionError("CMUdict を取得できません。ネットワーク接続を確認してください。") from e
+
+
 def convert_english_words(
     texts: Iterable[str], method: EnglishKatakanaMethod,
     on_progress: Callable[[str], None] | None = None,

@@ -858,7 +858,7 @@ def test_session_prepare_dictionary_relays_the_dictionary_note_to_on_progress(en
     [
         pytest.param(ImportError("no nltk"), "nltk", id="missing-library"),
         pytest.param(LookupError("no cmudict"), "CMUdict", id="corpus-missing"),
-        pytest.param(OSError("offline"), "ネットワーク接続を確認", id="download-failed"),
+        pytest.param(OSError("offline"), "CMUdict を取得できません。ネットワーク接続を確認", id="download-failed"),
     ],
 )
 def test_session_prepare_dictionary_maps_failures_to_recognition_error_with_cause(
@@ -874,7 +874,7 @@ def test_session_prepare_dictionary_maps_failures_to_recognition_error_with_caus
     assert excinfo.value.__cause__ is error
 
 
-@pytest.mark.parametrize("error_type", [ImportError, LookupError, OSError])
+@pytest.mark.parametrize("error_type", [ImportError, LookupError])
 def test_session_prepare_dictionary_maps_failures_to_the_same_error_as_english_word_conversion(
         ensure_cmudict, monkeypatch, error_type):
     from vocal_analysis.recognizer import RecognitionError

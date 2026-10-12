@@ -84,30 +84,28 @@ def test_lookup_cmudict_phonemes_uses_first_of_multiple_pronunciations(monkeypat
     assert module._lookup_cmudict_phonemes("read") == "R IY1 D"
 
 
-def test_get_cmudict_entries_auto_downloads_when_not_cached(monkeypatch):
+def test_get_cmudict_entries_raises_lookup_error_without_downloading_when_not_cached(monkeypatch):
+    import nltk
     import nltk.corpus
 
     import vocal_analysis.english_katakana as module
 
     monkeypatch.setattr(module, "_cmudict_cache", None)
     download_calls = []
-    attempts = {"n": 0}
 
     # nltk.corpus.cmudict は初回ロードで自身を別のオブジェクトへ置き換えるので、属性ではなく丸ごと差し替える。
-    class _FakeCmudict:
+    class _MissingCmudict:
         def dict(self):
-            attempts["n"] += 1
-            if attempts["n"] == 1:
-                raise LookupError("missing")
-            return {"sky": [["S", "K", "AY1"]]}
+            raise LookupError("missing")
 
-    monkeypatch.setattr(nltk.corpus, "cmudict", _FakeCmudict())
+    monkeypatch.setattr(nltk.corpus, "cmudict", _MissingCmudict())
     monkeypatch.setattr(nltk, "download", lambda name, quiet=False: download_calls.append((name, quiet)))
 
-    entries = module._get_cmudict_entries()
+    with pytest.raises(LookupError):
+        module._get_cmudict_entries()
 
-    assert download_calls == [("cmudict", True)]
-    assert entries == {"sky": [["S", "K", "AY1"]]}
+    assert download_calls == []
+    assert module._cmudict_cache is None
 
 
 @pytest.mark.parametrize(

@@ -135,20 +135,24 @@ def _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments):
 def run_front_stage(input_path, *, separate_vocals, separator, content_recognizer_model,
                     retry, forced_aligner, sofa_aligner, english_katakana_method,
                     chunking=None, keep_intermediate_dir=None, on_progress=None):
-    """on_progress は on_progress(stage_id, *, done, total, note, elapsed) の形で呼ばれる。"""
+    """on_progress は on_progress(stage_id, *, done, total, note, elapsed) の形で呼ばれる。
+    引数の不正による RecognitionError は、分離より前に送出される。"""
+    def open_session():
+        return _recognizer.RecognizerSession(
+            content_recognizer_model, retry=retry, forced_aligner=forced_aligner,
+            sofa_aligner=sofa_aligner, english_katakana_method=english_katakana_method)
+
     _report_stage_start(on_progress, "load")
     pcm = _io.load_audio(input_path)
     duration_sec = len(pcm.samples) / pcm.sample_rate
 
     if chunking is None or chunking.max_duration_sec <= 0 or duration_sec <= chunking.max_duration_sec:
         vocal_wav, segments, rms_envelope, vocal_pcm = _run_single(
-            pcm, separate_vocals, separator, content_recognizer_model, retry,
-            forced_aligner, sofa_aligner, english_katakana_method, on_progress)
+            pcm, separate_vocals, separator, open_session, on_progress)
         forced_split = False
     else:
         vocal_wav, segments, rms_envelope, vocal_pcm, forced_split = _run_chunked(
-            pcm, duration_sec, separate_vocals, separator, content_recognizer_model,
-            retry, chunking, forced_aligner, sofa_aligner, english_katakana_method, on_progress)
+            pcm, duration_sec, separate_vocals, separator, chunking, open_session, on_progress)
 
     if keep_intermediate_dir is not None:
         _save_intermediate(keep_intermediate_dir, pcm, vocal_pcm, segments)
@@ -158,21 +162,22 @@ def run_front_stage(input_path, *, separate_vocals, separator, content_recognize
         pcm=pcm, vocal_pcm=vocal_pcm, duration_sec=duration_sec, forced_split=forced_split)
 
 
-def _run_single(pcm, separate_vocals, separator, content_recognizer_model, retry,
-                forced_aligner, sofa_aligner, english_katakana_method, on_progress):
-    _report_stage_start(on_progress, "separate")
-    vocal_path = _run_inference(
-        "separate", _separator.separate, pcm, separate_vocals,
-        separator=separator,
-        map_failures=separate_vocals != "never",
-        on_progress=_model_download_progress(on_progress, "separate", done=0, total=None))
-    _report_stage_start(on_progress, "recognize")
-    segments = _run_inference(
-        "recognize", _recognizer.recognize, vocal_path,
-        content_recognizer_model=content_recognizer_model,
-        retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
-        english_katakana_method=english_katakana_method,
-        on_progress=_model_download_progress(on_progress, "recognize", done=0, total=None))
+def _run_single(pcm, separate_vocals, separator, open_session, on_progress):
+    with open_session() as session:
+        _report_stage_start(on_progress, "separate")
+        vocal_path = _run_inference(
+            "separate", _separator.separate, pcm, separate_vocals,
+            separator=separator,
+            map_failures=separate_vocals != "never",
+            on_progress=_model_download_progress(on_progress, "separate", done=0, total=None))
+        _report_stage_start(on_progress, "recognize")
+
+        def relay():
+            return _model_download_progress(on_progress, "recognize", done=0, total=None)
+
+        _run_inference("recognize", session.prepare_dictionary, on_progress=relay())
+        transcribed = _run_inference("recognize", session.transcribe, vocal_path, on_progress=relay())
+        segments = _run_inference("recognize", session.align, transcribed, on_progress=relay())
     _report_stage_start(on_progress, "rms")
     vocal_pcm = _read_intermediate(vocal_path, _io.load_audio)
     rms_envelope = _rms.compute_rms(vocal_pcm)
@@ -187,9 +192,7 @@ def _write_whole_vocal_wav(vocal_pcm):
     return path
 
 
-def _run_chunked(pcm, duration_sec, separate_vocals, separator, content_recognizer_model,
-                 retry, chunking, forced_aligner, sofa_aligner,
-                 english_katakana_method, on_progress):
+def _run_chunked(pcm, duration_sec, separate_vocals, separator, chunking, open_session, on_progress):
     unseparated_rms = _rms.compute_rms(pcm)
     boundary_pairs = _chunking.find_chunk_boundaries(
         duration_sec, unseparated_rms.times_sec, unseparated_rms.values,
@@ -199,35 +202,45 @@ def _run_chunked(pcm, duration_sec, separate_vocals, separator, content_recogniz
     forced_split = any(f for _, f in boundary_pairs)
     edges = [0.0] + boundaries + [duration_sec]
     n = len(edges) - 1
+    recognize_total = 2 * n
 
     chunk_offsets_sec = []
-    chunk_segments_list = []
+    vocal_paths = []
     vocal_core_chunks = []
-    for i in range(n):
-        core_start, core_end = edges[i], edges[i + 1]
-        pad_start = max(0.0, core_start - chunking.overlap_sec) if i > 0 else 0.0
-        pad_end = min(duration_sec, core_end + chunking.overlap_sec) if i < n - 1 else duration_sec
-        chunk_offsets_sec.append(pad_start)
+    with open_session() as session:
+        for i in range(n):
+            core_start, core_end = edges[i], edges[i + 1]
+            pad_start = max(0.0, core_start - chunking.overlap_sec) if i > 0 else 0.0
+            pad_end = min(duration_sec, core_end + chunking.overlap_sec) if i < n - 1 else duration_sec
+            chunk_offsets_sec.append(pad_start)
 
-        chunk_pcm = _slice_pcm(pcm, pad_start, pad_end)
-        completed_chunks = i
-        _report_stage_start(on_progress, "separate", done=completed_chunks, total=n)
-        vocal_path = _run_inference(
-            "separate", _separator.separate, chunk_pcm, separate_vocals,
-            separator=separator,
-            map_failures=separate_vocals != "never",
-            on_progress=_model_download_progress(on_progress, "separate", done=completed_chunks, total=n))
-        _report_stage_start(on_progress, "recognize", done=completed_chunks, total=n)
-        chunk_segments_list.append(
-            _run_inference(
-                "recognize", _recognizer.recognize, vocal_path,
-                content_recognizer_model=content_recognizer_model,
-                retry=retry, forced_aligner=forced_aligner, sofa_aligner=sofa_aligner,
-                english_katakana_method=english_katakana_method,
-                on_progress=_model_download_progress(on_progress, "recognize", done=completed_chunks, total=n)))
+            chunk_pcm = _slice_pcm(pcm, pad_start, pad_end)
+            _report_stage_start(on_progress, "separate", done=i, total=n)
+            vocal_path = _run_inference(
+                "separate", _separator.separate, chunk_pcm, separate_vocals,
+                separator=separator,
+                map_failures=separate_vocals != "never",
+                on_progress=_model_download_progress(on_progress, "separate", done=i, total=n))
+            vocal_paths.append(vocal_path)
 
-        chunk_vocal_pcm = _read_intermediate(vocal_path, _read_pcm_without_peak_normalization)
-        vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))
+            chunk_vocal_pcm = _read_intermediate(vocal_path, _read_pcm_without_peak_normalization)
+            vocal_core_chunks.append(_slice_pcm(chunk_vocal_pcm, core_start - pad_start, core_end - pad_start))
+
+        def relay(done):
+            return _model_download_progress(on_progress, "recognize", done=done, total=recognize_total)
+
+        _run_inference("recognize", session.prepare_dictionary, on_progress=relay(0))
+        transcriptions = []
+        for i, vocal_path in enumerate(vocal_paths):
+            _report_stage_start(on_progress, "recognize", done=i, total=recognize_total)
+            transcriptions.append(_run_inference(
+                "recognize", session.transcribe, vocal_path, on_progress=relay(i)))
+        chunk_segments_list = []
+        for i, transcribed in enumerate(transcriptions):
+            done = n + i
+            _report_stage_start(on_progress, "recognize", done=done, total=recognize_total)
+            chunk_segments_list.append(_run_inference(
+                "recognize", session.align, transcribed, on_progress=relay(done)))
 
     merged_segments = _chunking.merge_chunk_segments(chunk_segments_list, chunk_offsets_sec, boundaries)
     whole_vocal_pcm = _concat_pcm(vocal_core_chunks)

@@ -17,6 +17,8 @@ from vocal_analysis import (
 )
 from vocal_analysis.front_stage import FrontStageResult
 
+from .support import install_fake_recognizer_session
+
 _TEST_MODEL = ContentRecognizerModel(model_id="test-content-recognizer")
 
 
@@ -53,9 +55,7 @@ def test_unchunked_run_diagnostics_forced_split_is_false(tmp_path, monkeypatch):
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs())
     assert result.diagnostics.forced_split is False
@@ -68,9 +68,7 @@ def test_single_run_forwards_mora_event_group_sizes_to_build_diagnostics(tmp_pat
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     fake_group_sizes = [3]
 
@@ -107,9 +105,7 @@ def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, m
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs(
         separator_name="sep-x", content_recognizer_model=ContentRecognizerModel(model_id="rec-y"),
@@ -132,9 +128,7 @@ def test_separated_flag_matches_separate_vocals_mode(tmp_path, monkeypatch, mode
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, m, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs(separate_vocals=mode))
     assert result.diagnostics.separated is expected
@@ -147,9 +141,7 @@ def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monke
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     captured = {}
     real_build = pipeline.morphs.build_vmd_document
@@ -212,9 +204,7 @@ def test_chunked_run_diagnostics_forced_split_reflects_any_boundary(
 
     monkeypatch.setattr(front_stage._chunking, "merge_chunk_segments", fake_merge)
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
     assert result.diagnostics.forced_split is expected_forced_split
@@ -237,9 +227,7 @@ def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_pat
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(front_stage._chunking, "merge_chunk_segments", lambda *a, **k: combined_segments)
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     raw_values = [0.10, 0.30, 0.50, 0.60, 0.80, 0.99]
     hop = 0.010
@@ -294,9 +282,7 @@ def test_run_works_without_progress_reporter(tmp_path, monkeypatch):
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    monkeypatch.setattr(
-        front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
+    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs())
     assert result.document is not None
