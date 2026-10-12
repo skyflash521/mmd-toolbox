@@ -16,8 +16,9 @@ class ProgressRouter:
             self._display = None
         else:
             interval_option = {} if interval is None else {"interval": interval}
+            isatty = getattr(stream, "isatty", None)
             self._display = _display_module.ProgressReporter(
-                stream=stream, enabled=(not quiet) and stream.isatty(),
+                stream=stream, enabled=(not quiet) and callable(isatty) and bool(isatty()),
                 now=now, write_lock=write_lock, **interval_option)
 
     def stage(self, stage_id, *, done=0, total=None, note="", elapsed=0.0):

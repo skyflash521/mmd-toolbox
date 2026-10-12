@@ -63,9 +63,9 @@ def test_positional_uses_its_destination_name():
     assert _by_name()["input"]["name"] == "input"
 
 
-def test_every_element_has_the_same_five_keys():
+def test_every_element_has_the_same_six_keys():
     for option in _described():
-        assert set(option) == {"name", "type", "constraint", "default", "help"}
+        assert set(option) == {"name", "type", "constraint", "default", "help", "repeat"}
 
 
 def test_table_entries_are_used_as_given():

@@ -114,7 +114,7 @@ def test_describe_options_shape_and_values(capsysbinary):
     assert "--no-n-morph" not in by_name
     assert len(r["options"]) == len(EXPECTED_TYPE_CONSTRAINT_DEFAULT)
     for o in r["options"]:
-        assert set(o) == {"name", "type", "constraint", "default", "help"}
+        assert set(o) == {"name", "type", "constraint", "default", "help", "repeat"}
         assert isinstance(o["help"], str) and o["help"]
     assert set(by_name) == set(EXPECTED_TYPE_CONSTRAINT_DEFAULT)
     for name, (type_, constraint, default) in EXPECTED_TYPE_CONSTRAINT_DEFAULT.items():

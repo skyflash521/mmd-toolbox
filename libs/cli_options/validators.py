@@ -6,11 +6,14 @@ from typing import Literal
 
 class RangeValidator:
     def __init__(self, *, value_type: Literal["int", "float"], minimum=None, maximum=None,
-                 exclusive_min=False):
+                 exclusive_min=False, allow_empty=False):
         self.value_type = value_type
+        self.allow_empty = allow_empty
         self.constraint = {"min": minimum, "max": maximum, "exclusive_min": exclusive_min}
 
     def __call__(self, text):
+        if self.allow_empty and text == "":
+            return None
         try:
             value = int(text) if self.value_type == "int" else float(text)
         except ValueError:

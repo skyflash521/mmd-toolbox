@@ -1,7 +1,11 @@
+import argparse
+
 from .validators import CompoundValidator
 
+_REPEATING_ACTIONS = (argparse._AppendAction, argparse._ExtendAction)
 
-def describe_options(parser, type_table):
+
+def describe_options(parser, type_table, *, defaults=None):
     """type_table は格納先名から (型名, 制約) への対応で、載っている引数だけを返す。
 
     型名が None の引数は、型と制約を type に設定した検証子から取る。
@@ -24,11 +28,17 @@ def describe_options(parser, type_table):
             if not positive_long_forms:
                 continue
             name = positive_long_forms[0]
+        repeat = isinstance(action, _REPEATING_ACTIONS)
+        if defaults is not None and dest in defaults:
+            default = defaults[dest]
+        else:
+            default = None if repeat else action.default
         options.append({
             "name": name,
             "type": type_,
             "constraint": constraint,
-            "default": action.default,
+            "default": default,
             "help": action.help,
+            "repeat": repeat,
         })
     return options

@@ -102,7 +102,7 @@ def test_describe_without_input_returns_options_and_presets(capsysbinary):
 
     opts = res["options"]
     for o in opts:
-        assert set(o) == {"name", "type", "constraint", "default", "help"}
+        assert set(o) == {"name", "type", "constraint", "default", "help", "repeat"}
         assert o["help"]
 
     unit = {"min": 0, "max": 1, "exclusive_min": False}

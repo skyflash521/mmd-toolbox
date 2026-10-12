@@ -95,9 +95,9 @@ def test_describe_stdout_is_lf_terminated_json_lines_without_blank_lines(capsysb
         json.loads(line)
 
 
-def test_options_have_five_keys_each(capsysbinary):
+def test_options_have_six_keys_each(capsysbinary):
     for option in _options_by_name(capsysbinary).values():
-        assert set(option) == {"name", "type", "constraint", "default", "help"}
+        assert set(option) == {"name", "type", "constraint", "default", "help", "repeat"}
 
 
 def test_options_are_exactly_own_and_shared_arguments_without_duplicates(capsysbinary):

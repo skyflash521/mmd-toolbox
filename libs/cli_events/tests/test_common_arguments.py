@@ -111,3 +111,37 @@ def test_tool_specific_arguments_can_be_added_before_and_after():
     parser.add_argument("--after", type=int, default=2)
     args = parser.parse_args(["--before", "5", "--after", "6", "--dry-run"])
     assert (args.before, args.after, args.dry_run) == (5, 6, True)
+
+
+def _helps(parser):
+    helps = {}
+    for action in parser._actions:
+        for option in action.option_strings:
+            helps[option] = action.help
+    return helps
+
+
+def test_help_overrides_replace_only_the_given_flags():
+    default = _helps(_parser())
+    overridden = _helps(_parser(help_overrides={
+        "--verbose": "通常実行でも dry-run と同じ診断を表示する(出力vprは書く)",
+        "--dry-run": "出力vprを書かず診断だけ表示する",
+    }))
+    assert overridden["--verbose"] == "通常実行でも dry-run と同じ診断を表示する(出力vprは書く)"
+    assert overridden["-v"] == overridden["--verbose"]
+    assert overridden["--dry-run"] == "出力vprを書かず診断だけ表示する"
+    for flag in ("--machine", "--describe", "--version", "--overwrite", "--quiet", "--output"):
+        assert overridden[flag] == default[flag]
+
+
+def test_help_overrides_none_and_empty_keep_the_defaults():
+    default = _helps(_parser())
+    assert _helps(_parser(help_overrides=None)) == default
+    assert _helps(_parser(help_overrides={})) == default
+
+
+def test_help_overrides_unknown_key_is_a_value_error():
+    with pytest.raises(ValueError, match="--verbos"):
+        _parser(help_overrides={"--verbos": "x"})
+    with pytest.raises(ValueError):
+        _parser(help_overrides={"-v": "x"})
