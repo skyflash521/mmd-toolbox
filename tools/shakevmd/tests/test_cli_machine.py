@@ -1,5 +1,6 @@
 import json
 
+from cli_events import run as cli_events_run
 from shakevmd import bake as bake_mod
 from shakevmd import cli, presets
 from vmd import io
@@ -418,7 +419,7 @@ def test_describe_options_shape_and_values(capsysbinary):
     for meta in ("--describe", "--version", "--help", "--machine"):
         assert meta not in by_name
     for o in r["options"]:
-        assert set(o) == {"name", "type", "constraint", "default", "help"}
+        assert set(o) == {"name", "type", "constraint", "default", "help", "repeat"}
         assert isinstance(o["help"], str) and o["help"]
     assert by_name["input"]["type"] == "str" and by_name["input"]["constraint"] is None
     assert by_name["--amp-rot"]["type"] == "float"
@@ -573,7 +574,7 @@ def test_machine_cancelled_on_keyboard_interrupt(tmp_path, capsysbinary, monkeyp
 
 
 def test_machine_interrupt_while_installing_break_handler_is_cancelled_event(tmp_path, capsysbinary, monkeypatch):
-    monkeypatch.setattr(cli, "install_sigbreak_handler", _raise_keyboard_interrupt)
+    monkeypatch.setattr(cli_events_run, "install_sigbreak_handler", _raise_keyboard_interrupt)
     inp = write_input(tmp_path / "in.vmd")
     assert cli.main([inp, "--machine"]) == 130
     assert machine_error(capsysbinary)["code"] == "cancelled"

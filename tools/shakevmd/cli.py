@@ -1,16 +1,16 @@
 import argparse
 import math
-import os
 import sys
 import time
 
 from cli_events import (
-    ArgumentParseError,
-    EventEmitter,
     MachineArgumentParser,
-    emit_failure,
-    install_sigbreak_handler,
+    add_common_arguments,
+    default_output_path,
+    guard_output,
+    run_tool,
 )
+from cli_options import CompoundValidator, RangeValidator, describe_options
 from cli_progress_router import ProgressRouter
 from shakevmd import __version__, cuts, presets
 from shakevmd.bake import RangeOverlapError, bake
@@ -35,179 +35,88 @@ _SMOOTH_MAX_SEG = 5
 _STAGE_LABELS = {"bake": "ベイク", "smooth": "スムージング"}
 
 
-def _finite_float(text):
-    v = float(text)
-    if not math.isfinite(v):
-        raise argparse.ArgumentTypeError(f"有限な数値が必要: {text!r}")
-    return v
-
-
-def _nonneg_float(text):
-    v = _finite_float(text)
-    if v < 0:
-        raise argparse.ArgumentTypeError(f"非負の数値が必要: {text!r}")
-    return v
-
-
-def _positive_float(text):
-    v = _finite_float(text)
-    if v <= 0:
-        raise argparse.ArgumentTypeError(f"正の数値が必要: {text!r}")
-    return v
-
-
-def _parse_range(text) -> tuple[int | None, int | None]:
-    if text.count(":") != 1:
-        raise argparse.ArgumentTypeError(f"範囲は START:END 形式: {text!r}")
-    s_str, e_str = text.split(":")
-
-    def part(v):
-        if v == "":
-            return None
-        try:
-            n = int(v)
-        except ValueError:
-            raise argparse.ArgumentTypeError(f"範囲端は整数: {v!r}") from None
-        if n < 0:
-            raise argparse.ArgumentTypeError(f"フレーム番号は非負: {v!r}")
-        return n
-
-    s, e = part(s_str), part(e_str)
-    if s is not None and e is not None and s > e:
-        raise argparse.ArgumentTypeError(f"範囲は START<=END: {text!r}")
-    return (s, e)
-
-
-def _parse_rot_weights(text) -> tuple[float, float, float]:
-    parts = text.split(",")
-    if len(parts) != 3:
-        raise argparse.ArgumentTypeError(f"--rot-weights は P,Y,R の3要素: {text!r}")
-    try:
-        vals = tuple(float(p) for p in parts)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"--rot-weights は数値3要素: {text!r}") from None
-    if not all(math.isfinite(v) for v in vals):
-        raise argparse.ArgumentTypeError(f"--rot-weights は有限値: {text!r}")
-    return vals
-
-
-def _parse_cut_threshold(text) -> tuple[float, float]:
-    parts = text.split(",")
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError(f"--cut-threshold は 位置,角度 の2要素: {text!r}")
-    try:
-        vals = tuple(float(p) for p in parts)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"--cut-threshold は数値2要素: {text!r}") from None
-    if not all(math.isfinite(v) for v in vals):
-        raise argparse.ArgumentTypeError(f"--cut-threshold は有限値: {text!r}")
-    if any(v < 0 for v in vals):
-        raise argparse.ArgumentTypeError(f"--cut-threshold は非負(感度閾値): {text!r}")
-    return vals
-
-
-def _parse_impulse(text) -> tuple[int, float, float]:
-    parts = text.split(":")
-    if len(parts) != 3:
-        raise argparse.ArgumentTypeError(f"--impulse は F:S:D の3要素: {text!r}")
-    f_str, s_str, d_str = parts
-    try:
-        f, s, d = int(f_str), float(s_str), float(d_str)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"--impulse は F:S:D(F=整数, S/D=数値): {text!r}") from None
-    if f < 0:
-        raise argparse.ArgumentTypeError(f"--impulse の F(フレーム)は非負: {text!r}")
-    if not (math.isfinite(s) and math.isfinite(d)):
-        raise argparse.ArgumentTypeError(f"--impulse の S/D は有限値: {text!r}")
-    if s < 0:
-        raise argparse.ArgumentTypeError(f"--impulse の S(強さ)は非負: {text!r}")
-    if d <= 0:
-        raise argparse.ArgumentTypeError(f"--impulse の D(減衰秒)は正: {text!r}")
-    return (f, s, d)
+_NONNEG_FLOAT = RangeValidator(value_type="float", minimum=0)
+_POSITIVE_FLOAT = RangeValidator(value_type="float", minimum=0, exclusive_min=True)
+_FRAME_END = RangeValidator(value_type="int", minimum=0, allow_empty=True)
+_ROT_WEIGHTS = CompoundValidator(
+    format="P,Y,R", separator=",",
+    elements=[(n, RangeValidator(value_type="float")) for n in ("P", "Y", "R")],
+)
+_CUT_THRESHOLD = CompoundValidator(
+    format="位置,角度", separator=",",
+    elements=[(n, RangeValidator(value_type="float", minimum=0)) for n in ("位置", "角度")],
+)
+_RANGE = CompoundValidator(
+    format="START:END",
+    elements=[("START", _FRAME_END), ("END", _FRAME_END)],
+    relation=("範囲は START<=END",
+              lambda v: v[0] is None or v[1] is None or v[0] <= v[1]),
+)
+_IMPULSE = CompoundValidator(
+    format="F:S:D",
+    elements=[
+        ("F", RangeValidator(value_type="int", minimum=0)),
+        ("S", RangeValidator(value_type="float", minimum=0)),
+        ("D", RangeValidator(value_type="float", minimum=0, exclusive_min=True)),
+    ],
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = MachineArgumentParser(prog="shakevmd", allow_abbrev=False)
-    p.add_argument("--version", action="version", version=f"shakevmd {__version__}",
-                   help="バージョンを表示して終了する")
-    p.add_argument("--machine", action="store_true",
-                   help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
-                        "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
-    p.add_argument("--describe", action="store_true",
-                   help="オプション定義とプリセット一覧を JSON Lines の result で出力して終了する"
-                        "(VMD を読まない・入力不要の自己記述)")
+    add_common_arguments(
+        p, version=__version__, output_help="出力先(既定: <入力名>_shake.vmd)",
+        help_overrides={
+            "--describe": "オプション定義とプリセット一覧を JSON Lines の result で出力して終了する"
+                          "(VMD を読まない・入力不要の自己記述)",
+            "--dry-run": "出力せず統計を表示する(引数検証は実施する)",
+            "--verbose": "詳細ログを出す",
+            "--quiet": "進捗表示を抑制する(警告・統計・終了コードは抑制しない)",
+        })
     p.add_argument("input", nargs="?", help="入力カメラ VMD ファイル")
-    p.add_argument("-o", "--output", help="出力先(既定: <入力名>_shake.vmd)")
-    p.add_argument("--overwrite", action="store_true",
-                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
-    p.add_argument("--range", dest="ranges", action="append", type=_parse_range,
+    p.add_argument("--range", dest="ranges", action="append", type=_RANGE,
                    metavar="START:END",
-                   help="揺れ適用範囲。START/END は各々省略可。複数指定可(既定は全範囲)")
-    p.add_argument("--amp-rot", type=_nonneg_float, help="回転振幅の基準値(度)")
-    p.add_argument("--amp-pos", type=_nonneg_float, help="位置振幅(MMD距離単位)")
-    p.add_argument("--rot-weights", type=_parse_rot_weights, metavar="P,Y,R",
+                   help="揺れ適用範囲。START/END は各々省略可。"
+                        "START と END の両方を指定するときは START<=END。複数指定可(既定は全範囲)")
+    p.add_argument("--amp-rot", type=_NONNEG_FLOAT, help="回転振幅の基準値(度)")
+    p.add_argument("--amp-pos", type=_NONNEG_FLOAT, help="位置振幅(MMD距離単位)")
+    p.add_argument("--rot-weights", type=_ROT_WEIGHTS, metavar="P,Y,R",
                    help="Pitch/Yaw/Roll 個別重み")
-    p.add_argument("--freq", type=_positive_float, help="ノイズ基本周波数(Hz)")
+    p.add_argument("--freq", type=_POSITIVE_FLOAT, help="ノイズ基本周波数(Hz)")
     p.add_argument("--seed", type=int, default=1, help="ノイズシード(既定 1・再現性)")
-    p.add_argument("--fade", type=_nonneg_float, help="範囲端の自動フェード時間(秒)")
-    p.add_argument("--motion-damp", type=_nonneg_float,
+    p.add_argument("--fade", type=_NONNEG_FLOAT, help="範囲端の自動フェード時間(秒)")
+    p.add_argument("--motion-damp", type=_NONNEG_FLOAT,
                    help="元モーション速度に応じた振幅減衰係数(0 で無効)")
-    p.add_argument("--settle", type=_nonneg_float,
+    p.add_argument("--settle", type=_NONNEG_FLOAT,
                    help="停止検出時の減衰振動の初期振幅(度・0 で無効)")
-    p.add_argument("--cut-threshold", type=_parse_cut_threshold, metavar="位置,角度",
+    p.add_argument("--cut-threshold", type=_CUT_THRESHOLD, metavar="位置,角度",
                    help="カット自動検出の感度(位置ジャンプ,角度ジャンプ)")
-    p.add_argument("--impulse", dest="impulses", action="append", type=_parse_impulse,
+    p.add_argument("--impulse", dest="impulses", action="append", type=_IMPULSE,
                    metavar="F:S:D",
                    help="フレーム F に強さ S・減衰 D 秒の衝撃を加算(複数指定可)")
     p.add_argument("--preset", choices=presets.PRESET_NAMES,
                    help="公開引数を一括設定するプリセット(個別引数の明示指定が優先)")
-    p.add_argument("--dry-run", dest="dry_run", action="store_true",
-                   help="出力せず統計を表示する(引数検証は実施する)")
-    p.add_argument("-v", "--verbose", action="store_true", help="詳細ログを出す")
     p.add_argument("--smooth", default=True, action=argparse.BooleanOptionalAction,
                    help="ベイク後の密なキーをベジェ補間でなめらかに整理する"
                         "(スムージング。既定 on。--no-smooth で密キー+線形)")
-    p.add_argument("--quiet", dest="quiet", action="store_true",
-                   help="進捗表示を抑制する(警告・統計・終了コードは抑制しない)")
     return p
 
-
-_NONNEG_FLOAT_CONSTRAINT = {"min": 0, "max": None, "exclusive_min": False}
-_POSITIVE_FLOAT_CONSTRAINT = {"min": 0, "max": None, "exclusive_min": True}
-
-
-def _cfield(name, type_, mn, mx, ex):
-    return {"name": name, "type": type_, "min": mn, "max": mx, "exclusive_min": ex}
-
-
-_D_COMPOUND = {
-    "ranges": {"format": "START:END", "fields": [
-        _cfield("START", "int", 0, None, False), _cfield("END", "int", 0, None, False)]},
-    "rot_weights": {"format": "P,Y,R", "fields": [
-        _cfield("P", "float", None, None, False), _cfield("Y", "float", None, None, False),
-        _cfield("R", "float", None, None, False)]},
-    "cut_threshold": {"format": "位置,角度", "fields": [
-        _cfield("位置", "float", 0, None, False), _cfield("角度", "float", 0, None, False)]},
-    "impulses": {"format": "F:S:D", "fields": [
-        _cfield("F", "int", 0, None, False), _cfield("S", "float", 0, None, False),
-        _cfield("D", "float", 0, None, True)]},
-}
 
 _D_TYPE = {
     "input": ("str", None),
     "output": ("str", None),
     "overwrite": ("flag", None),
-    "ranges": ("compound", _D_COMPOUND["ranges"]),
-    "amp_rot": ("float", _NONNEG_FLOAT_CONSTRAINT),
-    "amp_pos": ("float", _NONNEG_FLOAT_CONSTRAINT),
-    "rot_weights": ("compound", _D_COMPOUND["rot_weights"]),
-    "freq": ("float", _POSITIVE_FLOAT_CONSTRAINT),
+    "ranges": (None, None),
+    "amp_rot": (None, None),
+    "amp_pos": (None, None),
+    "rot_weights": (None, None),
+    "freq": (None, None),
     "seed": ("int", None),
-    "fade": ("float", _NONNEG_FLOAT_CONSTRAINT),
-    "motion_damp": ("float", _NONNEG_FLOAT_CONSTRAINT),
-    "settle": ("float", _NONNEG_FLOAT_CONSTRAINT),
-    "cut_threshold": ("compound", _D_COMPOUND["cut_threshold"]),
-    "impulses": ("compound", _D_COMPOUND["impulses"]),
+    "fade": (None, None),
+    "motion_damp": (None, None),
+    "settle": (None, None),
+    "cut_threshold": (None, None),
+    "impulses": (None, None),
     "preset": ("enum", {"choices": list(presets.PRESET_NAMES)}),
     "dry_run": ("flag", None),
     "verbose": ("flag", None),
@@ -215,29 +124,9 @@ _D_TYPE = {
     "quiet": ("flag", None),
 }
 
-
-def _describe_options(parser):
-    options = []
-    for action in parser._actions:
-        dest = action.dest
-        if dest not in _D_TYPE:
-            continue
-        type_, constraint = _D_TYPE[dest]
-        if dest == "input":
-            name = "input"
-        else:
-            name = next(s for s in action.option_strings
-                        if s.startswith("--") and not s.startswith("--no-"))
-        if dest in _HARD_DEFAULTS:
-            v = _HARD_DEFAULTS[dest]
-            default = list(v) if isinstance(v, tuple) else v
-        else:
-            default = action.default
-        options.append({
-            "name": name, "type": type_, "constraint": constraint,
-            "default": default, "help": action.help,
-        })
-    return options
+_DESCRIBE_DEFAULTS = {
+    k: list(v) if isinstance(v, tuple) else v for k, v in _HARD_DEFAULTS.items()
+}
 
 
 def _describe_presets():
@@ -250,11 +139,6 @@ def _describe_presets():
         }
         out.append({"name": name, "values": values})
     return out
-
-
-def _default_output(input_path: str) -> str:
-    base, _ = os.path.splitext(input_path)
-    return base + "_shake.vmd"
 
 
 def _all_finite(keys) -> bool:
@@ -303,91 +187,36 @@ def _shake_stats(orig_camera, baked_keys, applied, cut_pos, cut_rot):
     return max_amp, detected_cuts
 
 
-def _argparse_field(message: str):
-    # argparse は起因引数を構造化して渡さないので、標準の文言から取り出す。
-    if message.startswith("argument "):
-        name = message[len("argument "):].split(":", 1)[0].strip()
-        # argparse は同じ引数の複数の表記を "-o/--output" のように "/" で連結する。
-        return name.split("/")[-1] if name.startswith("-") else name
-    if message.startswith("unrecognized arguments:"):
-        rest = message[len("unrecognized arguments:"):].split()
-        return rest[0] if rest else None
-    if message.startswith("the following arguments are required:"):
-        rest = message[len("the following arguments are required:"):].strip()
-        return rest.split(",")[0].strip() or None
-    return None
-
-
 def _smooth_keep_frames(resolved, detected_cuts) -> tuple[int, ...]:
     max_segment_grid = {f for f0, f1 in resolved for f in range(int(f0), int(f1) + 1, _SMOOTH_MAX_SEG)}
     both_sides_of_cuts = {f for c in detected_cuts for f in (c - 1, c) if f >= 0}
     return tuple(sorted(both_sides_of_cuts | max_segment_grid))
 
 
-def _fail(emitter, code, message, exit_code, *, field=None, path=None):
-    return emit_failure(emitter, code=code, message=message, exit_code=exit_code,
-                        field=field, path=path)
+def _describe(parser):
+    return {
+        "options": describe_options(parser, _D_TYPE, defaults=_DESCRIBE_DEFAULTS),
+        "presets": _describe_presets(),
+    }
 
 
 def main(argv=None) -> int:
-    emitter = None
-    try:
-        if argv is None:
-            argv = sys.argv[1:]
-
-        machine = "--machine" in argv
-        describe = "--describe" in argv
-        emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
-
-        def fail(code, message, exit_code, *, field=None, path=None):
-            return _fail(emitter, code, message, exit_code, field=field, path=path)
-
-        install_sigbreak_handler()
-        if hasattr(sys.stderr, "reconfigure"):
-            try:
-                sys.stderr.reconfigure(errors="backslashreplace")
-            except Exception:
-                pass
-        parser = _build_parser()
-        try:
-            args = parser.parse_args(argv)
-        except ArgumentParseError as e:
-            return fail("bad_argument", e.message, 2, field=_argparse_field(e.message))
-        except SystemExit as e:
-            code = e.code
-            return code if isinstance(code, int) else (0 if code is None else 2)
-
-        if args.describe:
-            emitter.result(
-                mode="describe",
-                options=_describe_options(parser),
-                presets=_describe_presets(),
-            )
-            return 0
-        if args.input is None:
-            return fail("bad_argument", "入力カメラ VMD ファイル(input)が必要", 2, field="input")
-
-        return _run(args, machine, emitter, fail)
-    except KeyboardInterrupt:
-        return _fail(emitter, "cancelled", "中断された(Ctrl-C 等)", 130)
-    except Exception as e:
-        return _fail(emitter, "internal_error", f"{type(e).__name__}: {e}", 1)
+    return run_tool(argv, build_parser=_build_parser, describe=_describe, run=_run)
 
 
-def _run(args, machine, emitter, fail) -> int:
-    output = args.output if args.output is not None else _default_output(args.input)
+def _run(args, ctx) -> int:
+    machine = ctx.machine
+    emitter = ctx.emitter
+    fail = ctx.fail
 
-    if os.path.isdir(output):
-        return fail("output_is_directory",
-                    f"出力先がディレクトリです(ファイルパスを指定): {output}",
-                    2, field="--output", path=output)
+    if args.input is None:
+        return fail("bad_argument", "入力カメラ VMD ファイル(input)が必要", 2, field="input")
 
-    if not args.overwrite and os.path.exists(output):
-        return fail(
-            "output_exists",
-            f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}",
-            2, field="--output",
-        )
+    output = (args.output if args.output is not None
+              else default_output_path(args.input, "_shake.vmd"))
+    guarded = guard_output(output, overwrite=args.overwrite, fail=fail)
+    if guarded is not None:
+        return guarded
 
     try:
         doc, read_warnings = io.read(args.input)
@@ -420,142 +249,134 @@ def _run(args, machine, emitter, fail) -> int:
     fade = _resolve_param("fade", args, preset)
     internal = {k: preset[k] for k in presets.INTERNAL_PARAM_NAMES if k in preset}
 
-    reporter = ProgressRouter(machine=machine, quiet=args.quiet, emitter=emitter,
-                              stream=sys.stderr, labels=_STAGE_LABELS)
+    reporter = ctx.track_progress(ProgressRouter(
+        machine=machine, quiet=args.quiet, emitter=emitter,
+        stream=sys.stderr, labels=_STAGE_LABELS))
+    bake_start = time.monotonic()
+    reporter.stage("bake")
+
+    def bake_cb(done, total):
+        reporter.stage("bake", done=done, total=total,
+                       elapsed=time.monotonic() - bake_start)
     try:
-        bake_start = time.monotonic()
-        reporter.stage("bake")
+        result = bake(
+            doc.camera,
+            ranges=ranges,
+            seed=args.seed,
+            amp_rot=amp_rot,
+            amp_pos=amp_pos,
+            rot_weights=rot_weights,
+            freq=freq,
+            motion_damp=motion_damp,
+            settle=settle,
+            fade_sec=fade,
+            cut_pos_threshold=cut_threshold[0],
+            cut_rot_threshold=cut_threshold[1],
+            impulses=tuple(args.impulses or ()),
+            progress=bake_cb,
+            **internal,
+        )
+    except RangeOverlapError as e:
+        return fail("range_overlap", str(e), 2, field="--range")
+    except (ValueError, OverflowError) as e:
+        return fail("value_overflow", f"値が過大でベイクが破綻した: {type(e).__name__}: {e}", 2)
+    reporter.close()
 
-        def bake_cb(done, total):
-            reporter.stage("bake", done=done, total=total,
-                           elapsed=time.monotonic() - bake_start)
-        try:
-            result = bake(
-                doc.camera,
-                ranges=ranges,
-                seed=args.seed,
-                amp_rot=amp_rot,
-                amp_pos=amp_pos,
-                rot_weights=rot_weights,
-                freq=freq,
-                motion_damp=motion_damp,
-                settle=settle,
-                fade_sec=fade,
-                cut_pos_threshold=cut_threshold[0],
-                cut_rot_threshold=cut_threshold[1],
-                impulses=tuple(args.impulses or ()),
-                progress=bake_cb,
-                **internal,
-            )
-        except RangeOverlapError as e:
-            return fail("range_overlap", str(e), 2, field="--range")
-        except (ValueError, OverflowError) as e:
-            return fail("value_overflow", f"値が過大でベイクが破綻した: {type(e).__name__}: {e}", 2)
-        reporter.close()
+    # struct は float32 への変換で inf と nan を例外なく通す。
+    if not _all_finite(result.camera_keys):
+        return fail("non_finite_output",
+                    "焼き出力が非有限(inf/nan)になった。振幅・重みが過大", 2)
 
-        # struct は float32 への変換で inf と nan を例外なく通す。
-        if not _all_finite(result.camera_keys):
-            return fail("non_finite_output",
-                        "焼き出力が非有限(inf/nan)になった。振幅・重みが過大", 2)
+    warnings = [
+        ShakeWarning(w.code, w.message, (w.section,) if w.section else None)
+        for w in read_warnings
+    ]
+    warnings += list(result.warnings)
+    sections = [
+        name for name, present in (
+            ("bone", doc.bone), ("morph", doc.morph), ("light", doc.light),
+            ("self_shadow", doc.self_shadow), ("ik_property", doc.ik_property),
+        ) if present
+    ]
+    if sections:
+        warnings.append(ShakeWarning(
+            "non_camera_sections_passthrough",
+            "カメラ以外のセクションは無加工で透過した",
+            tuple(sections),
+        ))
+    for w in warnings:
+        ctx.warn(w.code, w.message, section=w.section if machine else None)
 
-        warnings = [
-            ShakeWarning(w.code, w.message, (w.section,) if w.section else None)
-            for w in read_warnings
-        ]
-        warnings += list(result.warnings)
-        sections = [
-            name for name, present in (
-                ("bone", doc.bone), ("morph", doc.morph), ("light", doc.light),
-                ("self_shadow", doc.self_shadow), ("ik_property", doc.ik_property),
-            ) if present
-        ]
-        if sections:
-            warnings.append(ShakeWarning(
-                "non_camera_sections_passthrough",
-                "カメラ以外のセクションは無加工で透過した",
-                tuple(sections),
-            ))
-        for w in warnings:
-            if machine:
-                emitter.warning(
-                    code=w.code, message=w.message,
-                    section=list(w.section) if w.section is not None else None,
-                )
-            else:
-                print(f"warning: {w.code}: {w.message}", file=sys.stderr)
+    wv_frames = [k.frame for k in _working_view(doc.camera)]
+    applied = result.resolved
+    max_amp, detected_cuts = _shake_stats(
+        doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
 
-        wv_frames = [k.frame for k in _working_view(doc.camera)]
-        applied = result.resolved
-        max_amp, detected_cuts = _shake_stats(
-            doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
+    if not machine and (args.dry_run or args.verbose):
+        print(f"range: {applied}")
+        print(f"keys: {len(result.camera_keys)}")
+        print(f"max amplitude: {max_amp:.6g}")
+        print(f"cuts: {detected_cuts}")
 
-        if not machine and (args.dry_run or args.verbose):
-            print(f"range: {applied}")
-            print(f"keys: {len(result.camera_keys)}")
-            print(f"max amplitude: {max_amp:.6g}")
-            print(f"cuts: {detected_cuts}")
-
-        if args.dry_run:
-            if machine:
-                emitter.result(
-                    mode="inspect",
-                    output=None,
-                    input_kind="camera",
-                    keys=len(wv_frames),
-                    frame_range=[int(wv_frames[0]), int(wv_frames[-1])],
-                    duration_sec=wv_frames[-1] / 30.0,
-                    sections=["camera"] + list(sections),
-                    applied_ranges=[[int(a), int(b)] for a, b in applied],
-                    max_amplitude=float(max_amp),
-                    detected_cuts=[int(c) for c in detected_cuts],
-                )
-            return 0
-
-        camera_out = result.camera_keys
-        if args.smooth:
-            smooth_start = time.monotonic()
-            reporter.stage("smooth")
-
-            def smooth_cb(done, total, note=""):
-                reporter.stage("smooth", done=done, total=total, note=note,
-                               elapsed=time.monotonic() - smooth_start)
-            camera_out = reduce_camera_track(
-                result.camera_keys,
-                result.resolved,
-                _SMOOTH_TOLERANCES,
-                cut_thresholds=(cut_threshold[0], cut_threshold[1],
-                                _CUT_DISTANCE_THRESHOLD_UNUSED_WITHOUT_DETECTION),
-                keep_frames=_smooth_keep_frames(result.resolved, detected_cuts),
-                no_cut_detect=True,
-                min_seg=1,
-                max_seg=_SMOOTH_MAX_SEG,
-                strict=False,
-                curve_mode="bezier",
-                force_bezier=True,
-                progress=smooth_cb,
-            )
-            reporter.close()
-
-        doc.camera = camera_out
-
-        try:
-            io.write_file(doc, output)
-        except (OverflowError, VmdFormatError):
-            return fail("value_overflow", "値が大きすぎて書き込み時に float32 で溢れた", 2)
-        except Exception as e:
-            return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}",
-                        3, field="--output", path=output)
-
+    if args.dry_run:
         if machine:
             emitter.result(
-                mode="bake",
-                output=output,
-                keys=len(camera_out),
+                mode="inspect",
+                output=None,
+                input_kind="camera",
+                keys=len(wv_frames),
+                frame_range=[int(wv_frames[0]), int(wv_frames[-1])],
+                duration_sec=wv_frames[-1] / 30.0,
+                sections=["camera"] + list(sections),
                 applied_ranges=[[int(a), int(b)] for a, b in applied],
                 max_amplitude=float(max_amp),
                 detected_cuts=[int(c) for c in detected_cuts],
             )
-        reporter.summary(f"完了 {output}")
         return 0
-    finally:
+
+    camera_out = result.camera_keys
+    if args.smooth:
+        smooth_start = time.monotonic()
+        reporter.stage("smooth")
+
+        def smooth_cb(done, total, note=""):
+            reporter.stage("smooth", done=done, total=total, note=note,
+                           elapsed=time.monotonic() - smooth_start)
+        camera_out = reduce_camera_track(
+            result.camera_keys,
+            result.resolved,
+            _SMOOTH_TOLERANCES,
+            cut_thresholds=(cut_threshold[0], cut_threshold[1],
+                            _CUT_DISTANCE_THRESHOLD_UNUSED_WITHOUT_DETECTION),
+            keep_frames=_smooth_keep_frames(result.resolved, detected_cuts),
+            no_cut_detect=True,
+            min_seg=1,
+            max_seg=_SMOOTH_MAX_SEG,
+            strict=False,
+            curve_mode="bezier",
+            force_bezier=True,
+            progress=smooth_cb,
+        )
         reporter.close()
+
+    doc.camera = camera_out
+
+    try:
+        io.write_file(doc, output)
+    except (OverflowError, VmdFormatError):
+        return fail("value_overflow", "値が大きすぎて書き込み時に float32 で溢れた", 2)
+    except Exception as e:
+        return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}",
+                    3, field="--output", path=output)
+
+    if machine:
+        emitter.result(
+            mode="bake",
+            output=output,
+            keys=len(camera_out),
+            applied_ranges=[[int(a), int(b)] for a, b in applied],
+            max_amplitude=float(max_amp),
+            detected_cuts=[int(c) for c in detected_cuts],
+        )
+    reporter.summary(f"完了 {output}")
+    return 0

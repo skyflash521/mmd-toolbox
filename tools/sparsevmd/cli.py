@@ -1,4 +1,3 @@
-import argparse
 import dataclasses
 import os
 import sys
@@ -7,18 +6,17 @@ from collections import Counter
 from collections.abc import Callable
 
 from cli_events import (
-    ArgumentParseError,
-    EventEmitter,
     MachineArgumentParser,
-    argparse_error_field,
-    emit_failure,
-    install_sigbreak_handler,
+    add_common_arguments,
+    default_output_path,
+    guard_output,
+    run_tool,
 )
+from cli_options import CompoundValidator, RangeValidator, describe_options
 from cli_progress import progress
 from vmd import io
 
 from . import __version__, presets, ranges, report, selection
-from .cuts import parse_cut_threshold_bone, parse_cut_threshold_camera
 from .reduce import (
     StrictError,
     measure_bone_errors,
@@ -45,19 +43,28 @@ _TOL_HELP = {
     "camera_fov_tol": "視野角の最大許容誤差(度)。整数度保存のため 0.5 以上。明示値はプリセットに優先",
 }
 
-_D_NONNEG = {"min": 0, "max": None, "exclusive_min": False}
-_D_FOV = {"min": 0.5, "max": None, "exclusive_min": False}
-_D_AT_LEAST_1 = {"min": 1, "max": None, "exclusive_min": False}
+_TOL = RangeValidator(value_type="float", minimum=0)
+_FOV_TOL = RangeValidator(value_type="float", minimum=0.5)
+_SEGMENT_FRAMES = RangeValidator(value_type="int", minimum=1)
+_KEEP_FRAME = RangeValidator(value_type="int", minimum=0)
+_RANGE = CompoundValidator(
+    format="START:END",
+    elements=[(name, RangeValidator(value_type="int", minimum=0, allow_empty=True))
+              for name in ("START", "END")],
+    relation=("START と END の少なくとも一方が必要で、START<=END が必要",
+              lambda v: (v[0] is not None or v[1] is not None)
+              and (v[0] is None or v[1] is None or v[0] <= v[1])),
+)
+_CUT_THRESHOLD_CAMERA = CompoundValidator(
+    format="POS,ROT,DIST", separator=",",
+    elements=[(name, RangeValidator(value_type="float", minimum=0)) for name in ("POS", "ROT", "DIST")])
+_CUT_THRESHOLD_BONE = CompoundValidator(
+    format="POS,ROT", separator=",",
+    elements=[(name, RangeValidator(value_type="float", minimum=0)) for name in ("POS", "ROT")])
+
 _D_GROUPS = {"choices": ["core", "arms", "legs", "fingers", "ik", "mocap"]}
 
 _MIN_REDUCIBLE_KEYS = 2
-
-
-def _compound(fmt, *name_type_min: tuple[str, str, float]):
-    return {"format": fmt,
-            "fields": [{"name": n, "type": t, "min": m, "max": None, "exclusive_min": False}
-                       for n, t, m in name_type_min]}
-
 
 _D_TYPE = {
     "input": ("str", None),
@@ -72,43 +79,40 @@ _D_TYPE = {
     "exclude_bone_glob": ("str", None),
     "exclude_bone_group": ("enum", _D_GROUPS),
     "list_bones": ("flag", None),
-    "ranges": ("compound", _compound("START:END", ("START", "int", 0), ("END", "int", 0))),
+    "ranges": (None, None),
     "preset": ("enum", {"choices": list(presets.PRESET_NAMES)}),
-    "bone_pos_tol": ("float", _D_NONNEG),
-    "bone_rot_tol": ("float", _D_NONNEG),
-    "camera_pos_tol": ("float", _D_NONNEG),
-    "camera_rot_tol": ("float", _D_NONNEG),
-    "camera_distance_tol": ("float", _D_NONNEG),
-    "camera_fov_tol": ("float", _D_FOV),
-    "max_segment_frames": ("int", _D_AT_LEAST_1),
-    "min_segment_frames": ("int", _D_AT_LEAST_1),
+    "bone_pos_tol": ("float", _TOL.constraint),
+    "bone_rot_tol": ("float", _TOL.constraint),
+    "camera_pos_tol": ("float", _TOL.constraint),
+    "camera_rot_tol": ("float", _TOL.constraint),
+    "camera_distance_tol": ("float", _TOL.constraint),
+    "camera_fov_tol": ("float", _FOV_TOL.constraint),
+    "max_segment_frames": (None, None),
+    "min_segment_frames": (None, None),
     "curve_mode": ("enum", {"choices": ["bezier", "linear"]}),
     "strict": ("flag", None),
-    "cut_threshold_camera": ("compound", _compound(
-        "POS,ROT,DIST", ("POS", "float", 0), ("ROT", "float", 0), ("DIST", "float", 0))),
-    "cut_threshold_bone": ("compound", _compound(
-        "POS,ROT", ("POS", "float", 0), ("ROT", "float", 0))),
+    "cut_threshold_camera": (None, None),
+    "cut_threshold_bone": (None, None),
     "cut_detect": ("flag", None),
-    "keep_frames": ("int", _D_NONNEG),
+    "keep_frames": (None, None),
     "dry_run": ("flag", None),
     "verbose": ("flag", None),
     "quiet": ("flag", None),
 }
 
 
-def _nonneg_int(text):
-    v = int(text)
-    if v < 0:
-        raise argparse.ArgumentTypeError(f"フレーム番号は非負: {text!r}")
-    return v
-
-
 def _build_parser():
     p = MachineArgumentParser(prog="sparsevmd", allow_abbrev=False)
     p.add_argument("input", nargs="?", help="入力VMDファイル")
-    p.add_argument("-o", "--output", help="出力先(既定: <入力名>_sparse.vmd)")
-    p.add_argument("--overwrite", action="store_true",
-                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
+    add_common_arguments(
+        p, version=__version__, output_help="出力先(既定: <入力名>_sparse.vmd)",
+        help_overrides={
+            "--describe": "オプション定義とプリセット一覧の result を出して終了する"
+                          "(VMD を読まない・入力不要の自己記述)",
+            "--dry-run": "出力VMDを書かずに統計を表示する(引数検証は実施する)",
+            "--verbose": "詳細ログを出す(通常時は標準出力、--machine併用時は標準エラー)",
+            "--quiet": "進捗のライブ表示を抑制する(警告・統計・終了コードは抑制しない)",
+        })
     p.add_argument("--target", choices=("camera", "bone", "all"), default="all",
                    help="削減対象セクション: camera / bone / all(既定 all=camera+bone)")
     p.add_argument("--bone", dest="bone", action="append", default=[],
@@ -127,15 +131,16 @@ def _build_parser():
                    help="よく使うボーン集合を処理対象から除外(反復可)")
     p.add_argument("--list-bones", dest="list_bones", action="store_true",
                    help="ボーン名・キー数・選択状態を表示して終了する")
-    p.add_argument("--range", dest="ranges", action="append", type=ranges.parse_range,
-                   help="削減範囲 START:END(反復可)。START/END の一方は省略可")
+    p.add_argument("--range", dest="ranges", action="append", type=_RANGE,
+                   help="削減範囲 START:END(反復可)。START/END の一方は省略可(両方省略は不可)。"
+                        "両方指定するときは START<=END")
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="balanced",
                    help="品質プリセット: precise / balanced / aggressive(既定 balanced)")
     for arg in _TOL_OPTION_TO_FIELD:
         p.add_argument("--" + arg.replace("_", "-"), dest=arg, type=float, help=_TOL_HELP[arg])
-    p.add_argument("--max-segment-frames", dest="max_segment_frames", type=int, default=None,
+    p.add_argument("--max-segment-frames", dest="max_segment_frames", type=_SEGMENT_FRAMES, default=None,
                    help="出力キー間隔の上限。未指定なら無制限。指定する場合は 1 以上")
-    p.add_argument("--min-segment-frames", dest="min_segment_frames", type=int, default=1,
+    p.add_argument("--min-segment-frames", dest="min_segment_frames", type=_SEGMENT_FRAMES, default=1,
                    help="分割しない最小区間長(既定 1)")
     p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier",
                    help="出力補間曲線: bezier / linear(既定 bezier)")
@@ -144,14 +149,14 @@ def _build_parser():
     p.add_argument(
         "--cut-threshold-camera",
         dest="cut_threshold_camera",
-        type=parse_cut_threshold_camera,
+        type=_CUT_THRESHOLD_CAMERA,
         default=(5.0, 20.0, 5.0),
         help="カメラの不連続検出閾値 POS,ROT,DIST(既定 5.0,20.0,5.0)",
     )
     p.add_argument(
         "--cut-threshold-bone",
         dest="cut_threshold_bone",
-        type=parse_cut_threshold_bone,
+        type=_CUT_THRESHOLD_BONE,
         default=(1.0, 30.0),
         help="ボーンの不連続検出閾値 POS,ROT(既定 1.0,30.0)",
     )
@@ -159,28 +164,9 @@ def _build_parser():
                    help="閾値による自動境界検出を有効化(既定 on)。--no-cut-detect の対の明示形")
     p.add_argument("--no-cut-detect", dest="cut_detect", action="store_false",
                    help="閾値による自動境界検出を無効化。--cut-detect の対")
-    p.add_argument("--keep-frame", dest="keep_frames", action="append", type=_nonneg_int, default=[],
+    p.add_argument("--keep-frame", dest="keep_frames", action="append", type=_KEEP_FRAME, default=[],
                    help="指定フレームを必ずキーとして保持(反復可)")
-    p.add_argument("--dry-run", dest="dry_run", action="store_true",
-                   help="出力VMDを書かずに統計を表示する(引数検証は実施する)")
-    p.add_argument("-v", "--verbose", action="store_true",
-                   help="詳細ログを出す(通常時は標準出力、--machine併用時は標準エラー)")
-    p.add_argument("--quiet", dest="quiet", action="store_true",
-                   help="進捗のライブ表示を抑制する(警告・統計・終了コードは抑制しない)")
-    p.add_argument("--machine", action="store_true",
-                   help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
-                        "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
-    p.add_argument("--describe", action="store_true",
-                   help="オプション定義とプリセット一覧の result を出して終了する"
-                        "(VMD を読まない・入力不要の自己記述)")
-    p.add_argument("--version", action="version", version=f"sparsevmd {__version__}",
-                   help="バージョンを表示して終了する")
     return p
-
-
-def _default_output(input_path):
-    base, _ = os.path.splitext(input_path)
-    return base + "_sparse.vmd"
 
 
 def _build_selectors(args):
@@ -277,30 +263,8 @@ def _log_diagnostics(camera_diag, bone_diag, file=None):
         emit(f"bone {name}", d)
 
 
-def _describe_options(parser):
-    options = []
-    for action in parser._actions:
-        dest = action.dest
-        if dest not in _D_TYPE:
-            continue
-        type_, constraint = _D_TYPE[dest]
-        if dest == "input":
-            name = "input"
-        else:
-            pos = [s for s in action.option_strings if s.startswith("--") and not s.startswith("--no-")]
-            if not pos:
-                continue
-            name = pos[0]
-        repeat = isinstance(action, argparse._AppendAction)
-        options.append({
-            "name": name,
-            "type": type_,
-            "constraint": constraint,
-            "default": None if repeat else action.default,
-            "help": action.help,
-            "repeat": repeat,
-        })
-    return options
+def _describe(parser):
+    return {"options": describe_options(parser, _D_TYPE), "presets": _describe_presets()}
 
 
 def _describe_presets():
@@ -325,13 +289,6 @@ def _machine_progress(emitter, stage) -> Callable[..., None]:
                          elapsed=time.monotonic() - start)
 
     return cb
-
-
-def _emit_selector_unmatched(emitter, message):
-    if emitter is not None:
-        emitter.warning(code="selector_unmatched", message=message, section=None)
-    else:
-        print("warning: selector_unmatched: " + message, file=sys.stderr)
 
 
 def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
@@ -386,70 +343,21 @@ def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
     }
 
 
-def _fail(emitter, code, message, exit_code, *, field=None, path=None):
-    return emit_failure(emitter, code=code, message=message, exit_code=exit_code,
-                        field=field, path=path)
-
-
 def main(argv=None) -> int:
-    """戻り値は終了コード。"""
-    emitter = None
-    try:
-        if argv is None:
-            argv = sys.argv[1:]
-
-        machine = "--machine" in argv
-        describe = "--describe" in argv
-        emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
-
-        def fail(code, message, exit_code, *, field=None, path=None):
-            return _fail(emitter, code, message, exit_code, field=field, path=path)
-
-        install_sigbreak_handler()
-        if hasattr(sys.stderr, "reconfigure"):
-            try:
-                sys.stderr.reconfigure(errors="backslashreplace")
-            except Exception:
-                pass
-        parser = _build_parser()
-        try:
-            args = parser.parse_args(argv)
-        except ArgumentParseError as e:
-            return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
-        except SystemExit as e:
-            # argparse は --help と --version の表示後に SystemExit を送出する。
-            code = e.code
-            return code if isinstance(code, int) else (0 if code is None else 2)
-
-        if args.describe:
-            emitter.result(mode="describe", options=_describe_options(parser),
-                           presets=_describe_presets())
-            return 0
-        if args.input is None:
-            return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
-
-        return _run(args, emitter, fail)
-    except KeyboardInterrupt:
-        return _fail(emitter, "cancelled", "中断された(Ctrl-C 等)", 130)
-    except Exception as e:
-        return _fail(emitter, "internal_error", f"{type(e).__name__}: {e}", 1)
+    return run_tool(argv, build_parser=_build_parser, describe=_describe, run=_run)
 
 
-def _run(args, emitter, fail):
+def _run(args, ctx):
+    if args.input is None:
+        return ctx.fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
     if not os.path.isfile(args.input):
-        return fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 1, field="input")
+        return ctx.fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 1, field="input")
     if args.bone_file is not None and not os.path.isfile(args.bone_file):
-        return fail("bone_file_not_file",
+        return ctx.fail("bone_file_not_file",
                     f"--bone-file が存在しないか通常ファイルでない: {args.bone_file}", 1, field="--bone-file")
 
-    if args.min_segment_frames < 1:
-        return fail("bad_argument", f"--min-segment-frames は 1 以上が必要: {args.min_segment_frames}",
-                    2, field="--min-segment-frames")
-    if args.max_segment_frames is not None and args.max_segment_frames < 1:
-        return fail("bad_argument", f"--max-segment-frames は 1 以上が必要: {args.max_segment_frames}",
-                    2, field="--max-segment-frames")
     if args.max_segment_frames is not None and args.min_segment_frames > args.max_segment_frames:
-        return fail("segment_bounds_conflict",
+        return ctx.fail("segment_bounds_conflict",
                     f"--min-segment-frames({args.min_segment_frames})が "
                     f"--max-segment-frames({args.max_segment_frames})を超えている", 2)
 
@@ -461,25 +369,22 @@ def _run(args, emitter, fail):
     try:
         tols = presets.resolve_tolerances(args.preset, overrides)
     except ValueError as e:
-        return fail("bad_tolerance", str(e), 2)
+        return ctx.fail("bad_tolerance", str(e), 2)
 
     if args.target == "camera" and _has_bone_selection(args) and not args.list_bones:
-        return fail("target_selection_conflict",
+        return ctx.fail("target_selection_conflict",
                     "--target camera とボーン選択オプションは同時指定できない", 2)
 
-    output = args.output if args.output is not None else _default_output(args.input)
-    if not args.list_bones and os.path.isdir(output):
-        return fail("output_is_directory",
-                    f"出力先がディレクトリです(ファイルパスを指定): {output}",
-                    2, field="--output", path=output)
-    if not args.list_bones and not args.overwrite and os.path.exists(output):
-        return fail("output_exists",
-                    f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}", 2, field="--output")
+    output = args.output if args.output is not None else default_output_path(args.input, "_sparse.vmd")
+    if not args.list_bones:
+        rc = guard_output(output, overwrite=args.overwrite, fail=ctx.fail)
+        if rc is not None:
+            return rc
 
     try:
         doc, read_warnings = io.read(args.input)
     except Exception as e:
-        return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
+        return ctx.fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
 
     seen_warn = set()
     for w in read_warnings:
@@ -487,12 +392,7 @@ def _run(args, emitter, fail):
         if key in seen_warn:
             continue
         seen_warn.add(key)
-        if emitter is not None:
-            emitter.warning(code=w.code, message=w.message,
-                            section=[w.section] if w.section else None)
-        else:
-            where = f"({w.section})" if w.section else ""
-            print(f"warning: {w.code}: {w.message}{where}", file=sys.stderr)
+        ctx.warn(w.code, w.message, section=w.section)
 
     norm_sections = []
     if args.target in ("camera", "all"):
@@ -504,11 +404,11 @@ def _run(args, emitter, fail):
     try:
         includes, excludes = _build_selectors(args)
     except (UnicodeDecodeError, OSError, ValueError) as e:
-        return fail("bad_bone_file", f"--bone-file を読めない: {type(e).__name__}: {e}", 1,
+        return ctx.fail("bad_bone_file", f"--bone-file を読めない: {type(e).__name__}: {e}", 1,
                     field="--bone-file")
 
     if args.list_bones:
-        return _list_bones(doc, includes, excludes, emitter=emitter)
+        return _list_bones(doc, includes, excludes, ctx)
 
     cut_kw = dict(
         keep_frames=args.keep_frames,
@@ -523,27 +423,27 @@ def _run(args, emitter, fail):
     undecodable = _undecodable_bone_names(doc.bone)
     if args.target in ("bone", "all") and _has_bone_selection(args):
         if not bone_names:
-            return fail("no_target_keys", "ボーン選択を指定したがボーンキーが無い", 1, field="input")
+            return ctx.fail("no_target_keys", "ボーン選択を指定したがボーンキーが無い", 1, field="input")
         try:
             sel = selection.resolve_selection(
                 bone_names, includes, excludes, undecodable=undecodable
             )
         except selection.SelectionError as e:
             for w in e.warnings:
-                _emit_selector_unmatched(emitter, w)
-            return fail("bone_selection_invalid", str(e), 2)
+                ctx.warn("selector_unmatched", w)
+            return ctx.fail("bone_selection_invalid", str(e), 2)
         for w in sel.warnings:
-            _emit_selector_unmatched(emitter, w)
+            ctx.warn("selector_unmatched", w)
         selected = set(sel.selected)
     else:
         selected = set(bone_names)
 
     if args.target == "camera" and not doc.camera:
-        return fail("no_target_keys", "--target camera だがカメラキーが無い", 1, field="input")
+        return ctx.fail("no_target_keys", "--target camera だがカメラキーが無い", 1, field="input")
     if args.target == "bone" and not doc.bone:
-        return fail("no_target_keys", "--target bone だがボーンキーが無い", 1, field="input")
+        return ctx.fail("no_target_keys", "--target bone だがボーンキーが無い", 1, field="input")
     if args.target == "all" and not doc.camera and not doc.bone:
-        return fail("no_target_keys", "対象セクション(camera/bone)にキーが無い", 1, field="input")
+        return ctx.fail("no_target_keys", "対象セクション(camera/bone)にキーが無い", 1, field="input")
 
     do_camera = args.target in ("camera", "all") and bool(doc.camera)
     do_bone = args.target in ("bone", "all") and bool(doc.bone)
@@ -556,15 +456,12 @@ def _run(args, emitter, fail):
     try:
         global_ranges = _global_ranges(args.ranges, target_frames)
     except ranges.RangeError as e:
-        return fail("range_invalid", f"--range: {e}", 2, field="--range")
+        return ctx.fail("range_invalid", f"--range: {e}", 2, field="--range")
 
     for f in args.keep_frames:
         if not any(lo <= f <= hi for lo, hi in global_ranges):
             msg = f"keep-frame {f} は削減範囲外のため無視します"
-            if emitter is not None:
-                emitter.warning(code="keep_frame_ignored", message=msg, section=None)
-            else:
-                print(f"warning: keep_frame_ignored: {msg}", file=sys.stderr)
+            ctx.warn("keep_frame_ignored", msg)
 
     want_report = args.dry_run
     want_diag = want_report or args.verbose
@@ -574,96 +471,91 @@ def _run(args, emitter, fail):
     bone_errors = None
     camera_diag = None
     bone_diag = None
-    reporter = progress.ProgressReporter(
-        sys.stderr, enabled=(sys.stderr.isatty() and not args.quiet and emitter is None))
+    reporter = ctx.track_progress(progress.ProgressReporter(
+        sys.stderr, enabled=(sys.stderr.isatty() and not args.quiet and ctx.emitter is None)))
     did_reduce = False
     try:
-        try:
-            if do_camera:
-                cam = _sorted_camera(doc.camera)
-                cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
-                cam_cb = _machine_progress(emitter, "camera") if emitter is not None else None
-                if len(cam) >= 2:
-                    if cam_ranges:
-                        did_reduce = True
-                    camera_diag = {} if want_diag else None
-                    if emitter is None:
-                        reporter.stage("キーフレーム圧縮")
-                        cam_cb = lambda done, total, note="": reporter.update(  # noqa: E731
-                            done, total, note=f"カメラ {note}" if note else "カメラ")
-                    new_camera = reduce_camera_track(
-                        cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
-                        diagnostics=camera_diag, progress=cam_cb, **cut_kw
-                    )
-                else:
-                    new_camera = doc.camera
-                if want_report:
-                    camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
-            if do_bone:
-                bone_diag = {} if want_diag else None
-                bone_cb = _machine_progress(emitter, "bone") if emitter is not None else None
-                new_bone = _reduce_bones(
-                    doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
-                    diagnostics_out=bone_diag,
-                    reporter=(reporter if emitter is None else None), on_progress=bone_cb,
-                )
-                if _has_reducible_bone_in_ranges(doc.bone, selected, global_ranges):
+        if do_camera:
+            cam = _sorted_camera(doc.camera)
+            cam_ranges = ranges.intersect(global_ranges, cam[0].frame, cam[-1].frame)
+            cam_cb = _machine_progress(ctx.emitter, "camera") if ctx.emitter is not None else None
+            if len(cam) >= 2:
+                if cam_ranges:
                     did_reduce = True
-                if want_report:
-                    bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
-        except StrictError:
-            reporter.close()
-            return fail("strict_tolerance_unmet", "--strict 指定で許容誤差を満たせない", 4)
-
-        if args.verbose:
-            reporter.close()
-            _log_diagnostics(camera_diag, bone_diag, file=(sys.stderr if emitter is not None else None))
-
-        if want_report:
-            rep = report.build_report(
-                target=args.target,
-                camera=(len(doc.camera), len(new_camera)) if do_camera else None,
-                bones=_bone_io_counts(doc.bone, new_bone) if do_bone else None,
-                selected_bones=selected,
-                ranges=global_ranges,
-                keep_frames=args.keep_frames,
-                camera_errors=camera_errors,
-                bone_errors=bone_errors,
-                camera_diag=camera_diag,
-                bone_diag=bone_diag,
-                reduced=did_reduce,
+                camera_diag = {} if want_diag else None
+                if ctx.emitter is None:
+                    reporter.stage("キーフレーム圧縮")
+                    cam_cb = lambda done, total, note="": reporter.update(  # noqa: E731
+                        done, total, note=f"カメラ {note}" if note else "カメラ")
+                new_camera = reduce_camera_track(
+                    cam, cam_ranges, tols, cut_thresholds=args.cut_threshold_camera,
+                    diagnostics=camera_diag, progress=cam_cb, **cut_kw
+                )
+            else:
+                new_camera = doc.camera
+            if want_report:
+                camera_errors = measure_camera_errors(cam, new_camera, cam_ranges)
+        if do_bone:
+            bone_diag = {} if want_diag else None
+            bone_cb = _machine_progress(ctx.emitter, "bone") if ctx.emitter is not None else None
+            new_bone = _reduce_bones(
+                doc.bone, selected, global_ranges, tols, args.cut_threshold_bone, cut_kw,
+                diagnostics_out=bone_diag,
+                reporter=(reporter if ctx.emitter is None else None), on_progress=bone_cb,
             )
-            if args.dry_run and emitter is None:
-                reporter.close()
-                print(report.format_dry_run(rep))
+            if _has_reducible_bone_in_ranges(doc.bone, selected, global_ranges):
+                did_reduce = True
+            if want_report:
+                bone_errors = _measure_bone_errors(doc.bone, new_bone, selected, global_ranges)
+    except StrictError:
+        return ctx.fail("strict_tolerance_unmet", "--strict 指定で許容誤差を満たせない", 4)
 
-        if args.dry_run:
-            if emitter is not None:
-                emitter.result(mode="inspect", **_build_inspect(
-                    args, doc, do_camera, do_bone, selected, global_ranges, new_camera, new_bone,
-                    camera_errors, bone_errors, camera_diag, bone_diag, did_reduce))
-            return 0
-
-        out_doc = dataclasses.replace(doc, camera=new_camera, bone=new_bone)
-        try:
-            io.write_file(out_doc, output)
-        except Exception as e:
-            reporter.close()
-            return fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}", 3,
-                        field="--output", path=output)
-
-        if emitter is None:
-            reporter.close()
-            reporter.summary(f"完了 {output}")
-        else:
-            emitter.result(
-                mode="reduce", output=output, target=args.target,
-                camera={"input_keys": len(doc.camera), "output_keys": len(new_camera)} if do_camera else None,
-                bone={"input_keys": len(doc.bone), "output_keys": len(new_bone)} if do_bone else None,
-                reduced=did_reduce)
-        return 0
-    finally:
+    if args.verbose:
         reporter.close()
+        _log_diagnostics(camera_diag, bone_diag, file=(sys.stderr if ctx.emitter is not None else None))
+
+    if want_report:
+        rep = report.build_report(
+            target=args.target,
+            camera=(len(doc.camera), len(new_camera)) if do_camera else None,
+            bones=_bone_io_counts(doc.bone, new_bone) if do_bone else None,
+            selected_bones=selected,
+            ranges=global_ranges,
+            keep_frames=args.keep_frames,
+            camera_errors=camera_errors,
+            bone_errors=bone_errors,
+            camera_diag=camera_diag,
+            bone_diag=bone_diag,
+            reduced=did_reduce,
+        )
+        if args.dry_run and ctx.emitter is None:
+            reporter.close()
+            print(report.format_dry_run(rep))
+
+    if args.dry_run:
+        if ctx.emitter is not None:
+            ctx.emitter.result(mode="inspect", **_build_inspect(
+                args, doc, do_camera, do_bone, selected, global_ranges, new_camera, new_bone,
+                camera_errors, bone_errors, camera_diag, bone_diag, did_reduce))
+        return 0
+
+    out_doc = dataclasses.replace(doc, camera=new_camera, bone=new_bone)
+    try:
+        io.write_file(out_doc, output)
+    except Exception as e:
+        return ctx.fail("write_failed", f"出力の書き込みに失敗: {type(e).__name__}: {e}", 3,
+                    field="--output", path=output)
+
+    if ctx.emitter is None:
+        reporter.close()
+        reporter.summary(f"完了 {output}")
+    else:
+        ctx.emitter.result(
+            mode="reduce", output=output, target=args.target,
+            camera={"input_keys": len(doc.camera), "output_keys": len(new_camera)} if do_camera else None,
+            bone={"input_keys": len(doc.bone), "output_keys": len(new_bone)} if do_bone else None,
+            reduced=did_reduce)
+    return 0
 
 
 def _bone_io_counts(in_keys, out_keys):
@@ -743,7 +635,7 @@ def _measure_bone_errors(in_bone, out_bone, selected, global_ranges):
     return errors
 
 
-def _list_bones(doc, includes, excludes, emitter=None):
+def _list_bones(doc, includes, excludes, ctx):
     names = _bone_names_in_order(doc.bone)
     counts = {}
     for k in doc.bone:
@@ -756,17 +648,14 @@ def _list_bones(doc, includes, excludes, emitter=None):
         )
         selected = set(result.selected)
         for w in result.warnings:
-            _emit_selector_unmatched(emitter, w)
+            ctx.warn("selector_unmatched", w)
     except selection.SelectionError as e:
         for w in e.warnings:
-            _emit_selector_unmatched(emitter, w)
-        if emitter is not None:
-            emitter.warning(code="selection_unresolved", message=str(e), section=None)
-        else:
-            print("warning: selection_unresolved: " + str(e), file=sys.stderr)
+            ctx.warn("selector_unmatched", w)
+        ctx.warn("selection_unresolved", str(e))
 
-    if emitter is not None:
-        emitter.result(mode="list_bones", bones=[
+    if ctx.emitter is not None:
+        ctx.emitter.result(mode="list_bones", bones=[
             {"name": name, "keys": counts[name], "selected": name in selected} for name in names
         ])
     else:

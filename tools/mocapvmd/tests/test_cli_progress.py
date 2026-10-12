@@ -83,7 +83,7 @@ def test_stages_reported_in_order_reduce_updates_progress_and_summary_comes_last
     assert reduce_progress_updates
     assert all("elapsed" in e[2] for e in reduce_progress_updates)
     assert ("close",) in router.events
-    assert router.events[-1] == ("summary", f"完了 {out}")
+    assert [e for e in router.events if e != ("close",)][-1] == ("summary", f"完了 {out}")
 
 
 def test_disabled_stages_are_skipped(tmp_path, monkeypatch):

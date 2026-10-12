@@ -1,44 +1,47 @@
+import argparse
+
 import pytest
 
-from sparsevmd.ranges import RangeError, expand_and_normalize, intersect, parse_range
+from sparsevmd.cli import _RANGE
+from sparsevmd.ranges import RangeError, expand_and_normalize, intersect
 
 
 def test_parse_both_ends():
-    assert parse_range("0:240") == (0, 240)
+    assert _RANGE("0:240") == (0, 240)
 
 
 def test_parse_start_only():
-    assert parse_range("10:") == (10, None)
+    assert _RANGE("10:") == (10, None)
 
 
 def test_parse_end_only():
-    assert parse_range(":420") == (None, 420)
+    assert _RANGE(":420") == (None, 420)
 
 
 def test_parse_single_frame_inclusive():
-    assert parse_range("5:5") == (5, 5)
+    assert _RANGE("5:5") == (5, 5)
 
 
 def test_parse_start_greater_than_end_raises():
-    with pytest.raises(ValueError):
-        parse_range("20:10")
+    with pytest.raises(argparse.ArgumentTypeError):
+        _RANGE("20:10")
 
 
 @pytest.mark.parametrize("bad", ["-1:5", "1:-3"])
 def test_parse_negative_raises(bad):
-    with pytest.raises(ValueError):
-        parse_range(bad)
+    with pytest.raises(argparse.ArgumentTypeError):
+        _RANGE(bad)
 
 
 @pytest.mark.parametrize("bad", ["abc", "1.5:2", "1:2:3", "5", ""])
 def test_parse_malformed_raises(bad):
-    with pytest.raises(ValueError):
-        parse_range(bad)
+    with pytest.raises(argparse.ArgumentTypeError):
+        _RANGE(bad)
 
 
 def test_parse_both_omitted_raises():
-    with pytest.raises(ValueError):
-        parse_range(":")
+    with pytest.raises(argparse.ArgumentTypeError):
+        _RANGE(":")
 
 
 def test_expand_omitted_end():

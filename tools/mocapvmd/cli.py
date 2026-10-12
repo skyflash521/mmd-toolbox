@@ -1,17 +1,16 @@
 import dataclasses
-import math
 import os
 import sys
 import time
 
 from cli_events import (
-    ArgumentParseError,
-    EventEmitter,
     MachineArgumentParser,
-    argparse_error_field,
-    emit_failure,
-    install_sigbreak_handler,
+    add_common_arguments,
+    default_output_path,
+    guard_output,
+    run_tool,
 )
+from cli_options import RangeValidator, describe_options
 from cli_progress_router import ProgressRouter
 from pmx.types import PmxFormatError
 from vmd import interp, io
@@ -31,24 +30,27 @@ _STAGE_LABELS = {
 }
 
 
-def _build_parser():
+_NONNEGATIVE = RangeValidator(value_type="float", minimum=0)
+_UNIT_INTERVAL = RangeValidator(value_type="float", minimum=0, maximum=1)
+
+_COMMON_HELP_OVERRIDES = {
+    "--describe": "オプション定義とプリセット一覧を JSON Lines の result で出力して終了する"
+                  "(VMD を読まない・入力不要の自己記述)",
+    "--verbose": "通常実行でも診断レポートを標準出力へ表示する(出力VMDは書く)",
+}
+
+
+def _build_parser(*, defer_value_validation=False):
+    nonnegative = float if defer_value_validation else _NONNEGATIVE
+    unit_interval = float if defer_value_validation else _UNIT_INTERVAL
     p = MachineArgumentParser(prog="mocapvmd", allow_abbrev=False)
-    p.add_argument("--version", action="version", version=f"mocapvmd {__version__}",
-                   help="バージョンを表示して終了する")
-    p.add_argument("--machine", action="store_true",
-                   help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
-                        "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
-    p.add_argument("--describe", action="store_true",
-                   help="オプション定義とプリセット一覧を JSON Lines の result で出力して終了する"
-                        "(VMD を読まない・入力不要の自己記述)")
     p.add_argument("input", nargs="?", help="入力VMDファイル")
-    p.add_argument("-o", "--output", help="出力先(既定: <入力名>_mocap.vmd)")
-    p.add_argument("--overwrite", action="store_true",
-                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
+    add_common_arguments(p, version=__version__, output_help="出力先(既定: <入力名>_mocap.vmd)",
+                         help_overrides=_COMMON_HELP_OVERRIDES)
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="medium",
                    help="キーフレーム圧縮の許容誤差プリセット(速度観点): slower/slow/medium/fast/faster。"
                         "種別スケールの基準値")
-    p.add_argument("--clean-strength", dest="clean_strength", type=float, default=1.0,
+    p.add_argument("--clean-strength", dest="clean_strength", type=nonnegative, default=1.0,
                    help="ノイズ軽減の効き量の倍率(ブレンド率に掛ける。0で無加工相当、上げるほど強く平準化する。窓幅は据え置き)")
     p.add_argument("--denoise", dest="denoise", action="store_true", default=True,
                    help="ノイズ軽減を有効化(既定 on)")
@@ -62,11 +64,14 @@ def _build_parser():
                    help="足IK接地安定化を有効化(既定 on)")
     p.add_argument("--no-foot-ik-stabilize", dest="foot_ik_stabilize", action="store_false",
                    help="足IK接地安定化を無効化")
-    p.add_argument("--foot-slide-suppression", dest="foot_slide_suppression", type=float, default=1.0,
+    p.add_argument("--foot-slide-suppression", dest="foot_slide_suppression", type=unit_interval,
+                   default=1.0,
                    help="足IK接地中の横滑り抑制の強さ(0〜1)。既定1.0は接地中の横滑りを除去する")
-    p.add_argument("--reduce-error-bone-pos", dest="reduce_error_bone_pos", type=float, default=None,
+    p.add_argument("--reduce-error-bone-pos", dest="reduce_error_bone_pos", type=nonnegative,
+                   default=None,
                    help="キーフレーム圧縮の位置許容誤差の基準値(MMD単位)。明示値はプリセットに優先。種別スケールを掛ける")
-    p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=float, default=None,
+    p.add_argument("--reduce-error-bone-rot", dest="reduce_error_bone_rot", type=nonnegative,
+                   default=None,
                    help="キーフレーム圧縮の回転許容誤差の基準値(度)。明示値はプリセットに優先。種別スケールを掛ける")
     p.add_argument("--curve-mode", dest="curve_mode", choices=("bezier", "linear"), default="bezier",
                    help="出力補間曲線: bezier / linear")
@@ -76,30 +81,22 @@ def _build_parser():
                    help="キーフレームを圧縮せず、圧縮前の密キー(線形補間)を出力する(診断・比較用)")
     p.add_argument("--list-bones", dest="list_bones", action="store_true",
                    help="ボーン一覧と分類結果を表示して終了する")
-    p.add_argument("--dry-run", dest="dry_run", action="store_true",
-                   help="出力せず処理計画と診断を表示する(引数検証は実施する)")
-    p.add_argument("--quiet", dest="quiet", action="store_true",
-                   help="進捗表示を抑制する(警告・診断・終了コードは抑制しない)")
-    p.add_argument("-v", "--verbose", dest="verbose", action="store_true",
-                   help="通常実行でも 4.4 のレポートを標準出力へ表示する(出力VMDは書く)")
     return p
 
 
-_DESCRIBE_NONNEGATIVE = {"min": 0, "max": None, "exclusive_min": False}
-_DESCRIBE_UNIT_INTERVAL = {"min": 0, "max": 1, "exclusive_min": False}
 _DESCRIBED_TYPE_AND_CONSTRAINT_BY_DEST = {
     "input": ("str", None),
     "output": ("str", None),
     "overwrite": ("flag", None),
     "preset": ("enum", {"choices": list(presets.PRESET_NAMES)}),
-    "clean_strength": ("float", _DESCRIBE_NONNEGATIVE),
+    "clean_strength": (None, None),
     "denoise": ("flag", None),
     "denoise_mode": ("enum", {"choices": ["bone", "pose"]}),
     "pmx": ("str", None),
     "foot_ik_stabilize": ("flag", None),
-    "foot_slide_suppression": ("float", _DESCRIBE_UNIT_INTERVAL),
-    "reduce_error_bone_pos": ("float", _DESCRIBE_NONNEGATIVE),
-    "reduce_error_bone_rot": ("float", _DESCRIBE_NONNEGATIVE),
+    "foot_slide_suppression": (None, None),
+    "reduce_error_bone_pos": (None, None),
+    "reduce_error_bone_rot": (None, None),
     "curve_mode": ("enum", {"choices": ["bezier", "linear"]}),
     "reduce": ("flag", None),
     "list_bones": ("flag", None),
@@ -109,30 +106,11 @@ _DESCRIBED_TYPE_AND_CONSTRAINT_BY_DEST = {
 }
 
 
-def _describe_options(parser):
-    options = []
-    for action in parser._actions:
-        dest = action.dest
-        if dest not in _DESCRIBED_TYPE_AND_CONSTRAINT_BY_DEST:
-            continue
-        type_, constraint = _DESCRIBED_TYPE_AND_CONSTRAINT_BY_DEST[dest]
-        if dest == "input":
-            name = "input"
-        else:
-            positive_long_forms = [
-                s for s in action.option_strings if s.startswith("--") and not s.startswith("--no-")
-            ]
-            if not positive_long_forms:
-                continue
-            name = positive_long_forms[0]
-        options.append({
-            "name": name,
-            "type": type_,
-            "constraint": constraint,
-            "default": action.default,
-            "help": action.help,
-        })
-    return options
+def _describe(parser):
+    return {
+        "options": describe_options(parser, _DESCRIBED_TYPE_AND_CONSTRAINT_BY_DEST),
+        "presets": _describe_presets(),
+    }
 
 
 def _describe_presets():
@@ -144,24 +122,14 @@ def _describe_presets():
     return out
 
 
-def _default_output(input_path):
-    base, _ = os.path.splitext(input_path)
-    return base + "_mocap.vmd"
-
-
-def _surface_warnings(read_warnings, machine, emitter):
+def _surface_warnings(read_warnings, ctx):
     seen_warn = set()
     for w in read_warnings:
         key = (w.code, w.section, w.message)
         if key in seen_warn:
             continue
         seen_warn.add(key)
-        if machine:
-            emitter.warning(code=w.code, message=w.message,
-                            section=[w.section] if w.section else None)
-        else:
-            where = f"({w.section})" if w.section else ""
-            print(f"warning: {w.code}: {w.message}{where}", file=sys.stderr)
+        ctx.warn(w.code, w.message, section=w.section or None)
 
 
 def _bone_names_in_first_seen_order(bone_keys):
@@ -341,54 +309,20 @@ def _build_inspect(args, doc, reduction_diag, pose_diag):
     }
 
 
-def _fail(emitter, code, message, exit_code, *, field=None, path=None):
-    return emit_failure(emitter, code=code, message=message, exit_code=exit_code,
-                        field=field, path=path)
-
-
 def main(argv=None) -> int:
-    emitter = None
-    try:
-        if argv is None:
-            argv = sys.argv[1:]
-
-        machine = "--machine" in argv
-        describe = "--describe" in argv
-        emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
-
-        def fail(code, message, exit_code, *, field=None, path=None):
-            return _fail(emitter, code, message, exit_code, field=field, path=path)
-
-        install_sigbreak_handler()
-        if hasattr(sys.stderr, "reconfigure"):
-            try:
-                # ロケール符号化(cp932 等)で表せない文字を stderr へ書くと UnicodeEncodeError になる。
-                sys.stderr.reconfigure(errors="backslashreplace")
-            except Exception:
-                pass
-        parser = _build_parser()
-        try:
-            args = parser.parse_args(argv)
-        except ArgumentParseError as e:
-            return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
-        except SystemExit as e:
-            code = e.code
-            return code if isinstance(code, int) else (0 if code is None else 2)
-
-        if args.describe:
-            emitter.result(mode="describe", options=_describe_options(parser), presets=_describe_presets())
-            return 0
-        if args.input is None:
-            return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
-
-        return _run(args, machine, emitter, fail)
-    except KeyboardInterrupt:
-        return _fail(emitter, "cancelled", "中断された(Ctrl-C 等)", 130)
-    except Exception as e:
-        return _fail(emitter, "internal_error", f"{type(e).__name__}: {e}", 1)
+    effective = sys.argv[1:] if argv is None else argv
+    defer = "--list-bones" in effective and "--describe" not in effective
+    return run_tool(argv, build_parser=lambda: _build_parser(defer_value_validation=defer),
+                    describe=_describe, run=_run)
 
 
-def _run(args, machine, emitter, fail):
+def _run(args, ctx):
+    machine = ctx.machine
+    emitter = ctx.emitter
+    fail = ctx.fail
+    if args.input is None:
+        return fail("bad_argument", "入力VMDファイル(input)が必要", 2, field="input")
+
     if not os.path.isfile(args.input):
         return fail("input_not_file", f"入力が存在しないか通常ファイルでない: {args.input}", 1, field="input")
 
@@ -397,7 +331,7 @@ def _run(args, machine, emitter, fail):
             doc, read_warnings = io.read(args.input)
         except Exception as e:
             return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
-        _surface_warnings(read_warnings, machine, emitter)
+        _surface_warnings(read_warnings, ctx)
         if machine:
             emitter.result(mode="list_bones", bones=[
                 {"name": n, "category": classify.classify(n)} for n in _bone_names_in_first_seen_order(doc.bone)
@@ -406,29 +340,10 @@ def _run(args, machine, emitter, fail):
             print(_list_bones_text(doc.bone))
         return 0
 
-    output = args.output if args.output is not None else _default_output(args.input)
-    if os.path.isdir(output):
-        return fail("output_is_directory",
-                    f"出力先がディレクトリです(ファイルパスを指定): {output}",
-                    2, field="--output", path=output)
-    if not args.overwrite and os.path.exists(output):
-        return fail("output_exists",
-                    f"出力先に既存ファイルがあります。上書きには --overwrite が必要: {output}",
-                    2, field="--output")
-
-    for name, v in (("--reduce-error-bone-pos", args.reduce_error_bone_pos),
-                    ("--reduce-error-bone-rot", args.reduce_error_bone_rot)):
-        if v is not None and (not math.isfinite(v) or v < 0.0):
-            return fail("bad_argument", f"{name} は有限の非負値が必要: {v}", 2, field=name)
-
-    if not math.isfinite(args.clean_strength) or args.clean_strength < 0.0:
-        return fail("bad_argument", f"--clean-strength は有限の非負値が必要: {args.clean_strength}",
-                    2, field="--clean-strength")
-
-    s = args.foot_slide_suppression
-    if not math.isfinite(s) or not 0.0 <= s <= 1.0:
-        return fail("bad_argument", f"--foot-slide-suppression は 0〜1 の有限値が必要: {s}",
-                    2, field="--foot-slide-suppression")
+    output = args.output if args.output is not None else default_output_path(args.input, "_mocap.vmd")
+    guard_failure = guard_output(output, overwrite=args.overwrite, fail=fail)
+    if guard_failure is not None:
+        return guard_failure
 
     if args.denoise and args.denoise_mode == "pose" and args.pmx is not None:
         if not os.path.isfile(args.pmx):
@@ -439,7 +354,7 @@ def _run(args, machine, emitter, fail):
         doc, read_warnings = io.read(args.input)
     except Exception as e:
         return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
-    _surface_warnings(read_warnings, machine, emitter)
+    _surface_warnings(read_warnings, ctx)
 
     try:
         _validate_bones(doc.bone)
@@ -449,8 +364,8 @@ def _run(args, machine, emitter, fail):
 
     dense_bone = _densify_bones(doc.bone)
 
-    reporter = ProgressRouter(machine=machine, quiet=args.quiet, emitter=emitter,
-                              stream=sys.stderr, labels=_STAGE_LABELS)
+    reporter = ctx.track_progress(ProgressRouter(machine=machine, quiet=args.quiet, emitter=emitter,
+                                                 stream=sys.stderr, labels=_STAGE_LABELS))
     want_report = args.dry_run or args.verbose
     reduction_diag = {} if (args.reduce and want_report) else None
     pose_diag = {} if (args.denoise and args.denoise_mode == "pose" and want_report) else None

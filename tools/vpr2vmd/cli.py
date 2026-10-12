@@ -1,16 +1,14 @@
 import argparse
 import inspect
 import os
-import sys
 from dataclasses import dataclass, replace
 
 from cli_events import (
-    ArgumentParseError,
-    EventEmitter,
     MachineArgumentParser,
-    argparse_error_field,
-    emit_failure,
-    install_sigbreak_handler,
+    add_common_arguments,
+    default_output_path,
+    guard_output,
+    run_tool,
 )
 from cli_options import RangeValidator, describe_options
 from lipsync import generate_morph_keys
@@ -62,9 +60,6 @@ _positive_int = RangeValidator(value_type="int", minimum=1)
 def _build_parser() -> argparse.ArgumentParser:
     p = MachineArgumentParser(prog="vpr2vmd", allow_abbrev=False)
     p.add_argument("input", nargs="?", help="入力 vpr ファイル")
-    p.add_argument("-o", "--output", help="出力 VMD(既定: <入力名>.vmd)")
-    p.add_argument("--overwrite", action="store_true",
-                   help="出力先の既存ファイルへの上書きを許可する(未指定で出力先に既存ファイルがあるとエラー)")
     p.add_argument("--track",
                    help="リップモーション対象の歌唱トラック。半角数字だけの指定は 0-based の INDEX、"
                         "それ以外は Track 名(既定: 先頭トラック)")
@@ -98,24 +93,16 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="テンポ補正の基準テンポ(正値。既定: 120)")
     p.add_argument("--tempo-scale-min", dest="tempo_scale_min", type=_positive_unit_float,
                    help="テンポ補正の下げ止まり係数(0 超〜1.0。既定: 0.5)")
-    p.add_argument("--dry-run", dest="dry_run", action="store_true",
-                   help="出力せず処理計画と診断を表示する")
-    p.add_argument("-v", "--verbose", dest="verbose", action="store_true",
-                   help="通常実行でも処理計画と診断を標準出力へ表示する(出力 VMD は書く)")
-    p.add_argument("--machine", action="store_true",
-                   help="出力を JSON Lines のイベントストリームにする(標準出力=イベント専用・"
-                        "標準エラー=人間向けログ)。既定の人間向け表示・終了コードは変えない")
-    p.add_argument("--describe", action="store_true",
-                   help="オプション定義とスタイルプリセット一覧の result を出して終了する"
-                        "(vpr を読まない・入力不要の自己記述)")
-    p.add_argument("--version", action="version", version=f"vpr2vmd {__version__}",
-                   help="バージョンを表示して終了する")
+    add_common_arguments(
+        p, version=__version__, quiet=False, output_help="出力 VMD(既定: <入力名>.vmd)",
+        help_overrides={
+            "--dry-run": "出力せず処理計画と診断を表示する",
+            "--verbose": "通常実行でも処理計画と診断を標準出力へ表示する(出力 VMD は書く)",
+            "--describe": "オプション定義とスタイルプリセット一覧の result を出して終了する"
+                          "(vpr を読まない・入力不要の自己記述)",
+        },
+    )
     return p
-
-
-def _default_output(input_path: str) -> str:
-    base, _ = os.path.splitext(input_path)
-    return base + ".vmd"
 
 
 _DERIVED_FROM_VALIDATOR = (None, None)
@@ -142,19 +129,19 @@ _DESCRIBE_TYPE_BY_DEST = {
     "verbose": ("flag", None),
 }
 
-_FIXED_DEFAULT_BY_OPTION = {
-    "--legato-max": _DEFAULT_LEGATO_MAX,
-    "--ref-bpm": _DEFAULT_REF_BPM,
-    "--tempo-scale-min": _DEFAULT_TEMPO_SCALE_MIN,
+_FIXED_DEFAULT_BY_DEST = {
+    "legato_max": _DEFAULT_LEGATO_MAX,
+    "ref_bpm": _DEFAULT_REF_BPM,
+    "tempo_scale_min": _DEFAULT_TEMPO_SCALE_MIN,
 }
 
 
 def _describe_options(parser):
-    options = describe_options(parser, _DESCRIBE_TYPE_BY_DEST)
-    for option in options:
-        if option["name"] in _FIXED_DEFAULT_BY_OPTION:
-            option["default"] = _FIXED_DEFAULT_BY_OPTION[option["name"]]
-    return options
+    return [
+        option
+        for dest, entry in _DESCRIBE_TYPE_BY_DEST.items()
+        for option in describe_options(parser, {dest: entry}, defaults=_FIXED_DEFAULT_BY_DEST)
+    ]
 
 
 def _describe_presets():
@@ -217,18 +204,18 @@ class _Built:
     resolved_params: dict
 
 
-def _build(args, emitter, fail):
+def _build(args, ctx):
     try:
         project, warnings = read(args.input)
     except Exception as e:
-        return fail("not_vpr", f"入力を vpr として読めません: {type(e).__name__}: {e}", 1, field="input")
-    _surface_warnings(warnings, emitter)
+        return ctx.fail("not_vpr", f"入力を vpr として読めません: {type(e).__name__}: {e}", 1, field="input")
+    _surface_warnings(warnings, ctx)
     if not project.tracks:
-        return fail("no_tracks", "入力 vpr にトラックがありません", 1, field="input")
+        return ctx.fail("no_tracks", "入力 vpr にトラックがありません", 1, field="input")
     try:
         track = select_track(project, args.track)
     except TrackSelectionError as e:
-        return fail("bad_track", f"--track: {e}", 2, field="--track")
+        return ctx.fail("bad_track", f"--track: {e}", 2, field="--track")
     track_index = next(i for i, t in enumerate(project.tracks) if t is track)
 
     adopted, overlap_diag = resolve_overlaps(collect_notes(track))
@@ -288,7 +275,7 @@ def _build(args, emitter, fail):
     )
     document = ensure_frame0_neutral_keys(document, sections=("morph",))
     document, normalize_warnings = normalize(document, sections=["morph"])
-    _surface_normalize_warnings(normalize_warnings, emitter)
+    _surface_normalize_warnings(normalize_warnings, ctx)
     diagnostics = _Diagnostics(
         adopted_notes=len(adopted),
         mouth_events=len(mouth_events),
@@ -369,142 +356,91 @@ def _valley_bounds_inverted(args) -> bool:
     return deep > shallow
 
 
-def _surface_warnings(warnings, emitter) -> None:
-    if emitter is not None:
-        for w in warnings:
-            emitter.warning(
-                code=w.code, message=w.message, section=None,
-                track_index=w.track_index, part_index=w.part_index, note_index=w.note_index,
-                related_note_index=w.related_note_index, tick=w.tick,
-            )
-        return
+_POSITION_KEYS = ("track_index", "part_index", "note_index", "related_note_index", "tick")
+
+
+def _warn(ctx, code, message, *, section=None, **positions):
+    ctx.warn(code, message, section=section, **{key: positions.get(key) for key in _POSITION_KEYS})
+
+
+def _surface_warnings(warnings, ctx) -> None:
     seen = set()
     for w in warnings:
-        key = (w.code, w.message)
-        if key in seen:
-            continue
-        seen.add(key)
-        print(f"warning: {w.code}: {w.message}", file=sys.stderr)
+        if not ctx.machine:
+            key = (w.code, w.message)
+            if key in seen:
+                continue
+            seen.add(key)
+        _warn(ctx, w.code, w.message, track_index=w.track_index, part_index=w.part_index,
+              note_index=w.note_index, related_note_index=w.related_note_index, tick=w.tick)
 
 
 _SURFACED_NORMALIZE_CODES = frozenset({"normalize-duplicate"})
 
 
-def _surface_normalize_warnings(warnings, emitter) -> None:
-    warnings = [w for w in warnings if w.code in _SURFACED_NORMALIZE_CODES]
-    if emitter is not None:
-        for w in warnings:
-            emitter.warning(
-                code=w.code, message=w.message, section=w.section,
-                track_index=None, part_index=None, note_index=None,
-                related_note_index=None, tick=None,
-            )
-        return
+def _surface_normalize_warnings(warnings, ctx) -> None:
     seen = set()
     for w in warnings:
-        key = (w.code, w.section, w.message)
-        if key in seen:
+        if w.code not in _SURFACED_NORMALIZE_CODES:
             continue
-        seen.add(key)
-        print(f"warning: {w.code}: {w.message}({w.section})", file=sys.stderr)
-
-
-def _fail(emitter, code, message, exit_code, *, field=None, path=None):
-    return emit_failure(emitter, code=code, message=message, exit_code=exit_code,
-                        field=field, path=path)
+        if not ctx.machine:
+            key = (w.code, w.section, w.message)
+            if key in seen:
+                continue
+            seen.add(key)
+        _warn(ctx, w.code, w.message, section=w.section)
 
 
 def main(argv=None) -> int:
-    emitter = None
-    try:
-        if argv is None:
-            argv = sys.argv[1:]
-
-        machine = "--machine" in argv
-        describe = "--describe" in argv
-        emitter = EventEmitter(sys.stdout.buffer) if (machine or describe) else None
-
-        def fail(code, message, exit_code, *, field=None, path=None):
-            return _fail(emitter, code, message, exit_code, field=field, path=path)
-
-        install_sigbreak_handler()
-        if hasattr(sys.stderr, "reconfigure"):
-            try:
-                sys.stderr.reconfigure(errors="backslashreplace")
-            except Exception:
-                pass
-        parser = _build_parser()
-        try:
-            args = parser.parse_args(argv)
-        except ArgumentParseError as e:
-            return fail("bad_argument", e.message, 2, field=argparse_error_field(e.message))
-        except SystemExit as e:
-            code = e.code
-            return code if isinstance(code, int) else (0 if code is None else 2)
-
-        if args.describe:
-            emitter.result(mode="describe", options=_describe_options(parser),
-                           presets=_describe_presets())
-            return 0
-        if args.input is None:
-            return fail("bad_argument", "入力 vpr(input)が必要です", 2, field="input")
-
-        return _run(args, emitter, fail)
-    except KeyboardInterrupt:
-        return _fail(emitter, "cancelled", "中断された(Ctrl-C 等)", 130)
-    except Exception as e:
-        return _fail(emitter, "internal_error", f"{type(e).__name__}: {e}", 1)
+    return run_tool(
+        argv,
+        build_parser=_build_parser,
+        describe=lambda parser: {"options": _describe_options(parser), "presets": _describe_presets()},
+        run=_run,
+    )
 
 
-def _run(args, emitter, fail) -> int:
-    output = args.output if args.output is not None else _default_output(args.input)
+def _run(args, ctx) -> int:
+    if args.input is None:
+        return ctx.fail("bad_argument", "入力 vpr(input)が必要です", 2, field="input")
 
-    if os.path.isdir(output):
-        return fail("output_is_directory",
-                    f"出力先がディレクトリです(ファイルパスを指定): {output}",
-                    2, field="--output", path=output)
+    output = args.output if args.output is not None else default_output_path(args.input, ".vmd")
 
-    if not args.overwrite and os.path.exists(output):
-        return fail("output_exists",
-                    f"出力先に既存ファイルがあります(--overwrite が必要): {output}", 2, field="--output")
+    rejected = guard_output(output, overwrite=args.overwrite, fail=ctx.fail)
+    if rejected is not None:
+        return rejected
 
     if _valley_bounds_inverted(args):
-        return fail("valley_bounds_inverted",
-                    "谷係数の下限が上限を超えています(--valley-deep > --valley-shallow)", 2)
+        return ctx.fail("valley_bounds_inverted",
+                        "谷係数の下限が上限を超えています(--valley-deep > --valley-shallow)", 2)
 
     if not os.path.isfile(args.input):
-        return fail("input_not_found", f"入力 vpr が見つかりません: {args.input}", 1, field="input")
+        return ctx.fail("input_not_found", f"入力 vpr が見つかりません: {args.input}", 1, field="input")
 
-    built = _build(args, emitter, fail)
+    built = _build(args, ctx)
     if isinstance(built, int):
         return built
     diag = built.diagnostics
 
     if diag.adopted_notes == 0:
-        if emitter is not None:
-            emitter.warning(
-                code="no_adopted_notes", message="対象トラックに有効な発音がありません", section=None,
-                track_index=None, part_index=None, note_index=None, related_note_index=None, tick=None,
-            )
-        else:
-            print("warning: no_adopted_notes: 対象トラックに有効な発音がありません", file=sys.stderr)
+        _warn(ctx, "no_adopted_notes", "対象トラックに有効な発音がありません")
 
-    if (args.dry_run or args.verbose) and emitter is None:
+    if (args.dry_run or args.verbose) and not ctx.machine:
         _print_plan(args, output, built)
         _print_diagnostics(diag)
 
     if args.dry_run:
-        if emitter is not None:
-            emitter.result(mode="inspect", **_build_inspect(args, built))
+        if ctx.machine:
+            ctx.emitter.result(mode="inspect", **_build_inspect(args, built))
         return 0
 
     try:
         write_file(built.document, output)
-    except OSError as e:
-        return fail("write_failed", f"出力の書き込みに失敗: {e}", 3, field="--output", path=output)
+    except Exception as e:
+        return ctx.fail("write_failed", f"出力の書き込みに失敗: {e}", 3, field="--output", path=output)
 
-    if emitter is not None:
-        emitter.result(
+    if ctx.machine:
+        ctx.emitter.result(
             mode="convert", output=output, track_index=built.track_index, track_name=built.track_name,
             morph_keys=diag.morph_keys, adopted_notes=diag.adopted_notes, mouth_events=diag.mouth_events,
         )

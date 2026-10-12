@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from cli_events import run as cli_events_run
 from mocapvmd import cli, presets
 from mocapvmd.model_profile import STANDARD_BONE_NAMES
 from vmd import io
@@ -512,7 +513,7 @@ def test_non_machine_keyboard_interrupt_exits_130_with_stderr_reason_without_out
 
 def test_main_installs_ctrl_break_bridge_once(monkeypatch, capsysbinary):
     installs = []
-    monkeypatch.setattr(cli, "install_sigbreak_handler", lambda: installs.append(True))
+    monkeypatch.setattr(cli_events_run, "install_sigbreak_handler", lambda: installs.append(True))
     assert cli.main(["--describe"]) == 0
     assert installs == [True]
 
@@ -550,7 +551,7 @@ def test_describe_options_exclude_meta_and_negated_forms_and_pin_type_constraint
         assert neg not in by_name
     assert len(r["options"]) == _DESCRIBED_OPTION_COUNT
     for o in r["options"]:
-        assert set(o) == {"name", "type", "constraint", "default", "help"}
+        assert set(o) == {"name", "type", "constraint", "default", "help", "repeat"}
         assert isinstance(o["help"], str) and o["help"]
     assert set(by_name) == set(_EXPECTED_TYPE_CONSTRAINT_DEFAULT_BY_OPTION)
     for name, (type_, constraint, default) in _EXPECTED_TYPE_CONSTRAINT_DEFAULT_BY_OPTION.items():

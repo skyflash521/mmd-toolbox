@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from cli_events import run as cli_events_run
 from cli_options import RangeValidator
 from vpr import (
     ControllerCurve,
@@ -366,7 +367,7 @@ def test_machine_warning_normalize_carries_vmd_section(tmp_path, capsysbinary, m
     assert len(warns) == 1
     wa = warns[0]
     assert set(wa) == _WARNING_KEYS
-    assert wa["code"] == "normalize-duplicate" and wa["section"] == "morph"
+    assert wa["code"] == "normalize-duplicate" and wa["section"] == ["morph"]
     assert wa["message"] == "同一キーの重複"
     assert all(wa[key] is None for key in _VPR_POSITION_KEYS)
     assert events[-1]["mode"] == "convert"
@@ -570,7 +571,7 @@ def test_argument_errors_take_precedence_over_missing_input(
 
 def test_main_installs_sigbreak_handler(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(cli, "install_sigbreak_handler", lambda: calls.append(True))
+    monkeypatch.setattr(cli_events_run, "install_sigbreak_handler", lambda: calls.append(True))
     cli.main([str(tmp_path / "nope.vpr")])
     assert calls == [True]
 
@@ -581,7 +582,7 @@ def test_interrupt_right_after_sigbreak_install_is_reported_as_machine_event(
     def _interrupted():
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr(cli, "install_sigbreak_handler", _interrupted)
+    monkeypatch.setattr(cli_events_run, "install_sigbreak_handler", _interrupted)
     rc = cli.main([str(tmp_path / "nope.vpr"), "--machine"])
     assert rc == 130
     e = _machine_error(capsysbinary)

@@ -992,7 +992,7 @@ def test_repeated_flag_behaves_as_single(tmp_path, capsys):
 
 def test_main_installs_sigbreak_handler(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(cli, "install_sigbreak_handler", lambda: calls.append(True))
+    monkeypatch.setattr("cli_events.run.install_sigbreak_handler", lambda: calls.append(True))
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     assert cli.main([str(src), "--target", "camera", "--dry-run"]) == 0
