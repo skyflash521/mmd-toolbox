@@ -525,6 +525,20 @@ def test_convert_words_without_keep_model_reloads_converter_for_each_call(counti
     assert counting_katakana_model.alive() is False
 
 
+def test_convert_with_g2p_outside_a_session_releases_the_converter_after_conversion(counting_katakana_model):
+    import vocal_analysis.english_katakana as module
+    import vocal_analysis.transcription as transcription_module
+
+    module._conversion_cache.clear()
+    try:
+        transcription_module.convert_with_g2p("空を見上げてsky", method="tinyllama-katakana-converter")
+
+        assert counting_katakana_model.count == 1
+        assert counting_katakana_model.alive() is False
+    finally:
+        module._conversion_cache.clear()
+
+
 def test_convert_words_keep_model_holds_converter_across_calls_until_explicit_release(counting_katakana_model):
     import vocal_analysis.english_katakana as module
 

@@ -9,6 +9,7 @@ from typing import Literal
 
 import soundfile as sf
 
+from . import model_store
 from .config import DEFAULT_SEPARATOR, SEPARATOR_CONFIG, SeparatorId
 from .quiet import silence_third_party_output
 from .types import AudioPcm
@@ -57,14 +58,7 @@ def _separate_audio_separator_htdemucs_ft(work_dir: Path, input_wav: Path, on_pr
     output_files = _separate_with_progress(separator_obj, input_wav, on_progress)
     output_path = Path(output_files[0])
     del separator_obj
-    try:
-        import torch
-
-        # torch はキャッシュした GPU メモリを empty_cache まで手放さない。
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except ImportError:
-        pass
+    model_store.release_gpu_memory()
     # audio-separator は output_dir 相対のファイル名だけを返すことがある。
     return output_path if output_path.is_absolute() else work_dir / output_path
 

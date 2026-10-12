@@ -1,12 +1,13 @@
 import unicodedata
 from collections.abc import Callable
 
+from . import model_store
 from .config import (
     DEFAULT_ENGLISH_KATAKANA_METHOD,
     ENGLISH_KATAKANA_MODEL,
     EnglishKatakanaMethod,
 )
-from .quiet import silence_third_party_output, suppress_native_stderr
+from .quiet import suppress_native_stderr
 
 _FULLWIDTH_OFFSET = 0xFEE0
 _FULLWIDTH_LO = 0xFF01
@@ -79,45 +80,7 @@ def _is_valid_katakana(text: str) -> bool:
     return all(any(lo <= ord(ch) <= hi for lo, hi in _KANA_RANGES) for ch in text)
 
 
-def _select_katakana_model_device() -> str:
-    import torch
-
-    return "cuda" if torch.cuda.is_available() else "cpu"
-
-
 _katakana_model_cache = None
-
-
-def _hf_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
-    from huggingface_hub import snapshot_download
-
-    return snapshot_download(repo_id, revision=revision, tqdm_class=tqdm_class)
-
-
-def _prefetch_with_progress(repo_id: str, revision: str | None, on_progress: Callable[[str], None]) -> bool:
-    """戻り値はバイト転送が実際に起きたか。"""
-    from huggingface_hub.utils import tqdm as hf_tqdm
-
-    state = {"shown": False}
-
-    class _RelayTqdm(hf_tqdm):
-        def __init__(self, *args, **kwargs):
-            self._relay_unit = kwargs.get("unit")
-            self._relay_n = kwargs.get("initial") or 0
-            super().__init__(*args, **kwargs)
-
-        def update(self, n=1):
-            result = super().update(n)
-            # snapshot_download はファイル数を数えるバーと、バイト数を数える unit="B" のバーを作る。
-            if self._relay_unit == "B" and self.total:
-                self._relay_n += n or 0
-                state["shown"] = True
-                percent = min(100, int(self._relay_n * 100 / self.total))
-                on_progress(f"ダウンロード中: {repo_id} {percent}%")
-            return result
-
-    _hf_snapshot_download(repo_id, revision=revision, tqdm_class=_RelayTqdm)
-    return state["shown"]
 
 
 def _load_katakana_model(on_progress: Callable[[str], None] | None = None):
@@ -125,34 +88,28 @@ def _load_katakana_model(on_progress: Callable[[str], None] | None = None):
     if _katakana_model_cache is not None:
         return _katakana_model_cache
 
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    import transformers
 
-    silence_third_party_output()
+    device = model_store.select_device()
+    dtype = model_store.select_dtype(device)
 
-    downloaded = False
-    if on_progress is not None:
-        downloaded = _prefetch_with_progress(
-            ENGLISH_KATAKANA_MODEL.model_id, ENGLISH_KATAKANA_MODEL.model_revision, on_progress)
-
-    device = _select_katakana_model_device()
-
-    try:
-        if on_progress is not None:
-            on_progress(f"カタカナ生成モデル読み込み中: {ENGLISH_KATAKANA_MODEL.model_id}")
-        tokenizer = AutoTokenizer.from_pretrained(
+    def build():
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
             ENGLISH_KATAKANA_MODEL.model_id, revision=ENGLISH_KATAKANA_MODEL.model_revision
         )
-        # CPU 実行では fp16 を使えない。
-        dtype = torch.float16 if device == "cuda" else torch.float32
-        model = AutoModelForCausalLM.from_pretrained(
+        model = transformers.AutoModelForCausalLM.from_pretrained(
             ENGLISH_KATAKANA_MODEL.model_id,
             revision=ENGLISH_KATAKANA_MODEL.model_revision,
             dtype=dtype,
         )
-    finally:
-        if downloaded:
-            on_progress("")
+        return tokenizer, model
+
+    tokenizer, model = model_store.load_with_progress(
+        ENGLISH_KATAKANA_MODEL.model_id, ENGLISH_KATAKANA_MODEL.model_revision,
+        on_progress=on_progress,
+        loading_note=f"カタカナ生成モデル読み込み中: {ENGLISH_KATAKANA_MODEL.model_id}",
+        build=build,
+    )
     model.to(device)
     model.eval()
     _katakana_model_cache = (tokenizer, model)
@@ -246,13 +203,7 @@ def release_katakana_model() -> None:
     if _katakana_model_cache is None:
         return
     _katakana_model_cache = None
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except ImportError:
-        pass
+    model_store.release_gpu_memory()
 
 
 def uncached_target_words(
@@ -268,14 +219,15 @@ def uncached_target_words(
 
 def convert_words(
     words: list[str], method: EnglishKatakanaMethod = DEFAULT_ENGLISH_KATAKANA_METHOD,
-    on_progress: Callable[[str], None] | None = None,
+    on_progress: Callable[[str], None] | None = None, *, keep_model: bool = False,
 ) -> None:
-    """method が "tinyllama-katakana-converter" なら、変換し終えた時点で変換モデルを解放する。"""
+    """method が "tinyllama-katakana-converter" で keep_model が偽なら、変換し終えた時点で変換モデルを解放する。
+    keep_model が真なら解放は呼び出し側が release_katakana_model で行う。"""
     try:
         for word in words:
             _convert_word(word, method, on_progress=on_progress)
     finally:
-        if method == "tinyllama-katakana-converter":
+        if method == "tinyllama-katakana-converter" and not keep_model:
             release_katakana_model()
 
 

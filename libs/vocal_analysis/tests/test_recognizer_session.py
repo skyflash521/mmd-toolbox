@@ -623,7 +623,7 @@ def test_session_tinyllama_density_g2p_runs_in_transcribe_phase_without_the_conv
     assert {text for _, text, _ in density_calls} == {"あhello", "いworld"}
     assert all(method == "arpakana" for _, _, method in density_calls)
     release = fakes.events.index("release")
-    assert all(position < release for position, _, _ in density_calls)
+    assert all(position <= release for position, _, _ in density_calls)
     final_methods = [method for _, _, method in fakes.g2p_calls[len(density_calls):]]
     assert final_methods
     assert set(final_methods) == {_TINYLLAMA}

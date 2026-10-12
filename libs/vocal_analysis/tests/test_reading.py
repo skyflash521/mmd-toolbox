@@ -103,11 +103,11 @@ def test_missing_extra_dependency_at_import_time_is_reported_as_recognition_erro
 def test_kana_reading_passes_english_katakana_fallback_result_to_g2p(monkeypatch):
     import pyopenjtalk
 
-    from vocal_analysis import recognizer as recognizer_module
+    from vocal_analysis import english_katakana
 
     convert_calls = []
     monkeypatch.setattr(
-        recognizer_module, "convert_target_words",
+        english_katakana, "convert_target_words",
         lambda text, method=None, **kwargs: convert_calls.append(text) or "スカイ",
     )
 

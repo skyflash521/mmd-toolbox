@@ -16,7 +16,7 @@ _VOWEL_BASE_SYMBOLS = [
 
 @pytest.mark.parametrize("symbol", _VOWEL_BASE_SYMBOLS)
 def test_classify_symbol_vowel_base_set_is_complete(symbol):
-    from vocal_analysis.recognizer import _classify_symbol
+    from vocal_analysis.phonemes import _classify_symbol
 
     assert _classify_symbol(symbol) == "vowel"
 
@@ -42,7 +42,7 @@ def test_classify_symbol_vowel_base_set_is_complete(symbol):
     ],
 )
 def test_classify_symbol_modified_and_compound_vowel_examples(symbol):
-    from vocal_analysis.recognizer import _classify_symbol
+    from vocal_analysis.phonemes import _classify_symbol
 
     assert _classify_symbol(symbol) == "vowel"
 
@@ -52,44 +52,46 @@ def test_classify_symbol_modified_and_compound_vowel_examples(symbol):
     ["n", "s", "t", "k", "d", "m", "p", "z", "f", "v", "b", "ŋ", "θ", "ʃ", "ʒ", "ja", "ju", "wa", ""],
 )
 def test_classify_symbol_consonant_examples_including_approximant_initial_and_empty(symbol):
-    from vocal_analysis.recognizer import _classify_symbol
+    from vocal_analysis.phonemes import _classify_symbol
 
     assert _classify_symbol(symbol) == "consonant"
 
 
 @pytest.mark.parametrize(
-    "name,expected",
+    "module_name,name,expected",
     [
-        ("FRAME_DURATION_SEC", 0.02),
-        ("_SILENCE_FRAME_SEC", 0.1),
-        ("_SILENCE_MIN_RUN_SEC", 0.6),
-        ("_SEGMENT_MIN_SEC", 1.5),
-        ("_SEGMENT_MAX_SEC", 25.0),
-        ("_HALLUCINATION_PHONEME_RATE", 20.0),
-        ("_ECHO_FRAGMENT_PREFIX_LEN", 5),
-        ("_REPEAT_MIN_COUNT", 3),
-        ("_REPEAT_MIN_TOTAL_CHARS", 8),
-        ("_FORCED_ALIGN_BAND_SEC", 1.0),
-        ("_MIN_STAY_FRAMES", 6),
-        ("_VOICED_BLANK_PENALTY", 7.0),
-        ("_WORD_WINDOW_MARGIN_SEC", 0.75),
-        ("_EARLY_COMMIT_BONUS", 2.0),
+        ("alignment", "FRAME_DURATION_SEC", 0.02),
+        ("segmentation", "SILENCE_FRAME_SEC", 0.1),
+        ("segmentation", "SILENCE_MIN_RUN_SEC", 0.6),
+        ("segmentation", "SEGMENT_MIN_SEC", 1.5),
+        ("segmentation", "SEGMENT_MAX_SEC", 25.0),
+        ("hallucination", "HALLUCINATION_PHONEME_RATE", 20.0),
+        ("hallucination", "ECHO_FRAGMENT_PREFIX_LEN", 5),
+        ("hallucination", "REPEAT_MIN_COUNT", 3),
+        ("hallucination", "REPEAT_MIN_TOTAL_CHARS", 8),
+        ("alignment", "FORCED_ALIGN_BAND_SEC", 1.0),
+        ("alignment", "MIN_STAY_FRAMES", 6),
+        ("alignment", "VOICED_BLANK_PENALTY", 7.0),
+        ("alignment", "WORD_WINDOW_MARGIN_SEC", 0.75),
+        ("alignment", "EARLY_COMMIT_BONUS", 2.0),
     ],
 )
-def test_alignment_tuning_constants_are_pinned(name, expected):
-    from vocal_analysis import recognizer
+def test_alignment_tuning_constants_are_pinned(module_name, name, expected):
+    import importlib
 
-    assert getattr(recognizer, name) == expected
+    module = importlib.import_module(f"vocal_analysis.{module_name}")
+
+    assert getattr(module, name) == expected
 
 
 def test_frame_rms_computes_rms_per_frame():
-    from vocal_analysis.recognizer import _frame_rms
+    from vocal_analysis.segmentation import frame_rms
 
     frame_samples = 1600
     mono = np.concatenate([
         np.full(frame_samples, 0.5, dtype=np.float32), np.zeros(frame_samples, dtype=np.float32)])
 
-    result = _frame_rms(mono, sample_rate=16000, frame_sec=0.1)
+    result = frame_rms(mono, sample_rate=16000, frame_sec=0.1)
 
     assert result.shape == (2,)
     assert result[0] == pytest.approx(0.5)
@@ -97,104 +99,104 @@ def test_frame_rms_computes_rms_per_frame():
 
 
 def test_frame_rms_truncates_incomplete_final_frame():
-    from vocal_analysis.recognizer import _frame_rms
+    from vocal_analysis.segmentation import frame_rms
 
     mono = np.concatenate([np.full(1600, 0.5, dtype=np.float32), np.full(800, 0.9, dtype=np.float32)])
 
-    result = _frame_rms(mono, sample_rate=16000, frame_sec=0.1)
+    result = frame_rms(mono, sample_rate=16000, frame_sec=0.1)
 
     assert result.shape == (1,)
 
 
 def test_frame_rms_empty_input_returns_empty_array():
-    from vocal_analysis.recognizer import _frame_rms
+    from vocal_analysis.segmentation import frame_rms
 
-    assert _frame_rms(np.array([], dtype=np.float32), sample_rate=16000, frame_sec=0.1).shape == (0,)
+    assert frame_rms(np.array([], dtype=np.float32), sample_rate=16000, frame_sec=0.1).shape == (0,)
 
 
 def test_silence_threshold_is_30db_below_95th_percentile():
-    from vocal_analysis.recognizer import _silence_threshold
+    from vocal_analysis.segmentation import silence_threshold
 
     frame_rms = np.array([1.0] * 95 + [2.0] * 5)
     expected_peak = np.percentile(frame_rms, 95)
 
-    threshold = _silence_threshold(frame_rms)
+    threshold = silence_threshold(frame_rms)
 
     assert threshold == pytest.approx(expected_peak * (10 ** (-30.0 / 20.0)))
 
 
 def test_silence_threshold_zero_peak_gives_zero_threshold():
-    from vocal_analysis.recognizer import _silence_threshold
+    from vocal_analysis.segmentation import silence_threshold
 
-    assert _silence_threshold(np.zeros(10)) == pytest.approx(0.0)
+    assert silence_threshold(np.zeros(10)) == pytest.approx(0.0)
 
 
 def test_silence_threshold_empty_input_is_zero():
-    from vocal_analysis.recognizer import _silence_threshold
+    from vocal_analysis.segmentation import silence_threshold
 
-    assert _silence_threshold(np.array([])) == pytest.approx(0.0)
+    assert silence_threshold(np.array([])) == pytest.approx(0.0)
 
 
 def test_detect_silence_split_points_finds_midpoint_of_qualifying_run():
-    from vocal_analysis.recognizer import _detect_silence_split_points
+    from vocal_analysis.segmentation import detect_silence_split_points
 
     loud = np.full(16000, 0.5, dtype=np.float32)
     silence = np.zeros(16000, dtype=np.float32)
     mono = np.concatenate([loud, silence, loud])
 
-    splits = _detect_silence_split_points(mono, sample_rate=16000)
+    splits = detect_silence_split_points(mono, sample_rate=16000)
 
     assert len(splits) == 1
     assert splits[0] == pytest.approx((1.0 + 2.0) / 2)
 
 
 def test_detect_silence_split_points_ignores_silence_shorter_than_minimum_run():
-    from vocal_analysis.recognizer import _detect_silence_split_points
+    from vocal_analysis.segmentation import detect_silence_split_points
 
     loud = np.full(16000, 0.5, dtype=np.float32)
     silence = np.zeros(4800, dtype=np.float32)
     mono = np.concatenate([loud, silence, loud])
 
-    assert _detect_silence_split_points(mono, sample_rate=16000) == []
+    assert detect_silence_split_points(mono, sample_rate=16000) == []
 
 
 def test_detect_silence_split_points_handles_trailing_silence_run():
-    from vocal_analysis.recognizer import _detect_silence_split_points
+    from vocal_analysis.segmentation import detect_silence_split_points
 
     loud = np.full(16000, 0.5, dtype=np.float32)
     silence = np.zeros(16000, dtype=np.float32)
     mono = np.concatenate([loud, silence])
 
-    splits = _detect_silence_split_points(mono, sample_rate=16000)
+    splits = detect_silence_split_points(mono, sample_rate=16000)
 
     assert len(splits) == 1
     assert splits[0] == pytest.approx(1.5)
 
 
 def test_build_segment_bounds_no_splits_is_single_segment():
-    from vocal_analysis.recognizer import _build_segment_bounds
+    from vocal_analysis.segmentation import build_segment_bounds
 
-    assert _build_segment_bounds(duration_sec=10.0, split_points=[]) == [(0.0, 10.0)]
+    assert build_segment_bounds(duration_sec=10.0, split_points=[]) == [(0.0, 10.0)]
 
 
 def test_build_segment_bounds_merges_too_short_segment_forward():
-    from vocal_analysis.recognizer import _build_segment_bounds
+    from vocal_analysis.segmentation import build_segment_bounds
 
-    bounds = _build_segment_bounds(duration_sec=10.0, split_points=[0.5, 5.0])
+    bounds = build_segment_bounds(duration_sec=10.0, split_points=[0.5, 5.0])
 
     assert bounds == [(0.0, 5.0), (5.0, 10.0)]
 
 
 def test_build_segment_bounds_keeps_short_final_segment_when_no_neighbor():
-    from vocal_analysis.recognizer import _build_segment_bounds
+    from vocal_analysis.segmentation import build_segment_bounds
 
-    assert _build_segment_bounds(duration_sec=1.0, split_points=[]) == [(0.0, 1.0)]
+    assert build_segment_bounds(duration_sec=1.0, split_points=[]) == [(0.0, 1.0)]
 
 
 def test_build_segment_bounds_splits_too_long_segment_evenly():
-    from vocal_analysis.recognizer import _build_segment_bounds
+    from vocal_analysis.segmentation import build_segment_bounds
 
-    bounds = _build_segment_bounds(duration_sec=60.0, split_points=[])
+    bounds = build_segment_bounds(duration_sec=60.0, split_points=[])
 
     assert len(bounds) == 3
     assert bounds[0] == pytest.approx((0.0, 20.0))
@@ -203,88 +205,88 @@ def test_build_segment_bounds_splits_too_long_segment_evenly():
 
 
 def test_is_segment_silent_below_threshold_is_silent():
-    from vocal_analysis.recognizer import _is_segment_silent
+    from vocal_analysis.segmentation import is_segment_silent
 
-    assert _is_segment_silent(np.full(100, 0.001, dtype=np.float32), threshold=0.01) is True
+    assert is_segment_silent(np.full(100, 0.001, dtype=np.float32), threshold=0.01) is True
 
 
 def test_is_segment_silent_above_threshold_is_not_silent():
-    from vocal_analysis.recognizer import _is_segment_silent
+    from vocal_analysis.segmentation import is_segment_silent
 
-    assert _is_segment_silent(np.full(100, 0.5, dtype=np.float32), threshold=0.01) is False
+    assert is_segment_silent(np.full(100, 0.5, dtype=np.float32), threshold=0.01) is False
 
 
 def test_is_segment_silent_empty_segment_is_silent():
-    from vocal_analysis.recognizer import _is_segment_silent
+    from vocal_analysis.segmentation import is_segment_silent
 
-    assert _is_segment_silent(np.array([], dtype=np.float32), threshold=0.01) is True
+    assert is_segment_silent(np.array([], dtype=np.float32), threshold=0.01) is True
 
 
 def test_is_hallucinated_phoneme_density_exactly_at_threshold_is_not_hallucinated():
-    from vocal_analysis.recognizer import _HALLUCINATION_PHONEME_RATE, _is_hallucinated_phoneme_density
+    from vocal_analysis.hallucination import HALLUCINATION_PHONEME_RATE, is_hallucinated_phoneme_density
 
-    assert _is_hallucinated_phoneme_density(
-        phoneme_count=round(_HALLUCINATION_PHONEME_RATE * 2.0), duration_sec=2.0) is False
+    assert is_hallucinated_phoneme_density(
+        phoneme_count=round(HALLUCINATION_PHONEME_RATE * 2.0), duration_sec=2.0) is False
 
 
 def test_is_hallucinated_phoneme_density_above_threshold_is_hallucinated():
-    from vocal_analysis.recognizer import _is_hallucinated_phoneme_density
+    from vocal_analysis.hallucination import is_hallucinated_phoneme_density
 
-    assert _is_hallucinated_phoneme_density(phoneme_count=863, duration_sec=21.15) is True
+    assert is_hallucinated_phoneme_density(phoneme_count=863, duration_sec=21.15) is True
 
 
 def test_is_hallucinated_phoneme_density_zero_duration_is_not_hallucinated():
-    from vocal_analysis.recognizer import _is_hallucinated_phoneme_density
+    from vocal_analysis.hallucination import is_hallucinated_phoneme_density
 
-    assert _is_hallucinated_phoneme_density(phoneme_count=100, duration_sec=0.0) is False
+    assert is_hallucinated_phoneme_density(phoneme_count=100, duration_sec=0.0) is False
 
 
 def test_strip_prompt_echo_removes_exact_prompt_sentences():
-    from vocal_analysis.recognizer import _strip_prompt_echo
+    from vocal_analysis.hallucination import strip_prompt_echo
 
-    text, removed = _strip_prompt_echo("かんじは つかわないでください。" * 24)
+    text, removed = strip_prompt_echo("かんじは つかわないでください。" * 24)
     assert text == ""
     assert removed is True
 
 
 def test_strip_prompt_echo_removes_trailing_fragment_after_echo():
-    from vocal_analysis.recognizer import _strip_prompt_echo
+    from vocal_analysis.hallucination import strip_prompt_echo
 
-    text, removed = _strip_prompt_echo("かんじは つかわないでください。かんじは つかん")
+    text, removed = strip_prompt_echo("かんじは つかわないでください。かんじは つかん")
     assert text == ""
     assert removed is True
 
 
 def test_strip_prompt_echo_keeps_normal_text_untouched():
-    from vocal_analysis.recognizer import _strip_prompt_echo
+    from vocal_analysis.hallucination import strip_prompt_echo
 
     original = "きょうは あさから あめが ふっていて さんぽに いけなかった。"
-    text, removed = _strip_prompt_echo(original)
+    text, removed = strip_prompt_echo(original)
     assert text == original
     assert removed is False
 
 
 def test_strip_prompt_echo_keeps_real_sentences_between_echoes():
-    from vocal_analysis.recognizer import _strip_prompt_echo
+    from vocal_analysis.hallucination import strip_prompt_echo
 
-    text, removed = _strip_prompt_echo("かんじは つかわないでください。きょうはてんきがいい。")
+    text, removed = strip_prompt_echo("かんじは つかわないでください。きょうはてんきがいい。")
     assert text == "きょうはてんきがいい。"
     assert removed is True
 
 
 def test_strip_prompt_echo_keeps_prompt_prefix_fragment_when_no_echo_was_removed():
-    from vocal_analysis.recognizer import _strip_prompt_echo
+    from vocal_analysis.hallucination import strip_prompt_echo
 
     original = "かんじはじめた こころ"
-    text, removed = _strip_prompt_echo(original)
+    text, removed = strip_prompt_echo(original)
     assert text == original
     assert removed is False
 
 
 def test_find_suffix_repetition_detects_trailing_unit_run():
-    from vocal_analysis.recognizer import _find_suffix_repetition
+    from vocal_analysis.hallucination import find_suffix_repetition
 
-    result = _find_suffix_repetition("ハテシナイミチノムコウデ" + "ラ" * 300)
+    result = find_suffix_repetition("ハテシナイミチノムコウデ" + "ラ" * 300)
     assert result is not None
     unit, count, head = result
     assert unit == "ラ"
@@ -293,9 +295,9 @@ def test_find_suffix_repetition_detects_trailing_unit_run():
 
 
 def test_find_suffix_repetition_detects_whole_text_repetition():
-    from vocal_analysis.recognizer import _find_suffix_repetition
+    from vocal_analysis.hallucination import find_suffix_repetition
 
-    result = _find_suffix_repetition("ララ" * 200)
+    result = find_suffix_repetition("ララ" * 200)
     assert result is not None
     unit, count, head = result
     assert head == ""
@@ -303,131 +305,136 @@ def test_find_suffix_repetition_detects_whole_text_repetition():
 
 
 def test_find_suffix_repetition_ignores_runs_below_minimum_count():
-    from vocal_analysis.recognizer import _find_suffix_repetition
+    from vocal_analysis.hallucination import find_suffix_repetition
 
-    assert _find_suffix_repetition("たのしいね たのしいね") is None
+    assert find_suffix_repetition("たのしいね たのしいね") is None
 
 
-def _resolve(monkeypatch, text, words=None, duration=10.0, retry_result=None, retry_enabled=True,
-             g2p=None, transcribe_calls=None, text_only_result=None, text_only_calls=None):
-    from vocal_analysis import recognizer as R
+def _resolve(text, words=None, duration=10.0, retry_enabled=True, g2p=None, text_only_result=None,
+             text_only_calls=None):
+    from vocal_analysis.hallucination import resolve_transcription
 
-    primary = R.DEFAULT_CONTENT_RECOGNIZER_MODEL
-
-    def fake_transcribe(pipeline, samples):
-        if transcribe_calls is not None:
-            transcribe_calls.append(pipeline)
-        if retry_result is None:
-            raise AssertionError("リトライが呼ばれてはならないケースで _transcribe_segment が呼ばれた")
-        return retry_result
-
-    def fake_transcribe_text_only(samples, model, on_progress=None):
-        if text_only_calls is not None:
-            text_only_calls.append(model)
-        if text_only_result is None:
-            raise AssertionError("リトライが呼ばれてはならないケースで _transcribe_text_only が呼ばれた")
-        return text_only_result
-
-    def one_phoneme_per_non_space_char(t, method=None, **kwargs):
+    def one_phoneme_per_non_space_char(t):
         return ["a"] * len(t.replace(" ", ""))
 
-    monkeypatch.setattr(R, "_transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(R, "_transcribe_text_only", fake_transcribe_text_only)
-    monkeypatch.setattr(R, "_g2p", g2p or one_phoneme_per_non_space_char)
-    return R._resolve_transcription(
-        np.zeros(16000, dtype=np.float32), duration, text, words, primary, retry_enabled)
+    def retranscribe():
+        if text_only_calls is not None:
+            text_only_calls.append(True)
+        if text_only_result is None:
+            raise AssertionError("リトライが呼ばれてはならないケースで再書き起こしが呼ばれた")
+        return text_only_result
+
+    return resolve_transcription(
+        duration, text, words,
+        g2p=g2p or one_phoneme_per_non_space_char,
+        retranscribe=retranscribe if retry_enabled else None)
 
 
-def test_resolve_transcription_retries_once_with_primary_model_when_echo_leaves_empty_text(monkeypatch):
-    calls = []
-    text, words = _resolve(
-        monkeypatch, "かんじは つかわないでください。",
-        words=[("かんじは", 0.0, 1.0)], duration=15.0,
-        text_only_result="げんきです", text_only_calls=calls)
-    from vocal_analysis.recognizer import DEFAULT_CONTENT_RECOGNIZER_MODEL
+def _write_loud_wav(path, seconds):
+    import soundfile as sf
 
-    assert text == "げんきです"
-    assert words is None
-    assert len(calls) == 1
-    assert calls[0] is DEFAULT_CONTENT_RECOGNIZER_MODEL
+    t = np.arange(round(16000 * seconds)) / 16000
+    sf.write(path, (0.5 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32), 16000)
+    return path
 
 
-def test_resolve_transcription_does_not_retry_on_ascii_words(monkeypatch):
-    text, _words = _resolve(
-        monkeypatch, "hello world つづける", duration=10.0,
-        retry_result=None, text_only_result=None)
+def test_session_retries_once_with_primary_model_when_echo_leaves_empty_text(monkeypatch, tmp_path):
+    from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL, alignment, transcription
+    from vocal_analysis.recognizer import RecognizerSession
+
+    loaded_models = []
+    retry_calls = []
+    monkeypatch.setattr(
+        transcription, "load_pipeline",
+        lambda model, on_progress=None: loaded_models.append(model) or object())
+    monkeypatch.setattr(
+        transcription, "transcribe_segment",
+        lambda pipeline, samples: ("かんじは つかわないでください。", [("かんじは", 0.0, 1.0)]))
+    monkeypatch.setattr(
+        transcription, "transcribe_text_only",
+        lambda pipeline, samples: retry_calls.append(True) or "げんきです")
+    monkeypatch.setattr(transcription, "g2p", lambda t, method=None, **kwargs: ["a"] * len(t))
+    monkeypatch.setattr(alignment, "load_phoneme_model", lambda on_progress=None: pytest.fail("unused"))
+
+    with RecognizerSession() as session:
+        transcribed = session.transcribe(_write_loud_wav(tmp_path / "a.wav", 15.0))
+
+    utterance = transcribed.items[0]
+    assert utterance.text == "げんきです"
+    assert utterance.words is None
+    assert len(retry_calls) == 1
+    assert loaded_models == [DEFAULT_CONTENT_RECOGNIZER_MODEL]
+
+
+def test_resolve_transcription_does_not_retry_on_ascii_words():
+    text, _words = _resolve("hello world つづける", duration=10.0)
     assert text == "hello world つづける"
 
 
-def test_resolve_transcription_retries_on_high_density(monkeypatch):
-    text, _words = _resolve(
-        monkeypatch, "あ" * 40, duration=1.0,
-        text_only_result="あいうえお")
+def test_resolve_transcription_retries_on_high_density():
+    text, _words = _resolve("あ" * 40, duration=1.0, text_only_result="あいうえお")
     assert text == "あいうえお"
 
 
-def test_resolve_transcription_does_not_retry_normal_text(monkeypatch):
-    text, words = _resolve(
-        monkeypatch, "てんきがいいですね", words=[("てんきが", 0.0, 1.0)], duration=10.0,
-        retry_result=None)
+def test_resolve_transcription_does_not_retry_normal_text():
+    text, words = _resolve("てんきがいいですね", words=[("てんきが", 0.0, 1.0)], duration=10.0)
     assert text == "てんきがいいですね"
     assert words == [("てんきが", 0.0, 1.0)]
 
 
-def test_resolve_transcription_disabled_retry_still_rescues_by_keeping_head_before_suffix_repetition(monkeypatch):
-    text, _words = _resolve(
-        monkeypatch, "アイウエオカキクケコ" + "ラ" * 90, duration=1.0,
-        retry_result=None, retry_enabled=False)
+def test_resolve_transcription_disabled_retry_still_rescues_by_keeping_head_before_suffix_repetition():
+    text, _words = _resolve("アイウエオカキクケコ" + "ラ" * 90, duration=1.0, retry_enabled=False)
     assert text == "アイウエオカキクケコ"
 
 
-def test_resolve_transcription_normalizes_whole_text_repetition_to_3_5_morae_per_second(monkeypatch):
-    from vocal_analysis import recognizer as R
-
-    def g2p(t, method=None, **kwargs):
-        return ["a"] * len(t.replace(" ", ""))
-
-    monkeypatch.setattr(R, "_g2p", g2p)
+def test_resolve_transcription_normalizes_whole_text_repetition_to_3_5_morae_per_second():
     duration_sec = 10.0
-    text, words = R._resolve_transcription(
-        np.zeros(16000, dtype=np.float32), duration_sec, "ラ" * 400, None,
-        R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False)
+    text, words = _resolve("ラ" * 400, duration=duration_sec, retry_enabled=False)
     assert text == "ラ" * round(duration_sec * 3.5)
     assert words is None
 
 
-def test_resolve_transcription_density_judgement_uses_converter_free_g2p_regardless_of_session_method(monkeypatch):
+def test_session_density_judgement_uses_converter_free_g2p_regardless_of_session_method(monkeypatch, tmp_path):
     import inspect
 
-    from vocal_analysis import recognizer as R
+    from vocal_analysis import alignment, hallucination, transcription
+    from vocal_analysis.recognizer import RecognizerSession
 
-    g2p_methods = []
+    g2p_calls = []
 
     def g2p(t, method=None, **kwargs):
-        g2p_methods.append(method)
+        g2p_calls.append((t, method))
+        if method == "tinyllama-katakana-converter":
+            return ["a"] * 1000
         return ["a"] * len(t.replace(" ", ""))
 
-    monkeypatch.setattr(R, "_g2p", g2p)
-    text, words = R._resolve_transcription(
-        np.zeros(16000, dtype=np.float32), 10.0, "ラ" * 400, None,
-        R.DEFAULT_CONTENT_RECOGNIZER_MODEL, False)
+    monkeypatch.setattr(transcription, "load_pipeline", lambda model, on_progress=None: object())
+    monkeypatch.setattr(transcription, "transcribe_segment", lambda pipeline, samples: ("ラ" * 400, None))
+    monkeypatch.setattr(transcription, "g2p", g2p)
+    monkeypatch.setattr(alignment, "load_phoneme_model", lambda on_progress=None: pytest.fail("unused"))
 
-    assert "english_katakana_method" not in inspect.signature(R._resolve_transcription).parameters
-    assert text == "ラ" * 35
-    assert len(g2p_methods) >= 1
-    assert all(m == "arpakana" for m in g2p_methods)
+    with RecognizerSession(
+            retry=False, english_katakana_method="tinyllama-katakana-converter") as session:
+        transcribed = session.transcribe(_write_loud_wav(tmp_path / "a.wav", 10.0))
+        density_calls = list(g2p_calls)
+        session.align(transcribed)
+
+    assert "english_katakana_method" not in inspect.signature(hallucination.resolve_transcription).parameters
+    assert transcribed.items[0].text == "ラ" * 35
+    assert len(density_calls) >= 1
+    assert all(method == "arpakana" for _, method in density_calls)
+    assert g2p_calls[len(density_calls):] == [("ラ" * 35, "tinyllama-katakana-converter")]
 
 
-def test_resolve_transcription_rescue_keeps_normal_density_text(monkeypatch):
+def test_resolve_transcription_rescue_keeps_normal_density_text():
     text, words = _resolve(
-        monkeypatch, "すき すき すき", words=[("すき", 0.0, 0.5)], duration=10.0,
-        retry_result=None, retry_enabled=False)
+        "すき すき すき", words=[("すき", 0.0, 0.5)], duration=10.0, retry_enabled=False)
     assert text == "すき すき すき"
     assert words == [("すき", 0.0, 0.5)]
 
 
 def test_voiced_trim_bounds_trims_leading_and_trailing_silence_with_margin():
-    from vocal_analysis.recognizer import _voiced_trim_bounds
+    from vocal_analysis.segmentation import voiced_trim_bounds
 
     sr = 16000
     silence_head = np.zeros(2 * sr, dtype=np.float32)
@@ -435,7 +442,7 @@ def test_voiced_trim_bounds_trims_leading_and_trailing_silence_with_margin():
     silence_tail = np.zeros(3 * sr, dtype=np.float32)
     samples = np.concatenate([silence_head, voiced, silence_tail])
 
-    lo, hi = _voiced_trim_bounds(samples, sr, threshold=0.01)
+    lo, hi = voiced_trim_bounds(samples, sr, threshold=0.01)
 
     margin_sec = 0.1
     assert lo == round((2.0 - margin_sec) * sr)
@@ -443,30 +450,30 @@ def test_voiced_trim_bounds_trims_leading_and_trailing_silence_with_margin():
 
 
 def test_voiced_trim_bounds_clamps_margin_to_segment_edges():
-    from vocal_analysis.recognizer import _voiced_trim_bounds
+    from vocal_analysis.segmentation import voiced_trim_bounds
 
     sr = 16000
     samples = np.full(1 * sr, 0.5, dtype=np.float32)
 
-    lo, hi = _voiced_trim_bounds(samples, sr, threshold=0.01)
+    lo, hi = voiced_trim_bounds(samples, sr, threshold=0.01)
 
     assert lo == 0
     assert hi == len(samples)
 
 
 def test_voiced_trim_bounds_no_voiced_frame_returns_whole_segment():
-    from vocal_analysis.recognizer import _voiced_trim_bounds
+    from vocal_analysis.segmentation import voiced_trim_bounds
 
     sr = 16000
     samples = np.full(1 * sr, 0.001, dtype=np.float32)
 
-    lo, hi = _voiced_trim_bounds(samples, sr, threshold=0.01)
+    lo, hi = voiced_trim_bounds(samples, sr, threshold=0.01)
 
     assert (lo, hi) == (0, len(samples))
 
 
 def test_merge_adjacent_segments_combines_same_type_and_phoneme():
-    from vocal_analysis.recognizer import _merge_adjacent_segments
+    from vocal_analysis.alignment import merge_adjacent_segments
     from vocal_analysis.types import Segment
 
     segments = [
@@ -474,7 +481,7 @@ def test_merge_adjacent_segments_combines_same_type_and_phoneme():
         Segment(type="vowel", start_sec=1.0, end_sec=2.0, phoneme="a"),
     ]
 
-    result = _merge_adjacent_segments(segments)
+    result = merge_adjacent_segments(segments)
 
     assert len(result) == 1
     assert result[0].start_sec == pytest.approx(0.0)
@@ -482,7 +489,7 @@ def test_merge_adjacent_segments_combines_same_type_and_phoneme():
 
 
 def test_merge_adjacent_segments_keeps_different_phoneme_separate():
-    from vocal_analysis.recognizer import _merge_adjacent_segments
+    from vocal_analysis.alignment import merge_adjacent_segments
     from vocal_analysis.types import Segment
 
     segments = [
@@ -490,48 +497,49 @@ def test_merge_adjacent_segments_keeps_different_phoneme_separate():
         Segment(type="vowel", start_sec=1.0, end_sec=2.0, phoneme="i"),
     ]
 
-    result = _merge_adjacent_segments(segments)
+    result = merge_adjacent_segments(segments)
 
     assert len(result) == 2
 
 
 def test_sanitize_word_timestamps_clamps_to_duration_range():
-    from vocal_analysis.recognizer import _sanitize_word_timestamps
+    from vocal_analysis.transcription import sanitize_word_timestamps
 
-    result = _sanitize_word_timestamps([("a", -0.5, 3.0)], duration_sec=2.0)
+    result = sanitize_word_timestamps([("a", -0.5, 3.0)], duration_sec=2.0)
 
     assert result == [("a", 0.0, 2.0)]
 
 
 def test_sanitize_word_timestamps_raises_start_that_goes_back_to_previous_start():
-    from vocal_analysis.recognizer import _sanitize_word_timestamps
+    from vocal_analysis.transcription import sanitize_word_timestamps
 
-    result = _sanitize_word_timestamps([("a", 0.5, 0.8), ("b", 0.3, 0.9)], duration_sec=2.0)
+    result = sanitize_word_timestamps([("a", 0.5, 0.8), ("b", 0.3, 0.9)], duration_sec=2.0)
 
     assert result[0] == ("a", 0.5, 0.8)
     assert result[1][1] == pytest.approx(0.5)
 
 
 def test_sanitize_word_timestamps_enforces_minimum_length():
-    from vocal_analysis.recognizer import _MIN_WORD_DURATION_SEC, _sanitize_word_timestamps
+    from vocal_analysis.phonemes import _MIN_WORD_DURATION_SEC
+    from vocal_analysis.transcription import sanitize_word_timestamps
 
-    result = _sanitize_word_timestamps([("a", 1.0, 1.0)], duration_sec=2.0)
+    result = sanitize_word_timestamps([("a", 1.0, 1.0)], duration_sec=2.0)
 
     assert result[0][2] == pytest.approx(1.0 + _MIN_WORD_DURATION_SEC)
 
 
 def test_sanitize_word_timestamps_minimum_length_is_applied_after_clamp_and_may_exceed_duration():
-    from vocal_analysis.recognizer import _sanitize_word_timestamps
+    from vocal_analysis.transcription import sanitize_word_timestamps
 
-    result = _sanitize_word_timestamps([("a", 1.98, 2.5)], duration_sec=2.0)
+    result = sanitize_word_timestamps([("a", 1.98, 2.5)], duration_sec=2.0)
 
     assert result == [("a", 1.98, pytest.approx(1.98 + 0.05))]
 
 
 def test_widen_cramped_words_widens_below_30ms_per_phoneme_to_40ms_keeping_end():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
-    result = _widen_cramped_words([(["a", "b", "c", "d"], 0.94, 1.0)], duration_sec=2.0)
+    result = widen_cramped_words([(["a", "b", "c", "d"], 0.94, 1.0)], duration_sec=2.0)
 
     assert result[0][0] == ["a", "b", "c", "d"]
     assert result[0][1] == pytest.approx(1.0 - 4 * 0.04)
@@ -539,26 +547,26 @@ def test_widen_cramped_words_widens_below_30ms_per_phoneme_to_40ms_keeping_end()
 
 
 def test_widen_cramped_words_keeps_words_at_or_above_threshold():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
     words = [(["a", "b"], 0.0, 0.06), (["a"], 0.5, 1.0)]
-    assert _widen_cramped_words(words, duration_sec=2.0) == words
+    assert widen_cramped_words(words, duration_sec=2.0) == words
 
 
 def test_widen_cramped_words_widens_just_below_the_threshold():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
-    result = _widen_cramped_words([(["a", "b"], 1.0, 1.058)], duration_sec=2.0)
+    result = widen_cramped_words([(["a", "b"], 1.0, 1.058)], duration_sec=2.0)
 
     assert result[0][1] == pytest.approx(1.058 - 0.08)
     assert result[0][2] == pytest.approx(1.058)
 
 
 def test_widen_cramped_words_does_not_remonotonize_starts():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
     words = [(["a"], 0.98, 1.03), (["b", "c", "d", "e"], 1.04, 1.10)]
-    result = _widen_cramped_words(words, duration_sec=2.0)
+    result = widen_cramped_words(words, duration_sec=2.0)
 
     assert result[0] == (["a"], 0.98, 1.03)
     assert result[1][1] == pytest.approx(0.94)
@@ -566,48 +574,48 @@ def test_widen_cramped_words_does_not_remonotonize_starts():
 
 
 def test_widen_cramped_words_sends_overflow_past_start_to_the_end():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
-    result = _widen_cramped_words([(["a", "b", "c", "d"], 0.02, 0.1)], duration_sec=2.0)
+    result = widen_cramped_words([(["a", "b", "c", "d"], 0.02, 0.1)], duration_sec=2.0)
 
     assert result[0][1] == pytest.approx(0.0)
     assert result[0][2] == pytest.approx(0.16)
 
 
 def test_widen_cramped_words_clamps_to_the_trimmed_range():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
-    result = _widen_cramped_words([(["a", "b", "c", "d"], 0.05, 0.1)], duration_sec=0.12)
+    result = widen_cramped_words([(["a", "b", "c", "d"], 0.05, 0.1)], duration_sec=0.12)
 
     assert result[0][1] == pytest.approx(0.0)
     assert result[0][2] == pytest.approx(0.12)
 
 
 def test_widen_cramped_words_ignores_words_without_phonemes():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
     words = [([], 0.5, 0.5)]
-    assert _widen_cramped_words(words, duration_sec=2.0) == words
+    assert widen_cramped_words(words, duration_sec=2.0) == words
 
 
 def test_widen_cramped_words_clamps_the_end_before_widening():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
-    result = _widen_cramped_words([(["a", "b"], 1.98, 2.03)], duration_sec=2.0)
+    result = widen_cramped_words([(["a", "b"], 1.98, 2.03)], duration_sec=2.0)
 
     assert result[0][1] == pytest.approx(1.92)
     assert result[0][2] == pytest.approx(2.0)
 
 
 def test_widen_cramped_words_tolerates_float_noise_at_the_threshold():
-    from vocal_analysis.recognizer import _widen_cramped_words
+    from vocal_analysis.alignment import widen_cramped_words
 
     words = [(["a", "b"], 30.64, 30.70)]
-    assert _widen_cramped_words(words, duration_sec=40.0) == words
+    assert widen_cramped_words(words, duration_sec=40.0) == words
 
 
 def test_extract_word_timestamps_skips_empty_text_and_missing_start():
-    from vocal_analysis.recognizer import _extract_word_timestamps
+    from vocal_analysis.transcription import extract_word_timestamps
 
     chunks = [
         {"text": "あ", "timestamp": (0.0, 0.5)},
@@ -616,57 +624,58 @@ def test_extract_word_timestamps_skips_empty_text_and_missing_start():
         {"text": "う", "timestamp": (1.5, 2.0)},
     ]
 
-    result = _extract_word_timestamps(chunks, duration_sec=2.0)
+    result = extract_word_timestamps(chunks, duration_sec=2.0)
 
     assert [w[0] for w in result] == ["あ", "う"]
 
 
 def test_extract_word_timestamps_fills_missing_end_with_minimum_length():
-    from vocal_analysis.recognizer import _MIN_WORD_DURATION_SEC, _extract_word_timestamps
+    from vocal_analysis.phonemes import _MIN_WORD_DURATION_SEC
+    from vocal_analysis.transcription import extract_word_timestamps
 
     chunks = [{"text": "あ", "timestamp": (1.0, None)}]
 
-    result = _extract_word_timestamps(chunks, duration_sec=2.0)
+    result = extract_word_timestamps(chunks, duration_sec=2.0)
 
     assert result == [("あ", 1.0, 1.0 + _MIN_WORD_DURATION_SEC)]
 
 
 def test_assemble_phoneme_sequence_wraps_single_chunk_with_pau():
-    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+    from vocal_analysis.alignment import assemble_phoneme_sequence
 
-    result = _assemble_phoneme_sequence([["a", "i"]])
+    result = assemble_phoneme_sequence([["a", "i"]])
 
     assert result == ["pau", "a", "i", "pau"]
 
 
 def test_assemble_phoneme_sequence_inserts_pau_between_chunks():
-    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+    from vocal_analysis.alignment import assemble_phoneme_sequence
 
-    result = _assemble_phoneme_sequence([["a"], ["k", "i"]])
+    result = assemble_phoneme_sequence([["a"], ["k", "i"]])
 
     assert result == ["pau", "a", "pau", "k", "i", "pau"]
 
 
 def test_assemble_phoneme_sequence_empty_chunk_still_gets_boundary_pau():
-    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+    from vocal_analysis.alignment import assemble_phoneme_sequence
 
-    result = _assemble_phoneme_sequence([[], ["a"]])
+    result = assemble_phoneme_sequence([[], ["a"]])
 
     assert result == ["pau", "pau", "a", "pau"]
 
 
 def test_assemble_phoneme_sequence_no_chunks_is_leading_and_trailing_pau_only():
-    from vocal_analysis.recognizer import _assemble_phoneme_sequence
+    from vocal_analysis.alignment import assemble_phoneme_sequence
 
-    result = _assemble_phoneme_sequence([])
+    result = assemble_phoneme_sequence([])
 
     assert result == ["pau", "pau"]
 
 
 def test_assemble_with_word_windows_single_word_leading_word_and_trailing_windows():
-    from vocal_analysis.recognizer import _assemble_with_word_windows
+    from vocal_analysis.alignment import assemble_with_word_windows
 
-    seq, windows = _assemble_with_word_windows([(["a"], 1.0, 1.5)], margin_sec=0.5, duration_sec=3.0)
+    seq, windows = assemble_with_word_windows([(["a"], 1.0, 1.5)], margin_sec=0.5, duration_sec=3.0)
 
     assert seq == ["pau", "a", "pau"]
     leading_pau, word, trailing_pau = windows
@@ -676,11 +685,11 @@ def test_assemble_with_word_windows_single_word_leading_word_and_trailing_window
 
 
 def test_assemble_with_word_windows_inter_word_pau_spans_neighbors_and_word_phonemes_share_window():
-    from vocal_analysis.recognizer import _assemble_with_word_windows
+    from vocal_analysis.alignment import assemble_with_word_windows
 
     words_phonemes = [(["a"], 0.5, 1.0), (["k", "i"], 2.0, 2.5)]
 
-    seq, windows = _assemble_with_word_windows(words_phonemes, margin_sec=0.3, duration_sec=3.0)
+    seq, windows = assemble_with_word_windows(words_phonemes, margin_sec=0.3, duration_sec=3.0)
 
     assert seq == ["pau", "a", "pau", "k", "i", "pau"]
     inter_word_window = windows[2]
@@ -689,62 +698,64 @@ def test_assemble_with_word_windows_inter_word_pau_spans_neighbors_and_word_phon
 
 
 def test_assemble_with_word_windows_swaps_inverted_window():
-    from vocal_analysis.recognizer import _assemble_with_word_windows
+    from vocal_analysis.alignment import assemble_with_word_windows
 
     words_phonemes = [(["a"], 0.0, 2.0), (["i"], 2.1, 2.5)]
 
-    _, windows = _assemble_with_word_windows(words_phonemes, margin_sec=0.5, duration_sec=3.0)
+    _, windows = assemble_with_word_windows(words_phonemes, margin_sec=0.5, duration_sec=3.0)
 
     inter_word_window = windows[2]
     assert inter_word_window[0] <= inter_word_window[1]
 
 
 def test_g2p_symbols_to_token_ids_maps_known_symbols():
-    from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
+    from vocal_analysis.alignment import g2p_symbols_to_token_ids
 
     vocab = {"<pad>": 0, "a": 5, "k": 7}
 
-    result = _g2p_symbols_to_token_ids(["a", "k"], vocab, blank_token_id=0)
+    result = g2p_symbols_to_token_ids(["a", "k"], vocab, blank_token_id=0)
 
     assert result == [5, 7]
 
 
 def test_g2p_symbols_to_token_ids_maps_pau_and_cl_to_blank():
-    from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
+    from vocal_analysis.alignment import g2p_symbols_to_token_ids
 
     vocab = {"<pad>": 0, "a": 5}
 
-    result = _g2p_symbols_to_token_ids(["pau", "cl"], vocab, blank_token_id=0)
+    result = g2p_symbols_to_token_ids(["pau", "cl"], vocab, blank_token_id=0)
 
     assert result == [0, 0]
 
 
 def test_g2p_symbols_to_token_ids_devoiced_vowels_collapse_to_voiced():
-    from vocal_analysis.recognizer import _g2p_symbols_to_token_ids
+    from vocal_analysis.alignment import g2p_symbols_to_token_ids
 
     vocab = {"<pad>": 0, "i": 3, "ɯ": 4}
 
-    result = _g2p_symbols_to_token_ids(["I", "U"], vocab, blank_token_id=0)
+    result = g2p_symbols_to_token_ids(["I", "U"], vocab, blank_token_id=0)
 
     assert result == [3, 4]
 
 
 def test_g2p_symbols_to_token_ids_unmapped_symbol_raises_recognition_error():
-    from vocal_analysis.recognizer import RecognitionError, _g2p_symbols_to_token_ids
+    from vocal_analysis.alignment import g2p_symbols_to_token_ids
+    from vocal_analysis.recognizer import RecognitionError
 
     with pytest.raises(RecognitionError):
-        _g2p_symbols_to_token_ids(["xx"], {"<pad>": 0}, blank_token_id=0)
+        g2p_symbols_to_token_ids(["xx"], {"<pad>": 0}, blank_token_id=0)
 
 
 def test_g2p_symbols_to_token_ids_missing_vocab_entry_raises_recognition_error():
-    from vocal_analysis.recognizer import RecognitionError, _g2p_symbols_to_token_ids
+    from vocal_analysis.alignment import g2p_symbols_to_token_ids
+    from vocal_analysis.recognizer import RecognitionError
 
     with pytest.raises(RecognitionError):
-        _g2p_symbols_to_token_ids(["a"], {"<pad>": 0}, blank_token_id=0)
+        g2p_symbols_to_token_ids(["a"], {"<pad>": 0}, blank_token_id=0)
 
 
 def test_voiced_blank_penalty_applies_only_to_voiced_frames_blank_column_without_mutating_input():
-    from vocal_analysis.recognizer import _VOICED_BLANK_PENALTY, _apply_voiced_blank_penalty
+    from vocal_analysis.alignment import VOICED_BLANK_PENALTY, apply_voiced_blank_penalty
 
     samples_per_frame = 320
     samples = np.concatenate([
@@ -753,22 +764,22 @@ def test_voiced_blank_penalty_applies_only_to_voiced_frames_blank_column_without
     ])
     log_probs = np.zeros((4, 3))
 
-    result = _apply_voiced_blank_penalty(log_probs, samples, threshold=0.01, blank_token_id=1)
+    result = apply_voiced_blank_penalty(log_probs, samples, threshold=0.01, blank_token_id=1)
 
     expected = np.zeros((4, 3))
-    expected[2, 1] = -_VOICED_BLANK_PENALTY
-    expected[3, 1] = -_VOICED_BLANK_PENALTY
+    expected[2, 1] = -VOICED_BLANK_PENALTY
+    expected[3, 1] = -VOICED_BLANK_PENALTY
     assert np.array_equal(result, expected)
     assert np.array_equal(log_probs, np.zeros((4, 3)))
 
 
 def test_voiced_blank_penalty_handles_frame_count_mismatch():
-    from vocal_analysis.recognizer import _apply_voiced_blank_penalty
+    from vocal_analysis.alignment import apply_voiced_blank_penalty
 
     samples = np.full(3 * 320, 0.5, dtype=np.float32)
     log_probs = np.zeros((4, 2))
 
-    result = _apply_voiced_blank_penalty(log_probs, samples, threshold=0.01, blank_token_id=0)
+    result = apply_voiced_blank_penalty(log_probs, samples, threshold=0.01, blank_token_id=0)
 
     assert result.shape == (4, 2)
     assert result[3, 0] == 0.0
@@ -776,20 +787,20 @@ def test_voiced_blank_penalty_handles_frame_count_mismatch():
 
 
 def test_expand_min_stay_expands_phoneme_tokens_only():
-    from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay
+    from vocal_analysis.alignment import MIN_STAY_FRAMES, expand_min_stay
 
-    sub_ids, sub_to_token = _expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=100)
+    sub_ids, sub_to_token = expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=100)
 
-    assert sub_ids == [0] + [7] * _MIN_STAY_FRAMES + [0]
-    assert sub_to_token == [0] + [1] * _MIN_STAY_FRAMES + [2]
+    assert sub_ids == [0] + [7] * MIN_STAY_FRAMES + [0]
+    assert sub_to_token == [0] + [1] * MIN_STAY_FRAMES + [2]
 
 
 def test_expand_min_stay_reduces_stay_when_frames_are_scarce():
-    from vocal_analysis.recognizer import _expand_min_stay
+    from vocal_analysis.alignment import expand_min_stay
 
     num_frames = 6
     num_blank = 2
-    sub_ids, sub_to_token = _expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=num_frames)
+    sub_ids, sub_to_token = expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=num_frames)
 
     stay = num_frames - num_blank
     assert sub_ids == [0] + [7] * stay + [0]
@@ -797,93 +808,93 @@ def test_expand_min_stay_reduces_stay_when_frames_are_scarce():
 
 
 def test_expand_min_stay_never_reduces_below_one():
-    from vocal_analysis.recognizer import _expand_min_stay
+    from vocal_analysis.alignment import expand_min_stay
 
-    sub_ids, _ = _expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=2)
+    sub_ids, _ = expand_min_stay([0, 7, 0], blank_token_id=0, num_frames=2)
 
     assert sub_ids == [0, 7, 0]
 
 
 def test_expand_min_stay_all_blank_sequence_is_unchanged():
-    from vocal_analysis.recognizer import _expand_min_stay
+    from vocal_analysis.alignment import expand_min_stay
 
-    sub_ids, sub_to_token = _expand_min_stay([0, 0], blank_token_id=0, num_frames=10)
+    sub_ids, sub_to_token = expand_min_stay([0, 0], blank_token_id=0, num_frames=10)
 
     assert sub_ids == [0, 0]
     assert sub_to_token == [0, 1]
 
 
 def test_expand_min_stay_local_uses_word_duration_over_phoneme_count():
-    from vocal_analysis.recognizer import _expand_min_stay_local
+    from vocal_analysis.alignment import expand_min_stay_local
 
     words_phonemes = [(["a", "i"], 0.0, 0.12)]
-    sub_ids, sub_to_token = _expand_min_stay_local([0, 1, 2, 0], words_phonemes, blank_token_id=0)
+    sub_ids, sub_to_token = expand_min_stay_local([0, 1, 2, 0], words_phonemes, blank_token_id=0)
 
     assert sub_ids == [0, 1, 1, 1, 2, 2, 2, 0]
     assert sub_to_token == [0, 1, 1, 1, 2, 2, 2, 3]
 
 
 def test_expand_min_stay_local_varies_per_word_within_same_chunk():
-    from vocal_analysis.recognizer import _expand_min_stay_local
+    from vocal_analysis.alignment import expand_min_stay_local
 
     words_phonemes = [(["a"], 0.0, 0.12), (["i"], 0.12, 0.14)]
-    sub_ids, sub_to_token = _expand_min_stay_local([0, 1, 0, 2, 0], words_phonemes, blank_token_id=0)
+    sub_ids, sub_to_token = expand_min_stay_local([0, 1, 0, 2, 0], words_phonemes, blank_token_id=0)
 
     assert sub_ids == [0] + [1] * 6 + [0] + [2] * 1 + [0]
     assert sub_to_token == [0] + [1] * 6 + [2] + [3] * 1 + [4]
 
 
 def test_expand_min_stay_local_clamps_to_global_max_stay():
-    from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay_local
+    from vocal_analysis.alignment import MIN_STAY_FRAMES, expand_min_stay_local
 
     words_phonemes = [(["a"], 0.0, 2.0)]
-    sub_ids, _ = _expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
+    sub_ids, _ = expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
 
-    assert sub_ids == [0] + [1] * _MIN_STAY_FRAMES + [0]
+    assert sub_ids == [0] + [1] * MIN_STAY_FRAMES + [0]
 
 
 def test_expand_min_stay_local_never_reduces_below_one():
-    from vocal_analysis.recognizer import _expand_min_stay_local
+    from vocal_analysis.alignment import expand_min_stay_local
 
     words_phonemes = [(["a", "i", "u"], 0.0, 0.02)]
-    sub_ids, _ = _expand_min_stay_local([0, 1, 2, 3, 0], words_phonemes, blank_token_id=0)
+    sub_ids, _ = expand_min_stay_local([0, 1, 2, 3, 0], words_phonemes, blank_token_id=0)
 
     assert sub_ids == [0, 1, 2, 3, 0]
 
 
 def test_expand_min_stay_local_rounds_quotient_just_below_integer_by_float_error_up():
-    from vocal_analysis.recognizer import _expand_min_stay_local
+    from vocal_analysis.alignment import expand_min_stay_local
 
     words_phonemes = [(["a"], 0.02, 0.06)]
-    sub_ids, _ = _expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
+    sub_ids, _ = expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
 
     assert sub_ids == [0, 1, 1, 0]
 
 
 def test_expand_min_stay_local_rounds_half_up_not_half_to_even():
-    from vocal_analysis.recognizer import _expand_min_stay_local
+    from vocal_analysis.alignment import expand_min_stay_local
 
     words_phonemes = [(["a"], 0.0, 0.05)]
-    sub_ids, _ = _expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
+    sub_ids, _ = expand_min_stay_local([0, 1, 0], words_phonemes, blank_token_id=0)
 
     assert sub_ids == [0, 1, 1, 1, 0]
 
 
 def test_expand_min_stay_local_empty_phonemes_word_contributes_no_substates():
-    from vocal_analysis.recognizer import _expand_min_stay_local
+    from vocal_analysis.alignment import expand_min_stay_local
 
     words_phonemes = [([], 0.0, 0.02), (["a"], 0.02, 0.14)]
-    sub_ids, sub_to_token = _expand_min_stay_local([0, 0, 1, 0], words_phonemes, blank_token_id=0)
+    sub_ids, sub_to_token = expand_min_stay_local([0, 0, 1, 0], words_phonemes, blank_token_id=0)
 
     assert sub_ids == [0, 0] + [1] * 6 + [0]
     assert sub_to_token == [0, 1] + [2] * 6 + [3]
 
 
 def test_expand_min_stay_local_word_internal_blank_symbol_counts_toward_divisor_but_stays_one_frame():
-    from vocal_analysis.recognizer import _expand_min_stay_local
+    from vocal_analysis.alignment import expand_min_stay_local
 
     words_phonemes = [(["a", "cl", "t", "e"], 0.0, 0.24)]
-    sub_ids, sub_to_token = _expand_min_stay_local(
+    sub_ids, sub_to_token = expand_min_stay_local(
         [0, 5, 0, 7, 6, 0], words_phonemes, blank_token_id=0
     )
 
@@ -892,34 +903,34 @@ def test_expand_min_stay_local_word_internal_blank_symbol_counts_toward_divisor_
 
 
 def test_min_stay_expansion_forces_phoneme_to_occupy_expanded_frames():
-    from vocal_analysis.recognizer import _MIN_STAY_FRAMES, _expand_min_stay, _forced_align
+    from vocal_analysis.alignment import MIN_STAY_FRAMES, expand_min_stay, forced_align
 
-    num_frames = _MIN_STAY_FRAMES + 4
+    num_frames = MIN_STAY_FRAMES + 4
     log_probs = np.array(
         [[5.0, -5.0]] * 4 + [[-5.0, 5.0]] + [[5.0, -5.0]] * (num_frames - 5)
     )
-    plain_path = _forced_align(log_probs, [0, 1, 0])
+    plain_path = forced_align(log_probs, [0, 1, 0])
     assert sum(1 for s in plain_path if s == 1) == 1
 
-    sub_ids, sub_to_token = _expand_min_stay([0, 1, 0], blank_token_id=0, num_frames=num_frames)
-    sub_path = _forced_align(log_probs, sub_ids)
+    sub_ids, sub_to_token = expand_min_stay([0, 1, 0], blank_token_id=0, num_frames=num_frames)
+    sub_path = forced_align(log_probs, sub_ids)
     path = [sub_to_token[s] for s in sub_path]
 
-    assert sum(1 for s in path if s == 1) >= _MIN_STAY_FRAMES
+    assert sum(1 for s in path if s == 1) >= MIN_STAY_FRAMES
 
 
 def test_forced_align_single_state_stays_for_all_frames():
-    from vocal_analysis.recognizer import _forced_align
+    from vocal_analysis.alignment import forced_align
 
     log_probs = np.array([[0.1], [-1.0], [0.2]])
 
-    path = _forced_align(log_probs, token_ids=[0])
+    path = forced_align(log_probs, token_ids=[0])
 
     assert path == [0, 0, 0]
 
 
 def test_forced_align_follows_dominant_emission_monotonically():
-    from vocal_analysis.recognizer import _forced_align
+    from vocal_analysis.alignment import forced_align
 
     log_probs = np.array(
         [
@@ -930,22 +941,23 @@ def test_forced_align_follows_dominant_emission_monotonically():
         ]
     )
 
-    path = _forced_align(log_probs, token_ids=[0, 1])
+    path = forced_align(log_probs, token_ids=[0, 1])
 
     assert path == [0, 0, 1, 1]
 
 
 def test_forced_align_raises_when_fewer_frames_than_tokens():
-    from vocal_analysis.recognizer import RecognitionError, _forced_align
+    from vocal_analysis.alignment import forced_align
+    from vocal_analysis.recognizer import RecognitionError
 
     log_probs = np.zeros((2, 1))
 
     with pytest.raises(RecognitionError):
-        _forced_align(log_probs, token_ids=[0, 0, 0])
+        forced_align(log_probs, token_ids=[0, 0, 0])
 
 
 def test_forced_align_band_limit_excludes_out_of_band_favorable_evidence():
-    from vocal_analysis.recognizer import _forced_align
+    from vocal_analysis.alignment import forced_align
 
     num_frames = 200
     log_probs = np.zeros((num_frames, 2))
@@ -955,7 +967,7 @@ def test_forced_align_band_limit_excludes_out_of_band_favorable_evidence():
     log_probs[favorable_frames.start:favorable_frames.stop, 1] = 0.0
     token_ids = [0, 1, 0]
 
-    path = _forced_align(log_probs, token_ids)
+    path = forced_align(log_probs, token_ids)
 
     state1_frames = [i for i, state in enumerate(path) if state == 1]
     assert state1_frames
@@ -964,7 +976,7 @@ def test_forced_align_band_limit_excludes_out_of_band_favorable_evidence():
 
 
 def test_forced_align_windowed_follows_dominant_emission_within_window():
-    from vocal_analysis.recognizer import _forced_align_windowed
+    from vocal_analysis.alignment import forced_align_windowed
 
     log_probs = np.array(
         [
@@ -976,13 +988,13 @@ def test_forced_align_windowed_follows_dominant_emission_within_window():
     )
     loose_windows = [(0.0, 10.0), (0.0, 10.0)]
 
-    path = _forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=loose_windows)
+    path = forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=loose_windows)
 
     assert path == [0, 0, 1, 1]
 
 
 def test_forced_align_windowed_excludes_evidence_outside_window():
-    from vocal_analysis.recognizer import _forced_align_windowed
+    from vocal_analysis.alignment import forced_align_windowed
 
     num_frames = 200
     log_probs = np.zeros((num_frames, 3))
@@ -992,7 +1004,7 @@ def test_forced_align_windowed_excludes_evidence_outside_window():
     state1_window_end_frame = 150
     windows = [(0.0, 4.0), (0.0, state1_window_end_frame * 0.02), (0.0, 4.0)]
 
-    path = _forced_align_windowed(log_probs, token_ids=[0, 1, 0], windows_sec=windows)
+    path = forced_align_windowed(log_probs, token_ids=[0, 1, 0], windows_sec=windows)
 
     state1_frames = [i for i, state in enumerate(path) if state == 1]
     assert state1_frames
@@ -1001,40 +1013,42 @@ def test_forced_align_windowed_excludes_evidence_outside_window():
 
 
 def test_forced_align_windowed_raises_when_window_unreachable():
-    from vocal_analysis.recognizer import RecognitionError, _forced_align_windowed
+    from vocal_analysis.alignment import forced_align_windowed
+    from vocal_analysis.recognizer import RecognitionError
 
     log_probs = np.zeros((4, 2))
     windows = [(0.0, 10.0), (100.0, 200.0)]
 
     with pytest.raises(RecognitionError):
-        _forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=windows)
+        forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=windows)
 
 
 def test_forced_align_windowed_raises_when_fewer_frames_than_tokens():
-    from vocal_analysis.recognizer import RecognitionError, _forced_align_windowed
+    from vocal_analysis.alignment import forced_align_windowed
+    from vocal_analysis.recognizer import RecognitionError
 
     log_probs = np.zeros((2, 1))
 
     with pytest.raises(RecognitionError):
-        _forced_align_windowed(log_probs, token_ids=[0, 0, 0], windows_sec=[(0, 1), (0, 1), (0, 1)])
+        forced_align_windowed(log_probs, token_ids=[0, 0, 0], windows_sec=[(0, 1), (0, 1), (0, 1)])
 
 
 def test_forced_align_windowed_early_commit_bonus_pulls_transition_toward_window_open():
-    from vocal_analysis.recognizer import FRAME_DURATION_SEC, _forced_align_windowed
+    from vocal_analysis.alignment import FRAME_DURATION_SEC, forced_align_windowed
 
     num_frames = int(8.0 / FRAME_DURATION_SEC)
     log_probs = np.zeros((num_frames, 2))
     log_probs[:, 1] = -0.05
     windows = [(0.0, 8.0), (2.0, 8.0)]
 
-    path = _forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=windows)
+    path = forced_align_windowed(log_probs, token_ids=[0, 1], windows_sec=windows)
 
     first_state1_frame = path.index(1)
     assert first_state1_frame == round(2.0 / FRAME_DURATION_SEC)
 
 
 def test_viterbi_monotonic_without_state_bias_delays_transition_to_deadline():
-    from vocal_analysis.recognizer import FRAME_DURATION_SEC, _viterbi_monotonic
+    from vocal_analysis.alignment import FRAME_DURATION_SEC, viterbi_monotonic
 
     num_frames = int(8.0 / FRAME_DURATION_SEC)
     log_probs = np.zeros((num_frames, 2))
@@ -1047,16 +1061,16 @@ def test_viterbi_monotonic_without_state_bias_delays_transition_to_deadline():
     win_hi = np.array([w[1] for w in windows])
     out_of_window = ~((win_lo[None, :] < frame_hi[:, None]) & (win_hi[None, :] > frame_lo[:, None]))
 
-    path = _viterbi_monotonic(log_probs, token_ids=[0, 1], out_of_bounds=out_of_window, state_bias=None)
+    path = viterbi_monotonic(log_probs, token_ids=[0, 1], out_of_bounds=out_of_window, state_bias=None)
 
     first_state1_frame = path.index(1)
     assert first_state1_frame == num_frames - 1
 
 
 def test_path_to_segments_builds_gap_and_vowel_segments():
-    from vocal_analysis.recognizer import _path_to_segments
+    from vocal_analysis.alignment import path_to_segments
 
-    segments = _path_to_segments([0, 0, 1, 1], ["pau", "a"], frame_duration_sec=0.02)
+    segments = path_to_segments([0, 0, 1, 1], ["pau", "a"], frame_duration_sec=0.02)
 
     assert len(segments) == 2
     assert segments[0].type == "gap"
@@ -1070,9 +1084,9 @@ def test_path_to_segments_builds_gap_and_vowel_segments():
 
 
 def test_path_to_segments_merges_adjacent_states_with_same_output_symbol():
-    from vocal_analysis.recognizer import _path_to_segments
+    from vocal_analysis.alignment import path_to_segments
 
-    segments = _path_to_segments([0, 0, 1, 1], ["a", "a"], frame_duration_sec=0.02)
+    segments = path_to_segments([0, 0, 1, 1], ["a", "a"], frame_duration_sec=0.02)
 
     assert len(segments) == 1
     assert segments[0].type == "vowel"
@@ -1082,9 +1096,9 @@ def test_path_to_segments_merges_adjacent_states_with_same_output_symbol():
 
 
 def test_path_to_segments_merges_pau_and_cl_as_same_gap():
-    from vocal_analysis.recognizer import _path_to_segments
+    from vocal_analysis.alignment import path_to_segments
 
-    segments = _path_to_segments([0, 0, 1, 1], ["pau", "cl"], frame_duration_sec=0.02)
+    segments = path_to_segments([0, 0, 1, 1], ["pau", "cl"], frame_duration_sec=0.02)
 
     assert len(segments) == 1
     assert segments[0].type == "gap"
@@ -1094,9 +1108,9 @@ def test_path_to_segments_merges_pau_and_cl_as_same_gap():
 
 
 def test_path_to_segments_last_token_extends_to_audio_end():
-    from vocal_analysis.recognizer import _path_to_segments
+    from vocal_analysis.alignment import path_to_segments
 
-    segments = _path_to_segments([0, 1, 1, 1, 1], ["pau", "a"], frame_duration_sec=0.02)
+    segments = path_to_segments([0, 1, 1, 1, 1], ["pau", "a"], frame_duration_sec=0.02)
 
     assert segments[-1].end_sec == pytest.approx(0.10)
 
@@ -1104,11 +1118,12 @@ def test_path_to_segments_last_token_extends_to_audio_end():
 def test_g2p_applies_english_katakana_fallback_before_pyopenjtalk(monkeypatch):
     import pyopenjtalk
 
-    import vocal_analysis.recognizer as recognizer_module
+    import vocal_analysis.english_katakana as katakana_module
+    import vocal_analysis.transcription as transcription_module
 
     convert_calls = []
     monkeypatch.setattr(
-        recognizer_module, "convert_target_words",
+        katakana_module, "convert_target_words",
         lambda text, method=None, **kwargs: convert_calls.append(text) or "スカイ",
     )
 
@@ -1120,7 +1135,7 @@ def test_g2p_applies_english_katakana_fallback_before_pyopenjtalk(monkeypatch):
 
     monkeypatch.setattr(pyopenjtalk, "g2p", fake_g2p)
 
-    result = recognizer_module._g2p("空を見上げてsky")
+    result = transcription_module.g2p("空を見上げてsky")
 
     assert convert_calls == ["空を見上げてsky"]
     assert g2p_calls == [("スカイ", False, False)]
@@ -1129,7 +1144,7 @@ def test_g2p_applies_english_katakana_fallback_before_pyopenjtalk(monkeypatch):
 
 def test_g2p_method_reaches_real_convert_target_words_dispatch(monkeypatch):
     import vocal_analysis.english_katakana as katakana_module
-    import vocal_analysis.recognizer as recognizer_module
+    import vocal_analysis.transcription as transcription_module
 
     katakana_module._conversion_cache.clear()
     try:
@@ -1144,7 +1159,7 @@ def test_g2p_method_reaches_real_convert_target_words_dispatch(monkeypatch):
             lambda word, phonemes, **kwargs: tinyllama_calls.append(word) or "スカイ",
         )
 
-        recognizer_module._g2p("空を見上げてsky", method="tinyllama-katakana-converter")
+        transcription_module.g2p("空を見上げてsky", method="tinyllama-katakana-converter")
 
         assert tinyllama_calls == ["sky"]
         assert arpakana_calls == []
@@ -1161,15 +1176,17 @@ def test_g2p_method_reaches_real_convert_target_words_dispatch(monkeypatch):
     ],
 )
 def test_g2p_converts_katakana_fallback_errors_to_recognition_error(monkeypatch, raised, match):
-    import vocal_analysis.recognizer as recognizer_module
+    import vocal_analysis.english_katakana as katakana_module
+    import vocal_analysis.transcription as transcription_module
+    from vocal_analysis.phonemes import RecognitionError
 
     def fake_convert_target_words(text, method=None, **kwargs):
         raise raised
 
-    monkeypatch.setattr(recognizer_module, "convert_target_words", fake_convert_target_words)
+    monkeypatch.setattr(katakana_module, "convert_target_words", fake_convert_target_words)
 
-    with pytest.raises(recognizer_module.RecognitionError, match=match):
-        recognizer_module._g2p("空を見上げてsky")
+    with pytest.raises(RecognitionError, match=match):
+        transcription_module.g2p("空を見上げてsky")
 
 
 def _isolated_g2p_len(text):
@@ -1204,7 +1221,7 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
     import pyopenjtalk
 
     import vocal_analysis.english_katakana as katakana_module
-    from vocal_analysis.recognizer import _g2p
+    from vocal_analysis.transcription import g2p
 
     katakana_module._conversion_cache.clear()
     try:
@@ -1225,7 +1242,7 @@ def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text
         after_target_lens = [_isolated_g2p_len("スカイ") for _ in target_spans]
 
         before_full = pyopenjtalk.g2p(text, kana=False, join=False)
-        after_full = _g2p(text)
+        after_full = g2p(text)
 
         assert generate_calls == ["sky"]
 

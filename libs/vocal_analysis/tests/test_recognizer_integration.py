@@ -11,41 +11,41 @@ def _mod(name):
 
 
 def test_downmix_to_mono_averages_channels():
-    from vocal_analysis.recognizer import _downmix_to_mono
+    from vocal_analysis.segmentation import downmix_to_mono
 
     samples = np.array([[0.2, 0.6], [-0.4, 0.0]], dtype=np.float32)
 
-    mono = _downmix_to_mono(samples)
+    mono = downmix_to_mono(samples)
 
     assert np.allclose(mono, [0.4, -0.2])
 
 
 def test_downmix_to_mono_passthrough_for_already_mono():
-    from vocal_analysis.recognizer import _downmix_to_mono
+    from vocal_analysis.segmentation import downmix_to_mono
 
     samples = np.array([[0.3], [-0.1]], dtype=np.float32)
 
-    mono = _downmix_to_mono(samples)
+    mono = downmix_to_mono(samples)
 
     assert np.allclose(mono, [0.3, -0.1])
 
 
 def test_resample_to_target_same_rate_is_passthrough():
-    from vocal_analysis.recognizer import _resample_to_target
+    from vocal_analysis.segmentation import resample_to_target
 
     mono = np.linspace(-0.5, 0.5, 1000, dtype=np.float32)
 
-    result = _resample_to_target(mono, sample_rate=16000, target_sample_rate=16000)
+    result = resample_to_target(mono, sample_rate=16000, target_sample_rate=16000)
 
     assert np.array_equal(result, mono)
 
 
 def test_resample_to_target_downsamples_to_expected_length():
-    from vocal_analysis.recognizer import _resample_to_target
+    from vocal_analysis.segmentation import resample_to_target
 
     mono = np.linspace(-0.5, 0.5, 48000, dtype=np.float32)
 
-    result = _resample_to_target(mono, sample_rate=48000, target_sample_rate=16000)
+    result = resample_to_target(mono, sample_rate=48000, target_sample_rate=16000)
 
     assert len(result) == 16000
 
@@ -342,9 +342,9 @@ def test_recognize_reports_transcription_and_alignment_notes_with_time_range_and
 
 
 def test_format_time_range_uses_minutes_and_zero_padded_seconds():
-    from vocal_analysis.recognizer import _format_time_range
+    from vocal_analysis.segmentation import format_time_range
 
-    assert _format_time_range(65.4, 125.0) == "1:05-2:05"
+    assert format_time_range(65.4, 125.0) == "1:05-2:05"
 
 
 def test_recognize_without_on_progress_still_works(tmp_path, monkeypatch):
