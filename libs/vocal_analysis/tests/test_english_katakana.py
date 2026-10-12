@@ -735,3 +735,166 @@ def test_load_katakana_model_shows_loading_note_but_no_download_note_when_alread
     module._load_katakana_model(on_progress=notes.append)
 
     assert notes == [f"カタカナ生成モデル読み込み中: {ENGLISH_KATAKANA_MODEL.model_id}"]
+
+
+_SKY_ENTRIES = {"sky": [["S", "K", "AY1"]]}
+
+
+class _FakeCmudictCorpus:
+    def __init__(self, *, available):
+        self.available = available
+        self.load_count = 0
+
+    def dict(self):
+        self.load_count += 1
+        if not self.available:
+            raise LookupError("cmudict missing")
+        return _SKY_ENTRIES
+
+
+def _install_fake_nltk(monkeypatch, events, *, available, download_error=None, download_fixes=True):
+    import nltk
+    import nltk.corpus
+
+    import vocal_analysis.english_katakana as module
+
+    corpus = _FakeCmudictCorpus(available=available)
+
+    def fake_download(name, quiet=False):
+        events.append(("download", name))
+        if download_error is not None:
+            raise download_error
+        corpus.available = download_fixes
+        return True
+
+    monkeypatch.setattr(module, "_cmudict_cache", None)
+    monkeypatch.setattr(nltk.corpus, "cmudict", corpus)
+    monkeypatch.setattr(nltk, "download", fake_download)
+    return corpus
+
+
+def _note_into(events):
+    return lambda note: events.append(("note", note))
+
+
+def test_ensure_cmudict_does_nothing_visible_when_the_corpus_is_available(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    _install_fake_nltk(monkeypatch, events, available=True)
+
+    module.ensure_cmudict(_note_into(events))
+
+    assert events == []
+
+
+def test_ensure_cmudict_reports_the_note_before_downloading_when_the_corpus_is_missing(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    _install_fake_nltk(monkeypatch, events, available=False)
+
+    module.ensure_cmudict(_note_into(events))
+
+    assert events == [("note", "辞書取得中"), ("download", "cmudict")]
+
+
+def test_ensure_cmudict_downloads_without_on_progress_when_the_corpus_is_missing(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    _install_fake_nltk(monkeypatch, events, available=False)
+
+    module.ensure_cmudict()
+
+    assert events == [("download", "cmudict")]
+
+
+def test_ensure_cmudict_makes_later_conversion_neither_download_nor_reload_the_dictionary(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    corpus = _install_fake_nltk(monkeypatch, events, available=False)
+    module.ensure_cmudict(_note_into(events))
+    events.clear()
+    loads_after_ensure = corpus.load_count
+    monkeypatch.setattr(module, "_generate_katakana", lambda word, phonemes, **kwargs: "スカイ")
+    corpus.available = False
+
+    assert module._lookup_cmudict_phonemes("sky") == "S K AY1"
+    assert module._convert_word("sky", "arpakana") == "スカイ"
+
+    assert events == []
+    assert corpus.load_count == loads_after_ensure
+
+
+def test_ensure_cmudict_is_a_no_op_once_the_dictionary_is_in_the_process_cache(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    corpus = _install_fake_nltk(monkeypatch, events, available=False)
+    module.ensure_cmudict(_note_into(events))
+    events.clear()
+    loads = corpus.load_count
+    corpus.available = False
+
+    module.ensure_cmudict(_note_into(events))
+
+    assert events == []
+    assert corpus.load_count == loads
+
+
+def test_ensure_cmudict_does_not_touch_nltk_when_the_dictionary_is_already_cached(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    corpus = _install_fake_nltk(monkeypatch, events, available=False)
+    monkeypatch.setattr(module, "_cmudict_cache", _SKY_ENTRIES)
+
+    module.ensure_cmudict(_note_into(events))
+
+    assert events == []
+    assert corpus.load_count == 0
+
+
+def test_ensure_cmudict_raises_import_error_when_nltk_is_missing(monkeypatch):
+    import sys
+
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    monkeypatch.setattr(module, "_cmudict_cache", None)
+    monkeypatch.setitem(sys.modules, "nltk", None)
+
+    with pytest.raises(ImportError):
+        module.ensure_cmudict(_note_into(events))
+
+    assert events == []
+
+
+def test_ensure_cmudict_propagates_os_error_from_a_failed_download_and_stays_uncached(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    error = OSError("offline")
+    _install_fake_nltk(monkeypatch, events, available=False, download_error=error)
+
+    with pytest.raises(OSError) as excinfo:
+        module.ensure_cmudict(_note_into(events))
+
+    assert excinfo.value is error
+    assert events == [("note", "辞書取得中"), ("download", "cmudict")]
+    assert module._cmudict_cache is None
+
+
+def test_ensure_cmudict_raises_lookup_error_when_the_corpus_is_still_missing_after_download(monkeypatch):
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    _install_fake_nltk(monkeypatch, events, available=False, download_fixes=False)
+
+    with pytest.raises(LookupError):
+        module.ensure_cmudict(_note_into(events))
+
+    assert events == [("note", "辞書取得中"), ("download", "cmudict")]
+    assert module._cmudict_cache is None

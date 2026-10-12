@@ -804,3 +804,140 @@ def test_recognizer_facade_still_exports_public_names():
 
     for name in ("RecognizerSession", "Transcription", "RecognitionError", "recognize", "convert_with_g2p"):
         assert hasattr(recognizer, name)
+
+
+class _EnsureCmudict:
+    def __init__(self, monkeypatch):
+        self.calls = []
+        self.note = None
+        self.error = None
+        monkeypatch.setattr(_mod("english_katakana"), "ensure_cmudict", self._ensure)
+
+    def _ensure(self, on_progress=None):
+        self.calls.append(on_progress)
+        if self.note is not None and on_progress is not None:
+            on_progress(self.note)
+        if self.error is not None:
+            raise self.error
+
+
+@pytest.fixture
+def ensure_cmudict(monkeypatch):
+    return _EnsureCmudict(monkeypatch)
+
+
+def test_session_prepare_dictionary_delegates_to_ensure_cmudict_with_the_given_on_progress(ensure_cmudict):
+    def progress(note):
+        pass
+
+    with _session() as session:
+        session.prepare_dictionary(on_progress=progress)
+
+    assert ensure_cmudict.calls == [progress]
+
+
+def test_session_prepare_dictionary_without_on_progress_passes_none(ensure_cmudict):
+    with _session() as session:
+        session.prepare_dictionary()
+
+    assert ensure_cmudict.calls == [None]
+
+
+def test_session_prepare_dictionary_relays_the_dictionary_note_to_on_progress(ensure_cmudict):
+    ensure_cmudict.note = "辞書取得中"
+    notes = []
+
+    with _session() as session:
+        session.prepare_dictionary(on_progress=notes.append)
+
+    assert notes == ["辞書取得中"]
+
+
+@pytest.mark.parametrize(
+    "error,message",
+    [
+        pytest.param(ImportError("no nltk"), "nltk", id="missing-library"),
+        pytest.param(LookupError("no cmudict"), "CMUdict", id="corpus-missing"),
+        pytest.param(OSError("offline"), "ネットワーク接続を確認", id="download-failed"),
+    ],
+)
+def test_session_prepare_dictionary_maps_failures_to_recognition_error_with_cause(
+        ensure_cmudict, error, message):
+    from vocal_analysis.recognizer import RecognitionError
+
+    ensure_cmudict.error = error
+
+    with _session() as session:
+        with pytest.raises(RecognitionError, match=message) as excinfo:
+            session.prepare_dictionary()
+
+    assert excinfo.value.__cause__ is error
+
+
+@pytest.mark.parametrize("error_type", [ImportError, LookupError, OSError])
+def test_session_prepare_dictionary_maps_failures_to_the_same_error_as_english_word_conversion(
+        ensure_cmudict, monkeypatch, error_type):
+    from vocal_analysis.recognizer import RecognitionError
+
+    english_katakana = _mod("english_katakana")
+    monkeypatch.setattr(english_katakana, "uncached_target_words", lambda text, method: ["sky"])
+
+    def failing_conversion(words, method, on_progress=None, *, keep_model=False):
+        raise error_type("failure")
+
+    monkeypatch.setattr(english_katakana, "convert_words", failing_conversion)
+    with pytest.raises(RecognitionError) as conversion_failure:
+        _mod("transcription").convert_english_words(["sky"], "tinyllama-katakana-converter")
+
+    ensure_cmudict.error = error_type("failure")
+    with _session() as session:
+        with pytest.raises(RecognitionError) as preparation_failure:
+            session.prepare_dictionary()
+
+    assert str(preparation_failure.value) == str(conversion_failure.value)
+
+
+def test_session_prepare_dictionary_rejects_use_after_close(ensure_cmudict):
+    session = _session()
+    session.close()
+
+    with pytest.raises(RuntimeError):
+        session.prepare_dictionary()
+
+    assert ensure_cmudict.calls == []
+
+
+def test_session_prepare_dictionary_loads_and_releases_nothing(fakes, ensure_cmudict):
+    with _session() as session:
+        session.prepare_dictionary()
+
+    assert fakes.events == []
+
+
+def test_session_prepare_dictionary_does_not_change_model_loads_or_phase_order(
+        tmp_path, fakes, ensure_cmudict):
+    wavs = [_write_loud_wav(tmp_path, f"c{i}.wav") for i in range(3)]
+
+    with _session() as session:
+        session.prepare_dictionary()
+        transcriptions = [session.transcribe(w) for w in wavs]
+        for t in transcriptions:
+            session.align(t)
+
+    assert fakes.events == [
+        "load_pipeline", "transcribe", "transcribe", "transcribe",
+        "release", "load_phoneme", "align", "align", "align",
+        "release",
+    ]
+    assert len(ensure_cmudict.calls) == 1
+
+
+def test_session_transcribe_and_align_never_fetch_the_dictionary(tmp_path, fakes, ensure_cmudict):
+    wavs = [_write_loud_wav(tmp_path, f"c{i}.wav") for i in range(2)]
+
+    with _session() as session:
+        transcriptions = [session.transcribe(w) for w in wavs]
+        for t in transcriptions:
+            session.align(t)
+
+    assert ensure_cmudict.calls == []
