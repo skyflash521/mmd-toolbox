@@ -521,3 +521,54 @@ def test_build_separator_configures_real_separator_with_pinned_values():
     # Separator は demucs_params を arch_specific_params["Demucs"] へ格納する。
     assert sep.arch_specific_params["Demucs"]["shifts"] == SEPARATOR_CONFIG.shifts
     assert sep.logger.level == logging.CRITICAL
+
+
+def _install_fake_audio_separator(monkeypatch):
+    import sys
+    import types
+
+    received = {}
+
+    class _RecordingSeparator:
+        def __init__(self, **kwargs):
+            received.update(kwargs)
+
+    package = types.ModuleType("audio_separator")
+    module = types.ModuleType("audio_separator.separator")
+    module.Separator = _RecordingSeparator
+    package.separator = module
+    monkeypatch.setitem(sys.modules, "audio_separator", package)
+    monkeypatch.setitem(sys.modules, "audio_separator.separator", module)
+    return received
+
+
+def test_build_separator_stores_models_under_the_user_cache_directory(tmp_path, monkeypatch):
+    from vocal_analysis.separator import _build_separator
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    received = _install_fake_audio_separator(monkeypatch)
+
+    _build_separator(tmp_path / "out")
+
+    assert Path(received["model_file_dir"]) == home / ".cache" / "audio-separator-models"
+
+
+def test_build_separator_model_directory_does_not_depend_on_the_working_directory(tmp_path, monkeypatch):
+    from vocal_analysis.separator import _build_separator
+
+    home = tmp_path / "home"
+    home.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    received = _install_fake_audio_separator(monkeypatch)
+
+    monkeypatch.chdir(elsewhere)
+    _build_separator(tmp_path / "out")
+
+    assert Path(received["model_file_dir"]).is_absolute()
+    assert Path(received["model_file_dir"]) == home / ".cache" / "audio-separator-models"
