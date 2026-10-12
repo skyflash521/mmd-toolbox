@@ -11,7 +11,7 @@ import soundfile as sf
 
 from . import model_store
 from .config import DEFAULT_SEPARATOR, SEPARATOR_CONFIG, SeparatorId
-from .quiet import silence_third_party_output
+from .quiet import silenced_third_party_output
 from .types import AudioPcm
 
 # Demucs の set_progress_bar が受け取る進み具合は 0〜0.8 の範囲で進み、0.8 で推論が終わる。
@@ -46,16 +46,17 @@ def separate(
 
 
 def _separate_audio_separator_htdemucs_ft(work_dir: Path, input_wav: Path, on_progress) -> Path:
-    try:
-        separator_obj = _build_separator(work_dir)
-    except ImportError as e:
-        raise SeparationError(
-            "audio-separator が見つかりません。導入してください(pip install audio-separator onnxruntime)。"
-        ) from e
-    downloaded = _load_model_with_progress(separator_obj, on_progress)
-    if downloaded:
-        on_progress("")
-    output_files = _separate_with_progress(separator_obj, input_wav, on_progress)
+    with silenced_third_party_output():
+        try:
+            separator_obj = _build_separator(work_dir)
+        except ImportError as e:
+            raise SeparationError(
+                "audio-separator が見つかりません。導入してください(pip install audio-separator onnxruntime)。"
+            ) from e
+        downloaded = _load_model_with_progress(separator_obj, on_progress)
+        if downloaded:
+            on_progress("")
+        output_files = _separate_with_progress(separator_obj, input_wav, on_progress)
     output_path = Path(output_files[0])
     del separator_obj
     model_store.release_gpu_memory()
@@ -161,7 +162,6 @@ def _separate_with_progress(separator_obj, input_wav: Path, on_progress):
 def _build_separator(output_dir: Path):
     from audio_separator.separator import Separator
 
-    silence_third_party_output()
     return Separator(
         log_level=logging.CRITICAL,
         output_dir=str(output_dir),

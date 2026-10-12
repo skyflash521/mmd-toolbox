@@ -1,7 +1,7 @@
 import gc
 from collections.abc import Callable
 
-from .quiet import silence_third_party_output
+from .quiet import silenced_third_party_output
 
 # transformers の PyTorch バックエンドは、これらの形式の重みファイルを読まない。
 PYTORCH_IGNORE_PATTERNS = ["*.h5", "*.msgpack", "*.tflite", "*.onnx", "*.ot", "*.mlmodel"]
@@ -52,7 +52,8 @@ def prefetch_with_progress(repo_id: str, revision: str | None, on_progress: Call
                 on_progress(f"ダウンロード中: {repo_id} {percent}%")
             return result
 
-    hf_snapshot_download(repo_id, revision=revision, tqdm_class=_RelayTqdm)
+    with silenced_third_party_output():
+        hf_snapshot_download(repo_id, revision=revision, tqdm_class=_RelayTqdm)
     return state["shown"]
 
 
@@ -61,15 +62,14 @@ def load_with_progress(
     on_progress: Callable[[str], None] | None, loading_note: str, build: Callable[[], object],
 ):
     """on_progress があるときは、取得の進捗を中継し、読み込み中の note を出してから build を呼ぶ。"""
-    silence_third_party_output()
-
     downloaded = False
     if on_progress is not None:
         downloaded = prefetch_with_progress(repo_id, revision, on_progress)
     try:
         if on_progress is not None:
             on_progress(loading_note)
-        return build()
+        with silenced_third_party_output():
+            return build()
     finally:
         if downloaded:
             on_progress("")

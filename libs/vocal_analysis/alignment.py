@@ -11,6 +11,7 @@ from .phonemes import (
     RecognitionError,
     _classify_symbol,
 )
+from .quiet import silenced_third_party_output
 from .segmentation import frame_rms
 from .types import Segment
 
@@ -363,7 +364,7 @@ def compute_log_probs(processor, model, samples: np.ndarray) -> np.ndarray:
     import torch
 
     inputs = processor(samples, sampling_rate=RECOGNIZER_CONFIG.sample_rate, return_tensors="pt")
-    with torch.no_grad():
+    with silenced_third_party_output(), torch.no_grad():
         logits = model(inputs.input_values.to(model_store.select_device())).logits
     log_probs = torch.log_softmax(logits, dim=-1)
     return log_probs[0].cpu().numpy()

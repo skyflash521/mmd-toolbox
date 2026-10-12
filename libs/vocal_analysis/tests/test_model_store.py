@@ -155,6 +155,36 @@ def test_prefetch_relays_percentage_even_when_tqdm_display_is_disabled(monkeypat
     assert notes == ["ダウンロード中: org/model 30%", "ダウンロード中: org/model 100%"]
 
 
+def test_prefetch_silences_third_party_progress_only_while_downloading_and_still_relays(monkeypatch):
+    pytest.importorskip("huggingface_hub")
+    import huggingface_hub.utils as hf_utils
+    import tqdm.std
+
+    from vocal_analysis import model_store
+
+    pristine_init = tqdm.std.tqdm.__dict__["__init__"]
+    hf_utils.enable_progress_bars()
+    observed = {}
+
+    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
+        bar = tqdm_class(total=100, unit="B", unit_scale=True)
+        observed["tqdm_disabled"] = bar.disable
+        observed["hf_disabled"] = hf_utils.are_progress_bars_disabled()
+        bar.update(50)
+        bar.close()
+
+    monkeypatch.setattr(model_store, "hf_snapshot_download", fake_snapshot_download)
+    notes = []
+
+    downloaded = model_store.prefetch_with_progress("org/model", "main", notes.append)
+
+    assert downloaded is True
+    assert notes == ["ダウンロード中: org/model 50%"]
+    assert observed == {"tqdm_disabled": True, "hf_disabled": True}
+    assert tqdm.std.tqdm.__dict__["__init__"] is pristine_init
+    assert hf_utils.are_progress_bars_disabled() is False
+
+
 def test_load_with_progress_orders_download_notes_loading_note_build_and_clear(monkeypatch):
     pytest.importorskip("huggingface_hub")
     from vocal_analysis import model_store

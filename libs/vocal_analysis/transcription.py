@@ -12,7 +12,7 @@ from .config import (
     EnglishKatakanaMethod,
 )
 from .phonemes import _MIN_WORD_DURATION_SEC, RecognitionError
-from .quiet import suppress_native_stderr
+from .quiet import silenced_third_party_output, suppress_native_stderr
 
 DENSITY_G2P_METHOD: EnglishKatakanaMethod = "arpakana"
 
@@ -82,7 +82,8 @@ def transcribe_text_only(pipeline, samples: np.ndarray) -> str:
         "num_beams": 1, "do_sample": False, "temperature": 0.0,
         "max_new_tokens": RETRY_MAX_NEW_TOKENS,
     }
-    result = pipeline(samples, generate_kwargs=generate_kwargs)
+    with silenced_third_party_output():
+        result = pipeline(samples, generate_kwargs=generate_kwargs)
     return result["text"]
 
 
@@ -90,18 +91,19 @@ def transcribe_segment(
     pipeline, samples: np.ndarray
 ) -> tuple[str, list[tuple[str, float, float]] | None]:
     prompt_ids = pipeline.tokenizer.get_prompt_ids(KANA_PROMPT, return_tensors="pt").to(pipeline.device)
-    result = pipeline(
-        samples,
-        return_timestamps="word",
-        generate_kwargs={
-            "language": "japanese",
-            "task": "transcribe",
-            "num_beams": 1,
-            "do_sample": False,
-            "prompt_ids": prompt_ids,
-            "max_new_tokens": SEGMENT_MAX_NEW_TOKENS,
-        },
-    )
+    with silenced_third_party_output():
+        result = pipeline(
+            samples,
+            return_timestamps="word",
+            generate_kwargs={
+                "language": "japanese",
+                "task": "transcribe",
+                "num_beams": 1,
+                "do_sample": False,
+                "prompt_ids": prompt_ids,
+                "max_new_tokens": SEGMENT_MAX_NEW_TOKENS,
+            },
+        )
     chunks = result.get("chunks")
     if not chunks:
         return result["text"], None

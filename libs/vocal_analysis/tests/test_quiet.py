@@ -200,6 +200,43 @@ def test_silenced_third_party_output_can_be_entered_again_after_exit(third_party
     _assert_restored()
 
 
+def test_silenced_third_party_output_restores_per_group_progress_bar_settings(third_party_state):
+    import importlib
+
+    hf_tqdm = importlib.import_module("huggingface_hub.utils.tqdm")
+
+    hf_utils.enable_progress_bars()
+    hf_utils.disable_progress_bars("group_a")
+    hf_utils.enable_progress_bars("group_b")
+    saved_states = dict(hf_tqdm.progress_bar_states)
+
+    with quiet.silenced_third_party_output():
+        assert hf_utils.are_progress_bars_disabled() is True
+
+    assert dict(hf_tqdm.progress_bar_states) == saved_states
+    assert hf_utils.are_progress_bars_disabled() is False
+    assert hf_utils.are_progress_bars_disabled("group_a") is True
+    assert hf_utils.are_progress_bars_disabled("group_b") is False
+
+
+def test_silenced_third_party_output_undoes_partial_entry_when_a_step_fails(
+        third_party_state, monkeypatch):
+    def failing():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(quiet, "_silence_huggingface_hub", failing)
+
+    with pytest.raises(RuntimeError):
+        with quiet.silenced_third_party_output():
+            pytest.fail("入場が失敗したのに本体へ入った")
+
+    _assert_restored()
+    monkeypatch.undo()
+    with quiet.silenced_third_party_output():
+        _assert_silenced(_observe())
+    _assert_restored()
+
+
 @pytest.mark.parametrize("module_name", [
     "model_store", "separator", "transcription", "alignment", "recognizer", "front_stage",
     "english_katakana",
