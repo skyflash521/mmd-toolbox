@@ -22,8 +22,8 @@ def write_wav(path, seconds, sample_rate=8000, channels=2, amplitude=0.5):
     return samples, sample_rate
 
 
-def seg(type_, start, end, phoneme=None, confidence=None):
-    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme, confidence=confidence)
+def seg(type_, start, end, phoneme=None):
+    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 class _RecordingProgress:
@@ -56,14 +56,14 @@ def test_single_run_calls_stages_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     progress = _RecordingProgress()
     result = run_front_stage(input_path, on_progress=progress.stage, **_common_kwargs())
 
     assert [c["stage"] for c in progress.calls] == ["load", "separate", "recognize", "rms"]
     assert result.analysis.vocal_wav == vocal_path
-    assert result.analysis.segments == [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+    assert result.analysis.segments == [seg("vowel", 0.0, 1.0, phoneme="a")]
     assert result.pcm.sample_rate == 8000
     assert result.pcm.samples.shape[1] == 2
     assert result.duration_sec == pytest.approx(1.0)
@@ -85,7 +85,7 @@ def test_single_run_passes_separator_name_to_separate(tmp_path, monkeypatch):
     monkeypatch.setattr(front_stage._separator, "separate", spy_separate)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     run_front_stage(input_path, **_common_kwargs(separator="audio-separator-htdemucs-ft"))
 
@@ -97,7 +97,7 @@ def test_single_run_reports_each_stage_before_running_it_and_passes_data_through
     write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-    given_segments = [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+    given_segments = [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     call_order = []
     real_load_audio = front_stage._io.load_audio
@@ -162,7 +162,7 @@ def test_recognizer_receives_selected_content_recognizer_model(tmp_path, monkeyp
         received["content_recognizer_model"] = content_recognizer_model
         received["forced_aligner"] = forced_aligner
         received["sofa_aligner"] = sofa_aligner
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
@@ -188,7 +188,7 @@ def test_recognizer_receives_selected_english_katakana_method(tmp_path, monkeypa
     def fake_recognize(path, content_recognizer_model, retry, forced_aligner, sofa_aligner,
                        english_katakana_method, on_progress=None):
         received["english_katakana_method"] = english_katakana_method
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
@@ -214,7 +214,7 @@ def test_input_exactly_max_duration_is_not_chunked(tmp_path, monkeypatch):
         lambda pcm, mode, **kwargs: separate_calls.append(pcm) or vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 3.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 3.0, phoneme="a")])
 
     progress = _RecordingProgress()
     result = run_front_stage(input_path, on_progress=progress.stage,
@@ -238,7 +238,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
         overlap = 1.0
         assert chunk_offsets_sec == pytest.approx([0.0, 3.0 - overlap, 6.0 - overlap])
         assert boundaries_sec == [3.0, 6.0]
-        return [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 10.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._chunking, "merge_chunk_segments", fake_merge)
 
@@ -254,7 +254,7 @@ def test_chunked_run_calls_separate_and_recognize_once_per_chunk(tmp_path, monke
 
     def fake_recognize(path, **kwargs):
         recognize_calls.append((path, kwargs))
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._separator, "separate", fake_separate)
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
@@ -292,7 +292,7 @@ def test_chunked_run_separates_and_recognizes_one_chunk_at_a_time(tmp_path, monk
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
 
     call_order = []
     monkeypatch.setattr(
@@ -316,11 +316,11 @@ def test_chunked_run_reports_forced_split(tmp_path, monkeypatch):
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, True)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
@@ -343,11 +343,11 @@ def test_chunked_run_uses_unseparated_audio_rms_for_boundaries_and_whole_vocal_r
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", fake_find_boundaries)
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     compute_rms_results = []
     real_compute_rms = front_stage._rms.compute_rms
@@ -382,7 +382,7 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a")])
 
     separate_call_count = [0]
 
@@ -393,7 +393,7 @@ def test_chunked_run_preserves_relative_loudness_across_chunks(tmp_path, monkeyp
     monkeypatch.setattr(front_stage._separator, "separate", fake_separate)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     compute_rms_pcms = []
     real_compute_rms = front_stage._rms.compute_rms
@@ -423,11 +423,11 @@ def test_chunked_run_reports_recognize_progress_with_chunk_totals(tmp_path, monk
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     progress = _RecordingProgress()
     run_front_stage(input_path, on_progress=progress.stage,
@@ -446,7 +446,7 @@ def test_non_chunked_progress_reports_done_zero_total_none_for_every_stage(tmp_p
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     progress = _RecordingProgress()
     run_front_stage(input_path, on_progress=progress.stage, **_common_kwargs())
@@ -469,7 +469,7 @@ def test_non_chunked_recognize_on_progress_forwards_download_note(tmp_path, monk
         captured["on_progress"] = on_progress
         if on_progress is not None:
             on_progress("ダウンロード中: dummy-model 42%")
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
@@ -492,13 +492,13 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(tmp_path, monk
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
 
     def fake_recognize(path, on_progress=None, **kwargs):
         if on_progress is not None:
             on_progress("ダウンロード中: dummy-model 10%")
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
 
@@ -527,7 +527,7 @@ def test_non_chunked_separate_on_progress_forwards_download_note(tmp_path, monke
 
     monkeypatch.setattr(front_stage._separator, "separate", fake_separate)
     monkeypatch.setattr(front_stage._recognizer, "recognize", lambda path, **kwargs: [
-        seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        seg("vowel", 0.0, 1.0, phoneme="a")])
 
     progress = _RecordingProgress()
     run_front_stage(input_path, on_progress=progress.stage, **_common_kwargs())
@@ -547,7 +547,7 @@ def test_chunked_separate_on_progress_preserves_chunk_done_total(tmp_path, monke
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
 
     def fake_separate(pcm, mode, on_progress=None, **kwargs):
         if on_progress is not None:
@@ -556,7 +556,7 @@ def test_chunked_separate_on_progress_preserves_chunk_done_total(tmp_path, monke
 
     monkeypatch.setattr(front_stage._separator, "separate", fake_separate)
     monkeypatch.setattr(front_stage._recognizer, "recognize", lambda path, **kwargs: [
-        seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        seg("vowel", 0.0, 1.0, phoneme="a")])
 
     progress = _RecordingProgress()
     run_front_stage(input_path, on_progress=progress.stage,
@@ -581,7 +581,7 @@ def test_run_without_progress_reporter_passes_on_progress_none_to_separate(tmp_p
 
     monkeypatch.setattr(front_stage._separator, "separate", fake_separate)
     monkeypatch.setattr(front_stage._recognizer, "recognize", lambda path, **kwargs: [
-        seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        seg("vowel", 0.0, 1.0, phoneme="a")])
 
     run_front_stage(input_path, **_common_kwargs())
 
@@ -598,7 +598,7 @@ def test_run_without_progress_reporter_passes_on_progress_none_to_recognize(tmp_
 
     def fake_recognize(path, *, on_progress, **kwargs):
         captured["on_progress"] = on_progress
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
@@ -617,14 +617,14 @@ def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_recogn
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
 
     captured = []
 
     def fake_recognize(path, *, on_progress, **kwargs):
         captured.append(on_progress)
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
 
@@ -642,7 +642,7 @@ def test_keep_intermediate_dir_none_creates_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     keep_dir = tmp_path / "out.vmd.intermediate"
     run_front_stage(input_path, **_common_kwargs())
@@ -656,7 +656,7 @@ def test_keep_intermediate_saves_normalized_input_vocal_and_segments(tmp_path, m
     vocal_path = tmp_path / "vocal.wav"
     vocal_sample_rate = 11025
     write_wav(vocal_path, seconds=1.0, sample_rate=vocal_sample_rate, amplitude=0.8)
-    given_segments = [seg("vowel", 0.0, 1.0, phoneme="ɯ", confidence=0.9)]
+    given_segments = [seg("vowel", 0.0, 1.0, phoneme="ɯ")]
 
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
@@ -676,7 +676,7 @@ def test_keep_intermediate_saves_normalized_input_vocal_and_segments(tmp_path, m
     segments_text = segments_path.read_text(encoding="utf-8")
     assert "ɯ" in segments_text
     assert json.loads(segments_text) == [
-        {"type": "vowel", "start_sec": 0.0, "end_sec": 1.0, "phoneme": "ɯ", "confidence": 0.9},
+        {"type": "vowel", "start_sec": 0.0, "end_sec": 1.0, "phoneme": "ɯ"},
     ]
 
 
@@ -689,7 +689,7 @@ def test_keep_intermediate_write_failure_raises_intermediate_write_error(tmp_pat
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     keep_dir = tmp_path / "out.vmd.intermediate"
     keep_dir.mkdir()
@@ -708,11 +708,11 @@ def test_chunked_run_returns_and_saves_concatenated_whole_vocal(tmp_path, monkey
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     keep_dir = tmp_path / "out.vmd.intermediate"
     result = run_front_stage(input_path, keep_intermediate_dir=keep_dir,
@@ -732,11 +732,11 @@ def test_chunked_run_private_whole_vocal_write_failure_propagates_without_classi
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     error = OSError("disk full")
 
@@ -762,12 +762,12 @@ def test_chunked_run_reports_elapsed_from_each_call_start_without_accumulating_a
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
 
     def fake_recognize(path, on_progress=None, **kwargs):
         on_progress("認識中")
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._recognizer, "recognize", fake_recognize)
     tick = 10.0
@@ -819,7 +819,7 @@ def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeyp
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kw: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kw: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kw: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     with pytest.raises(front_stage.IntermediateReadError) as exc:
         run_front_stage(input_path, on_progress=_RecordingProgress().stage, **_common_kwargs())
@@ -836,11 +836,11 @@ def test_chunked_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path,
         front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
     monkeypatch.setattr(
         front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kw: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kw: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kw: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     real_read = front_stage.sf.read
 
@@ -884,7 +884,7 @@ def _stage_failure_kwargs(tmp_path, monkeypatch, *, failing_stage, error, chunke
     def recognize(path, **kw):
         if failing_stage == "recognize":
             raise error
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._separator, "separate", separate)
     monkeypatch.setattr(front_stage._recognizer, "recognize", recognize)
@@ -893,7 +893,7 @@ def _stage_failure_kwargs(tmp_path, monkeypatch, *, failing_stage, error, chunke
             front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
         monkeypatch.setattr(
             front_stage._chunking, "merge_chunk_segments",
-            lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+            lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
     return input_path, _common_kwargs(
         chunking=ChunkingPolicy(max_duration_sec=3.0 if chunked else 300.0))
 
@@ -1013,7 +1013,7 @@ def test_progress_callback_failure_during_inference_passes_through_unchanged(
     def recognize(path, on_progress=None, **kw):
         if stage == "recognize" and on_progress is not None:
             on_progress("モデル取得中")
-        return [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._separator, "separate", separate)
     monkeypatch.setattr(front_stage._recognizer, "recognize", recognize)
@@ -1022,7 +1022,7 @@ def test_progress_callback_failure_during_inference_passes_through_unchanged(
             front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
         monkeypatch.setattr(
             front_stage._chunking, "merge_chunk_segments",
-            lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)])
+            lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
 
     def failing_progress(stage_id, **kwargs):
         if kwargs.get("note"):

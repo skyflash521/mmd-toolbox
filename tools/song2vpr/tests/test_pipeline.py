@@ -19,8 +19,8 @@ from vocal_analysis.front_stage import FrontStageResult
 _TEST_MODEL = ContentRecognizerModel(model_id="test-content-recognizer")
 
 
-def seg(type_, start, end, phoneme=None, confidence=None):
-    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme, confidence=confidence)
+def seg(type_, start, end, phoneme=None):
+    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def _common_kwargs(**overrides):
@@ -50,7 +50,7 @@ def _pcm(seconds=1.0, sample_rate=8000, channels=2):
 
 def _stub_front_stage(monkeypatch, captured, *, segments=None, vocal_pcm=None, duration_sec=1.0,
                       forced_split=False):
-    given = segments if segments is not None else [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+    given = segments if segments is not None else [seg("vowel", 0.0, 1.0, phoneme="a")]
     vocal = vocal_pcm if vocal_pcm is not None else _pcm()
 
     def fake_run_front_stage(input_path, **kwargs):
@@ -111,7 +111,7 @@ def test_sofa_aligner_is_relayed_as_given(monkeypatch):
 
 def test_front_stage_outputs_including_vocal_and_input_pcm_are_kept_for_later_stages(monkeypatch):
     captured = {}
-    segments = [seg("vowel", 0.0, 0.4, phoneme="a", confidence=0.9),
+    segments = [seg("vowel", 0.0, 0.4, phoneme="a"),
                 seg("gap", 0.4, 1.0)]
     vocal = _pcm(seconds=2.0, sample_rate=16000, channels=1)
     _stub_front_stage(monkeypatch, captured, segments=segments, vocal_pcm=vocal, duration_sec=2.0)

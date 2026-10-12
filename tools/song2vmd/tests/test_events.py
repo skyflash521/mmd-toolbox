@@ -9,8 +9,8 @@ from vocal_analysis import rms as _va_rms
 FRAME_RATE = 30.0
 
 
-def seg(type_, start, end, phoneme=None, confidence=None):
-    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme, confidence=confidence)
+def seg(type_, start, end, phoneme=None):
+    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def rms_env(times_sec, values, dynamic_range_db=20.0):
@@ -53,20 +53,19 @@ def _normalized_between_anchors(raw_rms):
     return (raw_rms - _ANCHOR_LO_RMS) / (_ANCHOR_HI_RMS - _ANCHOR_LO_RMS)
 
 
-def confirm_between_anchor_morae(target_rms_value, *, kind="vowel", vowel_phoneme="a",
-                                 confidence=0.9, mora_dur=0.3, **kw):
+def confirm_between_anchor_morae(target_rms_value, *, kind="vowel", vowel_phoneme="a", mora_dur=0.3, **kw):
     """対象モーラを下アンカー・上アンカーの母音モーラで挟んで確定し、(対象モーラのイベント, 診断) を返す。"""
     lo_end = mora_dur
     target_end = 2 * mora_dur
     hi_end = 3 * mora_dur
     if kind == "vowel":
-        target_seg = seg("vowel", lo_end, target_end, phoneme=vowel_phoneme, confidence=confidence)
+        target_seg = seg("vowel", lo_end, target_end, phoneme=vowel_phoneme)
     else:
         target_seg = seg("consonant", lo_end, target_end, phoneme="ɴ")
     segments = [
-        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
         target_seg,
-        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
     ]
     hop = 0.010
     n = round(hi_end / hop) + 1
@@ -85,7 +84,7 @@ def _clamped_open_amount(normalized):
 
 
 def test_vowel_ipa_maps_to_mouth_shape():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.9)]
+    segments = [seg("vowel", 0.0, 0.3, phoneme="a")]
     rms = flat_rms(0.3, 0.8)
     mouth_events, _diag = confirm(segments, rms)
     assert [e.shape for e in mouth_events] == [MouthShape.A]
@@ -96,14 +95,14 @@ def test_vowel_ipa_maps_to_mouth_shape():
     ("e̞", MouthShape.E), ("o̞", MouthShape.O),
 ])
 def test_all_five_vowels_map(phoneme, letter):
-    segments = [seg("vowel", 0.0, 0.3, phoneme=phoneme, confidence=0.9)]
+    segments = [seg("vowel", 0.0, 0.3, phoneme=phoneme)]
     rms = flat_rms(0.3, 0.8)
     mouth_events, _diag = confirm(segments, rms)
     assert mouth_events[0].shape == letter
 
 
 def test_unmapped_vowel_symbol_at_start_becomes_silence_as_a_leading_gap():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="ʔ", confidence=0.9)]
+    segments = [seg("vowel", 0.0, 0.3, phoneme="ʔ")]
     rms = flat_rms(0.3, 0.8)
     mouth_events, _diag = confirm(segments, rms)
     assert mouth_events[0].shape == MouthShape.SILENCE
@@ -113,7 +112,7 @@ def test_unmapped_vowel_symbol_at_start_becomes_silence_as_a_leading_gap():
 def test_bilabial_consonants_become_independent_closure_event(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -124,7 +123,7 @@ def test_bilabial_consonants_become_independent_closure_event(phoneme):
 def test_fu_consonant_is_not_a_closure_and_is_absorbed_into_the_vowel():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="ɸ"),
-        seg("vowel", 0.05, 0.35, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="ɯ"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -134,7 +133,7 @@ def test_fu_consonant_is_not_a_closure_and_is_absorbed_into_the_vowel():
 
 def test_moraic_nasal_becomes_n_shape():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("consonant", 0.2, 0.35, phoneme="ɴ"),
     ]
     rms = flat_rms(0.35, 0.8)
@@ -144,7 +143,7 @@ def test_moraic_nasal_becomes_n_shape():
 
 def test_no_n_morph_flag_forces_silence_instead_of_n():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("consonant", 0.2, 0.35, phoneme="ɴ"),
     ]
     rms = flat_rms(0.35, 0.8)
@@ -154,7 +153,7 @@ def test_no_n_morph_flag_forces_silence_instead_of_n():
 
 def test_moraic_nasal_is_silence_when_use_n_morph_omitted():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("consonant", 0.2, 0.35, phoneme="ɴ"),
     ]
     rms = flat_rms(0.35, 0.8)
@@ -166,7 +165,7 @@ def test_moraic_nasal_is_silence_when_use_n_morph_omitted():
 def test_head_nasal_consonant_before_vowel_is_not_n_mora():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="n"),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -176,7 +175,7 @@ def test_head_nasal_consonant_before_vowel_is_not_n_mora():
 def test_plain_consonant_creates_no_independent_event():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="k"),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -185,7 +184,7 @@ def test_plain_consonant_creates_no_independent_event():
 
 
 def test_consonant_class_none_when_no_preceding_consonant():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.9)]
+    segments = [seg("vowel", 0.0, 0.3, phoneme="a")]
     rms = flat_rms(0.3, 0.8)
     mouth_events, _diag = confirm(segments, rms)
     assert mouth_events[0].consonant_class == ConsonantClass.NONE
@@ -195,7 +194,7 @@ def test_consonant_class_none_when_no_preceding_consonant():
 def test_consonant_class_rounded(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -206,7 +205,7 @@ def test_consonant_class_rounded(phoneme):
 def test_consonant_class_spread(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -216,7 +215,7 @@ def test_consonant_class_spread(phoneme):
 def test_consonant_class_neutral_for_unlisted_consonant():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="k"),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -224,7 +223,7 @@ def test_consonant_class_neutral_for_unlisted_consonant():
 
 
 def test_aperture_class_none_when_no_preceding_consonant():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.9)]
+    segments = [seg("vowel", 0.0, 0.3, phoneme="a")]
     rms = flat_rms(0.3, 0.8)
     mouth_events, _diag = confirm(segments, rms)
     assert mouth_events[0].aperture_class == ApertureClass.NONE
@@ -234,7 +233,7 @@ def test_aperture_class_none_when_no_preceding_consonant():
 def test_aperture_class_firm_closure(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -245,7 +244,7 @@ def test_aperture_class_firm_closure(phoneme):
 def test_aperture_class_narrow_channel(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -256,7 +255,7 @@ def test_aperture_class_narrow_channel(phoneme):
 def test_aperture_class_slight_closure(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -267,7 +266,7 @@ def test_aperture_class_slight_closure(phoneme):
 def test_aperture_class_none_for_listed_none_phonemes(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.35, phoneme="ɯ" if phoneme in ("ɸ", "w") else "a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="ɯ" if phoneme in ("ɸ", "w") else "a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -277,7 +276,7 @@ def test_aperture_class_none_for_listed_none_phonemes(phoneme):
 def test_aperture_class_none_for_unlisted_consonant():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="ʔ"),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -287,7 +286,7 @@ def test_aperture_class_none_for_unlisted_consonant():
 def test_aperture_class_is_none_for_palatalized_consonant_absent_from_table():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="sʲ"),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -298,7 +297,7 @@ def test_aperture_class_uses_strongest_among_consonant_run_when_strong_comes_las
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="k"),
         seg("consonant", 0.03, 0.06, phoneme="t"),
-        seg("vowel", 0.06, 0.36, phoneme="a", confidence=0.9),
+        seg("vowel", 0.06, 0.36, phoneme="a"),
     ]
     rms = flat_rms(0.36, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -309,7 +308,7 @@ def test_aperture_class_strongest_wins_when_strong_comes_first():
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="t"),
         seg("consonant", 0.03, 0.06, phoneme="k"),
-        seg("vowel", 0.06, 0.36, phoneme="a", confidence=0.9),
+        seg("vowel", 0.06, 0.36, phoneme="a"),
     ]
     rms = flat_rms(0.36, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -320,7 +319,7 @@ def test_aperture_class_resets_after_bilabial_closure():
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="t"),
         seg("consonant", 0.03, 0.08, phoneme="m"),
-        seg("vowel", 0.08, 0.38, phoneme="a", confidence=0.9),
+        seg("vowel", 0.08, 0.38, phoneme="a"),
     ]
     rms = flat_rms(0.38, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -333,7 +332,7 @@ def test_aperture_class_resets_at_moraic_nasal_between_consonants():
         seg("consonant", 0.0, 0.03, phoneme="t"),
         seg("consonant", 0.03, 0.13, phoneme="ɴ"),
         seg("consonant", 0.13, 0.16, phoneme="k"),
-        seg("vowel", 0.16, 0.46, phoneme="i", confidence=0.9),
+        seg("vowel", 0.16, 0.46, phoneme="i"),
     ]
     rms = flat_rms(0.46, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -345,7 +344,7 @@ def test_aperture_class_resets_after_gap():
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="t"),
         seg("gap", 0.03, 0.13),
-        seg("vowel", 0.13, 0.43, phoneme="a", confidence=0.9),
+        seg("vowel", 0.13, 0.43, phoneme="a"),
     ]
     rms = flat_rms(0.43, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -356,7 +355,7 @@ def test_aperture_class_resets_after_gap():
 def test_nya_consonant_is_spread_and_firm_closure_on_independent_axes():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="ɲ"),
-        seg("vowel", 0.05, 0.35, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.35, phoneme="a"),
     ]
     rms = flat_rms(0.35, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -368,7 +367,7 @@ def test_consonant_class_takes_last_consonant_while_aperture_takes_strongest():
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="k"),
         seg("consonant", 0.03, 0.06, phoneme="w"),
-        seg("vowel", 0.06, 0.36, phoneme="a", confidence=0.9),
+        seg("vowel", 0.06, 0.36, phoneme="a"),
     ]
     rms = flat_rms(0.36, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -379,9 +378,9 @@ def test_consonant_class_takes_last_consonant_while_aperture_takes_strongest():
 def test_aperture_class_resets_after_vowel_boundary():
     segments = [
         seg("consonant", 0.0, 0.03, phoneme="t"),
-        seg("vowel", 0.03, 0.33, phoneme="a", confidence=0.9),
+        seg("vowel", 0.03, 0.33, phoneme="a"),
         seg("consonant", 0.33, 0.36, phoneme="k"),
-        seg("vowel", 0.36, 0.66, phoneme="i", confidence=0.9),
+        seg("vowel", 0.36, 0.66, phoneme="i"),
     ]
     rms = flat_rms(0.66, 0.8)
     mouth_events, _diag = confirm(segments, rms)
@@ -392,7 +391,7 @@ def test_aperture_class_resets_after_vowel_boundary():
 def test_leading_and_trailing_gap_are_silence_even_when_loud():
     segments = [
         seg("gap", 0.0, 0.1),
-        seg("vowel", 0.1, 0.4, phoneme="a", confidence=0.9),
+        seg("vowel", 0.1, 0.4, phoneme="a"),
         seg("gap", 0.4, 0.5),
     ]
     rms = flat_rms(0.5, 0.9)
@@ -403,9 +402,9 @@ def test_leading_and_trailing_gap_are_silence_even_when_loud():
 
 def test_gap_silent_from_its_start_becomes_silence_without_extending_preceding_vowel():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 0.4),
-        seg("vowel", 0.4, 0.6, phoneme="i", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="i"),
     ]
     rms = flat_rms(0.6, 0.8)
     for i in range(len(rms.times_sec)):
@@ -420,9 +419,9 @@ def test_gap_silent_from_its_start_becomes_silence_without_extending_preceding_v
 
 def test_voiced_gap_continues_preceding_vowel_and_merges_with_following_same_vowel():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 0.4),
-        seg("vowel", 0.4, 0.6, phoneme="a", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="a"),
     ]
     rms = flat_rms(0.6, 0.5)
     mouth_events, _diag = confirm(segments, rms)
@@ -433,10 +432,10 @@ def test_voiced_gap_continues_preceding_vowel_and_merges_with_following_same_vow
 
 def test_voiced_gap_after_moraic_nasal_extends_the_n_event():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("consonant", 0.2, 0.3, phoneme="ɴ"),
         seg("gap", 0.3, 0.5),
-        seg("vowel", 0.5, 0.7, phoneme="i", confidence=0.9),
+        seg("vowel", 0.5, 0.7, phoneme="i"),
     ]
     rms = flat_rms(0.7, 0.5)
     mouth_events, _diag = confirm(segments, rms)
@@ -450,7 +449,7 @@ def test_voiced_gap_after_bilabial_becomes_silence():
     segments = [
         seg("consonant", 0.0, 0.1, phoneme="m"),
         seg("gap", 0.1, 0.3),
-        seg("vowel", 0.3, 0.5, phoneme="a", confidence=0.9),
+        seg("vowel", 0.3, 0.5, phoneme="a"),
     ]
     rms = flat_rms(0.5, 0.5)
     mouth_events, _diag = confirm(segments, rms)
@@ -461,7 +460,7 @@ def test_voiced_gap_after_silence_stays_silence():
     segments = [
         seg("gap", 0.0, 0.1),
         seg("gap", 0.1, 0.3),
-        seg("vowel", 0.3, 0.5, phoneme="a", confidence=0.9),
+        seg("vowel", 0.3, 0.5, phoneme="a"),
     ]
     rms = flat_rms(0.5, 0.5)
     mouth_events, _diag = confirm(segments, rms)
@@ -470,9 +469,9 @@ def test_voiced_gap_after_silence_stays_silence():
 
 def test_gap_with_voiced_head_and_silent_tail_splits_at_voice_end():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="e̞", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="e̞"),
         seg("gap", 0.2, 1.4),
-        seg("vowel", 1.4, 1.6, phoneme="a", confidence=0.9),
+        seg("vowel", 1.4, 1.6, phoneme="a"),
     ]
     rms = flat_rms(1.6, 0.8)
     for i in range(len(rms.times_sec)):
@@ -487,9 +486,9 @@ def test_gap_with_voiced_head_and_silent_tail_splits_at_voice_end():
 
 def test_gap_with_dip_shorter_than_run_length_does_not_close_when_voice_resumes():
     segments = [
-        seg("vowel", 0.0, 0.15, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.15, phoneme="a"),
         seg("gap", 0.15, 0.75),
-        seg("vowel", 0.75, 0.9, phoneme="a", confidence=0.9),
+        seg("vowel", 0.75, 0.9, phoneme="a"),
     ]
     rms = flat_rms(0.9, 0.8)
     for i in range(len(rms.times_sec)):
@@ -501,9 +500,9 @@ def test_gap_with_dip_shorter_than_run_length_does_not_close_when_voice_resumes(
 
 def test_gap_stays_closed_after_scan_close_even_if_voice_returns():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 1.4),
-        seg("vowel", 1.4, 1.6, phoneme="i", confidence=0.9),
+        seg("vowel", 1.4, 1.6, phoneme="i"),
     ]
     rms = flat_rms(1.6, 0.8)
     for i in range(len(rms.times_sec)):
@@ -518,9 +517,9 @@ def test_gap_stays_closed_after_scan_close_even_if_voice_returns():
 
 def test_gap_short_quiet_tail_reaching_gap_end_closes_without_minimum_run_length():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 1.0),
-        seg("vowel", 1.0, 1.2, phoneme="i", confidence=0.9),
+        seg("vowel", 1.0, 1.2, phoneme="i"),
     ]
     rms = flat_rms(1.2, 0.8)
     for i in range(len(rms.times_sec)):
@@ -534,9 +533,9 @@ def test_gap_short_quiet_tail_reaching_gap_end_closes_without_minimum_run_length
 
 def test_low_dynamics_suppresses_gap_silence_except_leading_trailing():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 0.4),
-        seg("vowel", 0.4, 0.6, phoneme="a", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="a"),
         seg("gap", 0.6, 0.7),
     ]
     rms = flat_rms(0.7, 0.5, dynamic_range_db=5.0)
@@ -555,7 +554,7 @@ def test_low_dynamics_suppresses_gap_silence_except_leading_trailing():
 ])
 def test_low_dynamics_suppression_starts_below_twelve_decibels(
         dynamic_range_db, expected_shape, expected_low_dynamics):
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.95)]
+    segments = [seg("vowel", 0.0, 0.3, phoneme="a")]
     rms = flat_rms(0.3, 0.01, dynamic_range_db=dynamic_range_db)
     mouth_events, diag = confirm(segments, rms)
     assert mouth_events[0].shape == expected_shape
@@ -564,9 +563,9 @@ def test_low_dynamics_suppression_starts_below_twelve_decibels(
 
 def test_gap_rms_exactly_at_silence_threshold_closes_instead_of_continuing_vowel():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 0.6),
-        seg("vowel", 0.6, 0.8, phoneme="a", confidence=0.9),
+        seg("vowel", 0.6, 0.8, phoneme="a"),
     ]
     rms = flat_rms(0.8, 0.8)
     for i in range(len(rms.times_sec)):
@@ -576,15 +575,15 @@ def test_gap_rms_exactly_at_silence_threshold_closes_instead_of_continuing_vowel
     assert [e.shape for e in mouth_events] == [MouthShape.A, MouthShape.SILENCE, MouthShape.A]
 
 
-def test_quiet_vowel_segment_is_silenced_even_with_high_confidence():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.95)]
+def test_quiet_vowel_segment_is_silenced():
+    segments = [seg("vowel", 0.0, 0.3, phoneme="a")]
     rms = flat_rms(0.3, 0.01)
     mouth_events, _diag = confirm(segments, rms)
     assert mouth_events[0].shape == MouthShape.SILENCE
 
 
 def test_low_dynamics_suppresses_vowel_silence_override():
-    segments = [seg("vowel", 0.0, 0.3, phoneme="a", confidence=0.95)]
+    segments = [seg("vowel", 0.0, 0.3, phoneme="a")]
     rms = flat_rms(0.3, 0.01, dynamic_range_db=5.0)
     mouth_events, _diag = confirm(segments, rms)
     assert mouth_events[0].shape == MouthShape.A
@@ -593,7 +592,7 @@ def test_low_dynamics_suppresses_vowel_silence_override():
 def _loud_consonant_with_narrow_quiet_vowel_nucleus():
     segments = [
         seg("consonant", 0.0, 0.9, phoneme="n"),
-        seg("vowel", 0.9, 0.92, phoneme="i", confidence=0.9),
+        seg("vowel", 0.9, 0.92, phoneme="i"),
     ]
     hop = 0.010
     n = 93
@@ -612,10 +611,10 @@ def _loud_consonant_with_narrow_quiet_vowel_nucleus_between_anchor_morae():
     offset = 0.3
     hi_end = offset + 0.92 + offset
     segments = [
-        seg("vowel", 0.0, offset, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.0, offset, phoneme="ɯ"),
         seg("consonant", offset, offset + 0.9, phoneme="n"),
-        seg("vowel", offset + 0.9, offset + 0.92, phoneme="i", confidence=0.9),
-        seg("vowel", offset + 0.92, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", offset + 0.9, offset + 0.92, phoneme="i"),
+        seg("vowel", offset + 0.92, hi_end, phoneme="o̞"),
     ]
     hop = 0.010
     n = round(hi_end / hop) + 1
@@ -644,7 +643,7 @@ def test_vowel_with_quiet_core_but_loud_mora_span_opens_from_the_louder_window()
 def test_vowel_with_absorbed_consonant_still_silenced_when_whole_mora_is_quiet():
     segments = [
         seg("consonant", 0.0, 0.2, phoneme="n"),
-        seg("vowel", 0.2, 0.3, phoneme="i", confidence=0.9),
+        seg("vowel", 0.2, 0.3, phoneme="i"),
     ]
     rms = flat_rms(0.3, 0.01)
     mouth_events, _diag = confirm(segments, rms)
@@ -653,8 +652,8 @@ def test_vowel_with_absorbed_consonant_still_silenced_when_whole_mora_is_quiet()
 
 def test_adjacent_same_vowel_segments_merge_into_one_event():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
-        seg("vowel", 0.2, 0.4, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
+        seg("vowel", 0.2, 0.4, phoneme="a"),
     ]
     rms = flat_rms(0.4, 0.8)
     mouth_events, diag = confirm(segments, rms)
@@ -667,9 +666,9 @@ def test_adjacent_same_vowel_segments_merge_into_one_event():
 
 def test_three_adjacent_same_vowel_segments_merge_with_merged_count_two():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
-        seg("vowel", 0.2, 0.4, phoneme="a", confidence=0.9),
-        seg("vowel", 0.4, 0.6, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
+        seg("vowel", 0.2, 0.4, phoneme="a"),
+        seg("vowel", 0.4, 0.6, phoneme="a"),
     ]
     rms = flat_rms(0.6, 0.8)
     mouth_events, diag = confirm(segments, rms)
@@ -679,9 +678,9 @@ def test_three_adjacent_same_vowel_segments_merge_with_merged_count_two():
 
 def test_gap_continuation_fragment_does_not_count_as_merged_mora():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 0.4),
-        seg("vowel", 0.4, 0.6, phoneme="i", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="i"),
     ]
     rms = flat_rms(0.6, 0.5)
     mouth_events, diag = confirm(segments, rms)
@@ -691,9 +690,9 @@ def test_gap_continuation_fragment_does_not_count_as_merged_mora():
 
 def test_gap_continuation_between_same_vowels_counts_only_the_real_mora():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
         seg("gap", 0.2, 0.4),
-        seg("vowel", 0.4, 0.6, phoneme="a", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="a"),
     ]
     rms = flat_rms(0.6, 0.5)
     mouth_events, diag = confirm(segments, rms)
@@ -716,7 +715,7 @@ def test_gap_continuation_fragment_of_moraic_nasal_does_not_count():
     segments = [
         seg("consonant", 0.0, 0.2, phoneme="ɴ"),
         seg("gap", 0.2, 0.4),
-        seg("vowel", 0.4, 0.6, phoneme="i", confidence=0.9),
+        seg("vowel", 0.4, 0.6, phoneme="i"),
     ]
     rms = flat_rms(0.6, 0.5)
     mouth_events, diag = confirm(segments, rms, use_n_morph=True)
@@ -726,8 +725,8 @@ def test_gap_continuation_fragment_of_moraic_nasal_does_not_count():
 
 def test_adjacent_different_vowels_do_not_merge():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
-        seg("vowel", 0.2, 0.4, phoneme="i", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
+        seg("vowel", 0.2, 0.4, phoneme="i"),
     ]
     rms = flat_rms(0.4, 0.8)
     mouth_events, diag = confirm(segments, rms)
@@ -739,9 +738,9 @@ def test_adjacent_different_vowels_do_not_merge():
 def test_repeated_consonant_between_same_vowels_does_not_merge(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),
-        seg("vowel", 0.05, 0.25, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.25, phoneme="a"),
         seg("consonant", 0.25, 0.30, phoneme=phoneme),
-        seg("vowel", 0.30, 0.50, phoneme="a", confidence=0.9),
+        seg("vowel", 0.30, 0.50, phoneme="a"),
     ]
     rms = flat_rms(0.50, 0.8)
     mouth_events, diag = confirm(segments, rms)
@@ -754,9 +753,9 @@ def test_repeated_consonant_between_same_vowels_does_not_merge(phoneme):
 def test_different_intervening_consonants_between_same_vowels_do_not_merge():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="t"),
-        seg("vowel", 0.05, 0.25, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.25, phoneme="a"),
         seg("consonant", 0.25, 0.30, phoneme="k"),
-        seg("vowel", 0.30, 0.50, phoneme="a", confidence=0.9),
+        seg("vowel", 0.30, 0.50, phoneme="a"),
     ]
     rms = flat_rms(0.50, 0.8)
     mouth_events, diag = confirm(segments, rms)
@@ -787,7 +786,7 @@ def test_vowel_onset_shifts_to_nearby_rms_rise():
     rms, rise_time = _rms_rising_at(0.28)
     segments = [
         seg("gap", 0.0, 0.30),
-        seg("vowel", 0.30, 0.59, phoneme="a", confidence=0.9),
+        seg("vowel", 0.30, 0.59, phoneme="a"),
     ]
     mouth_events, _diag = confirm(segments, rms)
     a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
@@ -799,7 +798,7 @@ def test_vowel_onset_ignores_rise_outside_the_60ms_window():
     rms, _rise_time = _rms_rising_at(0.20)
     segments = [
         seg("gap", 0.0, 0.30),
-        seg("vowel", 0.30, 0.59, phoneme="a", confidence=0.9),
+        seg("vowel", 0.30, 0.59, phoneme="a"),
     ]
     mouth_events, _diag = confirm(segments, rms)
     a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
@@ -810,7 +809,7 @@ def test_vowel_onset_keeps_token_boundary_when_no_rise_nearby():
     rms = flat_rms(0.6, 0.5)
     segments = [
         seg("gap", 0.0, 0.30),
-        seg("vowel", 0.30, 0.59, phoneme="a", confidence=0.9),
+        seg("vowel", 0.30, 0.59, phoneme="a"),
     ]
     mouth_events, _diag = confirm(segments, rms)
     a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
@@ -829,9 +828,9 @@ _ONE_FRAME_SEC = 1.0 / FRAME_RATE
 
 def test_onset_keeps_one_frame_for_the_preceding_unit():
     segments = [
-        seg("vowel", 0.0, 0.25, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.25, phoneme="a"),
         seg("consonant", 0.25, 0.28, phoneme="m"),
-        seg("vowel", 0.28, 0.60, phoneme="i", confidence=0.9),
+        seg("vowel", 0.28, 0.60, phoneme="i"),
     ]
     mouth_events, _diag = confirm(segments, step_rms(0.60, 0.24))
     bilabial = next(e for e in mouth_events if e.shape == MouthShape.BILABIAL)
@@ -844,9 +843,9 @@ def test_onset_keeps_one_frame_for_the_preceding_unit():
 def test_onset_keeps_one_frame_for_the_corrected_vowel():
     segments = [
         seg("gap", 0.0, 0.30),
-        seg("vowel", 0.30, 0.32, phoneme="a", confidence=0.9),
+        seg("vowel", 0.30, 0.32, phoneme="a"),
         seg("consonant", 0.32, 0.45, phoneme="m"),
-        seg("vowel", 0.45, 0.60, phoneme="i", confidence=0.9),
+        seg("vowel", 0.45, 0.60, phoneme="i"),
     ]
     mouth_events, _diag = confirm(segments, step_rms(0.60, 0.34))
     a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
@@ -856,8 +855,8 @@ def test_onset_keeps_one_frame_for_the_corrected_vowel():
 
 def test_onset_lower_bound_follows_the_corrected_start_of_the_preceding_vowel():
     segments = [
-        seg("vowel", 0.20, 0.30, phoneme="a", confidence=0.9),
-        seg("vowel", 0.30, 0.60, phoneme="i", confidence=0.9),
+        seg("vowel", 0.20, 0.30, phoneme="a"),
+        seg("vowel", 0.30, 0.60, phoneme="i"),
     ]
     mouth_events, _diag = confirm(segments, step_rms(0.60, 0.24))
     a_event = next(e for e in mouth_events if e.shape == MouthShape.A)
@@ -868,41 +867,29 @@ def test_onset_lower_bound_follows_the_corrected_start_of_the_preceding_vowel():
 
 def test_onset_is_not_applied_when_the_allowed_range_is_empty():
     segments = [
-        seg("vowel", 0.0, 0.25, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.25, phoneme="a"),
         seg("consonant", 0.25, 0.28, phoneme="m"),
-        seg("vowel", 0.28, 0.29, phoneme="i", confidence=0.9),
+        seg("vowel", 0.28, 0.29, phoneme="i"),
         seg("consonant", 0.29, 0.33, phoneme="m"),
-        seg("vowel", 0.33, 0.60, phoneme="e̞", confidence=0.9),
+        seg("vowel", 0.33, 0.60, phoneme="e̞"),
     ]
     mouth_events, _diag = confirm(segments, step_rms(0.60, 0.24))
     i_event = next(e for e in mouth_events if e.shape == MouthShape.I)
     assert i_event.start == pytest.approx(0.28 * FRAME_RATE)
 
 
-def test_low_confidence_and_low_rms_vowel_is_weakened():
-    target_event, _diag = confirm_between_anchor_morae(0.25, confidence=0.2)
-    expected_base = _clamped_open_amount(_normalized_between_anchors(0.25))
-    assert target_event.open_amount == pytest.approx(expected_base * 0.5)
-
-
-def test_vowel_not_weakened_when_confidence_is_high_even_with_low_rms():
-    target_event, _diag = confirm_between_anchor_morae(0.25, confidence=0.9)
-    expected = _clamped_open_amount(_normalized_between_anchors(0.25))
-    assert target_event.open_amount == pytest.approx(expected)
-
-
-def test_vowel_not_weakened_when_rms_is_high_even_with_low_confidence():
-    target_event, _diag = confirm_between_anchor_morae(0.5, confidence=0.2)
+def test_vowel_not_weakened_when_rms_is_high():
+    target_event, _diag = confirm_between_anchor_morae(0.5)
     expected = _clamped_open_amount(_normalized_between_anchors(0.5))
     assert target_event.open_amount == pytest.approx(expected)
 
 
-def test_without_confidence_the_weak_rms_threshold_is_lower():
-    weak_event, _ = confirm_between_anchor_morae(0.15, confidence=None)
+def test_vowel_is_weakened_only_below_the_weak_rms_threshold():
+    weak_event, _ = confirm_between_anchor_morae(0.15)
     expected_weak_base = _clamped_open_amount(_normalized_between_anchors(0.15))
     assert weak_event.open_amount == pytest.approx(expected_weak_base * 0.5)
 
-    strong_event, _ = confirm_between_anchor_morae(0.25, confidence=None)
+    strong_event, _ = confirm_between_anchor_morae(0.25)
     expected_strong = _clamped_open_amount(_normalized_between_anchors(0.25))
     assert strong_event.open_amount == pytest.approx(expected_strong)
 
@@ -922,7 +909,7 @@ def test_open_amount_saturates_at_open_max_below_open_hi():
 def test_bilabial_and_silence_have_zero_open_amount():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="m"),
-        seg("vowel", 0.05, 0.2, phoneme="a", confidence=0.01),
+        seg("vowel", 0.05, 0.2, phoneme="a"),
     ]
     rms = flat_rms(0.2, 0.01)
     mouth_events, _diag = confirm(segments, rms)
@@ -949,9 +936,9 @@ def test_open_amount_uses_middle_60_percent_of_vowel_segment():
             values.append(_ANCHOR_HI_RMS)
     rms = rms_env(times, values)
     segments = [
-        seg("vowel", 0.0, offset, phoneme="ɯ", confidence=0.9),
-        seg("vowel", offset, offset + target_dur, phoneme="a", confidence=0.9),
-        seg("vowel", offset + target_dur, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", 0.0, offset, phoneme="ɯ"),
+        seg("vowel", offset, offset + target_dur, phoneme="a"),
+        seg("vowel", offset + target_dur, hi_end, phoneme="o̞"),
     ]
     mouth_events, _diag = confirm(
         segments, rms, intensity_curve=1.0, open_lo=0.0, open_hi=1.0, open_max=1.0)
@@ -1032,7 +1019,7 @@ def test_confirm_mouth_events_output_is_invariant_to_uniform_audio_gain():
     bounds = [i * seg_dur_sec for i in range(len(levels) + 1)]
     phonemes = ["o̞", "ɯ", "a", "i", "u", "e̞"]
     segments = [
-        seg("vowel", bounds[i], bounds[i + 1], phoneme=phoneme, confidence=0.9)
+        seg("vowel", bounds[i], bounds[i + 1], phoneme=phoneme)
         for i, phoneme in enumerate(phonemes)
     ]
 
@@ -1070,9 +1057,9 @@ def test_song_without_morae_yields_single_closed_event():
 
 def test_degenerate_uniform_morae_all_get_midpoint_open_amount():
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="a", confidence=0.9),
-        seg("vowel", 0.2, 0.4, phoneme="i", confidence=0.9),
-        seg("vowel", 0.4, 0.6, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="a"),
+        seg("vowel", 0.2, 0.4, phoneme="i"),
+        seg("vowel", 0.4, 0.6, phoneme="ɯ"),
     ]
     rms = flat_rms(0.6, 0.73)
     mouth_events, _diag = confirm(
@@ -1083,12 +1070,12 @@ def test_degenerate_uniform_morae_all_get_midpoint_open_amount():
 def test_open_amount_uses_whole_song_percentiles_not_a_chunk_subset():
     mora_dur = 0.9
     segments = [
-        seg("vowel", 0.0 * mora_dur, 1.0 * mora_dur, phoneme="ɯ", confidence=0.9),
-        seg("vowel", 1.0 * mora_dur, 2.0 * mora_dur, phoneme="e̞", confidence=0.9),
-        seg("vowel", 2.0 * mora_dur, 3.0 * mora_dur, phoneme="a", confidence=0.9),
-        seg("vowel", 3.0 * mora_dur, 4.0 * mora_dur, phoneme="i", confidence=0.9),
-        seg("vowel", 4.0 * mora_dur, 5.0 * mora_dur, phoneme="o̞", confidence=0.9),
-        seg("vowel", 5.0 * mora_dur, 6.0 * mora_dur, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.0 * mora_dur, 1.0 * mora_dur, phoneme="ɯ"),
+        seg("vowel", 1.0 * mora_dur, 2.0 * mora_dur, phoneme="e̞"),
+        seg("vowel", 2.0 * mora_dur, 3.0 * mora_dur, phoneme="a"),
+        seg("vowel", 3.0 * mora_dur, 4.0 * mora_dur, phoneme="i"),
+        seg("vowel", 4.0 * mora_dur, 5.0 * mora_dur, phoneme="o̞"),
+        seg("vowel", 5.0 * mora_dur, 6.0 * mora_dur, phoneme="ɯ"),
     ]
     raw_values = [0.10, 0.30, 0.50, 0.60, 0.80, 0.99]
     hop = 0.010
@@ -1121,8 +1108,8 @@ def test_silence_classification_unaffected_by_other_loud_morae_context():
         base = 0.3 if with_other_mora else 0.0
         segments = []
         if with_other_mora:
-            segments.append(seg("vowel", 0.0, base, phoneme="i", confidence=0.9))
-        segments.append(seg("vowel", base, base + 0.3, phoneme="a", confidence=0.95))
+            segments.append(seg("vowel", 0.0, base, phoneme="i"))
+        segments.append(seg("vowel", base, base + 0.3, phoneme="a"))
         hop = 0.010
         n = round((base + 0.3) / hop) + 1
         times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
@@ -1135,36 +1122,15 @@ def test_silence_classification_unaffected_by_other_loud_morae_context():
     assert last_shape(with_other_mora=True) == MouthShape.SILENCE
 
 
-def test_weak_vowel_classification_unaffected_by_other_loud_morae_context():
-    def a_event(confidence, with_other_mora):
-        base = 0.3 if with_other_mora else 0.0
-        segments = []
-        if with_other_mora:
-            segments.append(seg("vowel", 0.0, base, phoneme="i", confidence=0.9))
-        segments.append(seg("vowel", base, base + 0.3, phoneme="a", confidence=confidence))
-        hop = 0.010
-        n = round((base + 0.3) / hop) + 1
-        times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
-        values = [0.9 if t < base else 0.25 for t in times]
-        rms = rms_env(times, values)
-        mouth_events, _diag = confirm(segments, rms)
-        return next(e for e in mouth_events if e.shape == MouthShape.A)
-
-    for with_other_mora in (False, True):
-        weak_event = a_event(confidence=0.2, with_other_mora=with_other_mora)
-        strong_event = a_event(confidence=0.9, with_other_mora=with_other_mora)
-        assert weak_event.open_amount == pytest.approx(strong_event.open_amount * 0.5)
-
-
 def test_low_dynamics_suppression_unaffected_by_other_morae_context():
     def shapes(with_other_mora):
         base = 0.2 if with_other_mora else 0.0
         segments = []
         if with_other_mora:
-            segments.append(seg("vowel", 0.0, base, phoneme="i", confidence=0.9))
-        segments.append(seg("vowel", base, base + 0.2, phoneme="a", confidence=0.9))
+            segments.append(seg("vowel", 0.0, base, phoneme="i"))
+        segments.append(seg("vowel", base, base + 0.2, phoneme="a"))
         segments.append(seg("gap", base + 0.2, base + 0.4))
-        segments.append(seg("vowel", base + 0.4, base + 0.6, phoneme="a", confidence=0.9))
+        segments.append(seg("vowel", base + 0.4, base + 0.6, phoneme="a"))
         total = base + 0.6
         rms = flat_rms(total, 0.5, dynamic_range_db=5.0)
         idx_lo = int((base + 0.2) / 0.010)
@@ -1184,9 +1150,9 @@ def test_events_are_time_ordered_contiguous_and_cover_full_range():
     segments = [
         seg("gap", 0.0, 0.05),
         seg("consonant", 0.05, 0.10, phoneme="k"),
-        seg("vowel", 0.10, 0.30, phoneme="a", confidence=0.9),
+        seg("vowel", 0.10, 0.30, phoneme="a"),
         seg("consonant", 0.30, 0.35, phoneme="m"),
-        seg("vowel", 0.35, 0.55, phoneme="i", confidence=0.9),
+        seg("vowel", 0.35, 0.55, phoneme="i"),
         seg("gap", 0.55, 0.65),
     ]
     rms = flat_rms(0.65, 0.6)
@@ -1210,9 +1176,9 @@ def test_empty_segment_list_returns_empty_events():
 def test_confirmation_is_deterministic():
     segments = [
         seg("consonant", 0.0, 0.05, phoneme="k"),
-        seg("vowel", 0.05, 0.30, phoneme="a", confidence=0.9),
+        seg("vowel", 0.05, 0.30, phoneme="a"),
         seg("gap", 0.30, 0.40),
-        seg("vowel", 0.40, 0.60, phoneme="i", confidence=0.4),
+        seg("vowel", 0.40, 0.60, phoneme="i"),
     ]
     rms = flat_rms(0.60, 0.5)
     first, _ = confirm(segments, rms)
@@ -1246,7 +1212,7 @@ def test_split_into_subwindows_are_contiguous_equal_width_and_cover_range():
 
 
 def test_mora_below_one_second_remains_single_event():
-    segments = [seg("vowel", 0.0, 0.99, phoneme="a", confidence=0.9)]
+    segments = [seg("vowel", 0.0, 0.99, phoneme="a")]
     rms = flat_rms(0.99, 0.8)
     mouth_events, _diag = confirm(segments, rms)
     assert len(mouth_events) == 1
@@ -1259,9 +1225,9 @@ def test_long_mora_splits_into_contiguous_events_tracking_rms_changes():
     target_end = lo_end + mora_dur
     hi_end = target_end + anchor_dur
     segments = [
-        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
-        seg("vowel", lo_end, target_end, phoneme="e̞", confidence=0.9),
-        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
+        seg("vowel", lo_end, target_end, phoneme="e̞"),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
     ]
     hop = 0.010
     n = round(hi_end / hop) + 1
@@ -1298,9 +1264,9 @@ def test_mora_of_exactly_one_second_is_split():
     target_end = lo_end + mora_dur
     hi_end = target_end + anchor_dur
     segments = [
-        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
-        seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9),
-        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
+        seg("vowel", lo_end, target_end, phoneme="a"),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
     ]
     rms = flat_rms(hi_end, 0.6)
     mouth_events, _diag, group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
@@ -1316,9 +1282,9 @@ def test_split_subwindow_rms_uses_middle_60_percent_not_whole_subwindow_average(
     target_end = lo_end + mora_dur
     hi_end = target_end + anchor_dur
     segments = [
-        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
-        seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9),
-        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
+        seg("vowel", lo_end, target_end, phoneme="a"),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
     ]
     hop = 0.010
     n = round(hi_end / hop) + 1
@@ -1354,9 +1320,9 @@ def test_split_subwindow_rms_uses_middle_60_percent_not_whole_subwindow_average(
 
 def _long_mora_between_anchor_morae(segments_between, *, lo_end, target_end, hi_end, target_value=0.6):
     segments = [
-        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
         *segments_between,
-        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
     ]
     hop = 0.010
     n = round(hi_end / hop) + 1
@@ -1374,7 +1340,7 @@ def test_split_head_only_keeps_consonant_and_aperture_class_others_are_none():
     target_end = lo_end + 1.2
     segments, rms = _long_mora_between_anchor_morae(
         [seg("consonant", lo_end, cons_end, phoneme="t"),
-         seg("vowel", cons_end, target_end, phoneme="a", confidence=0.9)],
+         seg("vowel", cons_end, target_end, phoneme="a")],
         lo_end=lo_end, target_end=target_end, hi_end=target_end + 0.2)
     mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
     a_events = [e for e in mouth_events if e.shape == MouthShape.A]
@@ -1390,7 +1356,7 @@ def test_split_preserves_none_head_classes_when_original_has_no_preceding_conson
     lo_end = 0.2
     target_end = lo_end + 1.2
     segments, rms = _long_mora_between_anchor_morae(
-        [seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9)],
+        [seg("vowel", lo_end, target_end, phoneme="a")],
         lo_end=lo_end, target_end=target_end, hi_end=target_end + 0.2)
     mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
     a_events = [e for e in mouth_events if e.shape == MouthShape.A]
@@ -1400,51 +1366,59 @@ def test_split_preserves_none_head_classes_when_original_has_no_preceding_conson
         assert e.aperture_class == ApertureClass.NONE
 
 
-def test_split_weak_vowel_scaling_applies_uniformly_to_all_subwindows():
+def _long_vowel_open_amounts_with_rms_scale(rms_scale):
     anchor_dur = 0.2
     mora_dur = 1.2
     lo_end = anchor_dur
     target_end = lo_end + mora_dur
     hi_end = target_end + anchor_dur
+    segments = [
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
+        seg("vowel", lo_end, target_end, phoneme="a"),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
+    ]
+    hop = 0.010
+    n = round(hi_end / hop) + 1
+    times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
+    half = mora_dur / 2
+    values = []
+    for t in times:
+        if t < lo_end:
+            values.append(_ANCHOR_LO_RMS * rms_scale)
+        elif t < target_end:
+            values.append((0.25 if t - lo_end < half else 0.28) * rms_scale)
+        else:
+            values.append(_ANCHOR_HI_RMS * rms_scale)
+    mouth_events, _diag, _group_sizes = events.confirm_mouth_events(
+        segments, rms_env(times, values), **_DEFAULT_KW)
+    a_events = [e for e in mouth_events if e.shape == MouthShape.A]
+    assert len(a_events) == 4
+    return [e.open_amount for e in a_events]
 
-    def a_events(confidence):
-        segments = [
-            seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
-            seg("vowel", lo_end, target_end, phoneme="a", confidence=confidence),
-            seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
-        ]
-        hop = 0.010
-        n = round(hi_end / hop) + 1
-        times = [_FRAME_CENTER_OFFSET_SEC + i * hop for i in range(n)]
-        half = mora_dur / 2
-        values = []
-        for t in times:
-            if t < lo_end:
-                values.append(_ANCHOR_LO_RMS)
-            elif t < target_end:
-                offset = t - lo_end
-                values.append(0.25 if offset < half else 0.28)
-            else:
-                values.append(_ANCHOR_HI_RMS)
-        rms = rms_env(times, values)
-        mouth_events, _diag, _group_sizes = events.confirm_mouth_events(segments, rms, **_DEFAULT_KW)
-        return [e for e in mouth_events if e.shape == MouthShape.A]
 
-    weak_events = a_events(confidence=0.2)
-    strong_events = a_events(confidence=0.9)
-    assert len(weak_events) == len(strong_events) == 4
-    for w, s in zip(weak_events, strong_events, strict=True):
-        assert w.open_amount == pytest.approx(s.open_amount * 0.5)
+def test_split_weak_vowel_halves_open_amount_of_every_subwindow():
+    reference = _long_vowel_open_amounts_with_rms_scale(1.0)
+    weak = _long_vowel_open_amounts_with_rms_scale(0.7)
+    assert len({round(a, 6) for a in reference}) > 1
+    for w, r in zip(weak, reference, strict=True):
+        assert w == pytest.approx(r * 0.5)
+
+
+def test_split_vowel_above_weak_rms_threshold_keeps_open_amount_of_every_subwindow():
+    reference = _long_vowel_open_amounts_with_rms_scale(1.0)
+    louder_scaled = _long_vowel_open_amounts_with_rms_scale(0.9)
+    for a, r in zip(louder_scaled, reference, strict=True):
+        assert a == pytest.approx(r)
 
 
 def test_split_does_not_affect_population_percentiles_for_other_morae():
     def mid_percentile_open_amounts(long_mora_dur):
         segments = [
-            seg("vowel", 0.0, 0.2, phoneme="ɯ", confidence=0.9),
-            seg("vowel", 0.2, 0.4, phoneme="i", confidence=0.9),
-            seg("vowel", 0.4, 0.4 + long_mora_dur, phoneme="e̞", confidence=0.9),
-            seg("vowel", 0.4 + long_mora_dur, 0.6 + long_mora_dur, phoneme="a", confidence=0.9),
-            seg("vowel", 0.6 + long_mora_dur, 0.8 + long_mora_dur, phoneme="o̞", confidence=0.9),
+            seg("vowel", 0.0, 0.2, phoneme="ɯ"),
+            seg("vowel", 0.2, 0.4, phoneme="i"),
+            seg("vowel", 0.4, 0.4 + long_mora_dur, phoneme="e̞"),
+            seg("vowel", 0.4 + long_mora_dur, 0.6 + long_mora_dur, phoneme="a"),
+            seg("vowel", 0.6 + long_mora_dur, 0.8 + long_mora_dur, phoneme="o̞"),
         ]
         hop = 0.010
         total = 0.8 + long_mora_dur
@@ -1488,8 +1462,8 @@ def test_split_subwindows_get_same_open_amount_when_population_is_degenerate():
     other_value = 0.5
     delta = 0.3
     segments = [
-        seg("vowel", 0.0, 0.2, phoneme="ɯ", confidence=0.9),
-        seg("vowel", 0.2, 0.2 + mora_dur, phoneme="a", confidence=0.9),
+        seg("vowel", 0.0, 0.2, phoneme="ɯ"),
+        seg("vowel", 0.2, 0.2 + mora_dur, phoneme="a"),
     ]
     hop = 0.010
     total = 0.2 + mora_dur
@@ -1518,9 +1492,9 @@ def test_n_mora_splits_when_long():
     target_end = lo_end + mora_dur
     hi_end = target_end + anchor_dur
     segments = [
-        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
         seg("consonant", lo_end, target_end, phoneme="ɴ"),
-        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
     ]
     hop = 0.010
     n = round(hi_end / hop) + 1
@@ -1589,9 +1563,9 @@ def test_split_subwindow_open_amounts_are_distinct_in_clamp_saturation_range():
     target_end = lo_end + three_subwindow_mora_dur
     hi_end = target_end + anchor_dur
     segments = [
-        seg("vowel", 0.0, lo_end, phoneme="ɯ", confidence=0.9),
-        seg("vowel", lo_end, target_end, phoneme="a", confidence=0.9),
-        seg("vowel", target_end, hi_end, phoneme="o̞", confidence=0.9),
+        seg("vowel", 0.0, lo_end, phoneme="ɯ"),
+        seg("vowel", lo_end, target_end, phoneme="a"),
+        seg("vowel", target_end, hi_end, phoneme="o̞"),
     ]
     hop = 0.010
     n = round(hi_end / hop) + 1

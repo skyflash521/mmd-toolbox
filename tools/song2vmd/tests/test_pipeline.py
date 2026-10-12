@@ -28,8 +28,8 @@ def write_wav(path, seconds, sample_rate=8000, channels=2, amplitude=0.5):
     return samples, sample_rate
 
 
-def seg(type_, start, end, phoneme=None, confidence=None):
-    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme, confidence=confidence)
+def seg(type_, start, end, phoneme=None):
+    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def _common_kwargs(**overrides):
@@ -55,7 +55,7 @@ def test_unchunked_run_diagnostics_forced_split_is_false(tmp_path, monkeypatch):
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs())
     assert result.diagnostics.forced_split is False
@@ -70,7 +70,7 @@ def test_single_run_forwards_mora_event_group_sizes_to_build_diagnostics(tmp_pat
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     fake_group_sizes = [3]
 
@@ -109,7 +109,7 @@ def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, m
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs(
         separator_name="sep-x", content_recognizer_model=ContentRecognizerModel(model_id="rec-y"),
@@ -134,7 +134,7 @@ def test_separated_flag_matches_separate_vocals_mode(tmp_path, monkeypatch, mode
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, m, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs(separate_vocals=mode))
     assert result.diagnostics.separated is expected
@@ -149,7 +149,7 @@ def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monke
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     captured = {}
     real_build = pipeline.morphs.build_vmd_document
@@ -208,13 +208,13 @@ def test_chunked_run_diagnostics_forced_split_reflects_any_boundary(
 
     def fake_merge(chunk_segments_list, chunk_offsets_sec, boundaries_sec):
         assert boundaries_sec == [3.0, 6.0]
-        return [seg("vowel", 0.0, 10.0, phoneme="a", confidence=0.9)]
+        return [seg("vowel", 0.0, 10.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._chunking, "merge_chunk_segments", fake_merge)
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
     assert result.diagnostics.forced_split is expected_forced_split
@@ -227,19 +227,19 @@ def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_pat
     write_wav(vocal_path, seconds=6.0, amplitude=0.5)
 
     combined_segments = [
-        seg("vowel", 0.0, 1.0, phoneme="ɯ", confidence=0.9),
-        seg("vowel", 1.0, 2.0, phoneme="e̞", confidence=0.9),
-        seg("vowel", 2.0, 3.0, phoneme="a", confidence=0.9),
-        seg("vowel", 3.0, 4.0, phoneme="i", confidence=0.9),
-        seg("vowel", 4.0, 5.0, phoneme="o̞", confidence=0.9),
-        seg("vowel", 5.0, 6.0, phoneme="ɯ", confidence=0.9),
+        seg("vowel", 0.0, 1.0, phoneme="ɯ"),
+        seg("vowel", 1.0, 2.0, phoneme="e̞"),
+        seg("vowel", 2.0, 3.0, phoneme="a"),
+        seg("vowel", 3.0, 4.0, phoneme="i"),
+        seg("vowel", 4.0, 5.0, phoneme="o̞"),
+        seg("vowel", 5.0, 6.0, phoneme="ɯ"),
     ]
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
     monkeypatch.setattr(front_stage._chunking, "merge_chunk_segments", lambda *a, **k: combined_segments)
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     raw_values = [0.10, 0.30, 0.50, 0.60, 0.80, 0.99]
     hop = 0.010
@@ -296,7 +296,7 @@ def test_run_works_without_progress_reporter(tmp_path, monkeypatch):
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
     monkeypatch.setattr(
         front_stage._recognizer, "recognize",
-        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)])
+        lambda path, **kwargs: [seg("vowel", 0.0, 1.0, phoneme="a")])
 
     result = pipeline.run(input_path, **_common_kwargs())
     assert result.document is not None
@@ -313,7 +313,7 @@ class _RecordingProgress:
 
 
 def _stub_front_stage(monkeypatch, captured, *, segments=None):
-    given = segments if segments is not None else [seg("vowel", 0.0, 1.0, phoneme="a", confidence=0.9)]
+    given = segments if segments is not None else [seg("vowel", 0.0, 1.0, phoneme="a")]
 
     def fake_run_front_stage(input_path, **kwargs):
         captured["input_path"] = input_path

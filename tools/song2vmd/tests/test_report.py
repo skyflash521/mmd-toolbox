@@ -6,7 +6,7 @@ from vocal_analysis import Segment
 
 
 def seg(type_, start, end):
-    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=None, confidence=None)
+    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=None)
 
 
 def mev(shape, start, end, open_amount=0.0):

@@ -19,15 +19,15 @@ def _track(seconds_and_midi_or_unvoiced):
 
 
 def _vowel(start, end, phoneme="a"):
-    return Segment(type="vowel", start_sec=start, end_sec=end, phoneme=phoneme, confidence=0.9)
+    return Segment(type="vowel", start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def _consonant(start, end, phoneme="k"):
-    return Segment(type="consonant", start_sec=start, end_sec=end, phoneme=phoneme, confidence=0.9)
+    return Segment(type="consonant", start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def _gap(start, end):
-    return Segment(type="gap", start_sec=start, end_sec=end, phoneme=None, confidence=None)
+    return Segment(type="gap", start_sec=start, end_sec=end, phoneme=None)
 
 
 def _one_vowel_covering(track):

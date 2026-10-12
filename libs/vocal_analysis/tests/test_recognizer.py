@@ -468,8 +468,8 @@ def test_merge_adjacent_segments_combines_same_type_and_phoneme():
     from vocal_analysis.types import Segment
 
     segments = [
-        Segment(type="vowel", start_sec=0.0, end_sec=1.0, phoneme="a", confidence=None),
-        Segment(type="vowel", start_sec=1.0, end_sec=2.0, phoneme="a", confidence=None),
+        Segment(type="vowel", start_sec=0.0, end_sec=1.0, phoneme="a"),
+        Segment(type="vowel", start_sec=1.0, end_sec=2.0, phoneme="a"),
     ]
 
     result = _merge_adjacent_segments(segments)
@@ -484,8 +484,8 @@ def test_merge_adjacent_segments_keeps_different_phoneme_separate():
     from vocal_analysis.types import Segment
 
     segments = [
-        Segment(type="vowel", start_sec=0.0, end_sec=1.0, phoneme="a", confidence=None),
-        Segment(type="vowel", start_sec=1.0, end_sec=2.0, phoneme="i", confidence=None),
+        Segment(type="vowel", start_sec=0.0, end_sec=1.0, phoneme="a"),
+        Segment(type="vowel", start_sec=1.0, end_sec=2.0, phoneme="i"),
     ]
 
     result = _merge_adjacent_segments(segments)

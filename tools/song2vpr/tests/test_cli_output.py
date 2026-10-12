@@ -29,8 +29,7 @@ def _pcm(*waves):
 def _front_stage(pcm=None, segments=None, duration_sec=1.0):
     pcm = pcm if pcm is not None else _pcm(_harmonic_wave(440.0, duration_sec, 0.5))
     if segments is None:
-        segments = [Segment(type="vowel", start_sec=0.0, end_sec=duration_sec, phoneme="a",
-                            confidence=1.0)]
+        segments = [Segment(type="vowel", start_sec=0.0, end_sec=duration_sec, phoneme="a")]
     return PipelineResult(vocal_wav=Path("vocal.wav"), vocal_pcm=pcm, segments=segments,
                           rms=compute_rms(pcm), pcm=pcm, duration_sec=duration_sec,
                           forced_split=False, backends={})
@@ -158,8 +157,8 @@ def test_dry_run_diagnostics_on_stdout_come_right_after_closing_the_live_line(tm
 
 def test_velocity_is_the_same_for_all_notes_regardless_of_singing_volume(tmp_path, monkeypatch):
     quiet, loud = _harmonic_wave(440.0, 0.6, 0.05), _harmonic_wave(523.25, 0.6, 0.45)
-    segments = [Segment(type="vowel", start_sec=0.0, end_sec=0.6, phoneme="a", confidence=1.0),
-                Segment(type="vowel", start_sec=0.6, end_sec=1.2, phoneme="i", confidence=1.0)]
+    segments = [Segment(type="vowel", start_sec=0.0, end_sec=0.6, phoneme="a"),
+                Segment(type="vowel", start_sec=0.6, end_sec=1.2, phoneme="i")]
     _stub_pipeline(monkeypatch, _front_stage(pcm=_pcm(quiet, loud), segments=segments,
                                              duration_sec=1.2))
     output = tmp_path / "song.vpr"
@@ -409,7 +408,7 @@ def test_separation_choice_is_reported(tmp_path, monkeypatch, capsysbinary):
 
 
 def test_moraic_nasal_only_input_raises_only_the_moraic_nasal_count(tmp_path, monkeypatch, capsysbinary):
-    segments = [Segment(type="consonant", start_sec=0.0, end_sec=1.0, phoneme="ɴ", confidence=1.0)]
+    segments = [Segment(type="consonant", start_sec=0.0, end_sec=1.0, phoneme="ɴ")]
     _stub_pipeline(monkeypatch, _front_stage(segments=segments))
     assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
 

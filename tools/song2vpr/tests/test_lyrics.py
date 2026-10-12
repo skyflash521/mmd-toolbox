@@ -10,15 +10,15 @@ def _note(start, end, midi=69, syllable=0):
 
 
 def _vowel(start, end, phoneme="a"):
-    return Segment(type="vowel", start_sec=start, end_sec=end, phoneme=phoneme, confidence=0.9)
+    return Segment(type="vowel", start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def _consonant(start, end, phoneme="k"):
-    return Segment(type="consonant", start_sec=start, end_sec=end, phoneme=phoneme, confidence=0.9)
+    return Segment(type="consonant", start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def _gap(start, end):
-    return Segment(type="gap", start_sec=start, end_sec=end, phoneme=None, confidence=None)
+    return Segment(type="gap", start_sec=start, end_sec=end, phoneme=None)
 
 
 def _flat_rms(value=0.5, seconds=2.0):
@@ -63,7 +63,7 @@ def _one_syllable_per_note(count, seconds=0.2, phoneme="a"):
 ])
 def test_ipa_is_mapped_to_the_vpr_phoneme_notation(ipa, xsampa):
     kind = "vowel" if ipa in {"a", "i", "ɯ", "e̞", "o̞"} else "consonant"
-    segment = Segment(type=kind, start_sec=0.0, end_sec=0.4, phoneme=ipa, confidence=0.9)
+    segment = Segment(type=kind, start_sec=0.0, end_sec=0.4, phoneme=ipa)
     result = lyrics.annotate([_note(0.0, 0.4)], _one_syllable(segment), _flat_rms())
     assert result.notes[0].phonemes == [xsampa]
 
@@ -99,7 +99,7 @@ def test_the_mapping_covers_every_symbol_the_recognizer_can_emit():
 def test_lyric_is_the_vowel_kana_of_the_nucleus(ipa, kana):
     result = lyrics.annotate([_note(0.0, 0.4)],
                              _one_syllable(Segment(type="vowel", start_sec=0.0, end_sec=0.4,
-                                                   phoneme=ipa, confidence=0.9)), _flat_rms())
+                                                   phoneme=ipa)), _flat_rms())
     assert result.notes[0].lyric == kana
 
 
@@ -148,7 +148,7 @@ def test_lyric_comes_from_the_head_consonant_and_the_nucleus(head, nucleus, kana
     segments = [_consonant(0.1 * i, 0.1 * (i + 1), phoneme) for i, phoneme in enumerate(head)]
     start = 0.1 * len(head)
     segments.append(Segment(type="vowel", start_sec=start, end_sec=start + 0.3,
-                            phoneme=nucleus, confidence=0.9))
+                            phoneme=nucleus))
     result = lyrics.annotate([_note(0.0, start + 0.3, syllable=0)], [segments], _flat_rms())
     assert result.notes[0].lyric == kana
 

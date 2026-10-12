@@ -3,8 +3,8 @@ import pytest
 from vocal_analysis import Segment, chunking
 
 
-def seg(type_, start, end, phoneme=None, confidence=None):
-    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme, confidence=confidence)
+def seg(type_, start, end, phoneme=None):
+    return Segment(type=type_, start_sec=start, end_sec=end, phoneme=phoneme)
 
 
 def test_audio_not_longer_than_max_duration_has_no_boundaries():
@@ -126,16 +126,15 @@ def test_overlap_is_trimmed_at_boundary_and_consonants_across_it_are_not_merged(
     assert merged[3] == seg("vowel", 11.0, 20.0, phoneme="i")
 
 
-def test_matching_vowel_across_boundary_merges_into_one_event_without_confidence():
-    chunk0 = [seg("vowel", 0.0, 10.5, phoneme="a", confidence=0.9)]
-    chunk1 = [seg("vowel", 0.0, 5.0, phoneme="a", confidence=0.7)]
+def test_matching_vowel_across_boundary_merges_into_one_event():
+    chunk0 = [seg("vowel", 0.0, 10.5, phoneme="a")]
+    chunk1 = [seg("vowel", 0.0, 5.0, phoneme="a")]
     merged = chunking.merge_chunk_segments(
         [chunk0, chunk1], chunk_offsets_sec=[0.0, 9.0], boundaries_sec=[10.0],
     )
     assert len(merged) == 1
     assert merged[0].type == "vowel" and merged[0].phoneme == "a"
     assert merged[0].start_sec == 0.0 and merged[0].end_sec == 14.0
-    assert merged[0].confidence is None
 
 
 def test_differing_vowels_across_boundary_do_not_merge():

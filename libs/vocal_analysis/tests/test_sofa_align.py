@@ -1021,9 +1021,9 @@ def test_segments_from_raw_converts_all_fields():
 
     raw = [(0.0, 0.5, "pau"), (0.5, 0.7, "k"), (0.7, 1.0, "a")]
     assert _segments_from_raw(raw) == [
-        Segment(type="gap", start_sec=0.0, end_sec=0.5, phoneme=None, confidence=None),
-        Segment(type="consonant", start_sec=0.5, end_sec=0.7, phoneme="k", confidence=None),
-        Segment(type="vowel", start_sec=0.7, end_sec=1.0, phoneme="a", confidence=None),
+        Segment(type="gap", start_sec=0.0, end_sec=0.5, phoneme=None),
+        Segment(type="consonant", start_sec=0.5, end_sec=0.7, phoneme="k"),
+        Segment(type="vowel", start_sec=0.7, end_sec=1.0, phoneme="a"),
     ]
 
 
