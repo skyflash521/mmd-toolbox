@@ -58,8 +58,7 @@ def _clamp_rot(orig, target, max_deg):
     return quat.slerp(orig, target, max_deg / ang)
 
 
-def validate_bone_values(positions, rotations):
-    """長さの不一致・非有限値・ノルムがゼロの quaternion は ValueError を送出する。"""
+def _validate(positions, rotations, pos_window, rot_window):
     if len(positions) != len(rotations):
         raise ValueError("位置と回転のフレーム数が一致しません")
     for p in positions:
@@ -70,10 +69,6 @@ def validate_bone_values(positions, rotations):
             raise ValueError("回転に非有限値が含まれます")
         if math.sqrt(quat.dot(q, q)) < ZERO_EPS:
             raise ValueError("ノルムがゼロの quaternion が含まれます")
-
-
-def _validate(positions, rotations, pos_window, rot_window):
-    validate_bone_values(positions, rotations)
     for w in (pos_window, rot_window):
         if w < 1 or w % 2 == 0:
             raise ValueError("窓幅は正の奇数である必要があります")
@@ -269,6 +264,12 @@ def detect_noise_events(positions, rotations, *, pos_window, rot_window):
     )
 
 
+def _detection_counts(det):
+    spike_frames = {f for f, _ in det.pos_candidates} | det.rot_candidates
+    protected_frames = det.boundaries | {f for f, _ in det.pos_accent} | det.rot_accent
+    return {"spike_candidates": len(spike_frames), "protected_frames": len(protected_frames)}
+
+
 def _pos_smoothed(pos, segs, window):
     out = pos.copy()
     for s, e in segs:
@@ -281,8 +282,11 @@ def _pos_smoothed(pos, segs, window):
     return out
 
 
-def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength, rot_strength):
+def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength, rot_strength,
+                  diagnostics_out: dict | None = None):
     det = detect_noise_events(positions, rotations, pos_window=pos_window, rot_window=rot_window)
+    if diagnostics_out is not None:
+        diagnostics_out.update(_detection_counts(det))
     n = len(positions)
     if n == 0:
         return [], []

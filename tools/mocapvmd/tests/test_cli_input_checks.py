@@ -139,6 +139,25 @@ def test_invalid_bone_values_are_rejected_before_any_stage(tmp_path, capsysbinar
     assert not out.exists()
 
 
+@pytest.mark.parametrize("extra", [
+    [],
+    ["--dry-run"],
+    ["--denoise-mode", "pose"],
+    ["--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"],
+], ids=["default", "dry-run", "pose", "stages-off"])
+def test_near_zero_norm_rotation_is_invalid_bone_values(tmp_path, capsysbinary, extra):
+    src = tmp_path / "in.vmd"
+    out = tmp_path / "out.vmd"
+    write_vmd(src, bone=[bone("センター", 0), bone("センター", 1, rot=(1e-12, 0.0, 0.0, 0.0)),
+                         bone("センター", 2, pos=(1.0, 0.0, 0.0))])
+    rc = cli.main([str(src), "-o", str(out), "--machine", *extra])
+    assert rc == _EXIT_FAILURE
+    e = _last_event(capsysbinary)
+    assert e["type"] == "error" and e["code"] == "invalid_bone_values"
+    assert e["field"] == "input" and e["exit_code"] == _EXIT_FAILURE
+    assert not out.exists()
+
+
 def test_invalid_bone_values_in_pose_mode_are_rejected(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     write_vmd(src, bone=[bone("センター", 0), bone("センター", 1, rot=(0.0, 0.0, 0.0, 0.0))])

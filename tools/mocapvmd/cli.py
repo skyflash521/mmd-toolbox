@@ -1,4 +1,5 @@
 import dataclasses
+import math
 import os
 import sys
 import time
@@ -13,9 +14,9 @@ from cli_events import (
 from cli_options import RangeValidator, describe_options
 from cli_progress_router import ProgressRouter
 from pmx.types import PmxFormatError
-from vmd import interp, io
+from vmd import interp, io, quat, validate_values
 from vmd.reduce import BONE_LINEAR_INTERP
-from vmd.types import BoneKey
+from vmd.types import BoneKey, VmdDocument, VmdValueError
 
 from . import __version__, classify, denoise, footik, presets, reduce, report
 from .model_profile import MocapModelProfileError
@@ -29,6 +30,9 @@ _STAGE_LABELS = {
     "reduce": "キーフレーム圧縮",
 }
 
+
+_DEFAULT_CLEAN_STRENGTH = 1.0
+_IGNORED_NORMALIZE_WARNING_CODES = frozenset({"normalize-sorted"})
 
 _NONNEGATIVE = RangeValidator(value_type="float", minimum=0)
 _UNIT_INTERVAL = RangeValidator(value_type="float", minimum=0, maximum=1)
@@ -50,8 +54,9 @@ def _build_parser(*, defer_value_validation=False):
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="medium",
                    help="キーフレーム圧縮の許容誤差プリセット(速度観点): slower/slow/medium/fast/faster。"
                         "種別スケールの基準値")
-    p.add_argument("--clean-strength", dest="clean_strength", type=nonnegative, default=1.0,
-                   help="ノイズ軽減の効き量の倍率(ブレンド率に掛ける。0で無加工相当、上げるほど強く平準化する。窓幅は据え置き)")
+    p.add_argument("--clean-strength", dest="clean_strength", type=nonnegative, default=_DEFAULT_CLEAN_STRENGTH,
+                   help="ノイズ軽減の効き量の倍率(bone 方式のみ。ブレンド率に掛ける。0で無加工相当、"
+                        "上げるほど強く平準化する。窓幅は据え置き)。pose 方式では既定値 1.0 以外を指定できない")
     p.add_argument("--denoise", dest="denoise", action="store_true", default=True,
                    help="ノイズ軽減を有効化(既定 on)")
     p.add_argument("--no-denoise", dest="denoise", action="store_false",
@@ -149,22 +154,24 @@ def _list_bones_text(bone_keys):
 
 
 def _validate_bones(bone_keys):
-    denoise.validate_bone_values([k.position for k in bone_keys], [k.rotation for k in bone_keys])
+    validate_values(VmdDocument(bone=bone_keys))
+    for i, k in enumerate(bone_keys):
+        if math.sqrt(quat.dot(k.rotation, k.rotation)) < denoise.ZERO_EPS:
+            raise VmdValueError(f"bone キー {i} の rotation のノルムがゼロに近い",
+                                section="bone", index=i, field="rotation")
+
+
+def _group_by_name(bone_keys):
+    groups = {}
+    for k in bone_keys:
+        groups.setdefault(k.name, []).append(k)
+    return groups
 
 
 def _densify_bones(bone_keys):
-    order = []
-    later_key_by_frame = {}
-    for k in bone_keys:
-        if k.name not in later_key_by_frame:
-            later_key_by_frame[k.name] = {}
-            order.append(k.name)
-        later_key_by_frame[k.name][k.frame] = k
-
     out = []
-    for name in order:
-        by_frame = later_key_by_frame[name]
-        ks = [by_frame[f] for f in sorted(by_frame)]
+    for ks in _group_by_name(bone_keys).values():
+        ks = sorted(ks, key=lambda k: k.frame)
         if len(ks) < 2:
             out.extend(ks)
             continue
@@ -176,31 +183,26 @@ def _densify_bones(bone_keys):
     return out
 
 
-def _clean_bones(bone_keys, clean_strength):
-    order = []
-    groups = {}
-    for k in bone_keys:
-        if k.name not in groups:
-            groups[k.name] = []
-            order.append(k.name)
-        groups[k.name].append(k)
-
+def _clean_bones(bone_keys, clean_strength, diagnostics_out=None):
     out = []
-    for name in order:
-        ks = sorted(groups[name], key=lambda k: k.frame)
-        positions = [k.position for k in ks]
-        rotations = [k.rotation for k in ks]
+    for name, ks in _group_by_name(bone_keys).items():
+        ks = sorted(ks, key=lambda k: k.frame)
+        params = presets.resolve_cleaning(clean_strength, classify.classify(name))
+        track_diag = None
+        if diagnostics_out is not None:
+            track_diag = {"cleaning": params, "spike_candidates": 0, "protected_frames": 0}
+            diagnostics_out[name] = track_diag
         if len(ks) < 2:
             out.extend(ks)
             continue
-        params = presets.resolve_cleaning(clean_strength, classify.classify(name))
         cpos, crot = denoise.apply_denoise(
-            positions,
-            rotations,
+            [k.position for k in ks],
+            [k.rotation for k in ks],
             pos_window=params["pos_window"],
             rot_window=params["rot_window"],
             pos_strength=params["pos_strength"],
             rot_strength=params["rot_strength"],
+            diagnostics_out=track_diag,
         )
         name_raw = ks[0].name_raw
         for i, k in enumerate(ks):
@@ -209,18 +211,10 @@ def _clean_bones(bone_keys, clean_strength):
     return out
 
 
-def _stabilize_bones(bone_keys, suppression):
-    order = []
-    groups = {}
-    for k in bone_keys:
-        if k.name not in groups:
-            groups[k.name] = []
-            order.append(k.name)
-        groups[k.name].append(k)
-
+def _stabilize_bones(bone_keys, suppression, diagnostics_out=None):
+    groups = {name: sorted(ks, key=lambda k: k.frame) for name, ks in _group_by_name(bone_keys).items()}
     tracks = {}
-    for name in order:
-        ks = sorted(groups[name], key=lambda k: k.frame)
+    for name, ks in groups.items():
         category = classify.classify(name)
         if category in ("foot_ik", "toe_ik") and len(ks) >= 2:
             tracks[name] = (category, [k.frame for k in ks], [k.position for k in ks])
@@ -230,13 +224,22 @@ def _stabilize_bones(bone_keys, suppression):
     stabilized = footik.stabilize_foot_ik(tracks, suppression)
 
     out = []
-    for name in order:
-        ks = sorted(groups[name], key=lambda k: k.frame)
+    for name, ks in groups.items():
         if name in stabilized:
-            locked = stabilized[name].locked_positions
+            ts = stabilized[name]
+            frames = tracks[name][1]
+            if diagnostics_out is not None:
+                diagnostics_out[name] = {
+                    "grounding_candidates": len(ts.grounding.candidate_frames),
+                    "grounding_segments": [[frames[s.start], frames[s.end]] for s in ts.grounding.segments],
+                    "max_change": ts.max_change,
+                    "mean_change": ts.mean_change,
+                    "lock_applied_ratio": ts.lock_applied_ratio,
+                    "clamp_warnings": len(ts.warnings),
+                }
             name_raw = ks[0].name_raw
             for i, k in enumerate(ks):
-                out.append(BoneKey(name_raw, k.frame, locked[i], k.rotation, BONE_LINEAR_INTERP))
+                out.append(BoneKey(name_raw, k.frame, ts.locked_positions[i], k.rotation, BONE_LINEAR_INTERP))
         else:
             out.extend(ks)
     out.sort(key=lambda k: (k.name_raw, k.frame))
@@ -340,15 +343,20 @@ def _run(args, ctx):
             print(_list_bones_text(doc.bone))
         return 0
 
+    if args.denoise_mode == "pose" and args.clean_strength != _DEFAULT_CLEAN_STRENGTH:
+        return fail("bad_argument",
+                    f"--clean-strength は bone 方式のみ指定できる"
+                    f"(pose 方式では {_DEFAULT_CLEAN_STRENGTH} 以外を指定できない)",
+                    2, field="--clean-strength")
+
     output = args.output if args.output is not None else default_output_path(args.input, "_mocap.vmd")
     guard_failure = guard_output(output, overwrite=args.overwrite, fail=fail)
     if guard_failure is not None:
         return guard_failure
 
-    if args.denoise and args.denoise_mode == "pose" and args.pmx is not None:
-        if not os.path.isfile(args.pmx):
-            return fail("pmx_not_file", f"--pmx が存在しないか通常ファイルでない: {args.pmx}",
-                        1, field="--pmx")
+    if args.pmx is not None and not os.path.isfile(args.pmx):
+        return fail("pmx_not_file", f"--pmx が存在しないか通常ファイルでない: {args.pmx}",
+                    1, field="--pmx")
 
     try:
         doc, read_warnings = io.read(args.input)
@@ -356,19 +364,27 @@ def _run(args, ctx):
         return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
     _surface_warnings(read_warnings, ctx)
 
+    if not doc.bone:
+        return fail("no_bone_keys", "入力にボーンキーがない", 1, field="input")
+
     try:
         _validate_bones(doc.bone)
-    except ValueError as e:
+    except VmdValueError as e:
         return fail("invalid_bone_values",
-                    f"ボーン値が不正(非有限・ゼロノルム quaternion): {e}", 1, field="input")
+                    f"ボーン値が不正(非有限・ゼロまたはゼロに近いノルムの quaternion): {e}", 1, field="input")
 
-    dense_bone = _densify_bones(doc.bone)
+    normalized, normalize_warnings = io.normalize(doc, sections=["bone"])
+    _surface_warnings(
+        [w for w in normalize_warnings if w.code not in _IGNORED_NORMALIZE_WARNING_CODES], ctx)
+    dense_bone = _densify_bones(normalized.bone)
 
     reporter = ctx.track_progress(ProgressRouter(machine=machine, quiet=args.quiet, emitter=emitter,
                                                  stream=sys.stderr, labels=_STAGE_LABELS))
     want_report = args.dry_run or args.verbose
     reduction_diag = {} if (args.reduce and want_report) else None
     pose_diag = {} if (args.denoise and args.denoise_mode == "pose" and want_report) else None
+    noise_diag = {} if (args.denoise and args.denoise_mode == "bone" and want_report) else None
+    stabilization_diag = {} if (args.foot_ik_stabilize and want_report) else None
     try:
         if args.denoise:
             reporter.stage("denoise")
@@ -381,13 +397,12 @@ def _run(args, ctx):
                     field = "--pmx" if args.pmx is not None else None
                     return fail("model_profile_invalid", f"モデルプロファイルが不正: {e}", 1, field=field)
             else:
-                new_bone = _clean_bones(dense_bone, args.clean_strength)
+                new_bone = _clean_bones(dense_bone, args.clean_strength, noise_diag)
         else:
             new_bone = dense_bone
-        denoised_bone = new_bone
         if args.foot_ik_stabilize:
             reporter.stage("foot_ik")
-            new_bone = _stabilize_bones(new_bone, args.foot_slide_suppression)
+            new_bone = _stabilize_bones(new_bone, args.foot_slide_suppression, stabilization_diag)
         cleaned_bone = new_bone
         if args.reduce:
             reduce_start = time.monotonic()
@@ -433,7 +448,8 @@ def _run(args, ctx):
             suppression=args.foot_slide_suppression,
             pose_denoise=pose_diag,
             cleaned_bone_keys=cleaned_bone,
-            denoised_bone_keys=denoised_bone,
+            noise_diagnostics=noise_diag,
+            stabilization_diagnostics=stabilization_diag,
         )
         print(report.format_dry_run(rep))
 
