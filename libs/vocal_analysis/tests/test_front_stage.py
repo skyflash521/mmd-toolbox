@@ -1276,3 +1276,40 @@ def test_recognition_error_from_session_creation_passes_through_unchanged(
         run_front_stage(input_path, **kwargs)
     assert exc.value is error
     assert session_fakes.sessions == []
+
+
+def test_single_run_reads_back_the_separated_vocal_without_peak_normalization(
+        tmp_path, monkeypatch, session_fakes):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.2)
+    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
+
+    result = run_front_stage(input_path, **_common_kwargs())
+
+    on_disk, _ = sf.read(vocal_path, dtype="float32", always_2d=True)
+    np.testing.assert_allclose(result.vocal_pcm.samples, on_disk, atol=1e-6)
+    assert float(np.max(np.abs(result.vocal_pcm.samples))) < 0.3
+
+
+def test_single_and_chunked_runs_read_back_the_separated_vocal_at_the_same_level(
+        tmp_path, monkeypatch, session_fakes):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=6.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=6.0, amplitude=0.2)
+    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
+    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False)])
+    monkeypatch.setattr(
+        front_stage._chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 6.0, phoneme="a")])
+
+    single = run_front_stage(input_path, **_common_kwargs())
+    chunked = run_front_stage(
+        input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    single_peak = float(np.max(np.abs(single.vocal_pcm.samples)))
+    chunked_peak = float(np.max(np.abs(chunked.vocal_pcm.samples)))
+    assert single_peak == pytest.approx(chunked_peak, rel=0.05)
+    assert single_peak < 0.3
