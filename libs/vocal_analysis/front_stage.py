@@ -179,7 +179,7 @@ def _run_single(pcm, separate_vocals, separator, open_session, on_progress):
         transcribed = _run_inference("recognize", session.transcribe, vocal_path, on_progress=relay())
         segments = _run_inference("recognize", session.align, transcribed, on_progress=relay())
     _report_stage_start(on_progress, "rms")
-    vocal_pcm = _read_intermediate(vocal_path, _io.load_audio)
+    vocal_pcm = _read_intermediate(vocal_path, _read_pcm_without_peak_normalization)
     rms_envelope = _rms.compute_rms(vocal_pcm)
     return vocal_path, segments, rms_envelope, vocal_pcm
 

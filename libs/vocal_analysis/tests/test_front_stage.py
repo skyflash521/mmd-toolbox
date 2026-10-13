@@ -203,7 +203,13 @@ def test_single_run_reports_each_stage_before_running_it_and_passes_data_through
     session_fakes.events = call_order
     real_load_audio = front_stage._io.load_audio
     real_compute_rms = front_stage._rms.compute_rms
+    real_sf_read = front_stage.sf.read
     captured = {}
+
+    def spy_sf_read(path, *args, **kwargs):
+        if str(path) == str(vocal_path):
+            call_order.append("read_vocal")
+        return real_sf_read(path, *args, **kwargs)
 
     def spy_load_audio(path):
         call_order.append("load_audio")
@@ -227,6 +233,7 @@ def test_single_run_reports_each_stage_before_running_it_and_passes_data_through
             call_order.append(f"progress:{stage}")
 
     monkeypatch.setattr(front_stage._io, "load_audio", spy_load_audio)
+    monkeypatch.setattr(front_stage.sf, "read", spy_sf_read)
     monkeypatch.setattr(front_stage._separator, "separate", spy_separate)
     monkeypatch.setattr(front_stage._rms, "compute_rms", spy_compute_rms)
 
@@ -235,7 +242,7 @@ def test_single_run_reports_each_stage_before_running_it_and_passes_data_through
 
     assert [c for c in call_order if c not in ("prepare_dictionary", "close")] == [
         "progress:load", "load_audio", "progress:separate", "separate", "progress:recognize",
-        "transcribe", "align", "progress:rms", "load_audio", "compute_rms",
+        "transcribe", "align", "progress:rms", "read_vocal", "compute_rms",
     ]
     (session,) = session_fakes.sessions
     (transcribed,) = session.transcribed
@@ -244,7 +251,8 @@ def test_single_run_reports_each_stage_before_running_it_and_passes_data_through
     assert captured["separate_pcm"] is captured["load_audio_results"][0]
     assert result.analysis.rms is captured["compute_rms_result"]
     assert result.analysis.segments == given_segments
-    assert result.vocal_pcm is captured["load_audio_results"][1]
+    on_disk, _ = sf.read(vocal_path, dtype="float32", always_2d=True)
+    np.testing.assert_allclose(result.vocal_pcm.samples, on_disk, atol=1e-6)
 
 
 def test_session_receives_selected_content_recognizer_model(tmp_path, monkeypatch, session_fakes):
@@ -1011,14 +1019,14 @@ def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeyp
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
-    real_load_audio = front_stage._io.load_audio
+    real_read = front_stage.sf.read
 
-    def fail_on_vocal(path):
+    def fail_on_vocal(path, *a, **kw):
         if str(path) == str(vocal_path):
-            raise AudioLoadError("broken vocal wav", reason="not_audio")
-        return real_load_audio(path)
+            raise sf.LibsndfileError(1, prefix=str(vocal_path))
+        return real_read(path, *a, **kw)
 
-    monkeypatch.setattr(front_stage._io, "load_audio", fail_on_vocal)
+    monkeypatch.setattr(front_stage.sf, "read", fail_on_vocal)
     monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kw: vocal_path)
 
     with pytest.raises(front_stage.IntermediateReadError) as exc:
