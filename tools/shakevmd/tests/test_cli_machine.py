@@ -147,7 +147,9 @@ def test_machine_emits_warning_event_for_duplicate_frame(tmp_path, capsysbinary)
     events = machine_events(capsysbinary)
     assert events[-1]["type"] == "result" and events[-1]["mode"] == "bake"
     warns = [e for e in events if e["type"] == "warning"]
-    w = next(w for w in warns if w["code"] == "bake_normalize_duplicate")
+    dups = [w for w in warns if w["code"] == "normalize-duplicate"]
+    assert len(dups) == 1
+    w = dups[0]
     assert w["section"] == ["camera"]
     assert isinstance(w["message"], str) and w["message"]
 
