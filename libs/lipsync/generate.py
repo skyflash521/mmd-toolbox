@@ -133,25 +133,7 @@ def _final_weights(event: MouthEvent, params: GenerationParams) -> dict[str, flo
     return {morph: weight * scale for morph, weight in weights.items()}
 
 
-def _shape_diff(
-    shape_a: MouthShape,
-    class_a: ConsonantClass,
-    shape_b: MouthShape,
-    class_b: ConsonantClass,
-    params: GenerationParams,
-) -> float:
-    def _unit(shape: MouthShape, consonant_class: ConsonantClass) -> list[float]:
-        eff = _effective_profile(shape, consonant_class, params)
-        vec = [eff.get(morph, 0.0) for morph in _STANDARD_MORPHS]
-        norm = math.sqrt(sum(x * x for x in vec))
-        return [x / norm for x in vec] if norm > 0.0 else vec
-
-    ua, ub = _unit(shape_a, class_a), _unit(shape_b, class_b)
-    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ua, ub, strict=True)))
-    return dist / math.sqrt(2.0)
-
-
-def _transition_frames(diff: float, shorter_len: float, params: GenerationParams) -> int:
+def _transition_frames(shorter_len: float, params: GenerationParams) -> int:
     cap = shorter_len / 2.0
     return _round_half_up(max(1.0, min(float(params.coartic_overlap_max), cap)))
 
@@ -531,12 +513,8 @@ def generate_morph_keys(
     for i in range(n - 1):
         if groups[i].end != groups[i + 1].start:
             continue
-        left, right = groups[i].events[-1], groups[i + 1].events[0]
-        diff = _shape_diff(
-            left.shape, left.consonant_class, right.shape, right.consonant_class, params
-        )
         shorter = min(groups[i].end - groups[i].start, groups[i + 1].end - groups[i + 1].start)
-        coart_half[i] = _transition_frames(diff, shorter, params) / 2.0
+        coart_half[i] = _transition_frames(shorter, params) / 2.0
     legato_at: dict[int, tuple[float, float]] = {}
     for i in range(n - 1):
         gs, ge = groups[i].end, groups[i + 1].start

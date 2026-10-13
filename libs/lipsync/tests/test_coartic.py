@@ -1,12 +1,10 @@
-import math
 
 import pytest
 
 import lipsync
-from lipsync import ConsonantClass, GenerationParams, MouthEvent, MouthShape, generate
+from lipsync import GenerationParams, MouthEvent, MouthShape, generate
 
 _WIDE = GenerationParams(coartic_overlap_max=4)
-_NONE = ConsonantClass.NONE
 
 
 def _envelope(events, params):
@@ -24,26 +22,6 @@ def _approx_envelope(actual, expected):
         assert aw == pytest.approx(ew)
 
 
-def test_shape_diff_identical_is_zero():
-    assert generate._shape_diff(
-        MouthShape.A, _NONE, MouthShape.A, _NONE, GenerationParams()
-    ) == pytest.approx(0.0)
-
-
-def test_shape_diff_disjoint_is_one():
-    assert generate._shape_diff(
-        MouthShape.A, _NONE, MouthShape.U, _NONE, GenerationParams()
-    ) == pytest.approx(1.0)
-
-
-def test_shape_diff_includes_consonant_modulation():
-    cosine = 1.0 / math.sqrt(1.0 + 0.3**2)
-    expected = math.sqrt(2.0 - 2.0 * cosine) / math.sqrt(2.0)
-    assert generate._shape_diff(
-        MouthShape.A, _NONE, MouthShape.A, ConsonantClass.ROUNDED, GenerationParams()
-    ) == pytest.approx(expected)
-
-
 @pytest.mark.parametrize(
     "shorter_len,overlap_max,expected",
     [
@@ -54,10 +32,9 @@ def test_shape_diff_includes_consonant_modulation():
         pytest.param(1.0, 4, 1, id="raised_to_minimum_one"),
     ],
 )
-def test_transition_frames_independent_of_shape_diff(shorter_len, overlap_max, expected):
+def test_transition_frames(shorter_len, overlap_max, expected):
     p = GenerationParams(coartic_overlap_max=overlap_max)
-    for diff in (0.0, 0.5, 1.0):
-        assert generate._transition_frames(diff, shorter_len, p) == expected
+    assert generate._transition_frames(shorter_len, p) == expected
 
 
 def test_coarticulation_boundary_holds_midpoint_of_both_shapes():
