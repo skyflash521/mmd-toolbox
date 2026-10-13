@@ -8,9 +8,10 @@ from scipy.signal import savgol_filter
 from vmd import quat
 from vmd.cuts import detect_cuts_bone
 
+from . import presets
+
 POS_SPIKE = 0.3
 ROT_SPIKE_DEG = 5.0
-CUT_THRESHOLDS = (1.0, 30.0)
 MIN_ACCENT_STEPS = 2
 ZERO_EPS = 1e-9
 
@@ -22,12 +23,11 @@ Axis = int
 class NoiseDetection:
     pos_candidates: set[tuple[RelativeFrame, Axis]]
     rot_candidates: set[RelativeFrame]
-    pos_spikes: set[tuple[RelativeFrame, Axis]]
-    rot_spikes: set[RelativeFrame]
     pos_accent: set[tuple[RelativeFrame, Axis]]
     rot_accent: set[RelativeFrame]
     boundaries: set[RelativeFrame]
     cuts: set[RelativeFrame]
+    rot_reference: list
 
 
 def _relative_rotation_vector_rad(q_prev, q_cur):
@@ -185,12 +185,12 @@ def detect_noise_events(positions, rotations, *, pos_window, rot_window):
     _validate(positions, rotations, pos_window, rot_window)
     n = len(positions)
     if n == 0:
-        return NoiseDetection(set(), set(), set(), set(), set(), set(), set(), set())
+        return NoiseDetection(set(), set(), set(), set(), set(), set(), [])
 
     pos = np.asarray(positions, dtype=float).reshape(n, 3)
     rots = [quat.normalize(tuple(float(c) for c in q)) for q in rotations]
 
-    raw_cuts = detect_cuts_bone(0, positions, rots, CUT_THRESHOLDS)
+    raw_cuts = detect_cuts_bone(0, positions, rots, presets.CUT_THRESHOLDS)
     cuts = {f for f in raw_cuts if 0 < f < n}
     segs = _inclusive_segments_split_before_cuts(cuts, n)
 
@@ -201,13 +201,6 @@ def detect_noise_events(positions, rotations, *, pos_window, rot_window):
 
     pos_ref = _pos_reference(pos, segs, pos_window)
     rot_ref = _rot_reference(rots, segs, rot_window)
-
-    seg_of = {}
-    for s, e in segs:
-        if (_effective_window_or_zero(e - s + 1, pos_window)
-                or _effective_window_or_zero(e - s + 1, rot_window)):
-            for i in range(s, e + 1):
-                seg_of[i] = (s, e)
 
     pos_candidates = set()
     for s, e in segs:
@@ -228,39 +221,14 @@ def detect_noise_events(positions, rotations, *, pos_window, rot_window):
     pos_accent = _pos_accent(pos, segs)
     rot_accent = _rot_accent(rots, segs)
 
-    pos_spikes = set()
-    for (i, a) in pos_candidates:
-        if (i, a) in pos_accent or i in boundaries:
-            continue
-        s, e = seg_of.get(i, (i, i))
-        if i <= s or i >= e:
-            continue
-        incoming = pos[i, a] - pos[i - 1, a]
-        outgoing = pos[i + 1, a] - pos[i, a]
-        if abs(incoming) > ZERO_EPS and abs(outgoing) > ZERO_EPS and incoming * outgoing < 0.0:
-            pos_spikes.add((i, a))
-
-    rot_spikes = set()
-    for i in rot_candidates:
-        if i in rot_accent or i in boundaries:
-            continue
-        s, e = seg_of.get(i, (i, i))
-        if i <= s or i >= e:
-            continue
-        v_in = _relative_rotation_vector_rad(rots[i - 1], rots[i])
-        v_out = _relative_rotation_vector_rad(rots[i], rots[i + 1])
-        if _vlen(v_in) > ZERO_EPS and _vlen(v_out) > ZERO_EPS and _vdot(v_in, v_out) < 0.0:
-            rot_spikes.add(i)
-
     return NoiseDetection(
         pos_candidates=pos_candidates,
         rot_candidates=rot_candidates,
-        pos_spikes=pos_spikes,
-        rot_spikes=rot_spikes,
         pos_accent=pos_accent,
         rot_accent=rot_accent,
         boundaries=boundaries,
         cuts=cuts,
+        rot_reference=rot_ref,
     )
 
 
@@ -296,7 +264,7 @@ def apply_denoise(positions, rotations, *, pos_window, rot_window, pos_strength,
     segs = _inclusive_segments_split_before_cuts(det.cuts, n)
 
     smoothed = _pos_smoothed(pos, segs, pos_window)
-    rot_mean = _rot_reference(rots, segs, rot_window)
+    rot_mean = det.rot_reference
 
     out_pos = []
     for i in range(n):

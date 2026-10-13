@@ -14,8 +14,6 @@ from vmd.types import BoneKey
 
 from . import classify, presets
 
-_CUT_POS_THRESHOLD = 1.0
-_CUT_ROT_THRESHOLD_DEG = 30.0
 _MIN_SEG = 1
 _UNLIMITED_MAX_SEG = None
 _MIN_PARALLEL_TRACKS = 8
@@ -34,7 +32,7 @@ def _reduce_track(ks, tol_pos, tol_rot, curve_mode, want_diag, progress=None) ->
             ks,
             [(ks[0].frame, ks[-1].frame)],
             tols,
-            cut_thresholds=(_CUT_POS_THRESHOLD, _CUT_ROT_THRESHOLD_DEG),
+            cut_thresholds=presets.CUT_THRESHOLDS,
             keep_frames=[],
             no_cut_detect=False,
             min_seg=_MIN_SEG,

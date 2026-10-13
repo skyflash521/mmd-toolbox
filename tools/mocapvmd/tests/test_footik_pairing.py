@@ -1,6 +1,8 @@
 import pytest
 
-from mocapvmd import footik
+from mocapvmd import footik, presets
+
+_HORIZ_VEL_THRESH = presets.resolve_foot_detection(0.0)["horiz_vel_thresh"]
 
 
 @pytest.mark.parametrize("name,side", [
@@ -174,8 +176,8 @@ def test_relative_change_includes_y_axis():
 
 def test_detect_paired_none_matches_single_track():
     foot = _still(8, (0.0, 0.0, 0.0))
-    with_none = footik.detect_grounding_segments(foot, paired_positions=None)
-    single = footik.detect_grounding_segments(foot)
+    with_none = footik.detect_grounding_segments(foot, horiz_vel_thresh=_HORIZ_VEL_THRESH, paired_positions=None)
+    single = footik.detect_grounding_segments(foot, horiz_vel_thresh=_HORIZ_VEL_THRESH)
     assert with_none.candidate_frames == single.candidate_frames
     assert with_none.segments == single.segments
     assert with_none.relative_rejected_frames == frozenset()
@@ -185,7 +187,7 @@ def test_detect_relative_excludes_candidate_frames():
     foot = _still(12, (0.0, 0.0, 0.0))
     toe = [(1.0, 0.0, 0.0)] * 12
     toe[6] = (1.2, 0.0, 0.0)
-    det = footik.detect_grounding_segments(foot, paired_positions=toe)
+    det = footik.detect_grounding_segments(foot, horiz_vel_thresh=_HORIZ_VEL_THRESH, paired_positions=toe)
     assert det.relative_rejected_frames == frozenset({6, 7})
     assert 6 not in det.candidate_frames and 7 not in det.candidate_frames
     assert [(s.start, s.end) for s in det.segments] == [(0, 5), (8, 11)]

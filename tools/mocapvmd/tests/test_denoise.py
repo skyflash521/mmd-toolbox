@@ -42,17 +42,16 @@ def _x_step_at_frame6():
     return [(0.0, 0.0, 0.0)] * 6 + [(_POS_CUT_JUMP, 0.0, 0.0)] * 5
 
 
-def test_empty_track_has_no_spikes():
+def test_empty_track_has_no_candidates_and_empty_rotation_reference():
     r = detect([], [])
-    assert r.pos_spikes == set()
-    assert r.rot_spikes == set()
+    assert r.pos_candidates == set()
+    assert r.rot_candidates == set()
+    assert r.rot_reference == []
 
 
 @pytest.mark.parametrize("n", [1, 2])
-def test_track_shorter_than_three_frames_has_no_candidates_or_spikes(n):
+def test_track_shorter_than_three_frames_has_no_candidates(n):
     r = detect(still(n), idents(n))
-    assert r.pos_spikes == set()
-    assert r.rot_spikes == set()
     assert r.pos_candidates == set()
     assert r.rot_candidates == set()
 
@@ -61,20 +60,17 @@ def test_all_same_value_no_events():
     r = detect(still(_N), idents(_N))
     assert r.pos_candidates == set()
     assert r.rot_candidates == set()
-    assert r.pos_spikes == set()
-    assert r.rot_spikes == set()
     assert r.pos_accent == set()
     assert r.rot_accent == set()
 
 
-def test_position_single_frame_round_trip_is_spike_on_that_axis_only():
+def test_position_single_frame_round_trip_is_candidate_on_that_axis_only():
     pos = still(_N)
     pos[_SPIKE_FRAME] = (0.5, 0.0, 0.0)
     r = detect(pos, idents(_N))
     assert (_SPIKE_FRAME, 0) in r.pos_candidates
-    assert (_SPIKE_FRAME, 0) in r.pos_spikes
-    assert (_SPIKE_FRAME, 1) not in r.pos_spikes
-    assert (_SPIKE_FRAME, 2) not in r.pos_spikes
+    assert (_SPIKE_FRAME, 1) not in r.pos_candidates
+    assert (_SPIKE_FRAME, 2) not in r.pos_candidates
 
 
 def test_position_spike_threshold_exact_is_not_candidate():
@@ -82,22 +78,13 @@ def test_position_spike_threshold_exact_is_not_candidate():
     pos[_SPIKE_FRAME] = (_POS_SPIKE_THRESHOLD, 0.0, 0.0)
     r = detect(pos, idents(_N))
     assert (_SPIKE_FRAME, 0) not in r.pos_candidates
-    assert (_SPIKE_FRAME, 0) not in r.pos_spikes
 
 
-def test_position_spike_threshold_over_is_spike():
+def test_position_spike_threshold_over_is_candidate():
     pos = still(_N)
     pos[_SPIKE_FRAME] = (0.31, 0.0, 0.0)
     r = detect(pos, idents(_N))
-    assert (_SPIKE_FRAME, 0) in r.pos_spikes
-
-
-def test_position_jump_that_does_not_return_is_not_spike():
-    pos = still(_N)
-    pos[_SPIKE_FRAME] = (0.5, 0.0, 0.0)
-    pos[_SPIKE_FRAME + 1] = (0.5, 0.0, 0.0)
-    r = detect(pos, idents(_N))
-    assert (_SPIKE_FRAME, 0) not in r.pos_spikes
+    assert (_SPIKE_FRAME, 0) in r.pos_candidates
 
 
 def test_position_same_direction_velocity_run_is_accent_and_not_candidate():
@@ -105,10 +92,9 @@ def test_position_same_direction_velocity_run_is_accent_and_not_candidate():
     r = detect(pos, idents(_N))
     assert _axis(r.pos_accent, 0) == _RAMP_ACCENT_FRAMES
     assert _axis(r.pos_candidates, 0) == set()
-    assert _axis(r.pos_spikes, 0) == set()
 
 
-def test_accent_priority_over_spike_at_run_peak():
+def test_run_peak_is_both_candidate_and_accent():
     xs = [0.0, 0.0, 0.5, 1.0, 1.5, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0]
     peak = 4
     rising_and_falling_run_frames = {1, 2, 3, 4, 5, 6, 7}
@@ -116,19 +102,17 @@ def test_accent_priority_over_spike_at_run_peak():
     r = detect(pos, idents(_N))
     assert (peak, 0) in r.pos_candidates
     assert (peak, 0) in r.pos_accent
-    assert (peak, 0) not in r.pos_spikes
     assert _axis(r.pos_accent, 0) == rising_and_falling_run_frames
-    assert _axis(r.pos_spikes, 0) == set()
 
 
-def test_axis_independence_x_spike_and_y_accent():
+def test_axis_independence_x_candidate_and_y_accent():
     pos = [(0.0, y, 0.0) for y in _RAMP_STEPS]
     pos[_SPIKE_FRAME] = (0.6, pos[_SPIKE_FRAME][1], 0.0)
     r = detect(pos, idents(_N))
-    assert (_SPIKE_FRAME, 0) in r.pos_spikes
+    assert (_SPIKE_FRAME, 0) in r.pos_candidates
     assert (_SPIKE_FRAME, 0) not in r.pos_accent
     assert (_SPIKE_FRAME, 1) in r.pos_accent
-    assert (_SPIKE_FRAME, 1) not in r.pos_spikes
+    assert (_SPIKE_FRAME, 1) not in r.pos_candidates
 
 
 def test_range_edges_are_boundaries():
@@ -143,9 +127,9 @@ def test_position_cut_marks_both_adjacent_frames_as_boundaries():
     assert 6 in r.boundaries
 
 
-def test_position_jump_at_cut_is_not_spike():
+def test_position_jump_at_cut_is_not_candidate():
     r = detect(_x_step_at_frame6(), idents(_N))
-    assert (6, 0) not in r.pos_spikes
+    assert (6, 0) not in r.pos_candidates
 
 
 def test_cuts_reported_separately_from_boundaries():
@@ -153,12 +137,11 @@ def test_cuts_reported_separately_from_boundaries():
     assert r.cuts == {6}
 
 
-def test_rotation_single_frame_round_trip_is_spike():
+def test_rotation_single_frame_round_trip_is_candidate():
     rots = idents(_N)
     rots[_SPIKE_FRAME] = quat_y(10.0)
     r = detect(still(_N), rots)
     assert _SPIKE_FRAME in r.rot_candidates
-    assert _SPIKE_FRAME in r.rot_spikes
 
 
 def test_rotation_jump_below_threshold_is_not_candidate():
@@ -166,7 +149,6 @@ def test_rotation_jump_below_threshold_is_not_candidate():
     rots[_SPIKE_FRAME] = quat_y(3.0)
     r = detect(still(_N), rots)
     assert _SPIKE_FRAME not in r.rot_candidates
-    assert _SPIKE_FRAME not in r.rot_spikes
 
 
 def test_rotation_quaternion_sign_flip_is_not_candidate():
@@ -174,7 +156,6 @@ def test_rotation_quaternion_sign_flip_is_not_candidate():
     rots[_SPIKE_FRAME] = (0.0, 0.0, 0.0, -1.0)
     r = detect(still(_N), rots)
     assert _SPIKE_FRAME not in r.rot_candidates
-    assert _SPIKE_FRAME not in r.rot_spikes
 
 
 def test_non_unit_quaternion_is_normalized_before_detection():
@@ -182,7 +163,7 @@ def test_non_unit_quaternion_is_normalized_before_detection():
     rots = [scale(IDENT)] * _N
     rots[_SPIKE_FRAME] = scale(quat_y(10.0))
     r = detect(still(_N), rots)
-    assert _SPIKE_FRAME in r.rot_spikes
+    assert _SPIKE_FRAME in r.rot_candidates
 
 
 def test_rotation_same_direction_velocity_run_is_accent():
@@ -190,7 +171,11 @@ def test_rotation_same_direction_velocity_run_is_accent():
     rots = [quat_y(d) for d in degs]
     r = detect(still(_N), rots)
     assert r.rot_accent == _RAMP_ACCENT_FRAMES
-    assert r.rot_spikes == set()
+
+
+def test_rotation_reference_has_one_entry_per_frame():
+    r = detect(still(_N), idents(_N))
+    assert r.rot_reference == [IDENT] * _N
 
 
 def test_length_mismatch_raises():

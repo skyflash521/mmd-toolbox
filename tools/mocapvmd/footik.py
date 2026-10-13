@@ -7,12 +7,10 @@ from typing import Literal
 from . import presets
 
 MIN_GROUND_LEN = 4
-HORIZ_VEL_THRESH = 0.08
 VERT_VEL_THRESH = 0.04
 LOCAL_WINDOW = 5
 GROUND_Y_TOL = 0.08
 RELATIVE_DELTA_THRESH = 0.08
-MAX_CORRECTION = 0.5
 
 Side = Literal["left", "right"]
 Vec3 = tuple[float, float, float]
@@ -91,9 +89,9 @@ def _runs(frames, min_len):
 def detect_grounding_segments(
     positions,
     *,
+    horiz_vel_thresh,
     paired_positions=None,
     min_ground_len=MIN_GROUND_LEN,
-    horiz_vel_thresh=HORIZ_VEL_THRESH,
     vert_vel_thresh=VERT_VEL_THRESH,
     local_window=LOCAL_WINDOW,
     ground_y_tol=GROUND_Y_TOL,
@@ -229,7 +227,7 @@ def _fade_coef(offset, length, center, edge, fade_width):
     return edge + (center - edge) * (d / w)
 
 
-def apply_foot_lock(positions, segments, strength, *, max_displacement=MAX_CORRECTION):
+def apply_foot_lock(positions, segments, strength, *, max_displacement):
     out = [tuple(float(c) for c in p) for p in positions]
     locks = []
     xz_c, xz_e = strength["xz_center"], strength["xz_edge"]

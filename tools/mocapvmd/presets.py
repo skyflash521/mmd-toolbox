@@ -36,6 +36,8 @@ _GROUNDING_HORIZ_VEL_THRESH = _BySuppression(at_s0=0.08, at_s1=1.0)
 _LOCK_MAX_DISPLACEMENT_PER_FRAME = _BySuppression(at_s0=0.5, at_s1=2.0)
 _FOOT_LOCK_FADE_WIDTH = 3
 
+CUT_THRESHOLDS = (1.0, 30.0)
+
 
 def _validate_suppression(suppression):
     if not math.isfinite(suppression) or not 0.0 <= suppression <= 1.0:

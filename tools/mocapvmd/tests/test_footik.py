@@ -1,6 +1,6 @@
 import pytest
 
-from mocapvmd import footik
+from mocapvmd import footik, presets
 
 _MIN_GROUND_LEN = 4
 _HORIZ_STEP_JUST_BELOW_THRESH = 0.079
@@ -10,7 +10,11 @@ _VERT_STEP_JUST_ABOVE_THRESH = 0.041
 _FAST_STEP = 0.5
 
 
+_NO_SUPPRESSION_DETECTION = presets.resolve_foot_detection(0.0)
+
+
 def detect(positions, **kw):
+    kw.setdefault("horiz_vel_thresh", _NO_SUPPRESSION_DETECTION["horiz_vel_thresh"])
     return footik.detect_grounding_segments(positions, **kw)
 
 

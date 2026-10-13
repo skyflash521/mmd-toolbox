@@ -26,7 +26,7 @@ def _track(xs, ys=None, zs=None):
 
 
 def _lock(positions, segments):
-    return footik.apply_foot_lock(positions, segments, _FIXED_LOCK_STRENGTH)
+    return footik.apply_foot_lock(positions, segments, _FIXED_LOCK_STRENGTH, max_displacement=_MAX_CORRECTION)
 
 
 def test_anchor_is_median_robust_to_outlier():
