@@ -1,5 +1,5 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -55,11 +55,15 @@ def _crossfaded_channel(seed, si, ch, t, freq, weights, octaves=noise.DEFAULT_OC
 
 @dataclass
 class BakeResult:
-    """resolved は端を既存キーへスナップした適用範囲 (start, end) の昇順。"""
+    """resolved は端を既存キーへスナップした適用範囲 (start, end) の昇順。detected_cuts は自動検出したカットの
+    フレーム(手動カットを含まない)。max_amplitude は適用範囲内の焼き込みキーと、重複除去後の入力キー列の補間値との
+    成分差(回転・位置)の絶対値の最大。"""
 
     camera_keys: list[CameraKey]
     warnings: list[ShakeWarning]
     resolved: list[tuple[int, int]]
+    detected_cuts: list[int] = field(default_factory=list)
+    max_amplitude: float = 0.0
 
 
 def _working_view_and_dropped_count(camera_keys):
@@ -279,6 +283,7 @@ def bake(
 
     fade_frames = int(round(fade_sec * FPS))
     baked: list = []
+    max_amplitude = 0.0
 
     for a, b in resolved:
         n = b - a + 1
@@ -344,6 +349,12 @@ def bake(
                     f, s["distance"], shaken["position"], shaken["rotation"],
                     LINEAR_CAMERA_INTERP, fov, persp,
                 ))
+                for i in range(3):
+                    max_amplitude = max(
+                        max_amplitude,
+                        abs(shaken["rotation"][i] - s["rotation"][i]),
+                        abs(shaken["position"][i] - s["position"][i]),
+                    )
                 if progress is not None:
                     done_baked += 1
                     progress(done_baked, total_baked)
@@ -355,4 +366,10 @@ def bake(
     preserved_fov_keys = [k for k in wv if k.frame in gradual_fov_boundaries and _in_range(k.frame)]
 
     result_keys = sorted(baked + preserved_fov_keys + out_of_range_originals, key=lambda k: k.frame)
-    return BakeResult(camera_keys=result_keys, warnings=_unique_in_order(warnings), resolved=resolved)
+    return BakeResult(
+        camera_keys=result_keys,
+        warnings=_unique_in_order(warnings),
+        resolved=resolved,
+        detected_cuts=detected,
+        max_amplitude=max_amplitude,
+    )

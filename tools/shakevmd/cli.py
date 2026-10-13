@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import math
 import sys
 import time
@@ -12,17 +13,28 @@ from cli_events import (
 )
 from cli_options import CompoundValidator, RangeValidator, describe_options
 from cli_progress_router import ProgressRouter
-from shakevmd import __version__, cuts, presets
+from shakevmd import __version__, presets
 from shakevmd.bake import RangeOverlapError, bake
 from shakevmd.warn import ShakeWarning
-from vmd import VmdFormatError, interp, io
+from vmd import VmdFormatError, io, validate_values
 from vmd.reduce import Tolerances, reduce_camera_track
+from vmd.types import VmdDocument, VmdValueError
 
-_HARD_DEFAULTS = {
-    "amp_rot": 0.8, "amp_pos": 0.05, "rot_weights": (1.0, 1.0, 0.3),
-    "freq": 1.2, "motion_damp": 1.0, "settle": 0.0, "cut_threshold": (5.0, 20.0),
-    "fade": 0.7,
+_BAKE_DEFAULTS = {
+    name: p.default for name, p in inspect.signature(bake).parameters.items()
+    if p.default is not inspect.Parameter.empty
 }
+_DEFAULT_BY_DEST = {
+    "amp_rot": _BAKE_DEFAULTS["amp_rot"],
+    "amp_pos": _BAKE_DEFAULTS["amp_pos"],
+    "rot_weights": _BAKE_DEFAULTS["rot_weights"],
+    "freq": _BAKE_DEFAULTS["freq"],
+    "motion_damp": _BAKE_DEFAULTS["motion_damp"],
+    "settle": _BAKE_DEFAULTS["settle"],
+    "cut_threshold": (_BAKE_DEFAULTS["cut_pos_threshold"], _BAKE_DEFAULTS["cut_rot_threshold"]),
+    "fade": _BAKE_DEFAULTS["fade_sec"],
+}
+_IGNORED_NORMALIZE_WARNING_CODES = frozenset({"normalize-sorted"})
 
 _BONE_TOLERANCES_UNUSED_FOR_CAMERA = {"bone_pos": 1.0, "bone_rot": 30.0}
 _SMOOTH_TOLERANCES = Tolerances(
@@ -83,7 +95,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rot-weights", type=_ROT_WEIGHTS, metavar="P,Y,R",
                    help="Pitch/Yaw/Roll 個別重み")
     p.add_argument("--freq", type=_POSITIVE_FLOAT, help="ノイズ基本周波数(Hz)")
-    p.add_argument("--seed", type=int, default=1, help="ノイズシード(既定 1・再現性)")
+    p.add_argument("--seed", type=int, default=_BAKE_DEFAULTS["seed"],
+                   help=f"ノイズシード(既定 {_BAKE_DEFAULTS['seed']}・再現性)")
     p.add_argument("--fade", type=_NONNEG_FLOAT, help="範囲端の自動フェード時間(秒)")
     p.add_argument("--motion-damp", type=_NONNEG_FLOAT,
                    help="元モーション速度に応じた振幅減衰係数(0 で無効)")
@@ -125,7 +138,7 @@ _D_TYPE = {
 }
 
 _DESCRIBE_DEFAULTS = {
-    k: list(v) if isinstance(v, tuple) else v for k, v in _HARD_DEFAULTS.items()
+    k: list(v) if isinstance(v, tuple) else v for k, v in _DEFAULT_BY_DEST.items()
 }
 
 
@@ -152,39 +165,22 @@ def _all_finite(keys) -> bool:
     return True
 
 
-def _working_view(camera):
-    by_frame = {}
-    for k in camera:
-        by_frame[k.frame] = k
-    return [by_frame[f] for f in sorted(by_frame)]
-
-
 def _resolve_param(name, args, preset):
     v = getattr(args, name)
     if v is not None:
         return v
     if name in preset:
         return preset[name]
-    return _HARD_DEFAULTS[name]
+    return _DEFAULT_BY_DEST[name]
 
 
-def _shake_stats(orig_camera, baked_keys, applied, cut_pos, cut_rot):
-    """戻り値は (最大振幅, 検出したカットのフレーム列)。"""
-    wv = _working_view(orig_camera)
-    detected_cuts = cuts.detect_cuts(wv, cut_pos, cut_rot)
-    applied_frames = set()
-    for a, b in applied:
-        applied_frames.update(range(a, b + 1))
-    max_amp = 0.0
-    for k in sorted(baked_keys, key=lambda x: x.frame):
-        if k.frame not in applied_frames:
+def _surface_warnings(warnings, ctx) -> None:
+    seen = set()
+    for w in warnings:
+        if w in seen:
             continue
-        s = interp.sample_camera(wv, k.frame)
-        dr = [k.rotation[i] - s["rotation"][i] for i in range(3)]
-        dp = [k.position[i] - s["position"][i] for i in range(3)]
-        for v in dr + dp:
-            max_amp = max(max_amp, abs(v))
-    return max_amp, detected_cuts
+        seen.add(w)
+        ctx.warn(w.code, w.message, section=w.section if ctx.machine else None)
 
 
 def _smooth_keep_frames(resolved, detected_cuts) -> tuple[int, ...]:
@@ -223,12 +219,27 @@ def _run(args, ctx) -> int:
     except Exception as e:
         return fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}",
                     1, field="input")
+    _surface_warnings(
+        [ShakeWarning(w.code, w.message, (w.section,) if w.section else None) for w in read_warnings],
+        ctx)
     if not doc.camera:
         return fail("no_camera_keys", "入力にカメラキーがない", 1, field="input")
 
+    try:
+        validate_values(VmdDocument(camera=doc.camera))
+    except VmdValueError as e:
+        return fail("invalid_camera_values", f"カメラ値が不正(非有限): {e}", 1, field="input")
+
+    normalized, normalize_warnings = io.normalize(doc, sections=["camera"])
+    camera_keys = normalized.camera
+    _surface_warnings(
+        [ShakeWarning(w.code, w.message, (w.section,) if w.section else None)
+         for w in normalize_warnings if w.code not in _IGNORED_NORMALIZE_WARNING_CODES],
+        ctx)
+
     ranges = None
     if args.ranges:
-        frames = [k.frame for k in doc.camera]
+        frames = [k.frame for k in camera_keys]
         first, last = min(frames), max(frames)
         ranges = [
             (first if s is None else s, last if e is None else e)
@@ -260,7 +271,7 @@ def _run(args, ctx) -> int:
                        elapsed=time.monotonic() - bake_start)
     try:
         result = bake(
-            doc.camera,
+            camera_keys,
             ranges=ranges,
             seed=args.seed,
             amp_rot=amp_rot,
@@ -287,11 +298,7 @@ def _run(args, ctx) -> int:
         return fail("non_finite_output",
                     "焼き出力が非有限(inf/nan)になった。振幅・重みが過大", 2)
 
-    warnings = [
-        ShakeWarning(w.code, w.message, (w.section,) if w.section else None)
-        for w in read_warnings
-    ]
-    warnings += list(result.warnings)
+    warnings = list(result.warnings)
     sections = [
         name for name, present in (
             ("bone", doc.bone), ("morph", doc.morph), ("light", doc.light),
@@ -304,13 +311,12 @@ def _run(args, ctx) -> int:
             "カメラ以外のセクションは無加工で透過した",
             tuple(sections),
         ))
-    for w in warnings:
-        ctx.warn(w.code, w.message, section=w.section if machine else None)
+    _surface_warnings(warnings, ctx)
 
-    wv_frames = [k.frame for k in _working_view(doc.camera)]
+    wv_frames = [k.frame for k in camera_keys]
     applied = result.resolved
-    max_amp, detected_cuts = _shake_stats(
-        doc.camera, result.camera_keys, applied, cut_threshold[0], cut_threshold[1])
+    max_amp = result.max_amplitude
+    detected_cuts = result.detected_cuts
 
     if not machine and (args.dry_run or args.verbose):
         print(f"range: {applied}")

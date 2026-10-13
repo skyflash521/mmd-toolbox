@@ -2,8 +2,6 @@ import numpy as np
 
 FPS = 30.0
 
-DEFAULT_MOTION_DAMP = 1.0
-DEFAULT_FADE_SEC = 0.7
 DEFAULT_SETTLE_TIME_SEC = 1.0
 DEFAULT_SETTLE_FREQ_HZ = 2.5
 DEFAULT_STOP_SPEED_THRESHOLD = 0.1
@@ -35,7 +33,7 @@ def _smoothstep(t: np.ndarray) -> np.ndarray:
     return t * t * (3.0 - 2.0 * t)
 
 
-def fade_envelope(n_frames: int, fade_sec: float = DEFAULT_FADE_SEC, fps: float = FPS) -> np.ndarray:
+def fade_envelope(n_frames: int, fade_sec: float, fps: float = FPS) -> np.ndarray:
     if n_frames <= 0:
         return np.zeros(0)
     f0 = int(round(fade_sec * fps))
@@ -64,7 +62,7 @@ def frame_speeds(values, ref) -> np.ndarray:
 
 
 def adaptive_amplitude(
-    base_amp: float, normalized_speed, motion_damp: float = DEFAULT_MOTION_DAMP
+    base_amp: float, normalized_speed, motion_damp: float
 ):
     return base_amp * np.maximum(0.0, 1.0 - motion_damp * normalized_speed)
 

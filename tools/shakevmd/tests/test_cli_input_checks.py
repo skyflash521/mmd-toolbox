@@ -56,7 +56,9 @@ def test_non_finite_camera_value_is_reported_in_plain_mode(tmp_path, capsys):
     out = tmp_path / "out.vmd"
     src = _write(tmp_path / "in.vmd", [cam(0), _INVALID_CAMERA_KEYS["nan-position"], cam(60)])
     assert cli.main([src, "-o", str(out)]) == _EXIT_FAILURE
-    assert "invalid_camera_values" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and len(err.splitlines()) == 1
+    assert "camera" in err and "Traceback" not in err
     assert not out.exists()
 
 
