@@ -165,6 +165,7 @@ def _build_separator(output_dir: Path):
     return Separator(
         log_level=logging.CRITICAL,
         output_dir=str(output_dir),
+        model_file_dir=str(Path.home() / ".cache" / "audio-separator-models"),
         output_single_stem=SEPARATOR_CONFIG.output_single_stem,
         demucs_params={
             "segment_size": "Default",
