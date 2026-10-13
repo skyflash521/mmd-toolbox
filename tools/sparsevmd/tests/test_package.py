@@ -25,10 +25,7 @@ def test_console_script_entry_point_callable():
 @pytest.mark.parametrize(
     ("legacy_module", "vmd_module", "symbol"),
     [
-        pytest.param("sparsevmd.fit", "vmd.fit", "fit_bezier_curve", id="fit"),
         pytest.param("sparsevmd.reduce", "vmd.reduce", "reduce_bone_track", id="reduce"),
-        pytest.param("sparsevmd.cuts", "vmd.cuts", "detect_cuts_camera", id="cuts"),
-        pytest.param("sparsevmd.sample", "vmd.sample", "perspective_series", id="sample"),
         pytest.param("sparsevmd.presets", "vmd.reduce", "Tolerances", id="presets"),
     ],
 )

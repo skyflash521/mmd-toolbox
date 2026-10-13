@@ -14,7 +14,8 @@ from cli_events import (
 )
 from cli_options import CompoundValidator, RangeValidator, describe_options
 from cli_progress import progress
-from vmd import io
+from vmd import io, validate_values
+from vmd.types import VmdDocument, VmdValueError
 
 from . import __version__, presets, ranges, report, selection
 from .reduce import (
@@ -65,6 +66,13 @@ _CUT_THRESHOLD_BONE = CompoundValidator(
 _D_GROUPS = {"choices": ["core", "arms", "legs", "fingers", "ik", "mocap"]}
 
 _MIN_REDUCIBLE_KEYS = 2
+
+_TARGET_SECTIONS = {"camera": ["camera"], "bone": ["bone"], "all": ["camera", "bone"]}
+_IGNORED_NORMALIZE_WARNING_CODES = frozenset({"normalize-sorted"})
+_INVALID_VALUES = {
+    "bone": ("invalid_bone_values", "ボーン値が不正(非有限・ゼロノルムの quaternion)"),
+    "camera": ("invalid_camera_values", "カメラ値が不正(非有限)"),
+}
 
 _D_TYPE = {
     "input": ("str", None),
@@ -218,6 +226,22 @@ def _undecodable_bone_names(bone_keys):
     return undecodable
 
 
+@dataclasses.dataclass(frozen=True)
+class _InputKeyCounts:
+    camera: int
+    bone: Counter
+
+
+def _surface_warnings(warnings, ctx):
+    seen = set()
+    for w in warnings:
+        key = (w.code, w.section, w.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        ctx.warn(w.code, w.message, section=w.section)
+
+
 def _bone_keys_by_name(bone_keys):
     groups = {}
     for k in bone_keys:
@@ -291,7 +315,7 @@ def _machine_progress(emitter, stage) -> Callable[..., None]:
     return cb
 
 
-def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
+def _build_inspect(args, doc, input_counts, do_camera, do_bone, selected, global_ranges,
                    new_camera, new_bone, camera_errors, bone_errors, camera_diag, bone_diag, reduced):
     sections = [name for name, present in (
         ("camera", doc.camera), ("bone", doc.bone), ("morph", doc.morph),
@@ -308,18 +332,19 @@ def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
     camera = None
     if do_camera:
         camera = {
-            "input_keys": len(doc.camera),
+            "input_keys": input_counts.camera,
             "output_keys": len(new_camera),
             "errors": camera_errors,
             "cuts": (camera_diag or {}).get("cuts") or [],
         }
     bones = None
     if do_bone:
-        io_counts = _bone_io_counts(doc.bone, new_bone)
+        io_counts = _bone_io_counts(doc.bone, input_counts.bone, new_bone)
+        reducible_counts = Counter(k.name for k in doc.bone)
         bones = []
         for name in _bone_names_in_order(doc.bone):
             inp, out = io_counts.get(name, (0, 0))
-            reducible = _is_reducible(name, selected, inp)
+            reducible = _is_reducible(name, selected, reducible_counts[name])
             bones.append({
                 "name": name,
                 "selected": name in selected,
@@ -332,7 +357,7 @@ def _build_inspect(args, doc, do_camera, do_bone, selected, global_ranges,
         "output": None,
         "target": args.target,
         "sections": sections,
-        "keys": {"camera": len(doc.camera), "bone": len(doc.bone)},
+        "keys": {"camera": input_counts.camera, "bone": sum(input_counts.bone.values())},
         "frame_range": frame_range,
         "duration_sec": duration,
         "ranges": [[s, e] for s, e in global_ranges],
@@ -386,20 +411,22 @@ def _run(args, ctx):
     except Exception as e:
         return ctx.fail("not_vmd", f"入力を VMD として読めない: {type(e).__name__}: {e}", 1, field="input")
 
-    seen_warn = set()
-    for w in read_warnings:
-        key = (w.code, w.section, w.message)
-        if key in seen_warn:
-            continue
-        seen_warn.add(key)
-        ctx.warn(w.code, w.message, section=w.section)
+    _surface_warnings(read_warnings, ctx)
 
-    norm_sections = []
-    if args.target in ("camera", "all"):
-        norm_sections.append("camera")
-    if args.target in ("bone", "all"):
-        norm_sections.append("bone")
-    doc, _ = io.normalize(doc, sections=norm_sections)
+    target_sections = _TARGET_SECTIONS[args.target]
+    try:
+        validate_values(VmdDocument(
+            bone=doc.bone if "bone" in target_sections else [],
+            camera=doc.camera if "camera" in target_sections else [],
+        ))
+    except VmdValueError as e:
+        code, summary = _INVALID_VALUES[e.section]
+        return ctx.fail(code, f"{summary}: {e}", 1, field="input")
+
+    input_counts = _InputKeyCounts(len(doc.camera), Counter(k.name for k in doc.bone))
+    doc, normalize_warnings = io.normalize(doc, sections=target_sections)
+    _surface_warnings(
+        [w for w in normalize_warnings if w.code not in _IGNORED_NORMALIZE_WARNING_CODES], ctx)
 
     try:
         includes, excludes = _build_selectors(args)
@@ -517,8 +544,8 @@ def _run(args, ctx):
     if want_report:
         rep = report.build_report(
             target=args.target,
-            camera=(len(doc.camera), len(new_camera)) if do_camera else None,
-            bones=_bone_io_counts(doc.bone, new_bone) if do_bone else None,
+            camera=(input_counts.camera, len(new_camera)) if do_camera else None,
+            bones=_bone_io_counts(doc.bone, input_counts.bone, new_bone) if do_bone else None,
             selected_bones=selected,
             ranges=global_ranges,
             keep_frames=args.keep_frames,
@@ -535,7 +562,7 @@ def _run(args, ctx):
     if args.dry_run:
         if ctx.emitter is not None:
             ctx.emitter.result(mode="inspect", **_build_inspect(
-                args, doc, do_camera, do_bone, selected, global_ranges, new_camera, new_bone,
+                args, doc, input_counts, do_camera, do_bone, selected, global_ranges, new_camera, new_bone,
                 camera_errors, bone_errors, camera_diag, bone_diag, did_reduce))
         return 0
 
@@ -552,16 +579,16 @@ def _run(args, ctx):
     else:
         ctx.emitter.result(
             mode="reduce", output=output, target=args.target,
-            camera={"input_keys": len(doc.camera), "output_keys": len(new_camera)} if do_camera else None,
-            bone={"input_keys": len(doc.bone), "output_keys": len(new_bone)} if do_bone else None,
+            camera={"input_keys": input_counts.camera, "output_keys": len(new_camera)} if do_camera else None,
+            bone={"input_keys": sum(input_counts.bone.values()), "output_keys": len(new_bone)} if do_bone else None,
             reduced=did_reduce)
     return 0
 
 
-def _bone_io_counts(in_keys, out_keys):
-    in_counts = Counter(k.name for k in in_keys)
+def _bone_io_counts(ordered_keys, input_counts, out_keys):
     out_counts = Counter(k.name for k in out_keys)
-    return {name: (in_counts[name], out_counts.get(name, 0)) for name in in_counts}
+    return {name: (input_counts[name], out_counts.get(name, 0))
+            for name in dict.fromkeys(k.name for k in ordered_keys)}
 
 
 def _sorted_camera(camera):
