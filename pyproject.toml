@@ -75,8 +75,8 @@ disable = ["MD013", "MD038", "MD051"]
 [tool.pytest.ini_options]
 testpaths = ["libs/cli_events", "libs/cli_options", "libs/cli_progress",
              "libs/cli_progress_router", "libs/cli_resource_watch", "libs/lipsync", "libs/pmx", "libs/vmd",
-             "libs/vocal_analysis", "libs/vocal_analysis_cli", "libs/vpr", "scripts", "tools/mocapvmd", "tools/shakevmd", "tools/song2vmd",
+             "libs/vocal_analysis", "libs/vocal_analysis_cli", "libs/vpr", "scripts", ".github/scripts", "tools/mocapvmd", "tools/shakevmd", "tools/song2vmd",
              "tools/song2vpr", "tools/sparsevmd", "tools/vpr2vmd"]
-pythonpath = ["libs", "tools", "scripts"]
+pythonpath = ["libs", "tools", "scripts", ".github/scripts"]
 # pytest の既定の prepend インポートモードは、別ディレクトリの同名テストファイルを collection で衝突させる。
 addopts = "--import-mode=importlib"
