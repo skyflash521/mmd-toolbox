@@ -219,9 +219,15 @@ def _check_section_flags(doc: VmdDocument) -> None:
             section="self_shadow",
             key_index=0,
         )
-    if not (doc.has_self_shadow_section and doc.has_ik_section) and doc.ik_property:
+    if doc.has_ik_section and not doc.has_self_shadow_section:
         raise VmdFormatError(
-            "IKセクションが書き出されないのにIKキーがある",
+            "IKセクションありなのにセルフ影セクションがない",
+            section="ik_property",
+            key_index=0,
+        )
+    if not doc.has_ik_section and doc.ik_property:
+        raise VmdFormatError(
+            "IKセクションなしなのにIKキーがある",
             section="ik_property",
             key_index=0,
         )

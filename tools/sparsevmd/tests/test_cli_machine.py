@@ -133,14 +133,26 @@ def test_machine_error_segment_bounds_conflict_has_null_field(tmp_path, capsysbi
     assert e["code"] == "segment_bounds_conflict" and e["field"] is None and e["exit_code"] == 2
 
 
-def test_machine_error_bad_tolerance_fov_below_half(tmp_path, capsysbinary):
+def test_machine_error_camera_fov_tol_below_half_is_bad_argument(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     ramp_camera(src)
     rc = cli.main([str(src), "--machine", "--target", "camera", "--camera-fov-tol", "0.4"])
     assert rc == 2
     e = machine_error(capsysbinary)
-    assert e["code"] == "bad_tolerance" and e["field"] is None and e["exit_code"] == 2
+    assert e["code"] == "bad_argument" and e["exit_code"] == 2
     assert isinstance(e["message"], str) and e["message"]
+
+
+@pytest.mark.parametrize("option", ["--bone-pos-tol", "--bone-rot-tol", "--camera-pos-tol", "--camera-rot-tol",
+                                    "--camera-distance-tol", "--camera-fov-tol"])
+@pytest.mark.parametrize("bad", ["-0.01", "nan", "inf", "abc"], ids=["negative", "nan", "inf", "non-numeric"])
+def test_machine_error_invalid_tolerance_is_bad_argument(tmp_path, capsysbinary, option, bad):
+    src = tmp_path / "in.vmd"
+    ramp_camera(src)
+    rc = cli.main([str(src), "--machine", "--target", "camera", f"{option}={bad}"])
+    assert rc == 2
+    e = machine_error(capsysbinary)
+    assert e["code"] == "bad_argument" and e["exit_code"] == 2
 
 
 def test_machine_error_target_selection_conflict(tmp_path, capsysbinary):

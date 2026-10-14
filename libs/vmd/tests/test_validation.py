@@ -106,8 +106,13 @@ class TestWriteValidation:
         err = _format_error(doc)
         assert (err.section, err.key_index) == ("ik_property", 0)
 
-    def test_ik_flag_true_with_empty_ik_is_accepted(self):
+    def test_ik_flag_true_without_self_shadow_section_is_rejected_even_when_ik_is_empty(self):
         doc = VmdDocument(has_self_shadow_section=False, has_ik_section=True)
+        err = _format_error(doc)
+        assert (err.section, err.key_index) == ("ik_property", 0)
+
+    def test_ik_flag_true_with_empty_ik_and_self_shadow_section_is_accepted(self):
+        doc = VmdDocument(has_self_shadow_section=True, has_ik_section=True)
         read(write(doc))
 
     def test_negative_bone_frame_points_at_key(self):

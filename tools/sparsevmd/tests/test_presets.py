@@ -1,5 +1,3 @@
-import math
-
 import pytest
 
 from sparsevmd import presets
@@ -66,41 +64,9 @@ def test_zero_allowed_for_non_fov(field):
     assert getattr(t, field) == 0.0
 
 
-def test_override_stored_as_float():
-    t = presets.resolve_tolerances(
-        "balanced", {"bone_pos": 0, "camera_fov": 1, "camera_pos": "0.03"}
-    )
-    assert isinstance(t.bone_pos, float) and t.bone_pos == 0.0
-    assert isinstance(t.camera_fov, float) and t.camera_fov == 1.0
-    assert isinstance(t.camera_pos, float) and t.camera_pos == pytest.approx(0.03)
-
-
-@pytest.mark.parametrize("bad", [None, object(), "0.5deg", "abc"])
-def test_non_numeric_override_rejected(bad):
-    with pytest.raises(ValueError):
-        presets.resolve_tolerances("balanced", {"bone_pos": bad})
-
-
 def test_unknown_preset_raises():
     with pytest.raises(ValueError):
         presets.resolve_tolerances("ultra")
-
-
-def test_fov_floor():
-    with pytest.raises(ValueError):
-        presets.resolve_tolerances("balanced", {"camera_fov": 0.4})
-    assert presets.resolve_tolerances("balanced", {"camera_fov": 0.5}).camera_fov == 0.5
-
-
-def test_negative_rejected():
-    with pytest.raises(ValueError):
-        presets.resolve_tolerances("balanced", {"bone_pos": -0.01})
-
-
-@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
-def test_nonfinite_rejected(bad):
-    with pytest.raises(ValueError):
-        presets.resolve_tolerances("balanced", {"camera_pos": bad})
 
 
 def test_unknown_override_key_rejected():

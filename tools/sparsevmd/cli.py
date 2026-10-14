@@ -145,7 +145,8 @@ def _build_parser():
     p.add_argument("--preset", choices=presets.PRESET_NAMES, default="balanced",
                    help="品質プリセット: precise / balanced / aggressive(既定 balanced)")
     for arg in _TOL_OPTION_TO_FIELD:
-        p.add_argument("--" + arg.replace("_", "-"), dest=arg, type=float, help=_TOL_HELP[arg])
+        p.add_argument("--" + arg.replace("_", "-"), dest=arg,
+                       type=_FOV_TOL if arg == "camera_fov_tol" else _TOL, help=_TOL_HELP[arg])
     p.add_argument("--max-segment-frames", dest="max_segment_frames", type=_SEGMENT_FRAMES, default=None,
                    help="出力キー間隔の上限。未指定なら無制限。指定する場合は 1 以上")
     p.add_argument("--min-segment-frames", dest="min_segment_frames", type=_SEGMENT_FRAMES, default=1,
@@ -391,10 +392,7 @@ def _run(args, ctx):
         for arg, field in _TOL_OPTION_TO_FIELD.items()
         if getattr(args, arg) is not None
     }
-    try:
-        tols = presets.resolve_tolerances(args.preset, overrides)
-    except ValueError as e:
-        return ctx.fail("bad_tolerance", str(e), 2)
+    tols = presets.resolve_tolerances(args.preset, overrides)
 
     if args.target == "camera" and _has_bone_selection(args) and not args.list_bones:
         return ctx.fail("target_selection_conflict",
