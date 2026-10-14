@@ -11,7 +11,7 @@
 | 静的検査 | `ruff check` | リポジトリ内の Python 全体(gitignore 済みのパスは ruff が自動で外す) |
 | 記法検査 | `rumdl check` | Markdown の一般的な記法(見出し・リスト・コードブロックまわりの体裁)。gitignore 済みのパスは rumdl が自動で外す |
 | 節参照検査 | `python scripts/check_section_references.py` | 平文の節参照・裸のファイル参照が残っていないこと |
-| リンク検査 | `lychee --config lychee.toml . .claude` | Markdown のリンク先の実在 |
+| リンク検査 | `lychee --config lychee.toml . .claude` | Markdown のリンク先の実在(リポジトリ内のリンクだけで、外部 URL は検査しない) |
 | テスト | `pytest` | [pyproject.toml](../../pyproject.toml) の `testpaths` が指す全パッケージ・全ツール |
 
 `pytest`・`ruff check`・`rumdl check` はディレクトリを渡すと対象を絞れる。作業中の確認には絞って
@@ -33,3 +33,8 @@
 ## 4. CI との関係
 
 [test.yml](../../.github/workflows/test.yml) が pull request で走らせる検査は [§1](#1-実行する検査) と一致させる。
+
+加えて [changelog.yml](../../.github/workflows/changelog.yml) が pull request で CHANGELOG の形式と、
+main 向けの場合はリリース対象ツールのバージョン節の有無を検査する
+(`python3 .github/scripts/check_changelog.py --base main`)。
+これは CI 専用で、[§1](#1-実行する検査) には含めない。
