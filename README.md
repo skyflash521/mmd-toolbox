@@ -162,16 +162,17 @@ shakevmd <入力ファイル名>.vmd
 
 追加のインストール:
 
-1. NVIDIA GPU を搭載している場合は [PyTorch 公式サイト](https://pytorch.org/get-started/locally/) の `Compute Platform` で CUDA のバージョンを選び、次のコマンドの `--index-url` をそれに合わせて実行する(次は CUDA 12.6 の場合)。
-
-   ```sh
-   pip install torch --index-url https://download.pytorch.org/whl/cu126 --force-reinstall --no-deps
-   ```
-
-2. 次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを追加する)。
+1. 次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを追加する)。
 
    ```sh
    pip install ".[vocal-analysis]"
+   ```
+
+2. NVIDIA GPU を搭載している場合は、続けて CUDA 版の `torch` を入れる。この extra が入れる `torch` が CPU 専用版のとき(Windows など)は、GPU を使わない。
+   [PyTorch 公式サイト](https://pytorch.org/get-started/locally/) の `Compute Platform` で CUDA のバージョンを選び、次のコマンドの `--index-url` をそれに合わせて実行する(次は CUDA 12.6 の場合)。
+
+   ```sh
+   pip install torch --index-url https://download.pytorch.org/whl/cu126 --force-reinstall --no-deps
    ```
 
 使い方:
@@ -254,7 +255,7 @@ vpr2vmd <入力ファイル名>.vpr
 
 ### 開発環境
 
-本体ライブラリと CLI のビルド・テストに必要な最小構成。実行時依存は `numpy` と `scipy`(`scipy` は補間曲線フィットで使用。shakevmd の既定のスムージングと sparsevmd が利用する)。いずれも pip が各 OS 向けホイールを導入する。
+本体ライブラリと CLI のビルド・テストに必要な最小構成。実行時依存は `numpy` と `scipy`(`scipy` は補間曲線フィット・音声前段のリサンプリング・mocapvmd のノイズ軽減で使用)。いずれも pip が各 OS 向けホイールを導入する。
 
 | ツール | 用途 | 備考 |
 |---|---|---|
@@ -290,6 +291,13 @@ pip install -e ".[dev,vocal-analysis]"
 ```
 
 cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替える。
+
+続けて、リポジトリルートで次を一度実行して commit-msg フックを有効にする。
+このフックは、シェル構文(ヒアドキュメント・コマンド置換)が漏れたコミットメッセージを拒否する。
+
+```sh
+git config core.hooksPath .githooks
+```
 
 ### AI 支援開発ワークフロー(任意)
 

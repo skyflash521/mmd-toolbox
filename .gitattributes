@@ -6,3 +6,8 @@
 *.vmd binary
 *.pmx binary
 *.pmd binary
+*.wav binary
+*.ogg binary
+*.flac binary
+*.mp3 binary
+*.m4a binary

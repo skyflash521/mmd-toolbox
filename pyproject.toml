@@ -1,11 +1,14 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmd-toolbox"
 version = "2026.8.8"
 description = "MikuMikuDance 向けユーティリティツール群"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "numpy<3",
@@ -37,6 +40,10 @@ vocal-analysis = [
     "arpakana<1",
     "psutil<8",
 ]
+
+[project.urls]
+Repository = "https://github.com/skyflash521/mmd-toolbox"
+Issues = "https://github.com/skyflash521/mmd-toolbox/issues"
 
 [project.scripts]
 mocapvmd = "mocapvmd.cli:main"
