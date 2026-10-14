@@ -1,5 +1,7 @@
 # vmd-camera 仕様書
 
+層: **フォーマット層**([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))。
+
 MMD のカメラキー(カメラ中心・距離・角度)と、ワールド座標でのカメラの位置と向きを相互に変換する。
 
 ## 前提とする MMD の規約

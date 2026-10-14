@@ -1,5 +1,7 @@
 # vmd-io 仕様書
 
+層: **フォーマット層**([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))。
+
 VMD ファイルの読み書き。
 
 ## 往復の保証

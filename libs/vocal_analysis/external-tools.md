@@ -1,5 +1,7 @@
 # vocal_analysis 外部ツールの制約
 
+層: **共有ドメイン層**([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))。
+
 vocal_analysis が内部で使う外部ツールとモデルの、同梱と利用条件の制約。
 
 - 本体の MIT ライセンスと両立しないライセンス(GPL など)のツールとモデルは使わない。

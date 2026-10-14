@@ -1,5 +1,7 @@
 # vmd-interp 仕様書
 
+層: **フォーマット層**([../../docs/conventions/layering.md §1](../../docs/conventions/layering.md#1-層タクソノミー))。
+
 VMD の補間曲線を MMD 本体と同じ結果になるよう評価し、任意のフレームの値を求める。
 
 ## 前提とする MMD の評価規則
