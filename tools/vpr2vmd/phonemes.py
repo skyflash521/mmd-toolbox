@@ -27,12 +27,12 @@ _MORAIC_NASALS = {"N\\"}
 _GEMINATE_STOPS = {"Q"}
 _CONTINUATIONS = {"-"}
 
-_ROUNDED_CONSONANTS = {"p\\", "w"}
+_ROUNDED_CONSONANTS = {"p\\", "p\\'", "w"}
 _SPREAD_CONSONANTS = {"S", "dZ", "tS", "j"}
 
-_FIRM_CLOSURE_CONSONANTS = {"t", "d", "n", "ts", "dz", "J"}
+_FIRM_CLOSURE_CONSONANTS = {"t", "t'", "d", "d'", "n", "ts", "dz", "J"}
 _NARROW_CHANNEL_CONSONANTS = {"s", "z", "S", "dZ", "tS", "j"}
-_SLIGHT_CLOSURE_CONSONANTS = {"k", "k'", "g", "4"}
+_SLIGHT_CLOSURE_CONSONANTS = {"k", "k'", "g", "g'", "4", "4'"}
 
 
 def vowel_shape(symbol: str) -> MouthShape | None:

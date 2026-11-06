@@ -17,7 +17,7 @@ FRAME_RATE = 30.0
 
 _SPREAD_PHONEMES = frozenset({"ɕ", "tɕ", "dʑ", "ɲ", "ç"})
 
-_FIRM_CLOSURE_PHONEMES = frozenset({"t", "d", "n", "ts", "ɲ"})
+_FIRM_CLOSURE_PHONEMES = frozenset({"t", "tʲ", "d", "dʲ", "n", "ts", "ɲ"})
 _NARROW_CHANNEL_PHONEMES = frozenset({"s", "z", "ɕ", "tɕ", "dʑ", "ç", "j"})
 _SLIGHT_CLOSURE_PHONEMES = frozenset({"k", "ɡ", "ɾ", "kʲ", "ɡʲ"})
 _APERTURE_RANK = {

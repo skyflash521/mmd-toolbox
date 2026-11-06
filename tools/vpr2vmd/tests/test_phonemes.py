@@ -55,7 +55,7 @@ def test_geminate_categorized_as_geminate_stop():
 
 
 def test_rounded_consonants_mapped_to_rounded():
-    for sym in ["p\\", "w"]:
+    for sym in ["p\\", "p\\'", "w"]:
         assert phonemes.consonant_class(sym) is ConsonantClass.ROUNDED
 
 
@@ -70,7 +70,7 @@ def test_other_and_unknown_consonants_mapped_to_neutral():
 
 
 def test_firm_closure_consonants_mapped_to_firm_closure():
-    for sym in ["t", "d", "n", "ts", "dz", "J"]:
+    for sym in ["t", "t'", "d", "d'", "n", "ts", "dz", "J"]:
         assert phonemes.aperture_class(sym) is ApertureClass.FIRM_CLOSURE
 
 
@@ -80,7 +80,7 @@ def test_narrow_channel_consonants_mapped_to_narrow_channel():
 
 
 def test_slight_closure_consonants_mapped_to_slight_closure():
-    for sym in ["k", "k'", "g", "4"]:
+    for sym in ["k", "k'", "g", "g'", "4", "4'"]:
         assert phonemes.aperture_class(sym) is ApertureClass.SLIGHT_CLOSURE
 
 

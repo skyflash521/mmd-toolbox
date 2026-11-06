@@ -21,8 +21,8 @@ from .phonemes import (
 )
 from .types import Segment
 
-# SOFA の日本語チェックポイントの語彙は無声化母音の専用記号を持たない。
-_SOFA_VOCAB_SYMBOL_NORMALIZE: dict[str, str] = {"I": "i", "U": "u"}
+# SOFA の日本語チェックポイントには、無声化母音と fy を語彙に持たないものがある。語彙に無い記号を渡すと SOFA が落ちる。
+_SOFA_VOCAB_SYMBOL_NORMALIZE: dict[str, str] = {"I": "i", "U": "u", "fy": "f"}
 
 # OS の待機は完了かタイムアウトまで戻らず、その間に届いた KeyboardInterrupt は待機が終わるまで反映されない。
 _COMMUNICATE_POLL_SEC = 1.0

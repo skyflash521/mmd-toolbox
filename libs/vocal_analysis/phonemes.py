@@ -70,10 +70,10 @@ def _classify_symbol(symbol: str) -> Literal["vowel", "consonant"]:
 _G2P_TO_VOCAB_SYMBOL: dict[str, str] = {
     "a": "a", "i": "i", "u": "ɯ", "e": "e̞", "o": "o̞",
     "I": "i", "U": "ɯ",
-    "k": "k", "ky": "kʲ", "g": "ɡ", "gy": "ɡʲ",
+    "k": "k", "ky": "kʲ", "kw": "k", "g": "ɡ", "gy": "ɡʲ", "gw": "ɡ",
     "s": "s", "sh": "ɕ", "z": "z", "j": "dʑ",
-    "t": "t", "ch": "tɕ", "ts": "ts", "d": "d",
-    "n": "n", "ny": "ɲ", "h": "h", "hy": "ç", "f": "ɸ",
+    "t": "t", "ty": "tʲ", "ch": "tɕ", "ts": "ts", "d": "d", "dy": "dʲ",
+    "n": "n", "ny": "ɲ", "h": "h", "hy": "ç", "f": "ɸ", "fy": "ɸ",
     "b": "b", "by": "bʲ", "p": "p", "py": "pʲ",
     "m": "m", "my": "mʲ", "y": "j", "r": "ɾ", "ry": "ɾ",
     "w": "w", "v": "v", "N": "ɴ",

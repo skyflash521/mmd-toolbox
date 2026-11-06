@@ -229,7 +229,7 @@ def test_aperture_class_none_when_no_preceding_consonant():
     assert mouth_events[0].aperture_class == ApertureClass.NONE
 
 
-@pytest.mark.parametrize("phoneme", ["t", "d", "n", "ts", "ɲ"])
+@pytest.mark.parametrize("phoneme", ["t", "tʲ", "d", "dʲ", "n", "ts", "ɲ"])
 def test_aperture_class_firm_closure(phoneme):
     segments = [
         seg("consonant", 0.0, 0.05, phoneme=phoneme),

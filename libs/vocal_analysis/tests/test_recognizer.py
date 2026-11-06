@@ -746,6 +746,26 @@ def test_g2p_symbols_to_token_ids_unmapped_symbol_raises_recognition_error():
         g2p_symbols_to_token_ids(["xx"], {"<pad>": 0}, blank_token_id=0)
 
 
+@pytest.mark.parametrize(("text", "symbol", "vocab_symbol"), [
+    ("デュエット", "dy", "dʲ"),
+    ("テュール", "ty", "tʲ"),
+    ("フュージョン", "fy", "ɸ"),
+    ("クヮルテット", "kw", "k"),
+    ("グヮバ", "gw", "ɡ"),
+])
+def test_g2p_output_of_loanword_sounds_reaches_the_phoneme_model_vocabulary(text, symbol, vocab_symbol):
+    from vocal_analysis import transcription
+    from vocal_analysis.alignment import g2p_symbols_to_token_ids
+    from vocal_analysis.phonemes import _G2P_TO_VOCAB_SYMBOL
+
+    symbols = transcription.g2p(text)
+    assert symbol in symbols
+
+    vocab = {"<pad>": 0, **{s: i for i, s in enumerate(sorted(set(_G2P_TO_VOCAB_SYMBOL.values())), start=1)}}
+    token_ids = g2p_symbols_to_token_ids(symbols, vocab, blank_token_id=0)
+    assert token_ids[symbols.index(symbol)] == vocab[vocab_symbol]
+
+
 def test_g2p_symbols_to_token_ids_missing_vocab_entry_raises_recognition_error():
     from vocal_analysis.alignment import g2p_symbols_to_token_ids
     from vocal_analysis.recognizer import RecognitionError

@@ -8,7 +8,7 @@ VOCAB = sorted(set(_G2P_TO_VOCAB_SYMBOL.values()))
 MORAIC_NASAL = {"ɴ"}
 BILABIAL = {"m", "mʲ", "b", "bʲ", "p", "pʲ"}
 ROUNDED = {"ɸ", "w"}
-PALATALIZED = {"kʲ", "ɡʲ", "bʲ", "pʲ", "mʲ"}
+PALATALIZED = {"kʲ", "ɡʲ", "tʲ", "dʲ", "bʲ", "pʲ", "mʲ"}
 
 PREDICATES = [
     ("is_moraic_nasal", MORAIC_NASAL),
@@ -23,7 +23,7 @@ UNKNOWN_SYMBOLS = ["", "x", "ʔ", "ŋ", "pʰ", "ɴː", "A", "ɯː"]
 def test_vocabulary_is_the_expected_inventory():
     assert set(VOCAB) == {
         "a", "i", "ɯ", "e̞", "o̞",
-        "k", "kʲ", "ɡ", "ɡʲ", "s", "ɕ", "z", "dʑ", "t", "tɕ", "ts", "d",
+        "k", "kʲ", "ɡ", "ɡʲ", "s", "ɕ", "z", "dʑ", "t", "tʲ", "tɕ", "ts", "d", "dʲ",
         "n", "ɲ", "h", "ç", "ɸ", "b", "bʲ", "p", "pʲ", "m", "mʲ",
         "j", "ɾ", "w", "v", "ɴ",
     }

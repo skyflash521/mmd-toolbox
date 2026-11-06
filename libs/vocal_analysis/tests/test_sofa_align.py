@@ -241,7 +241,7 @@ def test_align_batch_writes_space_separated_phonemes_to_lab_input(tmp_path, monk
     assert written_lab_texts["segment_0001"].strip() == "pau"
 
 
-def test_align_batch_normalizes_devoiced_vowels_for_sofa_vocab(tmp_path, monkeypatch):
+def test_align_batch_normalizes_symbols_missing_from_sofa_vocab(tmp_path, monkeypatch):
     from vocal_analysis import sofa_align
 
     config = _make_config(tmp_path)
@@ -260,10 +260,10 @@ def test_align_batch_normalizes_devoiced_vowels_for_sofa_vocab(tmp_path, monkeyp
     monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
 
     samples = np.zeros(16000, dtype=np.float32)
-    targets = [(samples, 16000, ["k", "I", "sh", "U"])]
+    targets = [(samples, 16000, ["k", "I", "sh", "U", "fy", "u"])]
     sofa_align._align_batch(targets, config)
 
-    assert written_lab_texts["segment_0000"].strip() == "k i sh u"
+    assert written_lab_texts["segment_0000"].strip() == "k i sh u f u"
 
 
 def test_align_batch_empty_targets_does_not_start_subprocess(tmp_path, monkeypatch):
@@ -1039,3 +1039,12 @@ def test_segments_from_raw_propagates_unmapped_symbol_error():
 
     with pytest.raises(RecognitionError):
         _segments_from_raw([(0.0, 0.5, "xyz_unknown")])
+
+
+@pytest.mark.parametrize(("symbol", "phoneme"), [
+    ("dy", "dʲ"), ("ty", "tʲ"), ("fy", "ɸ"), ("kw", "k"), ("gw", "ɡ"),
+])
+def test_loanword_sound_symbols_become_consonant_segments(symbol, phoneme):
+    from vocal_analysis import sofa_align
+
+    assert sofa_align._map_symbol_to_segment_fields(symbol) == ("consonant", phoneme)
