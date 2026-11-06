@@ -88,7 +88,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--open-max", dest="open_max", type=_unit_float,
                    help="口の開き量の上限(0.0〜1.0。既定: プリセット値)")
     p.add_argument("--coarticulation", dest="coarticulation", type=_nonneg_int,
-                   help="隣接母音の協調調音の重なり長上限(フレーム。既定: プリセット値)")
+                   help="隣接母音のあいだで口形を移す長さ(フレーム。既定: プリセット値)")
     p.add_argument("--anticipation", dest="anticipation", type=_nonneg_int,
                    help="母音口形を音より先行させる最大フレーム数(既定: プリセット値)")
     p.add_argument("--min-hold", dest="min_hold", type=_nonneg_int,

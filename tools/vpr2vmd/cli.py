@@ -86,7 +86,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--valley-slope", dest="valley_slope", type=_nonneg_float,
                    help="間隙長 1 フレームあたりの谷係数の減少(0 以上。既定: プリセット値)")
     p.add_argument("--coartic-overlap", dest="coartic_overlap", type=_positive_int,
-                   help="協調調音の重なり上限(=基準長・1 以上。既定: プリセット値)")
+                   help="隣接母音のあいだで口形を移す長さ(フレーム・1 以上。既定: プリセット値)")
     p.add_argument("--anticipation", dest="anticipation", type=_nonneg_int,
                    help="母音口形の先行準備フレーム数(0 以上・0 で無効。既定: プリセット値)")
     p.add_argument("--ref-bpm", dest="ref_bpm", type=_positive_float,

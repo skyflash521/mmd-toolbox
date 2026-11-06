@@ -414,6 +414,22 @@ def _quantize_targets(targets: Sequence[_Target]) -> list[MorphKey]:
     return keys
 
 
+def _transition_targets(
+    morph: str,
+    left: tuple[float, float],
+    center: tuple[float, float],
+    right: tuple[float, float],
+) -> list[_Target]:
+    """left・center・right は (フレーム, 重み)。"""
+    left_frame = _round_half_up(left[0])
+    if _round_half_up(right[0]) == left_frame:
+        right = (left_frame + 1.0, right[1])
+    outer = [_Target(morph, *left), _Target(morph, *right)]
+    if _round_half_up(center[0]) == left_frame:
+        return outer
+    return [outer[0], _Target(morph, *center), outer[1]]
+
+
 def _interp_points(points: Sequence[tuple[float, float]], t: float) -> float:
     if t <= points[0][0]:
         return points[0][1]
@@ -569,6 +585,9 @@ def generate_morph_keys(
         if len(g.events) >= 2:
             for ev, w in zip(g.events, gw, strict=True):
                 f_mid = (ev.start + ev.end) / 2.0
+                mid_frame = _round_half_up(f_mid)
+                if not _round_half_up(plateau_start) < mid_frame < _round_half_up(plateau_end):
+                    continue
                 for morph in group_morphs:
                     targets.append(_Target(morph, f_mid, w.get(morph, 0.0)))
             selected = _select_valleys(_mora_valley_candidates(g, gw, group_morphs, params), params)
@@ -591,9 +610,11 @@ def generate_morph_keys(
             a, b = wa.get(morph, 0.0), wb.get(morph, 0.0)
             if a == 0.0 and b == 0.0:
                 continue
-            targets.append(_Target(morph, boundary - half, a))
-            targets.append(_Target(morph, boundary, (a + b) / 2.0))
-            targets.append(_Target(morph, boundary + half, b))
+            targets.extend(
+                _transition_targets(
+                    morph, (boundary - half, a), (boundary, (a + b) / 2.0), (boundary + half, b)
+                )
+            )
     for i, (gs, ge) in legato_at.items():
         wa, wb = weights[i][-1], weights[i + 1][0]
         gm = (gs + ge) / 2.0
@@ -602,9 +623,7 @@ def generate_morph_keys(
             a, b = wa.get(morph, 0.0), wb.get(morph, 0.0)
             if a == 0.0 and b == 0.0:
                 continue
-            targets.append(_Target(morph, gs, a))
-            targets.append(_Target(morph, gm, depth * (a + b)))
-            targets.append(_Target(morph, ge, b))
+            targets.extend(_transition_targets(morph, (gs, a), (gm, depth * (a + b)), (ge, b)))
     if params.vibrato_amp > 0.0 and params.vibrato_period > 0:
         for i, g in enumerate(groups):
             plateau_start, plateau_end = plateaus[i]
