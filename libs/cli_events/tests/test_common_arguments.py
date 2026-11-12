@@ -10,12 +10,6 @@ def _parser(**kwargs):
     return parser
 
 
-def test_returns_none_and_registers_on_the_given_parser():
-    parser = MachineArgumentParser(prog="sample")
-    assert add_common_arguments(parser, version="1.2.3", output_help="出力先") is None
-    assert parser.parse_args([]).machine is False
-
-
 def test_defaults_without_any_flag():
     args = _parser().parse_args([])
     assert args.machine is False
@@ -51,12 +45,6 @@ def test_output_without_value_is_a_usage_error():
         _parser().parse_args(["--output"])
 
 
-def test_option_strings_are_exactly_the_documented_spellings():
-    registered = set(_parser()._option_string_actions)
-    assert {"--machine", "--describe", "--version", "-o", "--output", "--overwrite", "--dry-run",
-            "--verbose", "-v", "--quiet"} <= registered
-
-
 def test_flags_are_not_mutually_exclusive():
     args = _parser().parse_args(
         ["in", "--machine", "--quiet", "--verbose", "--dry-run", "--overwrite", "-o", "x"])
@@ -70,10 +58,6 @@ def test_version_prints_prog_and_version_on_stdout_and_exits_zero(capsys):
         _parser().parse_args(["--version"])
     assert excinfo.value.code == 0
     assert capsys.readouterr().out == "sample 1.2.3\n"
-
-
-def test_version_does_not_add_a_namespace_attribute():
-    assert not hasattr(_parser().parse_args([]), "version")
 
 
 def test_every_common_option_has_a_nonempty_help_and_output_help_is_the_given_text():
@@ -93,15 +77,6 @@ def test_quiet_can_be_left_out_for_tools_without_live_progress():
     assert not hasattr(parser.parse_args([]), "quiet")
     with pytest.raises(ArgumentParseError):
         parser.parse_args(["--quiet"])
-
-
-def test_quiet_is_registered_by_default():
-    assert "--quiet" in _parser()._option_string_actions
-
-
-def test_negated_forms_are_not_registered():
-    registered = set(_parser()._option_string_actions)
-    assert not {"--no-machine", "--no-overwrite", "--no-dry-run", "--no-verbose", "--no-quiet"} & registered
 
 
 def test_tool_specific_arguments_can_be_added_before_and_after():

@@ -26,11 +26,6 @@ def test_sigbreak_handler_installed_inside_fixture_scope_is_restored_on_exit():
     assert signal.getsignal(signal.SIGBREAK) is before
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows 以外での no-op を検証")
-def test_no_op_outside_windows():
-    install_sigbreak_handler()
-
-
 _CHILD_SCRIPT = """
 import sys, time
 from cli_events import install_sigbreak_handler

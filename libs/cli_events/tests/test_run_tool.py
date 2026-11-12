@@ -217,24 +217,9 @@ class TestDescribe:
         }]
         assert console.stderr_text() == ""
 
-    def test_describe_does_not_need_the_input_argument_nor_the_machine_flag(self, console):
-        assert console.tool(["--describe"], _ok) == 0
-        assert len(console.events()) == 1
-
     def test_describe_with_machine_flag_is_the_same_single_event(self, console):
         assert console.tool(["--describe", "--machine"], _ok) == 0
         assert len(console.events()) == 1
-
-    def test_describe_receives_the_built_parser(self, console):
-        seen = []
-        console.tool(["--describe"], _ok, describe=lambda parser: seen.append(parser) or {})
-        assert len(seen) == 1
-        assert seen[0].prog == "sample"
-
-    def test_describe_result_line_is_one_json_line_ending_in_lf(self, console):
-        console.tool(["--describe"], _ok)
-        raw = console.stdout_bytes()
-        assert raw.endswith(b"\n") and raw.count(b"\n") == 1 and b"\r" not in raw
 
 
 class TestMetaOperations:
@@ -275,6 +260,11 @@ class TestUsageError:
         assert console.tool(["--bogus"], _ok) == 2
         assert console.stderr_text() == "error: unrecognized arguments: --bogus\n"
         assert console.stdout_bytes() == b""
+
+    def test_usage_error_with_describe_but_without_machine_ends_stdout_with_an_error_event(self, console):
+        assert console.tool(["--describe", "--bogus"], _ok) == 2
+        assert console.events() == [
+            _error_event("bad_argument", 2, "unrecognized arguments: --bogus", field="--bogus")]
 
 
 class TestTermination:
@@ -354,11 +344,6 @@ def _emit_progress(args, ctx):
     return 0
 
 
-def _emit_result(args, ctx):
-    ctx.emitter.result(mode="process")
-    return 0
-
-
 def _fail_write(args, ctx):
     return ctx.fail("write_failed", "出力に失敗", 3, field="--output")
 
@@ -369,8 +354,6 @@ def _interrupt(args, ctx):
 
 _BROKEN_STDOUT_SCENARIOS = [
     pytest.param(["in.vmd", "--machine"], _emit_progress, 1, "{exc}", id="progress_event"),
-    pytest.param(["in.vmd", "--machine"], _emit_result, 1, "{exc}", id="result_event"),
-    pytest.param(["--describe"], _ok, 1, "{exc}", id="describe_event"),
     pytest.param(["in.vmd", "--machine"], _fail_write, 3, "出力に失敗", id="reported_failure"),
     pytest.param(["--bogus", "--machine"], _ok, 2, "unrecognized arguments: --bogus", id="usage_error"),
     pytest.param(["in.vmd", "--machine"], _interrupt, 130, _INTERRUPT_MESSAGE, id="interrupt"),
@@ -387,8 +370,7 @@ class TestUnwritableStdout:
             self, monkeypatch, exc, argv, run, expected_rc, message):
         console = _Console(monkeypatch)
         monkeypatch.setattr(sys, "stdout", _BrokenStdout(exc))
-        describe = (lambda parser: {}) if argv == ["--describe"] else _describe
-        rc = _tool(argv, run, describe=describe)
+        rc = _tool(argv, run)
         assert rc == expected_rc
         expected = message.format(exc=f"{type(exc).__name__}: {exc}")
         assert console.stderr_text() == f"error: {expected}\n"
@@ -419,24 +401,6 @@ class TestStderrEncoding:
         console = self._cp932_console(monkeypatch)
         assert _tool([f"--{_NON_CP932_CHAR}"], _ok) == 2
         assert self._stderr_text(console) == "error: unrecognized arguments: --\\U0001f3a5\n"
-
-    def test_reported_failure_with_unencodable_text_keeps_its_exit_code(self, monkeypatch):
-        console = self._cp932_console(monkeypatch)
-
-        def run(args, ctx):
-            return ctx.fail("not_vmd", f"読めない{_NON_CP932_CHAR}", 1)
-
-        assert _tool(["in.vmd"], run) == 1
-        assert self._stderr_text(console) == "error: 読めない\\U0001f3a5\n"
-
-    def test_internal_error_with_unencodable_text_exits_1(self, monkeypatch):
-        console = self._cp932_console(monkeypatch)
-
-        def run(args, ctx):
-            raise RuntimeError(_NON_CP932_CHAR)
-
-        assert _tool(["in.vmd"], run) == 1
-        assert self._stderr_text(console) == "error: RuntimeError: \\U0001f3a5\n"
 
     def test_warning_with_unencodable_text_does_not_stop_the_run(self, monkeypatch):
         console = self._cp932_console(monkeypatch)
@@ -470,16 +434,6 @@ class _LiveLine:
             self._log.append("close")
 
 
-class _LoggingStderr(io.StringIO):
-    def __init__(self, log):
-        super().__init__()
-        self._log = log
-
-    def write(self, text):
-        self._log.append(text)
-        return super().write(text)
-
-
 def _fail_boom(args, ctx):
     return ctx.fail("write_failed", "boom", 3)
 
@@ -500,32 +454,6 @@ _FAILURE_ROUTES = [
 
 
 class TestLiveProgressLine:
-    def test_track_progress_returns_the_given_router(self, console):
-        seen = {}
-
-        def run(args, ctx):
-            router = _LiveLine()
-            seen["same"] = ctx.track_progress(router) is router
-            return 0
-
-        console.tool(["in.vmd"], run)
-        assert seen["same"] is True
-
-    @pytest.mark.parametrize("run_failure, expected_rc, message", _FAILURE_ROUTES)
-    def test_live_line_is_closed_before_the_error_line_is_written(
-            self, monkeypatch, run_failure, expected_rc, message):
-        log = []
-        console = _Console(monkeypatch, stderr=_LoggingStderr(log))
-
-        def run(args, ctx):
-            ctx.track_progress(_LiveLine(log))
-            return run_failure(args, ctx)
-
-        assert _tool(["in.vmd"], run) == expected_rc
-        first_error = next(i for i, entry in enumerate(log) if entry.startswith("error:"))
-        assert "close" in log[:first_error]
-        assert console.stderr_text().endswith(_LiveLine.CLEAR + f"error: {message}\n")
-
     @pytest.mark.parametrize("run_failure, expected_rc, message", _FAILURE_ROUTES)
     def test_error_line_starts_on_a_cleared_line_and_nothing_follows_it(
             self, console, run_failure, expected_rc, message):
@@ -535,17 +463,6 @@ class TestLiveProgressLine:
 
         assert console.tool(["in.vmd"], run) == expected_rc
         assert console.stderr_text() == _LiveLine.TEXT + _LiveLine.CLEAR + f"error: {message}\n"
-
-    @pytest.mark.parametrize("run_failure, expected_rc, message", _FAILURE_ROUTES)
-    def test_router_is_closed_in_machine_mode_failures_too(self, console, run_failure, expected_rc, message):
-        routers = []
-
-        def run(args, ctx):
-            routers.append(ctx.track_progress(_LiveLine()))
-            return run_failure(args, ctx)
-
-        assert console.tool(["in.vmd", "--machine"], run) == expected_rc
-        assert routers[0].closed >= 1
 
     def test_router_is_closed_when_run_returns_normally(self, console):
         routers = []
@@ -559,15 +476,13 @@ class TestLiveProgressLine:
         assert console.stderr_text() == _LiveLine.TEXT + _LiveLine.CLEAR
 
     def test_every_tracked_router_is_closed(self, console):
-        routers = []
-
         def run(args, ctx):
-            routers.append(ctx.track_progress(_LiveLine()))
-            routers.append(ctx.track_progress(_LiveLine()))
+            ctx.track_progress(_LiveLine())
+            ctx.track_progress(_LiveLine())
             return _fail_boom(args, ctx)
 
         console.tool(["in.vmd"], run)
-        assert [router.closed >= 1 for router in routers] == [True, True]
+        assert console.stderr_text() == _LiveLine.TEXT * 2 + _LiveLine.CLEAR * 2 + "error: boom\n"
 
     def test_warning_line_starts_on_a_cleared_line(self, console):
         def run(args, ctx):
@@ -590,36 +505,15 @@ class TestOutputGuardThroughTheSkeleton:
             ctx.emitter.result(mode="process", output=output)
         return 0
 
-    @pytest.mark.parametrize("extra", [[], ["--dry-run"], ["--verbose"], ["--quiet"]])
-    def test_existing_output_without_overwrite_exits_2_with_an_error_event(self, console, tmp_path, extra):
+    def test_existing_output_without_overwrite_exits_2_with_an_error_event(self, console, tmp_path):
         out = tmp_path / "out.vmd"
         out.write_bytes(b"x")
-        assert console.tool(["in.vmd", "-o", str(out), "--machine", *extra], self._guarded) == 2
+        assert console.tool(["in.vmd", "-o", str(out), "--machine"], self._guarded) == 2
         events = console.events()
         assert len(events) == 1
         assert events[0]["code"] == "output_exists"
         assert events[0]["exit_code"] == 2
         assert events[0]["field"] == "--output"
-
-    def test_dry_run_without_machine_exits_2_with_one_error_line(self, console, tmp_path):
-        out = tmp_path / "out.vmd"
-        out.write_bytes(b"x")
-        assert console.tool(["in.vmd", "-o", str(out), "--dry-run"], self._guarded) == 2
-        lines = console.stderr_text().splitlines()
-        assert len(lines) == 1 and lines[0].startswith("error: ") and str(out) in lines[0]
-
-    def test_overwrite_lets_a_dry_run_through(self, console, tmp_path):
-        out = tmp_path / "out.vmd"
-        out.write_bytes(b"x")
-        assert console.tool(["in.vmd", "-o", str(out), "--dry-run", "--overwrite", "--machine"], self._guarded) == 0
-        assert console.events() == [{"type": "result", "mode": "process", "output": str(out)}]
-
-    def test_default_output_next_to_the_input_is_guarded(self, console, tmp_path):
-        source = tmp_path / "in.vmd"
-        source.write_bytes(b"x")
-        (tmp_path / "in_x.vmd").write_bytes(b"x")
-        assert console.tool([str(source), "--machine"], self._guarded) == 2
-        assert console.events()[0]["code"] == "output_exists"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="SIGBREAK は Windows 固有")

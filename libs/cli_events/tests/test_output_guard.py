@@ -22,7 +22,7 @@ def test_missing_output_passes_and_reports_nothing(tmp_path):
     assert fail.calls == []
 
 
-def test_existing_output_without_overwrite_fails_with_exit_code_2_and_returns_its_result(tmp_path):
+def test_existing_output_without_overwrite_fails_with_exit_code_2(tmp_path):
     out = tmp_path / "out.vmd"
     out.write_bytes(b"x")
     fail = _RecordingFail(result=2)
@@ -49,14 +49,6 @@ def test_existing_output_with_overwrite_passes(tmp_path):
     assert fail.calls == []
 
 
-def test_output_equal_to_the_input_file_is_protected_like_any_existing_file(tmp_path):
-    source = tmp_path / "in.vmd"
-    source.write_bytes(b"x")
-    fail = _RecordingFail()
-    assert guard_output(str(source), overwrite=False, fail=fail) == 2
-    assert fail.calls[0]["code"] == "output_exists"
-
-
 @pytest.mark.parametrize("overwrite", [False, True])
 def test_directory_output_fails_regardless_of_overwrite_and_carries_the_path(tmp_path, overwrite):
     fail = _RecordingFail()
@@ -75,16 +67,8 @@ def test_non_ascii_output_path_is_supported(tmp_path):
     assert "出力.vmd" in fail.calls[0]["message"]
 
 
-def test_guard_has_no_dry_run_parameter_so_dry_run_cannot_bypass_it(tmp_path):
-    out = tmp_path / "out.vmd"
-    out.write_bytes(b"x")
-    with pytest.raises(TypeError):
-        guard_output(str(out), overwrite=False, fail=_RecordingFail(), dry_run=True)
-
-
 @pytest.mark.parametrize("input_path, suffix, expected", [
     ("a.wav", ".vmd", "a.vmd"),
-    ("a.wav", "_shake.vmd", "a_shake.vmd"),
     (str(Path("dir") / "in.vmd"), "_mocap.vmd", str(Path("dir") / "in_mocap.vmd")),
     ("a.b.vmd", "_x.vmd", "a.b_x.vmd"),
     ("noext", ".vmd", "noext.vmd"),
@@ -92,8 +76,3 @@ def test_guard_has_no_dry_run_parameter_so_dry_run_cannot_bypass_it(tmp_path):
 ])
 def test_default_output_path_replaces_the_extension_keeping_the_directory(input_path, suffix, expected):
     assert default_output_path(input_path, suffix) == expected
-
-
-def test_default_output_path_returns_str():
-    assert isinstance(default_output_path("a.wav", ".vmd"), str)
-

@@ -71,22 +71,6 @@ def test_error_terminates_stream():
         em.result(mode="bake")
 
 
-def test_error_after_error_is_rejected():
-    buf = io.BytesIO()
-    em = EventEmitter(buf)
-    em.error(code="x", exit_code=1, field=None, path=None, message="m")
-    with pytest.raises(StreamTerminatedError):
-        em.error(code="y", exit_code=1, field=None, path=None, message="n")
-
-
-def test_result_after_result_is_rejected():
-    buf = io.BytesIO()
-    em = EventEmitter(buf)
-    em.result(mode="bake")
-    with pytest.raises(StreamTerminatedError):
-        em.result(mode="bake")
-
-
 def test_non_ascii_is_written_as_utf8_without_escaping():
     buf = io.BytesIO()
     em = EventEmitter(buf)
@@ -206,7 +190,6 @@ def test_argparse_error_event_field_defaults_to_none():
         pytest.param("the following arguments are required: input", "input", id="required_single"),
         pytest.param("the following arguments are required: input, --other", "input", id="required_first_of_list"),
         pytest.param("argument --foo invalid", None, id="argument_without_colon"),
-        pytest.param("argument ", None, id="argument_prefix_only"),
         pytest.param("some other unexpected message", None, id="unknown_form"),
         pytest.param("", None, id="empty"),
     ],

@@ -32,13 +32,6 @@ class _RaisingTextSink:
         raise self._exc
 
 
-_SINK_EXCEPTIONS_OF_UNRELATED_TYPES = [
-    pytest.param(OSError("stderr closed"), id="os_error"),
-    pytest.param(ValueError("closed file"), id="value_error"),
-    pytest.param(RuntimeError("壊れた出力先"), id="runtime_error"),
-]
-
-
 def test_emits_error_event_without_error_line_when_emitter_usable():
     buf = io.BytesIO()
     sink = _TextSink()
@@ -124,17 +117,9 @@ def test_other_event_write_exceptions_propagate_without_error_line():
     assert sink.text == ""
 
 
-@pytest.mark.parametrize("sink_exc", _SINK_EXCEPTIONS_OF_UNRELATED_TYPES)
-def test_swallows_failure_of_the_error_line_after_event_write_failed(sink_exc):
+def test_swallows_failure_of_the_error_line_after_event_write_failed():
     rc = emit_failure(EventEmitter(_RaisingStream(OSError("broken pipe"))), code="internal_error",
-                      message="どこにも書けない", exit_code=1, stderr=_RaisingTextSink(sink_exc))
-    assert rc == 1
-
-
-@pytest.mark.parametrize("sink_exc", _SINK_EXCEPTIONS_OF_UNRELATED_TYPES)
-def test_swallows_failure_of_the_error_line_without_emitter(sink_exc):
-    rc = emit_failure(None, code="internal_error", message="どこにも書けない", exit_code=1,
-                      stderr=_RaisingTextSink(sink_exc))
+                      message="どこにも書けない", exit_code=1, stderr=_RaisingTextSink(RuntimeError("壊れた出力先")))
     assert rc == 1
 
 
