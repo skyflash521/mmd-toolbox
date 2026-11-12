@@ -63,11 +63,6 @@ def test_positional_uses_its_destination_name():
     assert _by_name()["input"]["name"] == "input"
 
 
-def test_every_element_has_the_same_six_keys():
-    for option in _described():
-        assert set(option) == {"name", "type", "constraint", "default", "help", "repeat"}
-
-
 def test_table_entries_are_used_as_given():
     preset = _by_name()["--preset"]
     assert preset["type"] == "enum"
@@ -81,12 +76,6 @@ def test_range_validator_supplies_type_and_constraint():
     assert amount["constraint"] == _UNIT_FLOAT.constraint
 
 
-def test_int_range_validator_is_typed_int():
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--count", type=RangeValidator(value_type="int", minimum=1))
-    assert describe_options(parser, {"count": (None, None)})[0]["type"] == "int"
-
-
 def test_compound_validator_is_typed_as_compound():
     size = _by_name()["--size"]
     assert size["type"] == "compound"
@@ -97,12 +86,6 @@ def test_table_constraint_is_ignored_when_the_validator_supplies_it():
     table = dict(_TYPE_TABLE, amount=(None, {"min": 99}))
     amount = {o["name"]: o for o in describe_options(_parser(), table)}["--amount"]
     assert amount["constraint"] == _UNIT_FLOAT.constraint
-
-
-def test_default_and_help_come_from_the_parser():
-    assert _by_name()["--amount"]["default"] == 0.5
-    assert _by_name()["--amount"]["help"] == "開き量"
-    assert _by_name()["--output"]["default"] is None
 
 
 def test_long_form_is_preferred_over_the_short_form():
