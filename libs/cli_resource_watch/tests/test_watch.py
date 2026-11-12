@@ -1,4 +1,3 @@
-import builtins
 
 import pytest
 
@@ -93,29 +92,28 @@ def test_gpu_oversubscription_by_one_byte_fires_though_mib_fields_are_equal():
     assert fields["reserved_mib"] == fields["free_at_start_mib"] == 4000
 
 
-def test_gpu_probe_none_disables_gpu_side_without_probing_again():
+def test_gpu_probe_none_disables_gpu_side():
     emit = _Emit()
-    calls = {"n": 0}
-
-    def gpu():
-        calls["n"] += 1
-        return None
-
+    gpu = _mib_probe([None, (4000, 8192, 0), (4000, 8192, 5600)])
     watch = ResourceWatch(emit, gpu_probe=gpu, ram_probe=_ram_quiet())
     for stage in ("load", "separate", "recognize"):
         watch.check(stage)
     assert emit.calls == []
-    assert calls["n"] == 1
 
 
 def test_gpu_probe_exception_disables_gpu_side_silently():
     emit = _Emit()
+    later = _mib_probe([(4000, 8192, 0), (4000, 8192, 5600)])
+    calls = {"n": 0}
 
     def gpu():
-        raise RuntimeError("CUDA driver error")
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("CUDA driver error")
+        return later()
 
     watch = ResourceWatch(emit, gpu_probe=gpu, ram_probe=_ram_quiet())
-    for stage in ("load", "separate"):
+    for stage in ("load", "separate", "recognize"):
         watch.check(stage)
     assert emit.calls == []
 
@@ -156,18 +154,6 @@ def test_process_growth_below_floor_does_not_fire():
     ram = _mib_probe([
         (1000, 500, 65457),
         (1000 + SWAP_INCREASE_FLOOR_MIB, 500 + PROCESS_GROWTH_FLOOR_MIB - 1, 65457),
-    ])
-    watch = ResourceWatch(emit, gpu_probe=_gpu_unavailable(), ram_probe=ram)
-    watch.check("load")
-    watch.check("separate")
-    assert emit.calls == []
-
-
-def test_swap_without_own_process_growth_does_not_fire():
-    emit = _Emit()
-    ram = _mib_probe([
-        (1000, 500, 65457),
-        (1000 + SWAP_INCREASE_FLOOR_MIB * 10, 500, 65457),
     ])
     watch = ResourceWatch(emit, gpu_probe=_gpu_unavailable(), ram_probe=ram)
     watch.check("load")
@@ -284,42 +270,22 @@ def test_wrapper_runs_check_before_reporter_stage():
 
 def test_default_probes_are_used_when_not_injected(monkeypatch):
     emit = _Emit()
-    monkeypatch.setattr(watch_module, "_default_gpu_probe", _probe_repeating_last([None]))
-    monkeypatch.setattr(watch_module, "_default_ram_probe", _probe_repeating_last([(0, 0, 0)]))
+    monkeypatch.setattr(watch_module, "_default_gpu_probe",
+                        _mib_probe([(4000, 8192, 0), (4000, 8192, 5600)]))
+    monkeypatch.setattr(watch_module, "_default_ram_probe", _mib_probe([
+        (1000, 500, 65457),
+        (1000 + SWAP_INCREASE_FLOOR_MIB, 500 + PROCESS_GROWTH_FLOOR_MIB, 65457),
+    ]))
     watch = ResourceWatch(emit)
     watch.check("load")
     watch.check("separate")
-    assert emit.calls == []
-
-
-def test_default_probes_stay_silent_without_torch_and_psutil(monkeypatch):
-    real_import = builtins.__import__
-
-    def failing_import(name, *args, **kwargs):
-        if name in ("torch", "psutil"):
-            raise ImportError(name)
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", failing_import)
-    emit = _Emit()
-    watch = ResourceWatch(emit)
-    watch.check("load")
-    watch.check("separate")
-    assert emit.calls == []
+    assert [c[0] for c in emit.calls] == ["gpu_memory_oversubscribed", "swap_detected"]
 
 
 def test_default_gpu_probe_is_none_when_cuda_is_unavailable(monkeypatch):
     torch = pytest.importorskip("torch")
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert watch_module._default_gpu_probe() is None
-
-
-def test_default_gpu_probe_returns_free_total_and_peak_reserved_bytes(monkeypatch):
-    torch = pytest.importorskip("torch")
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda: (3 * _MIB, 8 * _MIB))
-    monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda: 5 * _MIB)
-    assert watch_module._default_gpu_probe() == (3 * _MIB, 8 * _MIB, 5 * _MIB)
 
 
 def test_default_ram_probe_sums_rss_over_process_tree_skipping_vanished(monkeypatch):

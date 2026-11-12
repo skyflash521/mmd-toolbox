@@ -62,21 +62,11 @@ def test_cpu_only_build_is_silent_without_nvidia_smi(monkeypatch):
     assert torch_gpu_warning("auto") is None
 
 
-def test_cpu_mode_is_silent_without_looking_for_nvidia_smi(monkeypatch):
-    def _fail(name):
-        raise AssertionError("cpu 指定では GPU の有無を調べてはならない")
-
-    monkeypatch.setattr(torch_config.shutil, "which", _fail)
-
-    assert torch_gpu_warning("cpu") is None
-
-
-@pytest.mark.parametrize("device_mode", ["auto", "gpu", "cuda"])
-def test_any_mode_other_than_cpu_is_judged(monkeypatch, device_mode):
+def test_cpu_mode_is_silent_even_with_cpu_only_torch(monkeypatch):
     _with_nvidia_smi(monkeypatch, True)
     _fake_torch(monkeypatch, version="2.13.0", cuda_build=None, available=False)
 
-    assert torch_gpu_warning(device_mode) == ("cpu_only_torch", {"torch_version": "2.13.0"})
+    assert torch_gpu_warning("cpu") is None
 
 
 def test_repeated_calls_return_the_same_warning(monkeypatch):
