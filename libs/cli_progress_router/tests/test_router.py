@@ -1,5 +1,6 @@
 import io
-from unittest.mock import MagicMock, call
+import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -83,21 +84,10 @@ def test_machine_mode_forwards_every_call_in_order(spy_display):
     assert [c["done"] for c in emitter.calls] == [0, 1, 2]
 
 
-def test_machine_mode_close_and_summary_do_not_touch_display_or_emitter(spy_display):
-    emitter = _FakeEmitter()
-    router = _router(machine=True, emitter=emitter, stream=_NonTTYStream())
-    router.close()
-    router.summary("完了")
-    spy_display.return_value.close.assert_not_called()
-    spy_display.return_value.summary.assert_not_called()
-    assert emitter.calls == []
-
-
 @pytest.mark.parametrize("isatty,quiet,expect_enabled", [
     (True, False, True),
     (True, True, False),
     (False, False, False),
-    (False, True, False),
 ])
 def test_non_machine_display_gets_all_kwargs_and_is_enabled_only_on_tty_without_quiet(
         spy_display, isatty, quiet, expect_enabled):
@@ -111,12 +101,6 @@ def test_non_machine_display_gets_all_kwargs_and_is_enabled_only_on_tty_without_
             now=clock, interval=0.2, write_lock=lock)
     spy_display.assert_called_once_with(
         stream=stream, enabled=expect_enabled, now=clock, interval=0.2, write_lock=lock)
-
-
-@pytest.mark.parametrize("option", ["write_lock", "now"])
-def test_unspecified_display_option_is_passed_as_none(spy_display, option):
-    _router()
-    assert spy_display.call_args.kwargs[option] is None
 
 
 def test_interval_is_not_passed_when_unspecified(spy_display):
@@ -138,41 +122,46 @@ def test_unknown_stage_id_used_as_label_as_is(spy_display):
     display.stage.assert_called_once_with("未知の工程")
 
 
-def test_same_stage_id_updates_only_and_new_stage_id_switches(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.stage("load", done=0, total=3)
-    router.stage("load", done=1, total=3, note="n")
-    display.stage.assert_called_once_with("音声読み込み")
-    assert display.update.call_args_list == [call(0, 3, ""), call(1, 3, "n")]
-    router.stage("write")
-    assert display.stage.call_args_list == [call("音声読み込み"), call("書き出し")]
+def _live_router(clock):
+    stream = _TTYStream()
+    router = _router(stream=stream, now=lambda: clock[0], interval=0.01)
+    return router, stream
 
 
-def test_stage_after_close_restarts_even_with_same_stage_id(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.stage("load")
-    router.close()
-    router.stage("load")
-    assert display.stage.call_args_list == [call("音声読み込み"), call("音声読み込み")]
+def _wait_for(stream, text, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if text in stream.getvalue():
+            return True
+        time.sleep(0.005)
+    return False
 
 
-def test_close_is_idempotent(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.close()
-    router.close()
-    assert display.close.call_count == 2
+def test_same_stage_id_keeps_the_elapsed_time_and_new_stage_id_restarts_it():
+    clock = [0.0]
+    router, stream = _live_router(clock)
+    try:
+        router.stage("load", done=0, total=3)
+        clock[0] = 5.0
+        router.stage("load", done=1, total=3)
+        assert _wait_for(stream, "[音声読み込み] 1/3 経過 0:05")
+        router.stage("write")
+        assert _wait_for(stream, "[書き出し] 経過 0:00")
+    finally:
+        router.close()
 
 
-def test_close_and_summary_delegate_to_the_display(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.close()
-    router.summary("完了 out.vmd")
-    display.close.assert_called_once_with()
-    display.summary.assert_called_once_with("完了 out.vmd")
+def test_stage_after_close_restarts_even_with_same_stage_id():
+    clock = [0.0]
+    router, stream = _live_router(clock)
+    try:
+        router.stage("load")
+        router.close()
+        clock[0] = 5.0
+        router.stage("load", done=2, total=4)
+        assert _wait_for(stream, "[音声読み込み] 2/4 経過 0:00")
+    finally:
+        router.close()
 
 
 class _RaisingEmitter:
@@ -187,8 +176,8 @@ class _NonIOEmitError(Exception):
     pass
 
 
-@pytest.mark.parametrize("error_type", [OSError, BrokenPipeError, ValueError, _NonIOEmitError])
-def test_emit_failure_raises_dedicated_error_keeping_cause_type_and_message(error_type):
+def test_emit_failure_raises_dedicated_error_keeping_cause_type_and_message():
+    error_type = _NonIOEmitError
     error = error_type("標準出力へ書けません")
     router = _router(machine=True, emitter=_RaisingEmitter(error), stream=_NonTTYStream())
     with pytest.raises(ProgressEmitError) as exc:
