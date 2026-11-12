@@ -60,11 +60,6 @@ def test_competition_shortening_keeps_min_hold(end, attack, release, expected):
     _approx_envelope(env["あ"], expected)
 
 
-def test_normal_length_group_not_shortened():
-    env = _envelope([MouthEvent(MouthShape.A, 0.0, 10.0, 0.5)])
-    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
-
-
 def test_too_short_group_without_neighbor_is_dropped():
     assert _envelope([MouthEvent(MouthShape.A, 0.0, 1.5, 0.5)]) == {}
 

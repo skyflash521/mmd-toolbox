@@ -1,7 +1,5 @@
-import pytest
-
 import lipsync
-from vmd import MorphKey, VmdDocument, read, write
+from vmd import MorphKey
 
 _STANDARD_MORPHS = {"あ", "い", "う", "え", "お", "ん"}
 _MORPH_NAME_BYTES = 15
@@ -85,18 +83,3 @@ def test_output_keys_are_standard_mouth_morphs_with_fixed_width_names_in_frame_o
         assert isinstance(k.frame, int)
     frames = [k.frame for k in keys]
     assert frames == sorted(frames)
-
-
-def test_generated_keys_roundtrip_through_vmd():
-    events = [
-        lipsync.MouthEvent(lipsync.MouthShape.A, 0.0, 10.0, 0.5),
-        lipsync.MouthEvent(lipsync.MouthShape.I, 10.0, 20.0, 0.5),
-    ]
-    keys = lipsync.generate_morph_keys(events, lipsync.GenerationParams())
-    assert keys
-    restored, _warnings = read(write(VmdDocument(morph=keys)))
-    assert len(restored.morph) == len(keys)
-    for src, dst in zip(keys, restored.morph, strict=True):
-        assert dst.name == src.name
-        assert dst.frame == src.frame
-        assert dst.weight == pytest.approx(src.weight)

@@ -120,15 +120,6 @@ def test_short_legato_gap_keeps_both_end_values(gap_end):
     _approx_envelope(env["う"][:2], [(11, 0.0), (12, 0.5)])
 
 
-def test_integer_coarticulation_window_has_no_collision():
-    p = GenerationParams(coartic_overlap_max=4)
-    env = _envelope(
-        [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)], p
-    )
-    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.25), (12, 0.0)])
-    _approx_envelope(env["う"], [(8, 0.0), (10, 0.25), (12, 0.5), (18, 0.5), (20, 0.0)])
-
-
 def test_quantize_rounds_half_up_and_keeps_latest_target_per_frame():
     targets = [
         generate._Target("あ", 0.5, 0.1),

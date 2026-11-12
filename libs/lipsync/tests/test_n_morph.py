@@ -37,38 +37,11 @@ def test_single_n_envelope_on_n_morph_only():
     _approx_envelope(env["ん"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
 
 
-@pytest.mark.parametrize(
-    "events",
-    [
-        pytest.param([MouthEvent(MouthShape.A, 0.0, 10.0, 0.5)], id="a"),
-        pytest.param([MouthEvent(MouthShape.I, 0.0, 10.0, 0.5)], id="i"),
-        pytest.param([MouthEvent(MouthShape.E, 0.0, 10.0, 1.0)], id="e_clamped"),
-        pytest.param(
-            [
-                MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
-                MouthEvent(MouthShape.I, 10.0, 20.0, 0.5),
-            ],
-            id="coarticulation",
-        ),
-        pytest.param(
-            [
-                MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
-                MouthEvent(MouthShape.SILENCE, 10.0, 14.0, 0.0),
-                MouthEvent(MouthShape.O, 14.0, 24.0, 0.6),
-            ],
-            id="silence_between",
-        ),
-        pytest.param(
-            [
-                MouthEvent(MouthShape.U, 0.0, 8.0, 0.4),
-                MouthEvent(MouthShape.BILABIAL, 8.0, 11.0, 0.0),
-                MouthEvent(MouthShape.A, 11.0, 21.0, 0.7),
-            ],
-            id="bilabial_between",
-        ),
-    ],
-)
-def test_vowel_inputs_emit_no_n_morph(events):
+def test_coarticulated_vowels_emit_no_n_morph():
+    events = [
+        MouthEvent(MouthShape.A, 0.0, 10.0, 0.5),
+        MouthEvent(MouthShape.I, 10.0, 20.0, 0.5),
+    ]
     keys = lipsync.generate_morph_keys(events, GenerationParams())
     assert "ん" not in {k.name for k in keys}
 

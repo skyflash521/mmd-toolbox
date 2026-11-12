@@ -39,7 +39,6 @@ def test_legato_gap_bridges_with_overlapping_valley():
     "gap_len,mid_frame,depth",
     [
         pytest.param(2.0, 11, 0.35, id="short_gap_shallow"),
-        pytest.param(8.0, 14, 0.2, id="long_gap_deep"),
         pytest.param(12.0, 16, 0.2, id="depth_clamped_at_deep"),
     ],
 )

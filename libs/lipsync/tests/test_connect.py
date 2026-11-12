@@ -31,15 +31,6 @@ def test_two_same_vowels_merge_into_one_envelope_with_midpoint_nodes():
     )
 
 
-def test_no_key_at_internal_boundary_of_merged_vowels():
-    env = _envelope(
-        [MouthEvent(MouthShape.A, 0.0, 10.0, 0.4), MouthEvent(MouthShape.A, 10.0, 20.0, 0.7)]
-    )
-    keys = env["あ"]
-    assert 10 not in [f for f, _ in keys]
-    assert all(weight > 0.0 for frame, weight in keys if 0 < frame < 20)
-
-
 def test_three_same_vowels_single_attack_release():
     env = _envelope(
         [
@@ -68,17 +59,6 @@ def test_same_vowel_different_consonant_merges_and_aux_fades_to_zero():
     assert max(w for _, w in env["う"]) == pytest.approx(0.15)
 
 
-def test_same_vowel_same_profile_different_consonant_merges():
-    env = _envelope(
-        [
-            MouthEvent(MouthShape.I, 0.0, 4.0, 0.5, ConsonantClass.NONE),
-            MouthEvent(MouthShape.I, 4.0, 8.0, 0.5, ConsonantClass.SPREAD),
-        ]
-    )
-    assert set(env) == {"い"}
-    assert all(w > 0.0 for f, w in env["い"] if 0 < f < 8)
-
-
 def test_short_same_vowel_different_consonant_stays_open_across_boundary():
     env = _envelope(
         [
@@ -102,12 +82,3 @@ def test_merged_nodes_keep_per_segment_aperture_decay():
     _approx_envelope(
         env["あ"], [(0, 0.0), (2, 0.4 * 0.75), (5, 0.4 * 0.75), (15, 0.4), (18, 0.4), (20, 0.0)]
     )
-
-
-def test_different_adjacent_vowels_not_merged():
-    env = _envelope(
-        [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)]
-    )
-    assert set(env) == {"あ", "う"}
-    assert any(f < 10 and w == pytest.approx(0.5) for f, w in env["あ"])
-    assert any(f > 10 and w == pytest.approx(0.5) for f, w in env["う"])

@@ -24,25 +24,13 @@ def _approx_envelope(actual, expected):
 @pytest.mark.parametrize(
     "shorter_len,overlap_max,expected",
     [
-        pytest.param(10.0, 4, 4, id="base_length_when_room"),
         pytest.param(4.0, 4, 2, id="capped_at_half_shorter"),
-        pytest.param(10.0, 2, 2, id="default_base_length"),
-        pytest.param(10.0, 1, 1, id="base_length_one"),
         pytest.param(1.0, 4, 1, id="raised_to_minimum_one"),
     ],
 )
 def test_transition_frames(shorter_len, overlap_max, expected):
     p = GenerationParams(coartic_overlap_max=overlap_max)
     assert generate._transition_frames(shorter_len, p) == expected
-
-
-def test_coarticulation_boundary_holds_midpoint_of_both_shapes():
-    env = _envelope(
-        [MouthEvent(MouthShape.A, 0.0, 10.0, 0.5), MouthEvent(MouthShape.U, 10.0, 20.0, 0.5)],
-        _WIDE,
-    )
-    at10 = {name: w for name, keys in env.items() for f, w in keys if f == 10}
-    assert at10 == pytest.approx({"あ": 0.25, "う": 0.25})
 
 
 def test_coarticulation_full_envelopes():

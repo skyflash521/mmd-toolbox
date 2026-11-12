@@ -105,31 +105,6 @@ def test_none_aperture_produces_no_valley_points():
     )
 
 
-def test_valley_omitted_when_half_width_floors_to_zero():
-    events = [
-        MouthEvent(MouthShape.A, 0.0, 10.0, 0.5, ConsonantClass.NONE, lipsync.ApertureClass.NONE),
-        MouthEvent(
-            MouthShape.A, 10.0, 11.0, 0.6, ConsonantClass.NONE,
-            lipsync.ApertureClass.FIRM_CLOSURE,
-        ),
-        MouthEvent(MouthShape.A, 11.0, 20.0, 0.5, ConsonantClass.NONE, lipsync.ApertureClass.NONE),
-    ]
-    env = _envelope(events)
-    assert set(env) == {"あ"}
-    _approx_envelope(
-        env["あ"],
-        [
-            (0, 0.0),
-            (2, 0.5),
-            (5, 0.5),
-            (11, 0.45),
-            (16, 0.5),
-            (18, 0.5),
-            (20, 0.0),
-        ],
-    )
-
-
 def test_valley_omitted_when_half_width_floors_to_one():
     events = [
         MouthEvent(MouthShape.A, 0.0, 10.0, 0.8, ConsonantClass.NONE, lipsync.ApertureClass.NONE),

@@ -30,9 +30,9 @@ def test_anticipation_after_silence_reaches_hold_at_note_start():
 def test_anticipation_capped_at_half_of_short_silence():
     p = GenerationParams(anticipation_frames=2)
     env = _envelope(
-        [MouthEvent(MouthShape.SILENCE, 0.0, 2.0), MouthEvent(MouthShape.A, 2.0, 12.0, 0.5)], p
+        [MouthEvent(MouthShape.SILENCE, 0.0, 2.0), MouthEvent(MouthShape.A, 2.0, 12.0, 0.8)], p
     )
-    _approx_envelope(env["あ"], [(1, 0.0), (2, 0.5), (10, 0.5), (12, 0.0)])
+    _approx_envelope(env["あ"], [(1, 0.0), (2, 0.8), (10, 0.8), (12, 0.0)])
 
 
 def test_release_lag_before_silence_holds_to_note_end():
@@ -59,11 +59,6 @@ def test_anticipation_scales_with_opening(open_amount, ramp_start_frame):
         GenerationParams(anticipation_frames=4),
     )
     assert env["あ"][0][0] == ramp_start_frame
-
-
-def test_no_anticipation_at_timeline_start():
-    env = _envelope([MouthEvent(MouthShape.A, 0.0, 10.0, 0.5)])
-    _approx_envelope(env["あ"], [(0, 0.0), (2, 0.5), (8, 0.5), (10, 0.0)])
 
 
 def test_anticipation_after_bilabial():

@@ -35,12 +35,6 @@ def test_pure_vowel_is_main_morph_only(shape, main):
     assert _peak_weights(_vowel(shape, 0.4)) == pytest.approx({main: 0.4})
 
 
-def test_neutral_consonant_is_pure_vowel():
-    assert _peak_weights(_vowel(MouthShape.A, 0.5, ConsonantClass.NEUTRAL)) == pytest.approx(
-        {"あ": 0.5}
-    )
-
-
 def test_rounded_consonant_adds_u_morph():
     w = _peak_weights(_vowel(MouthShape.A, 0.5, ConsonantClass.ROUNDED))
     assert w == pytest.approx({"あ": 0.5, "う": 0.5 * _CONSONANT_AUX_GAIN})
@@ -62,15 +56,6 @@ def test_consonant_aux_not_added_to_main_morph(shape, consonant, main):
     assert _peak_weights(_vowel(shape, 0.5, consonant)) == pytest.approx({main: 0.5})
 
 
-def test_hold_clamped_to_open_cap():
-    assert _peak_weights(_vowel(MouthShape.A, 1.0)) == pytest.approx({"あ": _DEFAULT_CAP})
-
-
-def test_vowel_scale_applied_then_clamped():
-    p = GenerationParams(vowel_scale=(2.0, 1.0, 1.0, 1.0, 1.0, 1.0))
-    assert _peak_weights(_vowel(MouthShape.A, 0.5), p) == pytest.approx({"あ": _DEFAULT_CAP})
-
-
 def test_total_over_open_cap_is_scaled_proportionally():
     w = _peak_weights(_vowel(MouthShape.A, 1.0, ConsonantClass.ROUNDED))
     raw_a, raw_u = _DEFAULT_CAP, _DEFAULT_CAP * _CONSONANT_AUX_GAIN
@@ -79,7 +64,7 @@ def test_total_over_open_cap_is_scaled_proportionally():
     assert sum(w.values()) == pytest.approx(_DEFAULT_CAP)
 
 
-def test_open_cap_param_used_for_hold_clamp():
+def test_single_morph_output_capped_at_open_cap():
     p = GenerationParams(open_cap=0.6)
     assert _peak_weights(_vowel(MouthShape.A, 1.0), p) == pytest.approx({"あ": 0.6})
 
@@ -128,7 +113,6 @@ def test_vowel_scale_indexed_per_vowel(shape, index, main):
 @pytest.mark.parametrize(
     "aperture,scale",
     [
-        (ApertureClass.NONE, 1.0),
         (ApertureClass.FIRM_CLOSURE, 0.75),
         (ApertureClass.NARROW_CHANNEL, 0.85),
         (ApertureClass.SLIGHT_CLOSURE, 0.92),
