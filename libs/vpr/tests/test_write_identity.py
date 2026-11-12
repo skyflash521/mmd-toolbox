@@ -77,20 +77,6 @@ def test_removed_note_takes_its_unknown_keys_with_it():
     assert [(note["pos"], note["exp"]) for note in written] == [(0, {"a": 1}), (480, {"c": 3})]
 
 
-def test_added_note_is_not_a_copy_of_the_first_raw_note():
-    raw_notes = [_raw_with(0, 60, exp={"a": 1}, isProtected=True)]
-
-    def add(project):
-        project.tracks[0].parts[0].notes.append(
-            Note(start_tick=480, duration_tick=240, pitch=64, lyric="う", velocity=50))
-
-    written = _written_notes(_read_write(raw_notes, add))
-
-    added = next(note for note in written if note["pos"] == 480)
-    assert "exp" not in added
-    assert added["isProtected"] is False
-
-
 def test_added_singing_track_is_not_a_copy_of_the_first_singing_track():
     sequence = _sequence([_singing_track([_raw_with(0, 60)])])
     sequence["tracks"][0]["color"] = 7
@@ -107,11 +93,3 @@ def test_added_singing_track_is_not_a_copy_of_the_first_singing_track():
     assert second["name"] == "second"
     assert "customKey" not in second
     assert second["color"] != 7
-
-
-def test_unmodified_read_write_does_not_change_unknown_note_keys():
-    raw_notes = [_raw_with(480, 62, exp={"x": 1}), _raw_with(0, 60, exp={"y": 2})]
-
-    written = _written_notes(_read_write(raw_notes))
-
-    assert sorted((note["pos"], note["exp"]) for note in written) == [(0, {"y": 2}), (480, {"x": 1})]

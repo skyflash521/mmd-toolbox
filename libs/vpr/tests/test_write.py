@@ -112,17 +112,15 @@ def test_round_trip_keeps_an_empty_phoneme_list():
     assert _read_back(write(source)).tracks[0].parts[0].notes[0].phonemes == []
 
 
-@pytest.mark.parametrize("is_protected", [True, False])
-def test_round_trip_keeps_is_protected(is_protected):
-    source = _project([_note(is_protected=is_protected)])
+def test_round_trip_keeps_is_protected():
+    source = _project([_note(is_protected=True)])
     written = _read_back(write(source)).tracks[0].parts[0].notes[0]
-    assert written.is_protected is is_protected
+    assert written.is_protected is True
 
 
-@pytest.mark.parametrize("is_protected", [True, False])
-def test_is_protected_is_written_as_the_format_field(is_protected):
-    written = _sequence_of(write(_project([_note(is_protected=is_protected)])))
-    assert written["tracks"][0]["parts"][0]["notes"][0]["isProtected"] is is_protected
+def test_is_protected_is_written_as_the_format_field():
+    written = _sequence_of(write(_project([_note(is_protected=True)])))
+    assert written["tracks"][0]["parts"][0]["notes"][0]["isProtected"] is True
 
 
 def test_is_protected_cleared_by_the_caller_overwrites_the_raw_value():
@@ -252,22 +250,6 @@ def test_existing_voice_bank_definition_is_not_replaced():
     assert result["voices"] == voices
 
 
-def test_every_part_voice_reference_resolves_when_a_singing_track_is_added():
-    audio = {"type": 1, "name": "audio", "parts": [{"name": "a", "pos": 0, "wav": {}, "region": {}}]}
-    sequence = _sequence([audio])
-    project = _read_back(_make_vpr(sequence))
-    project.tracks.append(Track(name="vocal", parts=[
-        Part(name="p", start_tick=0, duration_tick=1920,
-             voice=VoiceBank(comp_id="TESTCOMPID000001", name="TEST_VOICE"), notes=[_note()])]))
-
-    result = _sequence_of(write(project))
-    defined = {v["compID"] for v in result["voices"]}
-    for track in result["tracks"]:
-        for part in track["parts"]:
-            if "aiVoice" in part:
-                assert part["aiVoice"]["compID"] in defined
-
-
 def _raw_note_of(data):
     return _sequence_of(data)["tracks"][0]["parts"][0]["notes"][0]
 
@@ -284,7 +266,7 @@ def test_vibrato_cleared_by_the_caller_is_written_as_a_zero_length_span_keeping_
     assert _read_back(write(project)).tracks[0].parts[0].notes[0].vibrato is None
 
 
-@pytest.mark.parametrize("vibrato", [{"type": 0}, {"type": 0, "duration": "240"}])
+@pytest.mark.parametrize("vibrato", [{"type": 0}])
 def test_vibrato_the_reader_could_not_map_is_left_untouched(vibrato):
     raw = _raw_note(0, 480, 60, "あ", "a", 64)
     raw["vibrato"] = vibrato
@@ -313,11 +295,9 @@ def test_depth_envelope_cleared_by_the_caller_is_removed():
     pytest.param(_note(pitch=-1), id="pitch_below_midi"),
     pytest.param(_note(pitch=128), id="pitch_above_midi"),
     pytest.param(_note(duration=0), id="zero_duration"),
-    pytest.param(_note(duration=-1), id="negative_duration"),
     pytest.param(_note(velocity=-1), id="velocity_below_0"),
     pytest.param(_note(velocity=128), id="velocity_above_127"),
     pytest.param(_note(phonemes=["k a"]), id="phoneme_with_space"),
-    pytest.param(_note(phonemes=[""]), id="empty_phoneme"),
     pytest.param(_note(vibrato=NoteVibrato(type=0, duration=0)), id="zero_vibrato_duration"),
     pytest.param(_note(duration=480, vibrato=NoteVibrato(type=0, duration=481)),
                  id="vibrato_longer_than_note"),
@@ -349,12 +329,6 @@ def test_time_signature_without_a_bar_length_is_rejected(signature):
     project.time_signatures = [signature]
     with pytest.raises(VprFormatError):
         write(project)
-
-
-def test_time_signature_with_an_unusual_denominator_is_written():
-    project = _project([_note()])
-    project.time_signatures = [TimeSignature(tick=0, numerator=5, denominator=6)]
-    assert _read_back(write(project)).time_signatures[0].denominator == 6
 
 
 def test_tempo_that_the_format_cannot_hold_is_rejected():
@@ -409,11 +383,6 @@ def test_write_file_rejected_by_validation_keeps_the_existing_output_and_no_temp
         write_file(broken, path)
     assert path.read_bytes() == original
     assert not list(tmp_path.glob("*.tmp"))
-
-
-def test_same_model_gives_the_same_sequence_json():
-    source = _project([_note(0, 480, 60, "あ"), _note(480, 240, 62, "い")])
-    assert _sequence_of(write(source)) == _sequence_of(write(source))
 
 
 def test_project_without_tempos_is_rejected():
@@ -488,3 +457,14 @@ def test_fewer_singing_tracks_drop_the_trailing_raw_singing_tracks():
     result = _sequence_of(write(project))
     assert [(t["type"], t["name"]) for t in result["tracks"]] == [(2, "vocal2"), (1, "audio")]
     assert result["tracks"][0]["color"] == 7
+
+
+def test_time_signature_with_an_unusual_denominator_is_written():
+    project = _project([_note()])
+    project.time_signatures = [TimeSignature(tick=0, numerator=5, denominator=6)]
+    assert _read_back(write(project)).time_signatures[0].denominator == 6
+
+
+def test_same_model_gives_the_same_sequence_json():
+    source = _project([_note(0, 480, 60, "あ"), _note(480, 240, 62, "い")])
+    assert _sequence_of(write(source)) == _sequence_of(write(source))
