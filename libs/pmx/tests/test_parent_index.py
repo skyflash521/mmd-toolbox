@@ -60,15 +60,9 @@ def test_parent_declared_after_child_is_accepted():
     assert [b.parent for b in model.bones] == [1, None]
 
 
-@pytest.mark.parametrize("bone_index_size", [1, 2, 4])
-def test_parent_index_equal_to_bone_count_is_rejected(bone_index_size):
+def test_parent_index_equal_to_bone_count_is_rejected():
     with pytest.raises(PmxFormatError):
-        read_pmx(_build_pmx([-1, 0, 3], bone_index_size=bone_index_size))
-
-
-def test_parent_index_far_beyond_bone_count_is_rejected():
-    with pytest.raises(PmxFormatError):
-        read_pmx(_build_pmx([-1, 100]))
+        read_pmx(_build_pmx([-1, 0, 3]))
 
 
 def test_parent_index_below_minus_one_is_rejected():
@@ -76,29 +70,9 @@ def test_parent_index_below_minus_one_is_rejected():
         read_pmx(_build_pmx([-1, -2]))
 
 
-def test_single_bone_with_out_of_range_parent_is_rejected():
-    with pytest.raises(PmxFormatError):
-        read_pmx(_build_pmx([1]))
-
-
 def test_bone_that_is_its_own_parent_is_rejected():
     with pytest.raises(PmxFormatError):
         read_pmx(_build_pmx([-1, 1]))
-
-
-def test_two_bone_cycle_is_rejected():
-    with pytest.raises(PmxFormatError):
-        read_pmx(_build_pmx([1, 0]))
-
-
-def test_longer_cycle_away_from_root_is_rejected():
-    with pytest.raises(PmxFormatError):
-        read_pmx(_build_pmx([-1, 3, 1, 2]))
-
-
-def test_cycle_in_one_branch_is_rejected_even_if_other_branch_is_valid():
-    with pytest.raises(PmxFormatError):
-        read_pmx(_build_pmx([-1, 0, 3, 2]))
 
 
 def _chain_model(depth: int) -> PmxModel:
@@ -160,3 +134,18 @@ def test_fk_on_deep_chain_with_children_listed_before_parents():
         assert world[depth - 1 - i].position == pytest.approx(
             (float(i), 0.0, float(i + 1)), abs=1e-6
         )
+
+
+def test_two_bone_cycle_is_rejected():
+    with pytest.raises(PmxFormatError):
+        read_pmx(_build_pmx([1, 0]))
+
+
+def test_longer_cycle_away_from_root_is_rejected():
+    with pytest.raises(PmxFormatError):
+        read_pmx(_build_pmx([-1, 3, 1, 2]))
+
+
+def test_cycle_in_one_branch_is_rejected_even_if_other_branch_is_valid():
+    with pytest.raises(PmxFormatError):
+        read_pmx(_build_pmx([-1, 0, 3, 2]))

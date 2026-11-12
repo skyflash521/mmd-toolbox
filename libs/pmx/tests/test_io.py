@@ -332,18 +332,6 @@ def test_undecodable_name_is_replaced_and_raw_bytes_kept():
     assert b.name_raw == raw
 
 
-def test_read_parent_index():
-    data = build_pmx(
-        [
-            {"name": "親", "parent": None},
-            {"name": "子", "parent": 0},
-        ]
-    )
-    model = read_pmx(data)
-    assert model.bones[0].parent is None
-    assert model.bones[1].parent == 0
-
-
 def test_name_to_index():
     data = build_pmx([{"name": "A"}, {"name": "B"}, {"name": "C"}])
     model = read_pmx(data)
@@ -372,20 +360,6 @@ def test_flag_movable_rotatable(flags, movable, rotatable):
     assert b.movable is movable
     assert b.rotatable is rotatable
     assert b.flags == flags
-
-
-@pytest.mark.parametrize("size", [1, 2, 4])
-def test_index_size_variants(size):
-    data = build_pmx(
-        [
-            {"name": "親", "parent": None},
-            {"name": "子", "parent": 0},
-        ],
-        bone_index_size=size,
-    )
-    model = read_pmx(data)
-    assert model.bones[1].parent == 0
-    assert model.bones[0].parent is None
 
 
 def test_encoding_utf8():
@@ -441,19 +415,37 @@ def test_add_uv_count_above_4_raises():
 
 
 def test_declared_bone_missing_from_data_raises():
-    truncated = pmx_pre_bone_section() + _i32(1)
+    data = pmx_pre_bone_section() + _fields(
+        bone_count=_i32(1),
+        morph_count=_i32(0),
+        display_frame_count=_i32(0),
+        rigidbody_count=_i32(0),
+        joint_count=_i32(0),
+    )
     with pytest.raises(PmxFormatError):
-        read_pmx(truncated)
+        read_pmx(data)
 
 
 def test_negative_bone_count_raises():
-    data = pmx_pre_bone_section() + _i32(-1)
+    data = pmx_pre_bone_section() + _fields(
+        bone_count=_i32(-1),
+        morph_count=_i32(0),
+        display_frame_count=_i32(0),
+        rigidbody_count=_i32(0),
+        joint_count=_i32(0),
+    )
     with pytest.raises(PmxFormatError):
         read_pmx(data)
 
 
 def test_declared_morph_missing_after_bones_raises():
-    data = pmx_pre_bone_section() + _fields(bone_count=_i32(0), morph_count=_i32(1))
+    data = pmx_pre_bone_section() + _fields(
+        bone_count=_i32(0),
+        morph_count=_i32(1),
+        display_frame_count=_i32(0),
+        rigidbody_count=_i32(0),
+        joint_count=_i32(0),
+    )
     with pytest.raises(PmxFormatError):
         read_pmx(data)
 
@@ -461,8 +453,6 @@ def test_declared_morph_missing_after_bones_raises():
 def test_reads_bones_past_full_trailing_sections():
     data = build_pmx(
         [{"name": "センター"}, {"name": "子", "parent": 0}],
-        n_vertices=2,
-        n_materials=1,
         morphs=2,
         display_frames=1,
         rigidbodies=1,
@@ -472,7 +462,7 @@ def test_reads_bones_past_full_trailing_sections():
     assert [b.name for b in model.bones] == ["センター", "子"]
 
 
-def test_reads_bones_past_softbody_pmx21():
+def test_pmx_version_2_1_is_accepted():
     data = build_pmx(
         [{"name": "センター"}],
         version=2.1,

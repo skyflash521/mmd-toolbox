@@ -104,7 +104,7 @@ def test_unrotatable_bone_ignores_local_rotation():
     assert world[1].position == _approx_vec((1.0, 0.0, 0.0))
 
 
-def test_missing_keys_give_base_pose():
+def test_identity_local_poses_give_base_pose():
     model = _model([_bone("A"), _bone("B", parent=0, position=(3.0, 0.0, 0.0))])
     world = evaluate_fk(model, _local(model, {}))
     assert world[1].position == _approx_vec((3.0, 0.0, 0.0))
