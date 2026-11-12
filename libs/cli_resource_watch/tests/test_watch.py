@@ -1,4 +1,3 @@
-
 import pytest
 
 from cli_resource_watch import ProgressWithResourceCheck, ResourceWatch
