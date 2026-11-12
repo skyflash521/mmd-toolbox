@@ -1,4 +1,3 @@
-
 from cli_progress_router import ProgressRouter
 
 _LABELS = {"load": "音声読み込み", "write": "書き出し"}
