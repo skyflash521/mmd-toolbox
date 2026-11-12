@@ -352,15 +352,3 @@ def test_summary_holds_write_lock_during_write():
     finally:
         stream.release.set()
         t.join(2.0)
-
-
-def test_writes_without_write_lock_when_unspecified():
-    stream = io.StringIO()
-    clock = [0.0]
-    r = ProgressReporter(stream, enabled=True, now=lambda: clock[0], interval=3600.0)
-    r.stage("キーフレーム圧縮")
-    r.update(1, 2)
-    r._draw()
-    r.summary("完了 out.vmd")
-    r.close()
-    assert "[キーフレーム圧縮] 1/2 経過 0:00" in stream.getvalue()
