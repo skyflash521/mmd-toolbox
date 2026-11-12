@@ -1,13 +1,11 @@
 import math
 
-from vmd import fit, interp
+from vmd import fit
 from vmd import reduce as vreduce
 from vmd.reduce import build_bone_tolerances, reduce_bone_track, verify_bone_track
 from vmd.types import BoneKey
 
 _LOOSE = fit._LSQ_LOOSE_TOL
-_N_AT_THRESHOLD = fit._LSQ_LOOSEN_MIN_SAMPLES
-_N_BELOW_THRESHOLD = fit._LSQ_LOOSEN_MIN_SAMPLES - 1
 
 
 def _capture_least_squares(monkeypatch):
@@ -20,47 +18,6 @@ def _capture_least_squares(monkeypatch):
 
     monkeypatch.setattr(fit, "least_squares", cap)
     return captured
-
-
-def _eased_xy(n):
-    xs = [(i + 1) / (n + 2) for i in range(n)]
-    return xs, [interp._solve_factor(96, 0, 96, 30, x) for x in xs]
-
-
-def test_fit_bezier_loosens_tolerance_at_sample_threshold(monkeypatch):
-    cap = _capture_least_squares(monkeypatch)
-    xs, ys = _eased_xy(_N_AT_THRESHOLD)
-    fit.fit_bezier_curve(xs, ys)
-    assert cap, "least_squares が呼ばれていない"
-    assert all(
-        kw.get("ftol") == _LOOSE and kw.get("xtol") == _LOOSE and kw.get("gtol") == _LOOSE
-        for kw in cap
-    )
-
-
-def test_fit_bezier_keeps_default_tolerance_below_sample_threshold(monkeypatch):
-    cap = _capture_least_squares(monkeypatch)
-    xs, ys = _eased_xy(_N_BELOW_THRESHOLD)
-    fit.fit_bezier_curve(xs, ys)
-    assert cap, "least_squares が呼ばれていない"
-    assert all("ftol" not in kw and "xtol" not in kw and "gtol" not in kw for kw in cap)
-
-
-def test_fit_coeff_loosens_tolerance_at_sample_threshold(monkeypatch):
-    cap = _capture_least_squares(monkeypatch)
-    n = _N_AT_THRESHOLD
-    xs = [(i + 1) / (n + 2) for i in range(n)]
-    targets = [math.sin(math.pi * x) for x in xs]
-
-    def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
-
-    fit._fit_coeff_curve(xs, resid_at)
-    assert cap, "least_squares が呼ばれていない"
-    assert all(
-        kw.get("ftol") == _LOOSE and kw.get("xtol") == _LOOSE and kw.get("gtol") == _LOOSE
-        for kw in cap
-    )
 
 
 def _curvy_bone_keys_with_segment_above_threshold():

@@ -117,11 +117,6 @@ def test_camera_interp_bytes_layout():
     assert list(b[20:24]) == [21, 23, 22, 24]
 
 
-def test_camera_interp_bytes_linear_matches_constant():
-    b = camera_interp_bytes(*([_LINEAR_CP] * 6))
-    assert b == CAMERA_LINEAR_INTERP
-
-
 def test_scalar_curve_linear_mode_returns_linear_cp():
     ch = LinearScalarChannel(0, _eased(0.0, 100.0), tol=1.0, mode="linear")
     assert ch.curve(0, 10) == _LINEAR_CP

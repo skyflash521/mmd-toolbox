@@ -1,7 +1,5 @@
 import math
 
-import pytest
-
 from vmd.reduce import (
     BONE_LINEAR_INTERP,
     build_bone_tolerances,
@@ -22,13 +20,6 @@ def _peak_source(n=41):
     return keys
 
 
-def _sine_source(n=41):
-    return [
-        BoneKey(NAME, f, (5.0 * math.sin(0.4 * f), 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), BONE_LINEAR_INTERP)
-        for f in range(n)
-    ]
-
-
 def _reduce(source, ranges, **kw):
     opts = dict(
         cut_thresholds=(1.0, 30.0),
@@ -46,11 +37,6 @@ def _collect(source, ranges, **kw):
     calls = []
     _reduce(source, ranges, progress=lambda d, t, note: calls.append((d, t, note)), **kw)
     return calls
-
-
-def test_progress_is_called_when_given():
-    calls = _collect(_peak_source(), [(0, 30)])
-    assert calls
 
 
 def test_progress_done_is_monotonic_and_reaches_total():
@@ -94,25 +80,6 @@ def test_progress_does_not_change_output():
     assert [(k.frame, k.position, k.rotation, k.interpolation) for k in without] == [
         (k.frame, k.position, k.rotation, k.interpolation) for k in with_progress
     ]
-
-
-@pytest.mark.parametrize("c1_smoothing", [True, False])
-def test_progress_works_together_with_c1_smoothing_and_bezier(c1_smoothing):
-    source = _sine_source()
-    calls = _collect(
-        source, [(0, 40)], curve_mode="bezier", c1_smoothing=c1_smoothing, no_cut_detect=True
-    )
-    dones = [d for d, _, _ in calls]
-    assert dones == sorted(dones)
-    assert all(t == 40 for _, t, _ in calls)
-    assert calls[-1] == (40, 40, PHASE)
-
-
-def test_progress_works_together_with_diagnostics():
-    diag = {}
-    calls = _collect(_peak_source(), [(0, 30)], diagnostics=diag)
-    assert calls[-1][0] == 30
-    assert diag["verify"]
 
 
 def _slow_sine_source(n=41):

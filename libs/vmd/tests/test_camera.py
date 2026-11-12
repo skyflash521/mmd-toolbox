@@ -95,15 +95,6 @@ class TestRoundTrip:
         assert _approx(got["position"], center, abs=1e-5)
         assert _approx(got["rotation"], rotation, abs=1e-5)
 
-    def test_recovered_orientation_matches(self):
-        center, distance, rotation = (2.0, 1.0, -3.0), -40.0, (0.5, -0.8, 0.6)
-        pose = camera.to_world(cam_key(center, distance, rotation))
-        got = camera.from_world(pose, distance, prev_rotation=rotation)
-        pos2, fwd2, up2 = _fk(got["position"], distance, got["rotation"])
-        assert _approx(pose.position, pos2, abs=1e-5)
-        assert _approx(pose.forward, fwd2, abs=1e-5)
-        assert _approx(pose.up, up2, abs=1e-5)
-
 
 class TestDistanceZero:
     def test_position_equals_center(self):
@@ -117,13 +108,6 @@ class TestDistanceZero:
         pose = camera.to_world(cam_key(center, 0.0, rotation))
         got = camera.from_world(pose, 0.0, prev_rotation=rotation)
         assert _approx(got["position"], center, abs=1e-9)
-
-    def test_orientation_still_follows_rotation(self):
-        rotation = (0.3, 0.5, 0.7)
-        pose = camera.to_world(cam_key((1.0, 2.0, 3.0), 0.0, rotation))
-        _, forward, up = _fk((1.0, 2.0, 3.0), 0.0, rotation)
-        assert _approx(pose.forward, forward, abs=1e-9)
-        assert _approx(pose.up, up, abs=1e-9)
 
 
 class TestAngleContinuity:

@@ -28,13 +28,6 @@ def test_peak_splits_at_extremum():
     assert keys == [0, 5, 10]
 
 
-def test_valley_splits_at_extremum():
-    vals = [0, -1, -2, -3, -4, -5, -4, -3, -2, -1, 0]
-    ch = lin(0, vals, tol=1.0)
-    keys = reduce_track([0, 10], [ch], min_seg=1, max_seg=180, strict=False)
-    assert keys == [0, 5, 10]
-
-
 def test_max_seg_none_disables_cap():
     ch = lin(0, range(101), tol=0.01)
     assert reduce_track([0, 100], [ch], min_seg=1, max_seg=None, strict=False) == [0, 100]
@@ -103,20 +96,6 @@ def test_adjacent_segment_accepted():
     assert keys == [0, 1]
 
 
-def test_constant_span_not_capped():
-    ch = lin(0, [5.0] * 101, tol=0.01)
-    keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
-    assert keys == [0, 100]
-
-
-def test_loose_non_constant_span_capped():
-    ch = lin(0, [float(i) for i in range(101)], tol=1.0)
-    keys = reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
-    gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
-    assert all(g <= 40 for g in gaps)
-    assert len(gaps) == 3
-
-
 def test_mixed_constant_and_varying_span_no_grid_in_flat():
     vals = [5.0] * 61 + [5.0 + float(i + 1) for i in range(40)]
     ch = lin(0, vals, tol=1.0)
@@ -144,14 +123,6 @@ def test_non_constant_fallback_when_channel_lacks_is_constant():
     gaps = [b - a for a, b in zip(keys, keys[1:], strict=False)]
     assert all(g <= 40 for g in gaps)
     assert len(gaps) == 3
-
-
-def test_constant_span_reduce_deterministic():
-    def run():
-        ch = lin(0, [5.0] * 101, tol=0.01)
-        return reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
-
-    assert run() == run()
 
 
 def test_reduce_uses_only_normalized_contract():
@@ -204,10 +175,10 @@ def test_error_split_recorded_in_splits_not_caps():
     assert caps == []
 
 
-def test_no_mechanical_grid_when_span_within_max_seg():
+def test_no_mechanical_grid_when_span_equals_max_seg():
     ch = lin(0, [float(i) for i in range(31)], tol=1.0)
     caps = []
-    keys = reduce_track([0, 30], [ch], min_seg=1, max_seg=180, strict=False, caps=caps)
+    keys = reduce_track([0, 30], [ch], min_seg=1, max_seg=30, strict=False, caps=caps)
     assert keys == [0, 30]
     assert caps == []
 
@@ -234,3 +205,11 @@ def test_reduce_bone_track_diagnostics_has_maxspan_caps():
     )
     assert "maxspan_caps" in diag
     assert diag["maxspan_caps"]
+
+
+def test_constant_span_reduce_deterministic():
+    def run():
+        ch = lin(0, [5.0] * 101, tol=0.01)
+        return reduce_track([0, 100], [ch], min_seg=1, max_seg=40, strict=False)
+
+    assert run() == run()

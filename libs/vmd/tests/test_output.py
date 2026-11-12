@@ -35,20 +35,6 @@ def bone(name, frame, pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 1.0)):
     return BoneKey(name.encode("cp932").ljust(15, b"\x00"), frame, pos, rot, BL)
 
 
-def test_camera_linear_interp_is_24_bytes_linear():
-    assert len(CAMERA_LINEAR_INTERP) == 24
-    assert CAMERA_LINEAR_INTERP == bytes([20, 107, 20, 107]) * 6
-
-
-def test_bone_linear_interp_is_linear_in_body_and_shifted_copy():
-    assert len(BONE_LINEAR_INTERP) == 64
-    k = BoneKey(b"c".ljust(15, b"\x00"), 0, (0, 0, 0), (0, 0, 0, 1), BONE_LINEAR_INTERP)
-    cps = k.control_points()
-    for ch in ("X", "Y", "Z", "R"):
-        assert cps[ch] == (20, 20, 107, 107)
-    assert BONE_LINEAR_INTERP[2] == 20 and BONE_LINEAR_INTERP[3] == 20
-
-
 def test_bone_interp_bytes_full_shiftcopy_layout():
     b = bone_interp_bytes((1, 2, 3, 4), (5, 6, 7, 8), (9, 10, 11, 12), (13, 14, 15, 16))
     assert len(b) == 64

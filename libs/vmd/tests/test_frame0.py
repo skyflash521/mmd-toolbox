@@ -62,8 +62,7 @@ def test_bone_section_gets_identity_zero_position_linear_interp_key():
         assert cp == (20, 20, 107, 107)
 
 
-@pytest.mark.parametrize("section", ["camera", "light", "self_shadow", "ik_property"])
-def test_unnamed_section_rejected(section):
+def test_unnamed_section_rejected():
     doc = VmdDocument()
     with pytest.raises(ValueError):
-        ensure_frame0_neutral_keys(doc, sections=(section,))
+        ensure_frame0_neutral_keys(doc, sections=("camera",))

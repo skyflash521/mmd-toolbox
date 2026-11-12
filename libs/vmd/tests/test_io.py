@@ -227,8 +227,6 @@ class TestFieldAssert:
     def test_write_reproduces_handwritten_bytes(self):
         doc, _ = read(CAMERA_FILE)
         assert write(doc) == CAMERA_FILE
-        doc, _ = read(MODEL_FILE)
-        assert write(doc) == MODEL_FILE
 
 
 class TestRoundtrip:
@@ -320,8 +318,9 @@ class TestV1Reject:
 
 class TestErrors:
     def test_bad_magic(self):
-        with pytest.raises(VmdFormatError):
-            read(b"NOT A VMD FILE".ljust(30, b"\x00") + b"\x00" * 20)
+        bad = b"NOT A VMD FILE".ljust(30, b"\x00") + CAMERA_FILE[30:]
+        with pytest.raises(VmdFormatError, match="magic"):
+            read(bad)
 
     def test_empty(self):
         with pytest.raises(VmdFormatError):

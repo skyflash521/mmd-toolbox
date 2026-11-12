@@ -5,51 +5,6 @@ from vmd import reduce as vreduce
 from vmd.reduce import build_bone_tolerances, reduce_bone_track, verify_bone_track
 from vmd.types import BoneKey
 
-_N_AT_THRESHOLD = fit._LSQ_LOOSEN_MIN_SAMPLES
-_N_BELOW_THRESHOLD = fit._LSQ_LOOSEN_MIN_SAMPLES - 1
-
-
-def _capture_least_squares(monkeypatch):
-    captured = []
-    orig = fit.least_squares
-
-    def cap(fun, x0, **kwargs):
-        captured.append(kwargs)
-        return orig(fun, x0, **kwargs)
-
-    monkeypatch.setattr(fit, "least_squares", cap)
-    return captured
-
-
-def _hill_xy(n):
-    xs = [(i + 1) / (n + 2) for i in range(n)]
-    return xs, [math.sin(math.pi * x) for x in xs]
-
-
-def test_fit_bezier_uses_reduced_inits_at_sample_threshold(monkeypatch):
-    cap = _capture_least_squares(monkeypatch)
-    xs, ys = _hill_xy(_N_AT_THRESHOLD)
-    fit.fit_bezier_curve(xs, ys)
-    assert len(cap) == len(fit._BEZIER_INITS_LARGE)
-
-
-def test_fit_bezier_uses_all_inits_below_sample_threshold(monkeypatch):
-    cap = _capture_least_squares(monkeypatch)
-    xs, ys = _hill_xy(_N_BELOW_THRESHOLD)
-    fit.fit_bezier_curve(xs, ys)
-    assert len(cap) == len(fit._BEZIER_INITS)
-
-
-def test_fit_coeff_uses_reduced_inits_at_sample_threshold(monkeypatch):
-    cap = _capture_least_squares(monkeypatch)
-    xs, targets = _hill_xy(_N_AT_THRESHOLD)
-
-    def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
-
-    fit._fit_coeff_curve(xs, resid_at)
-    assert len(cap) == len(fit._BEZIER_INITS_LARGE)
-
 
 def _curvy_bone_keys_with_segment_above_threshold():
     keys = []

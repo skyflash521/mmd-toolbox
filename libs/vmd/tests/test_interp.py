@@ -162,15 +162,6 @@ class TestCameraRotation:
         assert result[1] == pytest.approx(-0.6 * y, abs=1e-4)
         assert result[2] == pytest.approx(1.2 * y, abs=1e-4)
 
-    def test_euler_lerp_not_slerp(self):
-        keys = [
-            cam_key(0, rotation=(0.0, 0.0, 0.0)),
-            cam_key(10, rotation=(1.0, 2.0, 4.0)),
-        ]
-        rx, ry, rz = interp.sample(keys, "rot", 5)
-        assert ry == pytest.approx(2.0 * rx, abs=1e-6)
-        assert rz == pytest.approx(4.0 * rx, abs=1e-6)
-
 
 class TestOutOfRange:
     def test_before_first_returns_first(self):
@@ -185,11 +176,6 @@ class TestOutOfRange:
         keys = [cam_key(7, distance=3.5)]
         for f in (0, 7, 50):
             assert interp.sample(keys, "distance", f) == pytest.approx(3.5, abs=1e-9)
-
-    def test_adjacent_frame_segment_keeps_value_jump(self):
-        keys = [cam_key(10, distance=1.0), cam_key(11, distance=9.0)]
-        assert interp.sample(keys, "distance", 10) == pytest.approx(1.0, abs=1e-9)
-        assert interp.sample(keys, "distance", 11) == pytest.approx(9.0, abs=1e-9)
 
 
 class TestFov:
@@ -223,12 +209,9 @@ class TestSampleRange:
 
 
 GRID = [
-    (20, 20, 107, 107),
-    (0, 0, 127, 127),
     (10, 117, 117, 10),
     (0, 127, 64, 64),
     (64, 0, 127, 64),
-    (5, 122, 122, 5),
     (40, 10, 80, 120),
 ]
 

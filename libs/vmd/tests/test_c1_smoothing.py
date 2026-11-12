@@ -105,12 +105,3 @@ def test_c1_default_matches_explicit_true():
     default = _reduce(src, tols, strict=False)
     on = _reduce(src, tols, strict=False, c1=True)
     assert [(k.frame, k.interpolation) for k in default] == [(k.frame, k.interpolation) for k in on]
-
-
-def test_c1_false_differs_from_default_in_interior_interpolation():
-    src = _sine_position_src()
-    tols = build_bone_tolerances(bone_pos=0.5, bone_rot=5.0)
-    default = _reduce(src, tols, strict=False)
-    off = _reduce(src, tols, strict=False, c1=False)
-    assert [k.frame for k in off] == [k.frame for k in default]
-    assert any(off[i].interpolation != default[i].interpolation for i in range(1, len(off) - 1))

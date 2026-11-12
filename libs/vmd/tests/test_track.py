@@ -249,6 +249,31 @@ def test_bone_keep_frame_forced():
     assert 12 in frames(keys)
 
 
+def test_camera_diagnostics_cuts_record_position_jump_just_over_threshold():
+    source = [cam(f, center=(float(f) if f < 10 else float(f) + 4.5, 0.0, 0.0)) for f in range(21)]
+    diag = {}
+    camera_track(source, [(0, 20)], diagnostics=diag)
+    assert diag["cuts"] == [10]
+
+
+def test_camera_diagnostics_split_names_position_channel():
+    source = []
+    for f in range(31):
+        y = float(f) if f <= 15 else float(30 - f)
+        source.append(cam(f, center=(0.0, y, 0.0)))
+    diag = {}
+    camera_track(source, [(0, 30)], curve_mode="linear", diagnostics=diag)
+    assert [(s["frame"], s["channel"]) for s in diag["splits"]] == [(15, "position")]
+    assert diag["splits"][0]["norm_error"] > 1.0
+
+
+def test_camera_diagnostics_verify_has_one_record_per_range():
+    source = [cam(f, dist=-30.0 - float(f)) for f in range(31)]
+    diag = {}
+    camera_track(source, [(0, 10), (20, 30)], curve_mode="bezier", no_cut_detect=True, diagnostics=diag)
+    assert [r["range"] for r in diag["verify"]] == [[0, 10], [20, 30]]
+
+
 def test_bone_bezier_reduce_is_deterministic():
     source = [bone("c", f, pos=(math.sin(f / 4.0) * 3.0, 0.0, 0.0)) for f in range(31)]
 

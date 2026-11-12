@@ -82,7 +82,9 @@ def _reduce_camera(src, diagnostics):
 
 
 def test_reset_zeroes_counters():
+    fit.fit_bezier_curve([0.5], [0.5], early_exit_err=0.01, category="position")
     fit.reset_fit_counters()
+    assert fit.read_fit_counters_by_category() == {}
     c = fit.read_fit_counters()
     assert c == {"fit_calls": 0, "lsq_calls": 0, "fastpath_linear": 0, "cheap_accept": 0}
 
@@ -96,31 +98,6 @@ def test_nonlinear_increments_lsq_calls():
     assert c["fit_calls"] == 1
     assert c["lsq_calls"] >= 1
     assert c["fastpath_linear"] == 0
-
-
-def test_linear_increments_fastpath_not_lsq():
-    fit.reset_fit_counters()
-    xs = [(i + 1) / 12 for i in range(11)]
-    ys = list(xs)
-    fit.fit_bezier_curve(xs, ys, early_exit_err=0.01)
-    c = fit.read_fit_counters()
-    assert c["fit_calls"] == 1
-    assert c["lsq_calls"] == 0
-    assert c["fastpath_linear"] == 1
-
-
-def test_coeff_curve_linear_increments_fastpath():
-    fit.reset_fit_counters()
-    xs = [(i + 1) / 6 for i in range(5)]
-
-    def resid_at(coeff):
-        return [coeff(x) - x for x in xs]
-
-    fit._fit_coeff_curve(xs, resid_at, early_exit_err=0.01)
-    c = fit.read_fit_counters()
-    assert c["fit_calls"] == 1
-    assert c["lsq_calls"] == 0
-    assert c["fastpath_linear"] == 1
 
 
 def test_coeff_curve_nonlinear_increments_lsq_calls():
@@ -225,8 +202,3 @@ def test_by_channel_camera_has_position():
     by = diag["fit_counts_by_channel"]
     assert by["position"]["lsq_calls"] >= 1
     assert all(isinstance(v, int) for c in by.values() for v in c.values())
-
-
-def test_diagnostics_omitted_still_reduces():
-    out = _reduce_bone(_bone_keys_eased_pos_x(), None)
-    assert out

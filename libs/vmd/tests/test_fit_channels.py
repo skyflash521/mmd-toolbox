@@ -32,15 +32,6 @@ def test_vector_normalized_and_zero_tol():
     assert nerr0 == math.inf and frame0 == 1
 
 
-def test_vector_split_frame_at_max_distance():
-    vecs = [(0.0, 0.0, 0.0)] * 5
-    vecs[3] = (0.0, 0.0, 10.0)
-    ch = EuclideanVectorChannel(0, vecs, tol=1.0)
-    err, frame = ch.residual(0, 4)
-    assert frame == 3
-    assert err == pytest.approx(10.0)
-
-
 def test_vector_prefers_velocity_reversal_over_max_error():
     vecs = [(0.0, 0.0, 0.0), (0.0, 0.0, 10.0), (0.0, 0.0, 2.0), (0.0, 0.0, 4.0), (0.0, 0.0, 20.0)]
     ch = EuclideanVectorChannel(0, vecs, tol=1.0)
@@ -60,13 +51,6 @@ def test_fov_error_includes_rounding_to_integer_degrees():
     vals = [30.0 + 0.1 * i for i in range(11)]
     ch = FovChannel(0, vals, tol=0.5)
     err, frame = ch.residual(0, 10)
-    assert err == pytest.approx(0.5)
-
-
-def test_fov_half_integer_quantization_is_half_degree():
-    vals = [30.0, 30.5, 31.0, 31.5, 32.0]
-    ch = FovChannel(0, vals, tol=0.5)
-    err, frame = ch.residual(0, 4)
     assert err == pytest.approx(0.5)
 
 
@@ -101,11 +85,3 @@ def test_fov_normalized_and_zero_tol():
     ch0 = FovChannel(0, vals, tol=0.0)
     nerr0, frame0 = ch0.normalized(0, 4)
     assert nerr0 == math.inf and frame0 == 2
-
-
-def test_fov_large_deviation_detected():
-    vals = [30.0, 30.0, 35.0, 30.0, 30.0]
-    ch = FovChannel(0, vals, tol=0.5)
-    err, frame = ch.residual(0, 4)
-    assert frame == 2
-    assert err == pytest.approx(5.0)

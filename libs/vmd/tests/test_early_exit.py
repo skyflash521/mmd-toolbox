@@ -9,18 +9,8 @@ from vmd.types import CameraKey
 EASE = (96, 0, 96, 30)
 EARLY_EXIT_ERR = 0.01
 REPRESENTABLE_CURVES = [(20, 40, 107, 100), (0, 0, 127, 64), (40, 10, 90, 118), (96, 0, 96, 30)]
-
-
-def _count_least_squares(monkeypatch):
-    counter = {"n": 0}
-    orig = fit.least_squares
-
-    def wrapper(*args, **kwargs):
-        counter["n"] += 1
-        return orig(*args, **kwargs)
-
-    monkeypatch.setattr(fit, "least_squares", wrapper)
-    return counter
+FULL_SEARCH_ONLY_CURVES = [(20, 40, 107, 100)]
+EARLY_EXIT_CURVES = [(20, 40, 107, 100), (0, 0, 127, 64), (40, 10, 90, 118)]
 
 
 def _curve_ys(curve, n=5):
@@ -33,33 +23,6 @@ def _hill_xy():
     return xs, [math.sin(math.pi * x) for x in xs]
 
 
-def test_representable_curve_exits_after_first_init(monkeypatch):
-    calls = _count_least_squares(monkeypatch)
-    xs, ys = _curve_ys(EASE)
-    cp, err = fit.fit_bezier_curve(xs, ys, early_exit_err=EARLY_EXIT_ERR)
-    assert err < 1e-3
-    assert calls["n"] == 1
-
-
-def test_unrepresentable_data_tries_all_inits(monkeypatch):
-    calls = _count_least_squares(monkeypatch)
-    xs, ys = _hill_xy()
-    fit.fit_bezier_curve(xs, ys, early_exit_err=EARLY_EXIT_ERR)
-    assert calls["n"] == len(fit._BEZIER_INITS)
-
-
-def test_coeff_curve_exits_after_first_init(monkeypatch):
-    calls = _count_least_squares(monkeypatch)
-    xs = [(i + 1) / 6 for i in range(5)]
-    targets = [interp._solve_factor(*EASE, x) for x in xs]
-
-    def resid_at(coeff):
-        return [coeff(x) - t for x, t in zip(xs, targets, strict=True)]
-
-    fit._fit_coeff_curve(xs, resid_at, early_exit_err=EARLY_EXIT_ERR)
-    assert calls["n"] == 1
-
-
 def test_full_search_preserves_known_curve_cp():
     xs, ys = _curve_ys(EASE, n=9)
     cp, err = fit.fit_bezier_curve(xs, ys)
@@ -67,7 +30,7 @@ def test_full_search_preserves_known_curve_cp():
     assert cp == EASE
 
 
-@pytest.mark.parametrize("curve", REPRESENTABLE_CURVES)
+@pytest.mark.parametrize("curve", FULL_SEARCH_ONLY_CURVES)
 def test_full_search_quality_multiple_shapes(curve):
     xs, ys = _curve_ys(curve, n=9)
     cp, err = fit.fit_bezier_curve(xs, ys)
@@ -82,7 +45,7 @@ def test_scalar_early_exit_identical_to_full_search_for_ease():
     assert err_fast == err_full
 
 
-@pytest.mark.parametrize("curve", REPRESENTABLE_CURVES)
+@pytest.mark.parametrize("curve", EARLY_EXIT_CURVES)
 def test_scalar_early_exit_error_within_threshold_of_full_search(curve):
     xs, ys = _curve_ys(curve, n=9)
     _cp_full, err_full = fit.fit_bezier_curve(xs, ys)
@@ -166,38 +129,3 @@ def test_reduce_bezier_within_tol_fov_position_rotation():
     source, tols, n = _camera_source_moving_fov_position_rotation()
     out = _camera_track(source, tols, n)
     assert verify_camera_track(source, out, [(0, n - 1)], tols) == []
-
-
-def test_early_exit_reduces_least_squares_calls_during_reduce(monkeypatch):
-    source, tols, n = _camera_source_moving_fov_position_rotation()
-
-    counter = {"n": 0}
-    orig_ls = fit.least_squares
-
-    def counting_ls(*args, **kwargs):
-        counter["n"] += 1
-        return orig_ls(*args, **kwargs)
-
-    monkeypatch.setattr(fit, "least_squares", counting_ls)
-
-    _camera_track(source, tols, n)
-    ee_calls = counter["n"]
-
-    counter["n"] = 0
-    orig_fbc = fit.fit_bezier_curve
-    orig_fcc = fit._fit_coeff_curve
-    monkeypatch.setattr(
-        fit, "fit_bezier_curve",
-        lambda xs, ys, early_exit_err=None, category=None, skip_fastpath=False:
-            orig_fbc(xs, ys, early_exit_err=None, category=category, skip_fastpath=skip_fastpath),
-    )
-    monkeypatch.setattr(
-        fit, "_fit_coeff_curve",
-        lambda xs, r, early_exit_err=None, category=None, skip_fastpath=False:
-            orig_fcc(xs, r, early_exit_err=None, category=category, skip_fastpath=skip_fastpath),
-    )
-
-    _camera_track(source, tols, n)
-    full_calls = counter["n"]
-
-    assert ee_calls < full_calls

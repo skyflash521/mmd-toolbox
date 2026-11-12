@@ -4,6 +4,7 @@ from vmd import interp
 from vmd.reduce import (
     StrictError,
     Tolerances,
+    reduce_bone_track,
     reduce_camera_track,
     verify_bone_track,
     verify_camera_track,
@@ -147,3 +148,35 @@ def test_reduce_camera_normal_passes_verification():
     source = [cam(f, dist=xs[f]) for f in range(11)]
     keys = reduce_camera_track(source, [(0, 10)], TOLS, **_opts())
     assert verify_camera_track(source, keys, [(0, 10)], TOLS) == []
+
+
+def test_reduce_camera_diagnostics_record_densification_until_converged(monkeypatch):
+    xs = _eased(-10.0, -110.0)
+    source = [cam(f, dist=xs[f]) for f in range(11)]
+    _force_linear_output_curves(monkeypatch)
+    diag = {}
+    reduce_camera_track(source, [(0, 10)], TOLS, diagnostics=diag, **_opts())
+    (record,) = diag["verify"]
+    assert record["added_total"] > 0
+    assert record["added_total"] == sum(record["added_counts"])
+    assert record["iterations"] >= 2
+    assert len(record["bad_counts"]) == len(record["added_counts"]) == record["iterations"]
+    assert record["bad_counts"][-1] == 0
+    assert record["added_counts"][-1] == 0
+
+
+def test_reduce_bone_diagnostics_record_densification(monkeypatch):
+    ys = _eased(0.0, 100.0)
+    source = [bone("c", f, pos=(0.0, ys[f], 0.0)) for f in range(11)]
+    _force_linear_output_curves(monkeypatch)
+    diag = {}
+    reduce_bone_track(
+        source, [(0, 10)], TOLS,
+        cut_thresholds=(5.0, 20.0), keep_frames=[], no_cut_detect=True,
+        min_seg=1, max_seg=180, strict=False, curve_mode="bezier", diagnostics=diag,
+    )
+    (record,) = diag["verify"]
+    assert record["range"] == [0, 10]
+    assert record["added_total"] > 0
+    assert record["added_total"] == sum(record["added_counts"])
+    assert len(record["bad_counts"]) == len(record["added_counts"]) == record["iterations"]

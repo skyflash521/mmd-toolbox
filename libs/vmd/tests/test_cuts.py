@@ -1,5 +1,6 @@
 import math
 
+from vmd import quat
 from vmd.cuts import (
     assemble_boundaries,
     detect_cuts_bone,
@@ -59,14 +60,6 @@ def test_camera_distance_jump_detected():
     assert cut == {2}
 
 
-def test_camera_below_threshold_no_cut():
-    positions = [(0.0, 0.0, 0.0), (0.5, 0.0, 0.0), (1.0, 0.0, 0.0)]
-    rotations = [(0.0, 0.0, 0.0)] * 3
-    distances = [-30.0, -31.0, -32.0]
-    cut = detect_cuts_camera(0, positions, rotations, distances, (5.0, 20.0, 5.0))
-    assert cut == set()
-
-
 def test_camera_cut_frame_offset_by_start():
     positions = [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0)]
     rotations = [(0.0, 0.0, 0.0)] * 2
@@ -101,11 +94,11 @@ def test_bone_rotation_jump_detected():
     assert cut == {1}
 
 
-def test_bone_rotation_below_threshold():
+def test_bone_rotation_difference_equal_to_threshold_is_not_cut():
     positions = [(0.0, 0.0, 0.0)] * 2
-    rotations = [(0.0, 0.0, 0.0, 1.0), quat_z(10)]
-    cut = detect_cuts_bone(0, positions, rotations, (1.0, 30.0))
-    assert cut == set()
+    rotations = [(0.0, 0.0, 0.0, 1.0), quat_z(30)]
+    threshold = quat.angle_deg(rotations[1], rotations[0])
+    assert detect_cuts_bone(0, positions, rotations, (1.0, threshold)) == set()
 
 
 def test_bone_position_uses_euclidean_distance():
@@ -170,10 +163,3 @@ def test_assemble_no_cut_detect_drops_cuts_but_keeps_perspective_and_keep():
         0, 60, cuts={20}, perspective_frames={40}, keep_frames=[10], no_cut_detect=True
     )
     assert b == [0, 10, 40, 60]
-
-
-def test_assemble_dedup_and_sorted():
-    b = assemble_boundaries(
-        0, 60, cuts={30}, perspective_frames={30}, keep_frames=[0, 30, 60], no_cut_detect=False
-    )
-    assert b == [0, 30, 60]

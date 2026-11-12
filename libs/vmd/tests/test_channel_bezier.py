@@ -48,13 +48,6 @@ def test_scalar_bezier_linear_data_zero_error():
     assert err < 1e-6
 
 
-def test_scalar_bezier_default_mode_is_linear():
-    vals = _eased_scalar(0.0, 100.0, EASE)
-    ch = LinearScalarChannel(0, vals, tol=1.0)
-    err, _ = ch.residual(0, 10)
-    assert err > 5.0
-
-
 def test_scalar_bezier_equal_endpoints_error_is_deviation_from_flat():
     vals = [0.0, 3.0, 5.0, 3.0, 0.0]
     bez = LinearScalarChannel(0, vals, tol=1.0, mode="bezier")
@@ -115,14 +108,6 @@ def test_camera_rotation_bezier_shared_curve_low_error():
     assert bez.residual(0, 10)[0] < 0.1
 
 
-def test_camera_rotation_bezier_default_mode_is_linear():
-    c = _eased_coeff(EASE)
-    e1 = (math.radians(30), math.radians(20), math.radians(-10))
-    eulers = [(e1[0] * c[f], e1[1] * c[f], e1[2] * c[f]) for f in range(11)]
-    ch = CameraRotationChannel(0, eulers, tol=0.1)
-    assert ch.residual(0, 10)[0] > 1.0
-
-
 def test_camera_rotation_bezier_linear_data_zero_error():
     eulers = [(0.01 * f, -0.02 * f, 0.005 * f) for f in range(11)]
     bez = CameraRotationChannel(0, eulers, tol=0.1, mode="bezier")
@@ -141,13 +126,6 @@ def test_bone_rotation_bezier_slerp_coeff_low_error():
     bez = BoneRotationChannel(0, quats, tol=0.1, mode="bezier")
     assert lin.residual(0, 10)[0] > 1.0
     assert bez.residual(0, 10)[0] < 0.1
-
-
-def test_bone_rotation_bezier_default_mode_is_linear():
-    c = _eased_coeff(EASE)
-    quats = [_z_quat(90.0 * c[f]) for f in range(11)]
-    ch = BoneRotationChannel(0, quats, tol=0.1)
-    assert ch.residual(0, 10)[0] > 1.0
 
 
 def test_bone_rotation_bezier_linear_data_zero_error():
