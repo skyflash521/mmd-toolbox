@@ -1,4 +1,3 @@
-
 from vmd import fit, interp
 
 EASE = (96, 0, 96, 30)
