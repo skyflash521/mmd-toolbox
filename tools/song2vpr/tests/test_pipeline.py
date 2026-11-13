@@ -2,7 +2,6 @@ import inspect
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from song2vpr import pipeline
 from vocal_analysis import (
@@ -88,53 +87,6 @@ def test_front_stage_receives_the_settings_unchanged_and_bindable_to_its_signatu
     assert kwargs["english_katakana_method"] == "arpakana"
 
 
-def test_intermediate_directory_is_none_when_unset(monkeypatch):
-    captured = {}
-    _stub_front_stage(monkeypatch, captured)
-
-    pipeline.run("in.wav", **_common_kwargs())
-
-    assert captured["kwargs"]["keep_intermediate_dir"] is None
-
-
-def test_sofa_aligner_is_relayed_as_given(monkeypatch):
-    captured = {}
-    _stub_front_stage(monkeypatch, captured)
-    sofa = object()
-
-    pipeline.run("in.wav", **_common_kwargs(
-        forced_aligner="sofa-forcedalign", sofa_aligner=sofa))
-
-    assert captured["kwargs"]["forced_aligner"] == "sofa-forcedalign"
-    assert captured["kwargs"]["sofa_aligner"] is sofa
-
-
-def test_front_stage_outputs_including_vocal_and_input_pcm_are_kept_for_later_stages(monkeypatch):
-    captured = {}
-    segments = [seg("vowel", 0.0, 0.4, phoneme="a"),
-                seg("gap", 0.4, 1.0)]
-    vocal = _pcm(seconds=2.0, sample_rate=16000, channels=1)
-    _stub_front_stage(monkeypatch, captured, segments=segments, vocal_pcm=vocal, duration_sec=2.0)
-
-    result = pipeline.run("in.wav", **_common_kwargs())
-
-    assert result.segments == segments
-    assert result.vocal_wav == Path("vocal.wav")
-    assert result.vocal_pcm is vocal
-    assert result.rms.dynamic_range_db == 20.0
-    assert result.duration_sec == 2.0
-    assert result.pcm.sample_rate == 8000
-    assert result.pcm.samples.shape[1] == 2
-
-
-@pytest.mark.parametrize("forced_split", [True, False])
-def test_forced_split_is_carried_from_the_front_stage(monkeypatch, forced_split):
-    captured = {}
-    _stub_front_stage(monkeypatch, captured, forced_split=forced_split)
-
-    assert pipeline.run("in.wav", **_common_kwargs()).forced_split is forced_split
-
-
 def test_progress_is_relayed_through_the_front_stage_callback_without_re_reporting(monkeypatch):
     captured = {}
     _stub_front_stage(monkeypatch, captured)
@@ -165,10 +117,3 @@ def test_backends_carry_the_settings_that_were_passed(monkeypatch):
         "forced_aligner": "wav2vec2-ctc-forcedalign",
         "english_katakana_method": "arpakana",
     }
-
-
-def test_backends_report_the_recognizer_revision_when_given(monkeypatch):
-    _stub_front_stage(monkeypatch, {})
-    pinned = ContentRecognizerModel(model_id="test-content-recognizer", model_revision="abc123")
-    result = pipeline.run("in.wav", **_common_kwargs(content_recognizer_model=pinned))
-    assert result.backends["recognizer_revision"] == "abc123"

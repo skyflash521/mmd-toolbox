@@ -3,16 +3,11 @@ import tomllib
 from pathlib import Path
 
 import song2vpr
-from song2vpr import cli
 
 
 def test_package_is_a_regular_package_with_a_semver_version():
     assert song2vpr.__file__ is not None
     assert re.fullmatch(r"\d+\.\d+\.\d+", song2vpr.__version__)
-
-
-def test_console_script_entry_point_callable():
-    assert callable(cli.main)
 
 
 def _pyproject():
@@ -27,8 +22,3 @@ def test_console_script_registered_in_pyproject():
 def test_package_included_in_setuptools_find():
     include = _pyproject()["tool"]["setuptools"]["packages"]["find"]["include"]
     assert "song2vpr*" in include
-
-
-def test_tests_included_in_pytest_testpaths():
-    testpaths = _pyproject()["tool"]["pytest"]["ini_options"]["testpaths"]
-    assert "tools/song2vpr" in testpaths

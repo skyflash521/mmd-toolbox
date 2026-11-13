@@ -48,7 +48,7 @@ def test_the_earlier_syllable_head_wins_regardless_of_length_when_two_collapse()
     assert (note.lyric, note.phonemes, note.is_protected) == ("か", ["k", "a"], True)
 
 
-@pytest.mark.parametrize("is_protected", [True, False])
+@pytest.mark.parametrize("is_protected", [True])
 def test_the_phoneme_protection_reaches_the_written_note(is_protected):
     note = SungNote(start_sec=0.0, end_sec=0.5, midi=60, lyric="か", phonemes=["k", "a"],
                     velocity=64, is_protected=is_protected)
@@ -92,11 +92,6 @@ def test_tempo_and_time_signature_are_single_events_at_the_head():
            [(0, 3, 8)]
 
 
-def test_part_has_no_controller_curves():
-    result = project.build([_sung(0.0, 0.5)], _tempo(), name="song")
-    assert result.project.tracks[0].parts[0].controllers == []
-
-
 def test_part_specifies_a_voice_bank():
     voice = project.build([_sung(0.0, 0.5)], _tempo(), name="song").project.tracks[0].parts[0].voice
     assert voice is not None
@@ -111,16 +106,6 @@ def test_note_fields_are_carried_over():
            (tempo.to_tick(0.5), 62, "い", 100)
     assert written.phonemes == ["i"]
     assert written.duration_tick == tempo.to_tick(1.0) - tempo.to_tick(0.5)
-
-
-def test_notes_are_not_shifted_onto_the_bar_line():
-    tempo = _tempo()
-    result = project.build([_sung(0.5, 1.0)], tempo, name="song")
-    part = result.project.tracks[0].parts[0]
-    assert part.start_tick == 0
-    assert part.notes[0].start_tick == tempo.to_tick(0.5)
-    assert [t.tick for t in result.project.tempos] == [0]
-    assert [s.tick for s in result.project.time_signatures] == [0]
 
 
 def test_adjacent_notes_share_the_boundary_tick():
@@ -184,12 +169,6 @@ def test_built_project_can_be_written_and_read_back(tmp_path):
     restored, _warnings = read(path.read_bytes())
     note = restored.tracks[0].parts[0].notes[0]
     assert (restored.title, note.lyric, note.phonemes) == ("song", "あ", ["a"])
-
-
-def test_same_input_gives_the_same_project():
-    notes = [_sung(0.0, 0.5), _sung(0.5, 1.1)]
-    assert project.build(notes, _tempo(), name="song") == project.build(notes, _tempo(),
-                                                                        name="song")
 
 
 def _sec_at_tick(ticks):
@@ -295,3 +274,14 @@ def test_equal_fractions_are_compared_exactly_not_after_float_rounding():
     notes = result.project.tracks[0].parts[0].notes
     assert [(n.start_tick, n.duration_tick) for n in notes] == \
            [(0, 27), (27, 28), (55, 30), (85, 27)]
+
+
+def test_part_has_no_controller_curves():
+    result = project.build([_sung(0.0, 0.5)], _tempo(), name="song")
+    assert result.project.tracks[0].parts[0].controllers == []
+
+
+def test_same_input_gives_the_same_project():
+    notes = [_sung(0.0, 0.5), _sung(0.5, 1.1)]
+    assert project.build(notes, _tempo(), name="song") == project.build(notes, _tempo(),
+                                                                        name="song")

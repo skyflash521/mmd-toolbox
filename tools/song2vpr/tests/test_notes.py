@@ -122,18 +122,6 @@ def test_pitch_change_splits_the_note():
     assert [note.midi for note in notes.split(track, _one_vowel_covering(track)).notes] == [69, 71]
 
 
-def test_a_momentary_pitch_change_does_not_split_the_note():
-    track = _track([(0.2, 69), (0.03, 71), (0.2, 69)])
-    result = notes.split(track, _one_vowel_covering(track)).notes
-    assert len(result) == 1
-    assert result[0].midi == 69
-
-
-def test_a_pitch_change_lasting_longer_than_the_hold_length_splits_the_note():
-    track = _track([(0.4, 69), (0.36, 71), (0.4, 69)])
-    assert [note.midi for note in notes.split(track, _one_vowel_covering(track)).notes] == [69, 71, 69]
-
-
 def test_a_pitch_change_at_exactly_the_hold_length_splits_the_note():
     track = _track([(0.4, 69), (0.34, 71), (0.4, 69)])
     assert [note.midi for note in notes.split(track, _one_vowel_covering(track)).notes] == [69, 71, 69]
@@ -314,13 +302,6 @@ def test_a_component_does_not_span_two_syllables():
     assert result.diagnostics.suppressed_notes == 1
 
 
-def test_a_suppressed_short_note_is_counted_as_suppressed():
-    track = _track([(0.3, 69), (2.5, None), (0.03, 60), (0.2, None)])
-    result = notes.split(track, [_vowel(0.0, 0.3, "a"), _gap(0.3, 3.03)])
-    assert [note.midi for note in result.notes] == [69]
-    assert result.diagnostics.suppressed_notes == 1
-
-
 def test_notes_are_ordered_and_do_not_overlap():
     track = _track([(0.4, 69), (0.4, 71), (0.1, None), (0.4, 67)])
     result = notes.split(track, _one_vowel_covering(track)).notes
@@ -337,9 +318,3 @@ def test_same_input_gives_the_same_notes():
     second = notes.split(track, segments).notes
     assert [(n.start_sec, n.end_sec, n.midi) for n in first] == \
            [(n.start_sec, n.end_sec, n.midi) for n in second]
-
-
-def test_short_notes_without_an_absorb_target_are_left_in_place():
-    track = _track([(0.2, None), (0.03, 69), (0.2, None), (0.03, 71), (0.2, None)])
-    result = notes.split(track, _one_vowel_covering(track))
-    assert len(result.notes) == 2

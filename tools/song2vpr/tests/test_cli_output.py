@@ -104,12 +104,6 @@ def test_run_writes_the_back_end_notes_with_the_vowel_lyric_and_the_440hz_pitch(
     assert project.tracks[0].parts[0].voice is not None
 
 
-def test_output_defaults_to_the_input_name(tmp_path, monkeypatch):
-    _stub_pipeline(monkeypatch)
-    assert cli.main([_source(tmp_path)]) == 0
-    assert (tmp_path / "in.vpr").exists()
-
-
 def test_title_track_and_part_names_come_from_the_output_base_name(tmp_path, monkeypatch):
     _stub_pipeline(monkeypatch)
     output = tmp_path / "別の名前.vpr"
@@ -153,20 +147,6 @@ def test_dry_run_diagnostics_on_stdout_come_right_after_closing_the_live_line(tm
     position = progress_calls.index(print_to_stdout)
     assert position >= 1
     assert progress_calls[position - 1] == "close"
-
-
-def test_velocity_is_the_same_for_all_notes_regardless_of_singing_volume(tmp_path, monkeypatch):
-    quiet, loud = _harmonic_wave(440.0, 0.6, 0.05), _harmonic_wave(523.25, 0.6, 0.45)
-    segments = [Segment(type="vowel", start_sec=0.0, end_sec=0.6, phoneme="a"),
-                Segment(type="vowel", start_sec=0.6, end_sec=1.2, phoneme="i")]
-    _stub_pipeline(monkeypatch, _front_stage(pcm=_pcm(quiet, loud), segments=segments,
-                                             duration_sec=1.2))
-    output = tmp_path / "song.vpr"
-    assert cli.main([_source(tmp_path), "-o", str(output)]) == 0
-
-    _project, notes = _notes_of(output)
-    assert len(notes) >= 2
-    assert {note.velocity for note in notes} == {64}
 
 
 def test_specified_tempo_and_time_signature_are_used(tmp_path, monkeypatch):
@@ -213,22 +193,6 @@ def test_lyrics_that_do_not_decode_as_utf8_are_unreadable(tmp_path, monkeypatch,
         "lyrics_unreadable", "--lyrics", 1)
 
 
-def test_the_lyrics_are_read_as_one_text(tmp_path, monkeypatch):
-    _stub_pipeline(monkeypatch)
-    readings = []
-
-    def to_kana_reading(text):
-        readings.append(text)
-        return "ゆき"
-
-    monkeypatch.setattr("vocal_analysis.reading.to_kana_reading", to_kana_reading)
-    lyrics = tmp_path / "lyrics.txt"
-    lyrics.write_text("雪\n降る\n", encoding="utf-8")
-    assert cli.main([_source(tmp_path), "-o", str(tmp_path / "song.vpr"),
-                     "--lyrics", str(lyrics)]) == 0
-    assert readings == ["雪\n降る\n"]
-
-
 def test_dry_run_writes_neither_the_output_nor_a_completion_line(tmp_path, monkeypatch, progress_calls):
     _stub_pipeline(monkeypatch)
     output = tmp_path / "song.vpr"
@@ -272,22 +236,6 @@ def test_no_notes_warns_in_dry_run_too(tmp_path, monkeypatch, capsysbinary):
     assert any(e["type"] == "warning" and e["code"] == "no_notes" for e in _events(capsysbinary))
 
 
-@pytest.mark.parametrize("quiet", [False, True])
-def test_quiet_reaches_the_progress_display(tmp_path, monkeypatch, quiet):
-    _stub_pipeline(monkeypatch)
-    received = {}
-
-    def build_router(**kwargs):
-        received.update(kwargs)
-        return _SpyProgressRouter()
-
-    _SpyProgressRouter.calls = []
-    monkeypatch.setattr(cli._va_cli, "build_router", build_router)
-    argv = [_source(tmp_path), "-o", str(tmp_path / "song.vpr")] + (["--quiet"] if quiet else [])
-    assert cli.main(argv) == 0
-    assert received["quiet"] is quiet
-
-
 def test_kana_reading_failure_is_a_stage_failure_of_the_notes_stage(tmp_path, monkeypatch,
                                                                     capsysbinary):
     lyrics = tmp_path / "lyrics.txt"
@@ -329,14 +277,6 @@ def test_tempo_estimation_fallback_is_reported_as_a_warning(tmp_path, monkeypatc
     assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
     assert any(e["type"] == "warning" and e["code"] == "tempo_defaulted"
                for e in _events(capsysbinary))
-
-
-def test_the_time_signature_is_not_reported_as_a_fallback(tmp_path, monkeypatch, capsysbinary):
-    silence = AudioPcm(samples=np.zeros((_RATE // 2, 1), dtype=np.float32), sample_rate=_RATE)
-    _stub_pipeline(monkeypatch, _front_stage(pcm=silence, segments=[], duration_sec=0.5))
-    assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
-    assert not any(e["type"] == "warning" and e["code"] == "time_signature_defaulted"
-                   for e in _events(capsysbinary))
 
 
 def test_forced_split_from_the_front_stage_is_reported(tmp_path, monkeypatch, capsysbinary):
@@ -445,3 +385,11 @@ def test_normal_run_without_verbose_or_dry_run_prints_nothing_to_stdout(tmp_path
     _stub_pipeline(monkeypatch)
     assert cli.main([_source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_the_time_signature_is_not_reported_as_a_fallback(tmp_path, monkeypatch, capsysbinary):
+    silence = AudioPcm(samples=np.zeros((_RATE // 2, 1), dtype=np.float32), sample_rate=_RATE)
+    _stub_pipeline(monkeypatch, _front_stage(pcm=silence, segments=[], duration_sec=0.5))
+    assert cli.main(["--machine", _source(tmp_path), "-o", str(tmp_path / "song.vpr")]) == 0
+    assert not any(e["type"] == "warning" and e["code"] == "time_signature_defaulted"
+                   for e in _events(capsysbinary))

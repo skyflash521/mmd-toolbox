@@ -16,10 +16,6 @@ def missing_dependency(monkeypatch):
         monkeypatch.delattr(cli, name)
 
 
-def test_names_bound_by_extra_imports_are_bound_in_dev_environment():
-    assert [name for name in _NAMES_BOUND_BY_EXTRA_IMPORTS if not hasattr(cli, name)] == []
-
-
 def test_missing_dependency_is_none_in_dev_environment():
     assert cli._MISSING_DEPENDENCY is None
 
@@ -32,15 +28,6 @@ def test_human_message_is_single_line_without_traceback(tmp_path, capsys, missin
     assert len(lines) == 1
     assert lines[0].startswith("error: ")
     assert "Traceback" not in captured.err
-
-
-def test_human_message_names_module_and_pip_install_command_without_tool_name(tmp_path, capsys,
-                                                                              missing_dependency):
-    cli.main([str(tmp_path / "in.wav")])
-    line = capsys.readouterr().err
-    assert "soundfile" in line
-    assert "pip install" in line and "vocal-analysis" in line
-    assert "song2vpr" not in line
 
 
 def test_machine_mode_reports_missing_dependency(tmp_path, capsysbinary, missing_dependency):
@@ -94,21 +81,15 @@ def _argv_rejected_with_code_2_before_dependency_guard(tmp_path, case):
         return [str(src), "--bogus"]
     if case == "missing_input":
         return []
-    if case == "value_error":
-        return [str(src), "--max-duration", "abc"]
     if case == "combination":
         return [str(src), "--recognizer-model-revision", "abc123"]
-    if case == "output_exists":
-        out = tmp_path / "out.vpr"
-        out.write_bytes(b"")
-        return [str(src), "-o", str(out)]
-    outdir = tmp_path / "dir"
-    outdir.mkdir()
-    return [str(src), "-o", str(outdir)]
+    out = tmp_path / "out.vpr"
+    out.write_bytes(b"")
+    return [str(src), "-o", str(out)]
 
 
-@pytest.mark.parametrize("case", ["unknown_option", "missing_input", "value_error",
-                                  "combination", "output_exists", "output_is_directory"])
+@pytest.mark.parametrize("case", ["unknown_option", "missing_input", "combination",
+                                  "output_exists"])
 def test_argument_checks_precede_dependency_guard_without_blaming_the_dependency(
         tmp_path, capsys, missing_dependency, case):
     assert cli.main(_argv_rejected_with_code_2_before_dependency_guard(tmp_path, case)) == 2

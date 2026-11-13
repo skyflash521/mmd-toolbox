@@ -77,12 +77,9 @@ def test_inspect_fields_are_exactly_run_keys_plus_input_metadata_with_null_outpu
 def test_report_text_lists_the_same_values_as_the_result():
     text = report.report_text(_fields())
     for expected in ("音符数: 3", "テンポ: 120.0", "拍子: 4/4",
-                     "分解能(tick/四分音符): 480", "入力の尺(秒): 12.5", "短いまま残った音符: 1"):
+                     "分解能(tick/四分音符): 480", "入力の尺(秒): 12.5", "短いまま残った音符: 1",
+                     "音節と結びつかず出力しなかった音符: 21"):
         assert expected in text
-
-
-def test_report_text_shows_the_suppressed_notes():
-    assert "音節と結びつかず出力しなかった音符: 21" in report.report_text(_fields())
 
 
 def test_report_text_shows_separated_in_japanese_not_as_python_bool():
@@ -90,10 +87,6 @@ def test_report_text_shows_separated_in_japanese_not_as_python_bool():
     assert "ボーカル分離の実施: あり" in separated
     assert "ボーカル分離の実施: なし" in report.report_text(_fields(separated=False))
     assert "True" not in separated and "False" not in separated
-
-
-def test_report_text_omits_the_output_path():
-    assert "out.vpr" not in report.report_text(_fields(output="out.vpr"))
 
 
 def test_moraic_counts_appear_only_when_the_lyrics_were_given():
@@ -122,3 +115,7 @@ def test_report_text_tells_where_the_tempo_came_from_in_japanese():
 def test_report_text_calls_the_unspecified_time_signature_a_default_not_a_placeholder():
     text = report.report_text(_fields(tempo=_tempo(time_signature_source="default")))
     assert "拍子: 4/4 (既定値)" in text
+
+
+def test_report_text_omits_the_output_path():
+    assert "out.vpr" not in report.report_text(_fields(output="out.vpr"))

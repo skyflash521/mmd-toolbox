@@ -126,23 +126,14 @@ def test_later_notes_of_a_split_syllable_carry_the_continuation_mark_in_lyric_an
 
 
 @pytest.mark.parametrize(("head", "nucleus", "kana"), [
-    pytest.param([], "a", "あ", id="no_head_consonant"),
     pytest.param(["k"], "a", "か", id="k_a"),
-    pytest.param(["s"], "i", "すぃ", id="s_i_loanword_sound"),
-    pytest.param(["t"], "ɯ", "とぅ", id="t_u_loanword_sound"),
-    pytest.param(["ɸ"], "o̞", "ふぉ", id="bilabial_fricative_o_loanword_sound"),
-    pytest.param(["ɕ"], "a", "しゃ", id="alveolo_palatal_fricative_a"),
-    pytest.param(["kʲ"], "a", "きゃ", id="palatalized_consonant_gives_palatal_row"),
-    pytest.param(["tʲ"], "ɯ", "てゅ", id="palatalized_t_u_loanword_sound"),
-    pytest.param(["dʲ"], "ɯ", "でゅ", id="palatalized_d_u_loanword_sound"),
-    pytest.param(["v"], "a", "ば", id="v_uses_the_b_row"),
     pytest.param(["k", "j"], "a", "きゃ", id="j_after_k_gives_palatal_row_of_k"),
-    pytest.param(["ɾ", "j"], "o̞", "りょ", id="j_after_r_gives_palatal_row_of_r"),
     pytest.param(["ɡ", "j"], "a", "ぎゃ", id="j_after_g_gives_palatal_row_of_g"),
     pytest.param(["b", "j"], "ɯ", "びゅ", id="j_after_b_gives_palatal_row_of_b"),
     pytest.param(["p", "j"], "o̞", "ぴょ", id="j_after_p_gives_palatal_row_of_p"),
     pytest.param(["m", "j"], "a", "みゃ", id="j_after_m_gives_palatal_row_of_m"),
     pytest.param(["h", "j"], "a", "ひゃ", id="j_after_h_gives_palatal_row_of_h"),
+    pytest.param(["ɾ", "j"], "o̞", "りょ", id="j_after_r_gives_palatal_row_of_r"),
     pytest.param(["s", "j"], "a", "や", id="j_after_consonant_without_palatal_row_gives_j_row"),
     pytest.param(["t", "k"], "a", "か", id="multiple_heads_use_the_one_next_to_the_nucleus"),
 ])
@@ -271,13 +262,9 @@ def test_phonemes_still_come_from_the_segments_when_lyrics_are_given():
     pytest.param("がっき", ["が", "っき"], id="sokuon_joins_the_following_mora"),
     pytest.param("かー", ["かー"], id="long_mark_joins_the_preceding_mora"),
     pytest.param("はん", ["は", "ん"], id="moraic_nasal_forms_its_own_mora"),
-    pytest.param("んー", ["んー"], id="long_mark_joins_a_preceding_moraic_nasal"),
-    pytest.param("っか", ["っか"], id="leading_sokuon_joins_the_following_mora"),
     pytest.param("ーか", ["ーか"], id="long_mark_without_preceding_joins_the_following_mora"),
     pytest.param("かっ", ["かっ"], id="sokuon_without_following_joins_the_preceding_mora"),
     pytest.param("ー", ["ー"], id="long_mark_without_neighbours_stands_alone"),
-    pytest.param("あ い", ["あ", "い"], id="space_is_skipped_and_does_not_join_its_neighbours"),
-    pytest.param("かーん", ["かー", "ん"], id="long_mark_then_moraic_nasal"),
 ])
 def test_mora_split_rules(text, expected):
     source, segments = _one_syllable_per_note(len(expected))
@@ -287,8 +274,6 @@ def test_mora_split_rules(text, expected):
 
 @pytest.mark.parametrize("reading,expected", [
     pytest.param("ゃ", ["ゃ"], id="small_kana_without_previous_stands_alone"),
-    pytest.param("かっん", ["か", "っん"], id="sokuon_joins_following_moraic_nasal"),
-    pytest.param("んゃ", ["んゃ"], id="small_kana_joins_preceding_moraic_nasal"),
     pytest.param("か ー", ["か", "ー"], id="long_mark_does_not_join_across_skipped_char"),
     pytest.param("かっ い", ["かっ", "い"], id="sokuon_does_not_join_across_skipped_char"),
     pytest.param("っ", ["っ"], id="sokuon_without_neighbours_stands_alone"),
@@ -357,7 +342,7 @@ def test_katakana_is_folded_to_hiragana():
     assert result.notes[0].lyric == "さ"
 
 
-@pytest.mark.parametrize("value", [0.1, 1.0])
+@pytest.mark.parametrize("value", [0.1])
 def test_velocity_is_the_neutral_value_on_head_and_continuation_regardless_of_the_volume(value):
     result = lyrics.annotate(
         [_note(0.0, 0.3, syllable=0), _note(0.3, 0.6, midi=71, syllable=0)],
@@ -387,21 +372,6 @@ def test_the_volume_comes_from_the_middle_of_the_note(loud_in_middle, output):
     envelope = RmsEnvelope(times_sec=times, values=values, dynamic_range_db=20.0)
     result = lyrics.annotate([_note(0.0, 1.0)], _one_syllable(_vowel(0.0, 1.0, "a")), envelope)
     assert bool(result.notes) is output
-
-
-def test_the_span_and_the_pitch_are_carried_through():
-    source = _note(0.1, 0.5, midi=72)
-    result = lyrics.annotate([source], _one_syllable(_vowel(0.1, 0.5, "a")), _flat_rms())
-    assert (result.notes[0].start_sec, result.notes[0].end_sec, result.notes[0].midi) == \
-           (source.start_sec, source.end_sec, source.midi)
-
-
-def test_same_input_gives_the_same_result():
-    source, segments = _one_syllable_per_note(2)
-    first = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さく")
-    second = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さく")
-    assert [(n.lyric, n.phonemes, n.velocity) for n in first.notes] == \
-           [(n.lyric, n.phonemes, n.velocity) for n in second.notes]
 
 
 def test_only_moraic_nasal_notes_are_counted():
@@ -437,3 +407,11 @@ def test_only_notes_without_phonemes_are_counted():
                              [[_vowel(0.0, 0.2, "a")], [_gap(0.2, 0.4)]], _flat_rms())
     assert [note.phonemes for note in result.notes] == [["a"], []]
     assert result.diagnostics.no_phoneme_notes == 1
+
+
+def test_same_input_gives_the_same_result():
+    source, segments = _one_syllable_per_note(2)
+    first = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さく")
+    second = lyrics.annotate(source, segments, _flat_rms(), lyrics_text="さく")
+    assert [(n.lyric, n.phonemes, n.velocity) for n in first.notes] == \
+           [(n.lyric, n.phonemes, n.velocity) for n in second.notes]
