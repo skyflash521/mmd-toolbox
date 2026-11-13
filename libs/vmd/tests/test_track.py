@@ -184,27 +184,54 @@ def test_camera_bezier_diagnostics_record_lower_seam_rewrite():
     assert diag["seam_rewrites"] == [10]
 
 
+def _peak_at_middle(f):
+    return 1.0 - abs(f - 5) / 5.0
+
+
 def test_measure_camera_errors_reports_each_channel_max():
-    source = [cam(f, center=(float(f), 0.0, 0.0)) for f in range(11)]
-    output = [cam(0, dist=-31.0, center=(0.0, 0.0, 0.0), rot=(0.0, math.radians(2.0), 0.0), fov=32),
-              cam(10, dist=-31.0, center=(10.0, 0.0, 0.5), rot=(0.0, math.radians(2.0), 0.0), fov=32)]
+    source = [cam(f, dist=-30.0 - _peak_at_middle(f),
+                  center=(f + 0.25 * _peak_at_middle(f), 0.5 * _peak_at_middle(f), 0.75 * _peak_at_middle(f)),
+                  rot=(0.0, math.radians(2.0) * _peak_at_middle(f), 0.0), fov=32 if f == 5 else 30)
+              for f in range(11)]
+    output = [cam(0), cam(10, center=(10.0, 0.0, 0.0))]
     m = measure_camera_errors(source, output, [(0, 10)])
-    assert m["pos_x"] == pytest.approx(0.0, abs=1e-6)
-    assert m["pos_z"] == pytest.approx(0.5)
+    assert m["pos_x"] == pytest.approx(0.25)
+    assert m["pos_y"] == pytest.approx(0.5)
+    assert m["pos_z"] == pytest.approx(0.75)
     assert m["distance"] == pytest.approx(1.0)
     assert m["fov"] == pytest.approx(2.0)
     assert m["rot_deg"] == pytest.approx(2.0)
 
 
+def test_measure_camera_errors_are_zero_for_faithful_output():
+    source = [cam(f, center=(float(f), 0.0, 0.0)) for f in range(11)]
+    output = [source[0], source[-1]]
+    m = measure_camera_errors(source, output, [(0, 10)])
+    assert list(m.values()) == pytest.approx([0.0] * len(m), abs=1e-6)
+
+
 def test_measure_bone_errors_reports_axis_max_and_rotation_degrees():
-    half = math.radians(3.0) / 2.0
-    source = [bone("c", f, pos=(float(f), 0.0, 0.0)) for f in range(11)]
-    output = [bone("c", 0, pos=(0.0, 0.25, 0.0), rot=(0.0, 0.0, math.sin(half), math.cos(half))),
-              bone("c", 10, pos=(10.0, 0.25, 0.0), rot=(0.0, 0.0, math.sin(half), math.cos(half)))]
+    def rot_z(deg):
+        half = math.radians(deg) / 2.0
+        return (0.0, 0.0, math.sin(half), math.cos(half))
+
+    source = [bone("c", f,
+                   pos=(f + 0.25 * _peak_at_middle(f), 0.5 * _peak_at_middle(f), 0.75 * _peak_at_middle(f)),
+                   rot=rot_z(3.0 * _peak_at_middle(f)))
+              for f in range(11)]
+    output = [bone("c", 0), bone("c", 10, pos=(10.0, 0.0, 0.0))]
     m = measure_bone_errors(source, output, [(0, 10)])
-    assert m["pos_x"] == pytest.approx(0.0, abs=1e-6)
-    assert m["pos_y"] == pytest.approx(0.25)
+    assert m["pos_x"] == pytest.approx(0.25)
+    assert m["pos_y"] == pytest.approx(0.5)
+    assert m["pos_z"] == pytest.approx(0.75)
     assert m["rot_deg"] == pytest.approx(3.0)
+
+
+def test_measure_bone_errors_are_zero_for_faithful_output():
+    source = [bone("c", f, pos=(float(f), 0.0, 0.0)) for f in range(11)]
+    output = [source[0], source[-1]]
+    m = measure_bone_errors(source, output, [(0, 10)])
+    assert list(m.values()) == pytest.approx([0.0] * len(m), abs=1e-6)
 
 
 def bone_track(source, ranges, **kw):
