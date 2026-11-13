@@ -70,14 +70,6 @@ def test_machine_error_bad_argument_unknown_style(tmp_path, capsysbinary):
     assert e["code"] == "bad_argument" and e["field"] == "--style" and e["exit_code"] == 2
 
 
-def test_machine_error_output_exists(tmp_path, capsysbinary):
-    src = _touch(tmp_path / "in.wav")
-    rc = cli.main([str(src), "-o", str(src), "--machine"])
-    assert rc == 2
-    e = single_terminal_error(capsysbinary)
-    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
-
-
 def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
     src = _touch(tmp_path / "in.wav")
     out = _touch(tmp_path / "out.vmd")

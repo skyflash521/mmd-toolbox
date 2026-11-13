@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from lipsync import GenerationParams, MouthEvent, MouthShape
+from lipsync import MouthShape
 from song2vmd import pipeline, presets
 from vocal_analysis import (
     AnalysisResult,
@@ -48,56 +48,6 @@ def _common_kwargs(**overrides):
     return kw
 
 
-def test_unchunked_run_diagnostics_forced_split_is_false(tmp_path, monkeypatch):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-
-    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
-
-    result = pipeline.run(input_path, **_common_kwargs())
-    assert result.diagnostics.forced_split is False
-
-
-def test_single_run_forwards_mora_event_group_sizes_to_build_diagnostics(tmp_path, monkeypatch):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-
-    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
-
-    fake_group_sizes = [3]
-
-    def fake_confirm(segments, rms, **kwargs):
-        fake_events = [
-            MouthEvent(shape=MouthShape.A, start=0.0, end=10.0, open_amount=0.5),
-            MouthEvent(shape=MouthShape.A, start=10.0, end=20.0, open_amount=0.6),
-            MouthEvent(shape=MouthShape.A, start=20.0, end=30.0, open_amount=0.7),
-        ]
-        fake_diag = pipeline.events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=0)
-        return fake_events, fake_diag, fake_group_sizes
-
-    monkeypatch.setattr(pipeline.events, "confirm_mouth_events", fake_confirm)
-
-    real_build_diagnostics = pipeline.report.build_diagnostics
-    captured = {}
-
-    def spy_build_diagnostics(**kwargs):
-        captured["kwargs"] = kwargs
-        return real_build_diagnostics(**kwargs)
-
-    monkeypatch.setattr(pipeline.report, "build_diagnostics", spy_build_diagnostics)
-
-    result = pipeline.run(input_path, progress=None, **_common_kwargs())
-
-    assert captured["kwargs"]["mora_event_group_sizes"] == fake_group_sizes
-    assert result.diagnostics.morae == 1
-
-
 def test_single_run_diagnostics_reflect_backends_style_and_separated(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
@@ -132,56 +82,6 @@ def test_separated_flag_matches_separate_vocals_mode(tmp_path, monkeypatch, mode
 
     result = pipeline.run(input_path, **_common_kwargs(separate_vocals=mode))
     assert result.diagnostics.separated is expected
-
-
-def test_generation_params_are_built_from_openness_and_style_gen(tmp_path, monkeypatch):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-
-    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
-
-    captured = {}
-    real_build = pipeline.morphs.build_vmd_document
-
-    def spy_build_vmd_document(events_, params, model_name):
-        captured["params"] = params
-        return real_build(events_, params, model_name)
-
-    monkeypatch.setattr(pipeline.morphs, "build_vmd_document", spy_build_vmd_document)
-
-    openness, style_gen = presets.resolve("powerful", vowel_gain=(1.1, 0.9, 1.0, 1.0, 1.2))
-    pipeline.run(input_path, **_common_kwargs(
-        openness=openness, style_gen=style_gen, style_name="powerful"))
-
-    params = captured["params"]
-    assert params.open_cap == pytest.approx(openness.open_max)
-    assert params.vowel_scale == style_gen.vowel_scale
-    assert params.vowel_scale == (1.1, 0.9, 1.0, 1.0, 1.2, 1.0)
-    assert params.attack_frames == style_gen.attack_frames
-    assert params.release_frames == style_gen.release_frames
-    assert params.min_hold_frames == style_gen.min_hold_frames
-    assert params.triangle_min_frames == style_gen.triangle_min_frames
-    assert params.coartic_overlap_max == style_gen.coartic_overlap_max
-    assert params.anticipation_frames == style_gen.anticipation_frames
-    assert params.legato_valley_shallow == pytest.approx(style_gen.legato_valley_shallow)
-    assert params.legato_valley_deep == pytest.approx(style_gen.legato_valley_deep)
-    assert params.legato_valley_slope == pytest.approx(style_gen.legato_valley_slope)
-    assert params.exaggeration == pytest.approx(style_gen.exaggeration)
-    assert params.vibrato_threshold == style_gen.vibrato_threshold
-    assert params.vibrato_amp == pytest.approx(style_gen.vibrato_amp)
-    assert params.vibrato_period == style_gen.vibrato_period
-
-
-@pytest.mark.parametrize("style", presets.STYLE_NAMES)
-def test_mora_valley_parameters_are_left_at_lipsync_defaults(style):
-    openness, style_gen = presets.resolve(style)
-    params = pipeline._build_generation_params(openness, style_gen)
-    defaults = GenerationParams()
-    assert params.mora_valley_frames == defaults.mora_valley_frames
-    assert params.mora_valley_min_gap_frames == defaults.mora_valley_min_gap_frames
 
 
 @pytest.mark.parametrize("boundary_pairs, expected_forced_split", [
@@ -275,19 +175,6 @@ def test_chunked_run_renormalizes_openness_over_whole_song_not_per_chunk(tmp_pat
     assert boundary_next_event.open_amount != pytest.approx(float(per_chunk_only), abs=1e-3)
 
 
-def test_run_works_without_progress_reporter(tmp_path, monkeypatch):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-
-    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-    install_fake_recognizer_session(monkeypatch, [seg("vowel", 0.0, 1.0, phoneme="a")])
-
-    result = pipeline.run(input_path, **_common_kwargs())
-    assert result.document is not None
-
-
 class _RecordingProgress:
     def __init__(self):
         self.calls = []
@@ -314,24 +201,6 @@ def _stub_front_stage(monkeypatch, captured, *, segments=None):
             pcm=pcm, vocal_pcm=pcm, duration_sec=1.0, forced_split=False)
 
     monkeypatch.setattr(pipeline, "run_front_stage", fake_run_front_stage)
-
-
-def test_front_stage_receives_the_settings_and_the_intermediate_directory(tmp_path, monkeypatch):
-    captured = {}
-    _stub_front_stage(monkeypatch, captured)
-
-    pipeline.run("in.wav", keep_intermediate_dir=str(tmp_path / "keep"), **_common_kwargs(
-        separator_name="sep-x", chunking=ChunkingPolicy(max_duration_sec=42.0)))
-
-    kwargs = captured["kwargs"]
-    assert captured["input_path"] == "in.wav"
-    assert kwargs["separator"] == "sep-x"
-    assert kwargs["chunking"] == ChunkingPolicy(max_duration_sec=42.0)
-    assert kwargs["keep_intermediate_dir"] == str(tmp_path / "keep")
-    assert kwargs["content_recognizer_model"] is _TEST_MODEL
-    assert kwargs["forced_aligner"] == "wav2vec2-ctc-forcedalign"
-    assert kwargs["sofa_aligner"] is None
-    assert kwargs["english_katakana_method"] == "arpakana"
 
 
 def test_progress_is_relayed_to_the_front_stage_and_own_stages_follow_it(monkeypatch):

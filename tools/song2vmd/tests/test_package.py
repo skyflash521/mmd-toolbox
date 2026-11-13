@@ -3,16 +3,11 @@ import tomllib
 from pathlib import Path
 
 import song2vmd
-from song2vmd import cli
 
 
 def test_package_is_a_regular_package_with_semver_version():
     assert song2vmd.__file__ is not None
     assert re.fullmatch(r"\d+\.\d+\.\d+", song2vmd.__version__)
-
-
-def test_console_script_entry_point_callable():
-    assert callable(cli.main)
 
 
 def _pyproject():

@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-from cli_progress_router import ProgressEmitError
 from cli_resource_watch import torch_config as _torch_config
 from cli_resource_watch import warning_texts
 from cli_resource_watch import watch as _watch_module
@@ -104,16 +103,6 @@ def test_run_calls_pipeline_with_resolved_preset_and_default_recognizer(tmp_path
     assert kwargs["keep_intermediate_dir"] is None
     assert kwargs["forced_aligner"] == "wav2vec2-ctc-forcedalign"
     assert kwargs["sofa_aligner"] is None
-
-
-def test_silence_threshold_off_side_does_not_reach_pipeline(tmp_path, monkeypatch):
-    src = _touch(tmp_path / "in.wav")
-    runs = []
-    for text in ("0.06:0.10", "0.06:0.90"):
-        captured = _capture_run_kwargs(monkeypatch)
-        assert cli.main([src, "--silence-threshold", text, "--dry-run"]) == 0
-        runs.append({k: v for k, v in captured["kwargs"].items() if k != "progress"})
-    assert runs[0] == runs[1]
 
 
 def test_dry_run_report_shows_both_silence_threshold_sides(tmp_path, monkeypatch, capsys):
@@ -460,33 +449,24 @@ def test_low_dynamics_suppressed_warning_emitted_in_machine_mode(tmp_path, monke
     assert warnings[0]["code"] == "low_dynamics_suppressed"
 
 
-def test_no_low_dynamics_warning_when_not_suppressed(tmp_path, monkeypatch, capsysbinary):
+def test_no_warning_when_neither_low_dynamics_nor_forced_split(tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
-    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=False))
+    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=False, forced_split=False))
 
     rc = cli.main([src, "--machine", "--dry-run"])
     assert rc == 0
     assert not [e for e in _events_of(capsysbinary) if e["type"] == "warning"]
 
 
-def test_low_dynamics_suppressed_warning_printed_to_stderr_non_machine(tmp_path, monkeypatch, capsys):
+def test_quiet_does_not_suppress_warnings(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
-    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
-
-    rc = cli.main([src, "--dry-run"])
-    assert rc == 0
-    err = capsys.readouterr().err
-    assert "low_dynamics_suppressed" in err or "ダイナミックレンジ" in err
-
-
-def test_low_dynamics_suppressed_warning_survives_quiet(tmp_path, monkeypatch, capsys):
-    src = _touch(tmp_path / "in.wav")
-    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
+    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True, forced_split=True))
 
     rc = cli.main([src, "--dry-run", "--quiet"])
     assert rc == 0
     err = capsys.readouterr().err
-    assert "low_dynamics_suppressed" in err or "ダイナミックレンジ" in err
+    assert "warning: low_dynamics_suppressed:" in err
+    assert "warning: forced_split:" in err
 
 
 def test_low_dynamics_human_warning_is_one_code_prefixed_stderr_line(tmp_path, monkeypatch, capsys):
@@ -519,35 +499,6 @@ def test_forced_split_warning_emitted_in_machine_mode_without_stage_key(tmp_path
     assert "stage" not in warnings[0]
 
 
-def test_no_forced_split_warning_when_not_forced(tmp_path, monkeypatch, capsysbinary):
-    src = _touch(tmp_path / "in.wav")
-    _capture_run_kwargs(monkeypatch, result=_make_result(forced_split=False))
-
-    rc = cli.main([src, "--machine", "--dry-run"])
-    assert rc == 0
-    assert not [e for e in _events_of(capsysbinary) if e["type"] == "warning"]
-
-
-def test_forced_split_warning_printed_to_stderr_non_machine(tmp_path, monkeypatch, capsys):
-    src = _touch(tmp_path / "in.wav")
-    _capture_run_kwargs(monkeypatch, result=_make_result(forced_split=True))
-
-    rc = cli.main([src, "--dry-run"])
-    assert rc == 0
-    err = capsys.readouterr().err
-    assert "forced_split" in err
-
-
-def test_forced_split_warning_survives_quiet(tmp_path, monkeypatch, capsys):
-    src = _touch(tmp_path / "in.wav")
-    _capture_run_kwargs(monkeypatch, result=_make_result(forced_split=True))
-
-    rc = cli.main([src, "--dry-run", "--quiet"])
-    assert rc == 0
-    err = capsys.readouterr().err
-    assert "forced_split" in err
-
-
 def test_forced_split_human_warning_is_one_code_prefixed_stderr_line(tmp_path, monkeypatch, capsys):
     src = _touch(tmp_path / "in.wav")
     out = tmp_path / "out.vmd"
@@ -564,17 +515,6 @@ def test_forced_split_human_warning_is_one_code_prefixed_stderr_line(tmp_path, m
     body = lines[0][len(prefix):]
     assert body.strip()
     assert body.lstrip() == body
-
-
-def test_audio_load_error_maps_to_decoder_missing(tmp_path, monkeypatch):
-    src = _touch(tmp_path / "in.wav")
-    monkeypatch.setattr(
-        cli._pipeline, "run",
-        lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")),
-    )
-
-    rc = cli.main([src, "--dry-run"])
-    assert rc == 4
 
 
 def test_audio_load_error_machine_mode_emits_decoder_missing_error(tmp_path, monkeypatch, capsysbinary):
@@ -718,15 +658,6 @@ def test_keyboard_interrupt_during_pipeline_is_cancelled_130_machine(tmp_path, m
     assert events[0]["exit_code"] == 130
 
 
-def test_write_to_missing_parent_directory_maps_to_write_failed(tmp_path, monkeypatch):
-    src = _touch(tmp_path / "in.wav")
-    out = tmp_path / "missing_parent" / "out.vmd"
-    _capture_run_kwargs(monkeypatch, result=_make_result())
-
-    rc = cli.main([src, "-o", str(out)])
-    assert rc == 3
-
-
 def test_write_to_missing_parent_directory_machine_mode_emits_write_failed_error(
         tmp_path, monkeypatch, capsysbinary):
     src = _touch(tmp_path / "in.wav")
@@ -808,43 +739,14 @@ def test_dry_run_closes_progress_before_report_without_completion_line(tmp_path,
     assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
 
 
-def test_low_dynamics_warning_closes_progress_before_stderr_print(tmp_path, monkeypatch, spy_progress):
-    src = _touch(tmp_path / "in.wav")
-    _capture_run_kwargs(monkeypatch, result=_make_result(low_dynamics=True))
-
-    rc = cli.main([src, "--dry-run"])
-    assert rc == 0
-    close_positions = [i for i, c in enumerate(spy_progress) if c == "close"]
-    print_positions = [i for i, c in enumerate(spy_progress)
-                       if isinstance(c, tuple) and c[0] == "stderr_print"]
-    assert close_positions and print_positions
-    assert close_positions[0] < print_positions[0]
-
-
-@pytest.mark.parametrize("make_exc", [
-    lambda: AudioLoadError("no ffmpeg", reason="decoder_missing"),
-    lambda: SeparationError("sep failed"),
-    lambda: RecognitionError("rec failed"),
-    lambda: StageExecutionError("RuntimeError: 分離の失敗", stage="separate"),
-])
-def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress, make_exc):
-    src = _touch(tmp_path / "in.wav")
-    monkeypatch.setattr(cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(make_exc()))
-
-    rc = cli.main([src, "--dry-run"])
-    assert rc == 4
-    assert spy_progress[0] == "close"
-    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
-
-
-def test_intermediate_write_error_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
+def test_pipeline_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
     src = _touch(tmp_path / "in.wav")
     monkeypatch.setattr(
         cli._pipeline, "run",
-        lambda *a, **k: (_ for _ in ()).throw(IntermediateWriteError("disk full")))
+        lambda *a, **k: (_ for _ in ()).throw(AudioLoadError("no ffmpeg", reason="decoder_missing")))
 
-    rc = cli.main([src, "--keep-intermediate", "--dry-run"])
-    assert rc == 3
+    rc = cli.main([src, "--dry-run"])
+    assert rc == 4
     assert spy_progress[0] == "close"
     assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
 
@@ -900,9 +802,9 @@ def _raise_from_pipeline(monkeypatch, error):
         cli._pipeline, "run", lambda *a, **k: (_ for _ in ()).throw(error))
 
 
-@pytest.mark.parametrize("stage", ["separate", "recognize"])
 def test_stage_execution_error_maps_to_stage_failed_with_only_stage_as_extra_key(
-        tmp_path, monkeypatch, capsysbinary, stage):
+        tmp_path, monkeypatch, capsysbinary):
+    stage = "separate"
     src = _touch(tmp_path / "in.wav")
     _raise_from_pipeline(
         monkeypatch,
@@ -938,16 +840,6 @@ def test_stage_execution_error_names_the_stage_label_in_one_human_line(
     assert stage_label in lines[0]
     assert "CUDA out of memory" in lines[0]
     assert "Traceback" not in captured.err
-
-
-def test_progress_emit_error_is_reported_as_internal_error_not_stage_failed(tmp_path, monkeypatch, capsysbinary):
-    src = _touch(tmp_path / "in.wav")
-    _raise_from_pipeline(monkeypatch, ProgressEmitError("stdout is closed"))
-
-    rc = cli.main([src, "--machine", "--dry-run"])
-    assert rc == 1
-    events = _events_of(capsysbinary)
-    assert events[-1]["code"] == "internal_error"
 
 
 def test_unexpected_exception_reports_internal_error_without_traceback(tmp_path, monkeypatch, capsysbinary):

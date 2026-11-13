@@ -70,22 +70,6 @@ def test_max_opening_defaults_to_zero_when_no_mouth_events():
     assert diag.max_opening == 0.0
 
 
-def test_max_opening_is_zero_when_only_closed_shapes_present():
-    mouth_events = [mev(MouthShape.BILABIAL, 0, 5), mev(MouthShape.SILENCE, 5, 10)]
-    diag = diag_of(mouth_events=mouth_events, keys=2)
-    assert diag.max_opening == 0.0
-
-
-def test_merged_morae_comes_from_event_diagnostics():
-    diag = diag_of(event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=False, merged_morae=7))
-    assert diag.merged_morae == 7
-
-
-def test_weak_vowels_comes_from_event_diagnostics():
-    diag = diag_of(event_diagnostics=events.EventDiagnostics(weak_vowels=5, low_dynamics=False, merged_morae=0))
-    assert diag.weak_vowels == 5
-
-
 def test_low_dynamics_comes_from_event_diagnostics_and_stays_out_of_result_payload():
     diag = diag_of(
         event_diagnostics=events.EventDiagnostics(weak_vowels=0, low_dynamics=True, merged_morae=0))

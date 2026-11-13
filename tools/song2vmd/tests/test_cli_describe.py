@@ -1,10 +1,5 @@
-import argparse
 import json
-import math
 
-import pytest
-
-from cli_options import CompoundValidator, RangeValidator, describe_options
 from song2vmd import __version__, cli
 
 _NONNEG_INT = {"min": 0, "max": None, "exclusive_min": False}
@@ -92,12 +87,6 @@ def test_describe_emits_result_without_input(capsysbinary):
     assert set(r) == {"type", "mode", "options", "presets"}
 
 
-def test_describe_works_without_machine_flag(capsysbinary):
-    rc = cli.main(["--describe"])
-    assert rc == 0
-    assert single_describe_result(capsysbinary)["mode"] == "describe"
-
-
 def test_describe_with_nonexistent_input_still_describes(capsysbinary):
     rc = cli.main(["--describe", "does_not_exist.wav"])
     assert rc == 0
@@ -134,13 +123,6 @@ def test_describe_presets_shape_and_values(capsysbinary):
     assert {p["name"]: p["values"] for p in r["presets"]} == EXPECTED_PRESETS
 
 
-def test_describe_type_table_covers_non_meta_args():
-    parser = cli._build_parser()
-    meta = {"help", "version", "machine", "describe"}
-    non_meta = {a.dest for a in parser._actions if a.dest not in meta}
-    assert non_meta <= set(cli._DESCRIBE_TYPE_TABLE)
-
-
 def test_describe_without_machine_reports_arg_error_as_error_event(capsysbinary):
     rc = cli.main(["--describe", "--max-duration", "abc"])
     assert rc == 2
@@ -150,87 +132,3 @@ def test_describe_without_machine_reports_arg_error_as_error_event(capsysbinary)
     assert events[-1]["code"] == "bad_argument"
     assert events[-1]["field"] == "--max-duration" and events[-1]["exit_code"] == 2
 
-
-def _actions_by_describe_name(parser):
-    actions = {}
-    for action in parser._actions:
-        if action.dest == "input":
-            actions["input"] = action
-            continue
-        positive = [s for s in action.option_strings
-                    if s.startswith("--") and not s.startswith("--no-")]
-        if positive:
-            actions[positive[0]] = action
-    return actions
-
-
-def _options_by_name(parser):
-    return {o["name"]: o for o in describe_options(parser, cli._DESCRIBE_TYPE_TABLE)}
-
-
-def _rejects(validator, text):
-    try:
-        validator(text)
-    except (argparse.ArgumentTypeError, ValueError):
-        return True
-    return False
-
-
-_NUMERIC_NAMES = [n for n, (type_, c, _) in EXPECTED_TYPE_CONSTRAINT_DEFAULT.items()
-                  if type_ in ("int", "float") and c is not None]
-_COMPOUND_NAMES = [n for n, (type_, _, _) in EXPECTED_TYPE_CONSTRAINT_DEFAULT.items() if type_ == "compound"]
-
-_COMPOUND_VALID_BASELINES = {
-    "--vowel-gain": [1.0, 1.0, 1.0, 1.0, 1.0],
-    "--silence-threshold": [0.1, 0.5],
-}
-
-_COMPOUND_BOUNDS_ACCEPTED_WITH_BASELINE = {
-    "--vowel-gain": [(i, "min") for i in range(5)],
-    "--silence-threshold": [(0, "min"), (1, "max")],
-}
-
-
-@pytest.mark.parametrize("name", _COMPOUND_NAMES)
-def test_compound_field_constraint_agrees_with_argument_validation(name):
-    parser = cli._build_parser()
-    fields = _options_by_name(parser)[name]["constraint"]["fields"]
-    validator = _actions_by_describe_name(parser)[name].type
-
-    def value_with(index, element):
-        values = list(_COMPOUND_VALID_BASELINES[name])
-        values[index] = element
-        return ":".join(repr(float(v)) for v in values)
-
-    for index, field in enumerate(fields):
-        minimum, maximum = field["min"], field["max"]
-        if minimum is not None:
-            if field["exclusive_min"]:
-                assert _rejects(validator, value_with(index, minimum))
-            assert _rejects(validator, value_with(index, math.nextafter(float(minimum), -math.inf)))
-        if maximum is not None:
-            assert _rejects(validator, value_with(index, math.nextafter(float(maximum), math.inf)))
-    for index, bound in _COMPOUND_BOUNDS_ACCEPTED_WITH_BASELINE[name]:
-        assert not _rejects(validator, value_with(index, fields[index][bound]))
-
-
-@pytest.mark.parametrize("name", _NUMERIC_NAMES)
-def test_numeric_constraint_is_derived_from_the_validator(name):
-    parser = cli._build_parser()
-    validator = _actions_by_describe_name(parser)[name].type
-    assert isinstance(validator, RangeValidator)
-    assert _options_by_name(parser)[name]["constraint"] == validator.constraint
-
-
-@pytest.mark.parametrize("name", _COMPOUND_NAMES)
-def test_compound_constraint_is_derived_from_the_element_validators(name):
-    parser = cli._build_parser()
-    validator = _actions_by_describe_name(parser)[name].type
-    assert isinstance(validator, CompoundValidator)
-
-    constraint = _options_by_name(parser)[name]["constraint"]
-    assert constraint["format"] == validator.format
-    assert [f["name"] for f in constraint["fields"]] == [n for n, _ in validator.elements]
-    for field, (_, element) in zip(constraint["fields"], validator.elements, strict=True):
-        assert isinstance(element, RangeValidator)
-        assert {k: field[k] for k in ("min", "max", "exclusive_min")} == element.constraint

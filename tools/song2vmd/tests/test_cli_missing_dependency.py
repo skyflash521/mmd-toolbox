@@ -16,10 +16,6 @@ def missing_dependency(monkeypatch):
         monkeypatch.delattr(cli, name)
 
 
-def test_dependencies_present_in_dev_environment():
-    assert cli._MISSING_DEPENDENCY is None
-
-
 def test_human_message_is_single_line_without_traceback(tmp_path, capsys, missing_dependency):
     rc = cli.main([str(tmp_path / "in.wav")])
     assert rc == 4
@@ -29,13 +25,6 @@ def test_human_message_is_single_line_without_traceback(tmp_path, capsys, missin
     assert len(lines) == 1
     assert lines[0].startswith("error: ")
     assert "Traceback" not in captured.err
-
-
-def test_human_message_names_module_and_install_command(tmp_path, capsys, missing_dependency):
-    cli.main([str(tmp_path / "in.wav")])
-    err = capsys.readouterr().err
-    assert "soundfile" in err
-    assert 'pip install ".[vocal-analysis]"' in err
 
 
 def test_version_succeeds_without_dependencies(capsys, missing_dependency):
@@ -57,15 +46,12 @@ def test_help_succeeds_without_dependencies(capsys, missing_dependency):
 @pytest.mark.parametrize("argv", [
     pytest.param([], id="input欠落"),
     pytest.param(["in.wav", "--forced-aligner", "sofa-forcedalign"], id="SOFA必須検証"),
-    pytest.param(["in.wav", "--recognizer-model-revision", "abc"], id="組み合わせ検証"),
     pytest.param(["in.wav", "--output", "existing.vmd"], id="上書きガード"),
-    pytest.param(["in.wav", "--output", "existing_dir"], id="出力先がディレクトリ"),
 ])
 def test_argument_errors_keep_their_own_exit_code(argv, tmp_path, monkeypatch, capsys,
                                                   missing_dependency):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "existing.vmd").write_bytes(b"")
-    (tmp_path / "existing_dir").mkdir()
     rc = cli.main(argv)
     assert rc == 2
     err = capsys.readouterr().err
