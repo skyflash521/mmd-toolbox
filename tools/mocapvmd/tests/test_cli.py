@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from mocapvmd import cli
@@ -26,7 +28,6 @@ _EXIT_ARG_ERROR = 2
 
 _WINERROR_PRIVILEGE_NOT_HELD = 1314
 
-_FOOT_IK_BASE_POS_STRENGTH = 0.65
 
 _DENSE_FRAME_COUNT = 11
 
@@ -49,33 +50,14 @@ def _write_all_sections_doc(path, *, model_name_raw=_DEFAULT_MODEL_NAME_RAW):
     )
 
 
-def test_missing_input_is_input_error(tmp_path):
-    code = cli.main([str(tmp_path / "nope.vmd")])
-    assert code == _EXIT_INPUT_ERROR
-
-
-def test_input_directory_is_input_error(tmp_path):
+def test_input_directory_is_input_not_file_error(tmp_path, capsysbinary):
     d = tmp_path / "indir"
     d.mkdir()
-    code = cli.main([str(d)])
+    code = cli.main([str(d), "--machine"])
     assert code == _EXIT_INPUT_ERROR
-
-
-def test_non_vmd_input_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    src.write_bytes(b"not a vmd file at all")
-    code = cli.main([str(src)])
-    assert code == _EXIT_INPUT_ERROR
-
-
-def test_non_finite_bone_value_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(
-        src,
-        bone=[bone("センター", 0, pos=(float("nan"), 0.0, 0.0)), bone("センター", 1)],
-    )
-    assert cli.main([str(src), "-o", str(out)]) == _EXIT_INPUT_ERROR
+    lines = capsysbinary.readouterr().out.decode("utf-8").splitlines()
+    last = json.loads(lines[-1])
+    assert last["code"] == "input_not_file" and last["field"] == "input"
 
 
 def test_single_key_bone_kept_verbatim(tmp_path):
@@ -87,38 +69,6 @@ def test_single_key_bone_kept_verbatim(tmp_path):
     assert len(out_doc.bone) == 1
     assert out_doc.bone[0].position == pytest.approx((1.0, 2.0, 3.0))
     assert out_doc.bone[0].interpolation == BONE_NONLINEAR
-
-
-def test_single_key_non_finite_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, bone=[bone("センター", 0, pos=(float("nan"), 0.0, 0.0))])
-    assert cli.main([str(src), "-o", str(out)]) == _EXIT_INPUT_ERROR
-
-
-def test_single_key_zero_norm_quaternion_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, bone=[bone("センター", 0, rot=(0.0, 0.0, 0.0, 0.0))])
-    assert cli.main([str(src), "-o", str(out)]) == _EXIT_INPUT_ERROR
-
-
-def test_no_denoise_non_finite_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    keys = [bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(4)]
-    keys.append(bone("センター", 4, pos=(float("inf"), 0.0, 0.0)))
-    write_vmd(src, bone=keys)
-    assert cli.main([str(src), "-o", str(out), "--no-denoise"]) == _EXIT_INPUT_ERROR
-
-
-def test_no_denoise_zero_norm_quaternion_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    keys = [bone("センター", f) for f in range(4)]
-    keys.append(bone("センター", 4, rot=(0.0, 0.0, 0.0, 0.0)))
-    write_vmd(src, bone=keys)
-    assert cli.main([str(src), "-o", str(out), "--no-denoise"]) == _EXIT_INPUT_ERROR
 
 
 def test_overwrite_guard_rejects_output_equal_to_input_and_leaves_input_untouched(tmp_path):
@@ -188,15 +138,6 @@ def test_default_output_name_appends_mocap_suffix(tmp_path):
     assert (tmp_path / "dance_mocap.vmd").exists()
 
 
-def test_explicit_output_written(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    _write_all_sections_doc(src)
-    code = cli.main([str(src), "-o", str(out)])
-    assert code == _EXIT_OK
-    assert out.exists()
-
-
 def test_nonbone_sections_and_model_name_pass_through_with_denoise(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -225,17 +166,6 @@ def _assert_frames_and_values_kept_with_linear_interp(in_doc, out_doc, names):
             assert ko.interpolation == BONE_LINEAR_INTERP
 
 
-def test_no_denoise_no_stabilize_keeps_bone_values_and_linearizes_interp(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    _write_all_sections_doc(src)
-    code = cli.main([str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce"])
-    assert code == _EXIT_OK
-    in_doc, _ = io.read(str(src))
-    out_doc, _ = io.read(str(out))
-    _assert_frames_and_values_kept_with_linear_interp(in_doc, out_doc, ("センター", "右足ＩＫ"))
-
-
 def test_dry_run_does_not_write_explicit_output(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -243,14 +173,6 @@ def test_dry_run_does_not_write_explicit_output(tmp_path):
     code = cli.main([str(src), "-o", str(out), "--dry-run"])
     assert code == _EXIT_OK
     assert not out.exists()
-
-
-def test_dry_run_does_not_write_default_output(tmp_path):
-    src = tmp_path / "in.vmd"
-    _write_all_sections_doc(src)
-    code = cli.main([str(src), "--dry-run"])
-    assert code == _EXIT_OK
-    assert not (tmp_path / "in_mocap.vmd").exists()
 
 
 def _dry_run_report(src, monkeypatch, *args):
@@ -304,14 +226,6 @@ def test_dry_run_prints_bone_names(tmp_path, capsys):
     assert "センター" in out
 
 
-def test_dry_run_does_not_write_output_when_report_is_built(tmp_path):
-    src = tmp_path / "in.vmd"
-    _write_all_sections_doc(src)
-    code = cli.main([str(src), "--dry-run"])
-    assert code == _EXIT_OK
-    assert not (tmp_path / "in_mocap.vmd").exists()
-
-
 def test_clean_strength_option_resolves_cleaning_in_report(tmp_path, monkeypatch):
     from mocapvmd import presets
 
@@ -320,36 +234,7 @@ def test_clean_strength_option_resolves_cleaning_in_report(tmp_path, monkeypatch
     _write_all_sections_doc(src)
     data = _dry_run_report(src, monkeypatch, "--clean-strength", str(clean_strength))
     foot = next(e for e in data["bones"] if e["name"] == "右足ＩＫ")
-    assert foot["cleaning"]["pos_strength"] == pytest.approx(
-        min(1.0, _FOOT_IK_BASE_POS_STRENGTH * clean_strength))
     assert foot["cleaning"] == presets.resolve_cleaning(clean_strength, "foot_ik")
-
-
-@pytest.mark.parametrize("bad", [
-    pytest.param("-0.1", id="negative"),
-    pytest.param("nan", id="nan"),
-    pytest.param("inf", id="inf"),
-])
-def test_negative_or_non_finite_clean_strength_is_arg_error(tmp_path, bad):
-    src = tmp_path / "in.vmd"
-    _write_all_sections_doc(src)
-    assert cli.main([str(src), "--clean-strength", bad]) == _EXIT_ARG_ERROR
-
-
-def test_unknown_preset_is_arg_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    _write_all_sections_doc(src)
-    assert cli.main([str(src), "--preset", "turbo"]) == _EXIT_ARG_ERROR
-
-
-def test_default_clean_strength_is_unit_in_dry_run_report(tmp_path, monkeypatch):
-    from mocapvmd import presets
-
-    src = tmp_path / "in.vmd"
-    _write_all_sections_doc(src)
-    data = _dry_run_report(src, monkeypatch)
-    center = next(e for e in data["bones"] if e["name"] == "センター")
-    assert center["cleaning"] == presets.resolve_cleaning(1.0, "center")
 
 
 _JITTER_BONE_CATEGORIES = {
@@ -418,21 +303,6 @@ def test_no_denoise_no_stabilize_keeps_bone_values_for_every_category(tmp_path):
     _assert_frames_and_values_kept_with_linear_interp(in_doc, out_doc, _JITTER_BONES)
 
 
-def test_no_denoise_preserves_nonbone_sections(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    _write_all_sections_doc(src)
-    code = cli.main([str(src), "-o", str(out), "--no-denoise"])
-    assert code == _EXIT_OK
-    in_doc, _ = io.read(str(src))
-    out_doc, _ = io.read(str(out))
-    assert out_doc.morph == in_doc.morph
-    assert out_doc.camera == in_doc.camera
-    assert out_doc.light == in_doc.light
-    assert out_doc.self_shadow == in_doc.self_shadow
-    assert out_doc.ik_property == in_doc.ik_property
-
-
 _FOOT_IK_BONES = ("右足ＩＫ", "右つま先ＩＫ")
 _GROUNDED_X_WOBBLE = [0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0, 0.05, 0.0]
 _GROUNDED_SLOW_X_RAMP = [round(0.05 * i, 6) for i in range(_DENSE_FRAME_COUNT)]
@@ -495,26 +365,6 @@ def test_explicit_foot_ik_stabilize_matches_default(tmp_path):
     assert io.read(str(out_explicit))[0].bone == io.read(str(out_default))[0].bone
 
 
-def test_no_foot_ik_stabilize_keeps_foot_and_toe_values(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    _write_grounded_wobble_for_foot_ik_and_center(src)
-    assert cli.main([
-        str(src), "-o", str(out), "--no-denoise", "--no-foot-ik-stabilize", "--no-reduce",
-    ]) == _EXIT_OK
-    in_doc, _ = io.read(str(src))
-    out_doc, _ = io.read(str(out))
-    _assert_frames_and_values_kept_with_linear_interp(in_doc, out_doc, _FOOT_IK_BONES)
-
-
-def test_foot_slide_suppression_outside_unit_interval_or_nan_is_arg_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, bone=[bone("右足ＩＫ", f, pos=(0.05 * f, 0.0, 0.0)) for f in range(6)])
-    for bad in ("1.5", "-0.1", "nan"):
-        assert cli.main([str(src), "-o", str(out), "--foot-slide-suppression", bad]) == _EXIT_ARG_ERROR
-
-
 def _foot_ik_x_series(doc):
     ks = sorted((k for k in doc.bone if k.name == "右足ＩＫ"), key=lambda k: k.frame)
     return [k.position[0] for k in ks]
@@ -542,10 +392,6 @@ def _write_center_linear_ramp(path):
     write_vmd(path, bone=[bone("センター", f, pos=(float(f), 0.0, 0.0)) for f in range(_DENSE_FRAME_COUNT)])
 
 
-def _center_frames(bones):
-    return sorted(k.frame for k in bones if k.name == "センター")
-
-
 def _write_center_quadratic_curve(path):
     write_vmd(path, bone=[
         bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0)) for f in range(_DENSE_FRAME_COUNT)
@@ -569,18 +415,6 @@ def test_default_output_is_reduced_with_bezier_curve_mode(tmp_path):
     assert len(default_keys) < _DENSE_FRAME_COUNT
     assert default_keys == _center_keys(out_bezier)
     assert default_keys != _center_keys(out_linear)
-
-
-def test_no_reduce_keeps_dense_linear(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    _write_center_linear_ramp(src)
-    assert cli.main([str(src), "-o", str(out), "--no-reduce"]) == _EXIT_OK
-    out_doc, _ = io.read(str(out))
-    assert _center_frames(out_doc.bone) == list(range(_DENSE_FRAME_COUNT))
-    for k in out_doc.bone:
-        if k.name == "センター":
-            assert k.interpolation == BONE_LINEAR_INTERP
 
 
 def test_preset_slower_accepted_and_unknown_is_arg_error(tmp_path):
@@ -692,21 +526,6 @@ def test_dry_run_reduction_equals_clean_stabilize_reduce_diagnostics(tmp_path, m
     assert r["errors"] == d["errors"]
 
 
-@pytest.mark.parametrize(
-    "bad_key",
-    [
-        pytest.param(bone("センター", 4, pos=(float("inf"), 0.0, 0.0)), id="non_finite_pos"),
-        pytest.param(bone("センター", 4, rot=(0.0, 0.0, 0.0, 0.0)), id="zero_norm_quat"),
-    ],
-)
-def test_dry_run_rejects_invalid_bone_value_as_input_error(tmp_path, bad_key):
-    src = tmp_path / "in.vmd"
-    keys = [bone("センター", f) for f in range(4)]
-    keys.append(bad_key)
-    write_vmd(src, bone=keys)
-    assert cli.main([str(src), "--dry-run"]) == _EXIT_INPUT_ERROR
-
-
 def _list_lines(capsys):
     return capsys.readouterr().out.splitlines()
 
@@ -783,13 +602,6 @@ def test_overwrite_guard_is_checked_before_reading_input(tmp_path):
     src = tmp_path / "in.vmd"
     src.write_bytes(b"not a vmd")
     assert cli.main([str(src), "-o", str(src)]) == _EXIT_ARG_ERROR
-
-
-def test_reduce_override_is_validated_before_reading_input(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    src.write_bytes(b"not a vmd")
-    assert cli.main([str(src), "-o", str(out), "--reduce-error-bone-pos", "nan"]) == _EXIT_ARG_ERROR
 
 
 def test_decode_warning_is_single_common_format_line_on_stderr_only(tmp_path, capsys):

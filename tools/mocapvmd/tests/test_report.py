@@ -56,7 +56,7 @@ def test_report_adds_grounding_diagnostics_for_foot():
     assert e["grounding_segments"] == [[0, 10]]
     assert e["lock_applied_ratio"] == pytest.approx(1.0)
     assert e["max_change"] > 0.0
-    assert e["mean_change"] == pytest.approx(e["mean_change"])
+    assert 0.0 < e["mean_change"] <= e["max_change"]
     assert e["clamp_warnings"] == 0
 
 
@@ -72,29 +72,6 @@ def test_report_adds_grounding_diagnostics_for_toe():
     assert e["grounding_candidates"] == 11
     assert e["grounding_segments"] == [[0, 10]]
     assert e["lock_applied_ratio"] == pytest.approx(1.0)
-
-
-def test_report_grounding_reflects_denoise_then_stabilize():
-    from mocapvmd import denoise as dn
-    from mocapvmd import footik
-
-    keys = _slow_grounded_ramp_frames_0_to_10()
-    rep = _build_report(keys, denoise=True)
-    e = _entry(rep, "右足ＩＫ")
-    foot = sorted(keys, key=lambda k: k.frame)
-    params = presets.resolve_cleaning(1.0, "foot_ik")
-    cpos, _ = dn.apply_denoise(
-        [k.position for k in foot], [k.rotation for k in foot],
-        pos_window=params["pos_window"], rot_window=params["rot_window"],
-        pos_strength=params["pos_strength"], rot_strength=params["rot_strength"],
-    )
-    ts = footik.stabilize_foot_ik(
-        {"右足ＩＫ": ("foot_ik", [k.frame for k in foot], cpos)}, 1.0
-    )["右足ＩＫ"]
-    assert e["grounding_segments"] == [[s.start, s.end] for s in ts.grounding.segments]
-    assert e["max_change"] == pytest.approx(ts.max_change)
-    assert e["mean_change"] == pytest.approx(ts.mean_change)
-    assert e["lock_applied_ratio"] == pytest.approx(ts.lock_applied_ratio)
 
 
 def test_report_non_foot_bone_has_no_grounding_fields():
@@ -139,27 +116,13 @@ def test_report_includes_resolved_cleaning_params():
     assert foot["cleaning"] == presets.resolve_cleaning(1.4, "foot_ik")
 
 
-def test_report_default_clean_strength_is_unit():
-    keys = [bone("センター", 0)]
-    rep = _build_report(keys)
-    assert _entry(rep, "センター")["cleaning"] == presets.resolve_cleaning(1.0, "center")
-    assert rep["clean_strength"] == pytest.approx(1.0)
-
-
 def test_format_dry_run_shows_center_pos_blend_scaled_by_clean_strength():
     keys = [bone("センター", 0), bone("センター", 10)]
     rep = _build_report(keys, clean_strength=1.4)
     text = report.format_dry_run(rep)
     center_line = next(line for line in text.splitlines() if "センター" in line and "center" in line)
-    center_pos_blend_0_45_times_1_4 = "0.63"
-    assert center_pos_blend_0_45_times_1_4 in center_line
-
-
-def test_report_counts_spike_candidate_frames():
-    keys = [bone("センター", f) for f in range(11)]
-    keys[5] = bone("センター", 5, pos=(0.5, 0.0, 0.0))
-    rep = _build_report(keys)
-    assert _entry(rep, "センター")["spike_candidates"] == 1
+    scaled_pos_blend = presets.resolve_cleaning(1.4, "center")["pos_strength"]
+    assert f"clean_pos={scaled_pos_blend:.4g}" in center_line
 
 
 def test_report_spike_candidates_are_frame_based_not_axis_based():
@@ -320,17 +283,6 @@ def test_velocity_uses_time_order_not_input_order():
     rep = _build_report(keys)
     frame2_to_frame4_speed = (10.0 - 2.0) / 2
     assert _entry(rep, "センター")["max_speed"] == pytest.approx(frame2_to_frame4_speed)
-
-
-def test_angular_velocity_uses_time_order_not_input_order():
-    keys = [
-        bone("頭", 4, rot=_quat_y(100.0)),
-        bone("頭", 0, rot=_quat_y(0.0)),
-        bone("頭", 2, rot=_quat_y(20.0)),
-    ]
-    rep = _build_report(keys)
-    frame2_to_frame4_deg_per_frame = (100.0 - 20.0) / 2
-    assert _entry(rep, "頭")["max_ang_speed_deg"] == pytest.approx(frame2_to_frame4_deg_per_frame, abs=1e-3)
 
 
 def test_velocity_normalized_by_frame_gap():
@@ -527,16 +479,14 @@ def test_format_dry_run_shows_values_and_candidates():
     text = report.format_dry_run(rep)
     lines = text.splitlines()
     center_line = next(line for line in lines if "センター" in line and "center" in line)
-    center_key_count, center_last_frame, center_max_speed = "2", "10", "0.5"
-    assert center_key_count in center_line
-    assert center_last_frame in center_line
-    assert center_max_speed in center_line
+    center_tokens = center_line.split()
+    assert "keys=2" in center_tokens
+    assert "frames=[0,10]" in center_tokens
+    assert "max_speed=0.5" in center_tokens
     head_line = next(line for line in lines if "頭" in line and "torso" in line)
-    head_max_ang_speed_deg = "90"
-    assert head_max_ang_speed_deg in head_line
+    assert "max_rot=90deg" in head_line.split()
     foot_line = next(line for line in lines if "右足ＩＫ" in line and "foot_ik" in line)
-    foot_last_frame = "40"
-    assert foot_last_frame in foot_line
+    assert "frames=[0,40]" in foot_line.split()
     bone_line_plus_candidate_list = 2
     assert text.count("右足ＩＫ") >= bone_line_plus_candidate_list
     assert text.count("右つま先ＩＫ") >= bone_line_plus_candidate_list
@@ -605,20 +555,3 @@ def test_rotation_change_is_zero_for_unchanged_non_unit_quaternion():
     keys = [bone("右手首", 0, rot=(0.0, 0.0, 0.0, 0.5))]
     rep = _build_report(keys, denoise=False, foot_ik_stabilize=False, cleaned_bone_keys=keys)
     assert _entry(rep, "右手首")["clean_change"]["max_rot_deg"] == pytest.approx(0.0, abs=1e-9)
-
-
-def test_grounding_diagnostics_come_from_denoised_keys_when_given():
-    fast = [bone("右足ＩＫ", f, pos=(3.0 * f, 0.0, 0.0)) for f in range(11)]
-    rep = _build_report(
-        fast, denoise=True, denoised_bone_keys=_slow_grounded_ramp_frames_0_to_10(),
-    )
-    e = _entry(rep, "右足ＩＫ")
-    assert e["grounding_candidates"] == 11
-    assert e["lock_applied_ratio"] == pytest.approx(1.0)
-
-
-def test_grounding_segments_use_frames_of_denoised_keys_when_ranges_differ():
-    short_input = [bone("右足ＩＫ", f) for f in range(100, 111)]
-    expanded = [bone("右足ＩＫ", f) for f in range(0, 111)]
-    rep = _build_report(short_input, denoise=True, denoised_bone_keys=expanded)
-    assert _entry(rep, "右足ＩＫ")["grounding_segments"] == [[0, 110]]

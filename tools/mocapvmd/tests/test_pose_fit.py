@@ -6,8 +6,6 @@ from mocapvmd.markers import extract_markers
 from mocapvmd.model_profile import load_mocap_profile
 from mocapvmd.pose_fit import (
     DEFAULT_FIT_PARAMS,
-    FitParams,
-    FitResult,
     fit,
 )
 from mocapvmd.pose_sampling import sample_local_poses
@@ -46,19 +44,6 @@ def _shift_head_marker_x(target, dx):
     target["head"][0] = (hx[0] + dx, hx[1], hx[2])
 
 
-def test_targets_equal_to_fk_markers_keep_original_pose():
-    profile = load_mocap_profile(None)
-    frames = range(0, 2)
-    dense = _dense(profile, {}, frames)
-    target = _fk_markers(profile, dense)
-    res = fit(profile, dense, target)
-    assert isinstance(res, FitResult)
-    for fitted_frame, orig_frame in zip(res.poses, dense, strict=True):
-        for fb, ob in zip(fitted_frame, orig_frame, strict=True):
-            assert fb.position == pytest.approx(ob.position, abs=1e-9)
-            assert fb.rotation == pytest.approx(ob.rotation, abs=1e-9)
-
-
 def test_marker_displacement_below_fit_threshold_keeps_original_pose():
     profile = load_mocap_profile(None)
     dense = _dense(profile, {}, range(0, 1))
@@ -80,17 +65,6 @@ def test_fit_reduces_error_of_leaf_head_marker():
     res = fit(profile, dense, target)
     after = _marker_error(profile, res.poses, target)
     assert after < before
-
-
-def test_unreachable_target_does_not_worsen_error():
-    profile = load_mocap_profile(None)
-    dense = _dense(profile, {}, range(0, 1))
-    target = _unchanged_targets(profile, dense)
-    _shift_head_marker_x(target, 100.0)
-    before = _marker_error(profile, dense, target)
-    res = fit(profile, dense, target)
-    after = _marker_error(profile, res.poses, target)
-    assert after <= before + 1e-9
 
 
 def test_large_displacement_corrections_stay_within_absolute_limits():
@@ -134,19 +108,12 @@ def test_small_displacement_correction_is_capped_by_displacement_proportional_li
     assert max_rot > 0.0
 
 
-def test_default_fit_params_are_positive():
-    assert isinstance(DEFAULT_FIT_PARAMS, FitParams)
-    assert DEFAULT_FIT_PARAMS.skip_threshold > 0.0
-    assert DEFAULT_FIT_PARAMS.max_rot_deg > 0.0
-    assert DEFAULT_FIT_PARAMS.max_pos > 0.0
-    assert DEFAULT_FIT_PARAMS.k_rot > 0.0
-    assert DEFAULT_FIT_PARAMS.k_pos > 0.0
-
-
-def test_fallback_frame_count_is_reported():
+def test_unreachable_target_does_not_worsen_error():
     profile = load_mocap_profile(None)
     dense = _dense(profile, {}, range(0, 1))
-    target = _fk_markers(profile, dense)
+    target = _unchanged_targets(profile, dense)
+    _shift_head_marker_x(target, 100.0)
+    before = _marker_error(profile, dense, target)
     res = fit(profile, dense, target)
-    assert isinstance(res.fallback_frames, int)
-    assert res.fallback_frames >= 0
+    after = _marker_error(profile, res.poses, target)
+    assert after <= before + 1e-9

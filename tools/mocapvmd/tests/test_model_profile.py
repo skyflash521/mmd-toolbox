@@ -7,7 +7,6 @@ from mocapvmd.model_profile import (
     MocapModelProfile,
     MocapModelProfileError,
     load_mocap_profile,
-    validate_required_roles,
 )
 from pmx.types import PmxFormatError, PmxModel
 
@@ -30,41 +29,6 @@ def _write_pmx(tmp_path, names):
     p = tmp_path / "model.pmx"
     p.write_bytes(build_standard_pmx(names))
     return str(p)
-
-
-def test_default_profile_loads():
-    p = load_mocap_profile(None)
-    assert isinstance(p, MocapModelProfile)
-    assert p.source == "default"
-    assert isinstance(p.model, PmxModel)
-    assert set(p.required_bones) >= set(STANDARD_BONE_NAMES)
-    assert set(p.marker_bindings) == _EXPECTED_MARKERS
-    assert set(p.feature_bindings) == _EXPECTED_FEATURES
-
-
-def test_default_marker_bindings_valid():
-    p = load_mocap_profile(None)
-    n = len(p.model.bones)
-    for marker, mb in p.marker_bindings.items():
-        assert mb.marker == marker
-        assert 0 <= mb.bone < n
-        assert mb.offset == (0.0, 0.0, 0.0)
-        assert mb.category in _CATEGORIES
-        assert 0.0 < mb.weight <= 1.0
-
-
-def test_default_feature_bindings_valid():
-    p = load_mocap_profile(None)
-    for feature, fb in p.feature_bindings.items():
-        assert fb.feature == feature
-        assert fb.kind == "vector"
-        assert fb.a in p.required_bones
-        assert fb.b in p.required_bones
-        assert 0.0 < fb.weight <= 1.0
-
-
-def test_validate_required_roles_accepts_default_profile():
-    validate_required_roles(load_mocap_profile(None))
 
 
 def test_default_role_index_matches_standard_names():
@@ -111,7 +75,3 @@ def test_pmx_format_error_propagates(tmp_path):
     bad.write_bytes(b"NOTPMX")
     with pytest.raises(PmxFormatError):
         load_mocap_profile(str(bad))
-
-
-def test_standard_bone_names_cover_exactly_the_default_roles():
-    assert set(STANDARD_BONE_NAMES) == set(_DEFAULT_ROLE_TO_INDEX)

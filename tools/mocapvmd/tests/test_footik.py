@@ -1,5 +1,3 @@
-import pytest
-
 from mocapvmd import footik, presets
 
 _MIN_GROUND_LEN = 4
@@ -40,18 +38,6 @@ def _still_block_between_fast_steps(block):
         + [(1.0, 0.0, 0.0)] * block
         + [(1.5, 0.0, 0.0), (2.0, 0.0, 0.0)]
     )
-
-
-def test_empty_track_has_no_segments_or_candidates():
-    det = detect([])
-    assert det.segments == ()
-    assert det.candidate_frames == frozenset()
-
-
-@pytest.mark.parametrize("n", range(1, _MIN_GROUND_LEN))
-def test_still_track_shorter_than_min_ground_len_has_no_segment(n):
-    det = detect([(0.0, 0.0, 0.0)] * n)
-    assert det.segments == ()
 
 
 def test_full_still_low_track_is_one_segment():
@@ -119,3 +105,9 @@ def test_stance_swing_stance_splits_into_two_segments():
     stance2 = [(2.0, 0.0, 0.0)] * 6
     det = detect(stance1 + swing + stance2)
     assert segs(det) == [(0, 5), (10, 15)]
+
+
+def test_empty_track_has_no_segments_or_candidates():
+    det = detect([])
+    assert det.segments == ()
+    assert det.candidate_frames == frozenset()

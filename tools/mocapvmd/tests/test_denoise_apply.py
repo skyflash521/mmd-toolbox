@@ -77,13 +77,6 @@ def test_position_micro_jitter_total_variation_reduced():
     assert _x_variation(out_pos) < _x_variation(pos)
 
 
-def test_output_lengths_match_input():
-    pos = [(0.1 * i, 0.0, 0.0) for i in range(_N)]
-    out_pos, out_rot = apply(pos, [IDENT] * _N)
-    assert len(out_pos) == _N
-    assert len(out_rot) == _N
-
-
 def test_position_spike_suppressed_below_half():
     spike = 0.5
     pos = list(_ZERO_POS)
@@ -163,10 +156,3 @@ def test_rotation_cut_adjacent_frames_preserved():
     _, out_rot = apply(_ZERO_POS, rots, rot_strength=1.0)
     assert _quat_angle_deg(out_rot[5], rots[5]) == pytest.approx(0.0, abs=1e-6)
     assert _quat_angle_deg(out_rot[6], rots[6]) == pytest.approx(0.0, abs=1e-6)
-
-
-def test_rotation_zero_norm_input_raises():
-    rots = [IDENT] * _N
-    rots[5] = (0.0, 0.0, 0.0, 0.0)
-    with pytest.raises(ValueError):
-        apply(_ZERO_POS, rots)

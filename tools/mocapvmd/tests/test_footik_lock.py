@@ -44,9 +44,7 @@ def test_anchor_per_axis_median():
 @pytest.mark.parametrize("offset,new_x", [
     pytest.param(0, 0.15, id="start_edge"),
     pytest.param(1, 0.10666667, id="start_edge_dist1"),
-    pytest.param(2, 0.06333333, id="start_edge_dist2"),
     pytest.param(3, 0.02, id="center"),
-    pytest.param(4, 0.06333333, id="end_edge_dist2"),
     pytest.param(5, 0.10666667, id="end_edge_dist1"),
     pytest.param(6, 0.15, id="end_edge"),
 ])

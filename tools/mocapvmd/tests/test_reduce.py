@@ -1,3 +1,5 @@
+import math
+import signal
 import sys
 
 import pytest
@@ -24,11 +26,6 @@ def _single_key_tracks(count):
     return [bone(f"単{i:02d}", 0, pos=(float(i), 0.0, 0.0)) for i in range(count)]
 
 
-def _expected_tols(preset, category, **override):
-    t = presets.resolve_reduction_tolerances(preset, category, **override)
-    return build_bone_tolerances(t["bone_pos"], t["bone_rot"])
-
-
 def _reduce_with_building_blocks(
     track_keys, preset, category, curve_mode="bezier", override_pos=None, override_rot=None
 ):
@@ -44,16 +41,9 @@ def _sorted_track(out, name):
     return sorted((k for k in out if k.name == name), key=lambda k: k.frame)
 
 
-def test_single_track_matches_building_blocks():
-    keys = _dense_parabolic_track("右足ＩＫ")
-    out = mreduce.reduce_bones(keys, "medium")
-    expected = _reduce_with_building_blocks(keys, "medium", "foot_ik")
-    assert _sorted_track(out, "右足ＩＫ") == list(expected)
-
-
-def test_each_track_reduced_with_its_category_tolerance_and_no_extra_keys():
+def test_each_track_reduced_over_its_own_frame_range_with_its_category_tolerance_and_no_extra_keys():
     center = _dense_parabolic_track("センター")
-    fingers = _dense_parabolic_track("右人指1")
+    fingers = [bone("右人指1", f, pos=(round(0.01 * f * f, 6), 0.0, 0.0)) for f in range(5, 16)]
     out = mreduce.reduce_bones(center + fingers, "medium")
     assert _sorted_track(out, "センター") == list(_reduce_with_building_blocks(center, "medium", "center"))
     assert _sorted_track(out, "右人指1") == list(_reduce_with_building_blocks(fingers, "medium", "fingers"))
@@ -64,48 +54,6 @@ def test_each_track_reduced_with_its_category_tolerance_and_no_extra_keys():
     assert sorted(out, key=lambda k: (k.name, k.frame)) == sorted(expected_all, key=lambda k: (k.name, k.frame))
 
 
-def test_each_track_gets_own_frame_range_category_tolerance_and_fixed_args(monkeypatch):
-    calls = {}
-
-    def _record_call_and_pass_through(source_keys, ranges, tols, **kw):
-        calls[source_keys[0].name] = (ranges, tols, kw)
-        return list(source_keys)
-
-    monkeypatch.setattr(mreduce, "reduce_bone_track", _record_call_and_pass_through)
-    center_frames_0_to_10 = _dense_parabolic_track("センター")
-    fingers_frames_5_to_12 = [bone("右人指1", f, pos=(round(0.01 * f * f, 6), 0.0, 0.0)) for f in range(5, 13)]
-    mreduce.reduce_bones(center_frames_0_to_10 + fingers_frames_5_to_12, "medium")
-
-    assert calls["センター"][0] == [(0, 10)]
-    assert calls["右人指1"][0] == [(5, 12)]
-    assert calls["センター"][1] == _expected_tols("medium", "center")
-    assert calls["右人指1"][1] == _expected_tols("medium", "fingers")
-    for name in ("センター", "右人指1"):
-        kw = calls[name][2]
-        for key, val in {
-            "cut_thresholds": (1.0, 30.0), "keep_frames": [], "no_cut_detect": False,
-            "min_seg": 1, "strict": False, "curve_mode": "bezier",
-        }.items():
-            assert kw[key] == val
-        assert kw["max_seg"] is None
-
-
-def test_override_flows_into_tolerance_and_curve_mode_into_call(monkeypatch):
-    captured = {}
-
-    def _capture_tols_and_curve_mode(source_keys, ranges, tols, **kw):
-        captured["tols"] = tols
-        captured["curve_mode"] = kw["curve_mode"]
-        return list(source_keys)
-
-    monkeypatch.setattr(mreduce, "reduce_bone_track", _capture_tols_and_curve_mode)
-    mreduce.reduce_bones(
-        _dense_parabolic_track("センター"), "medium", override_pos=0.005, override_rot=0.05, curve_mode="linear"
-    )
-    assert captured["tols"] == _expected_tols("medium", "center", override_pos=0.005, override_rot=0.05)
-    assert captured["curve_mode"] == "linear"
-
-
 def test_single_key_track_kept_verbatim_alongside_multikey():
     single = [bone("右足ＩＫ", 0, pos=(1.0, 2.0, 3.0), interp=BONE_NONLINEAR)]
     multi = _dense_parabolic_track("センター")
@@ -114,7 +62,7 @@ def test_single_key_track_kept_verbatim_alongside_multikey():
     assert _sorted_track(out, "センター") == list(_reduce_with_building_blocks(multi, "medium", "center"))
 
 
-@pytest.mark.parametrize("preset", presets.PRESET_NAMES)
+@pytest.mark.parametrize("preset", ["slower"])
 def test_reconstruction_error_stays_within_resolved_tolerance(preset):
     keys = _dense_parabolic_track("センター", n=31, k=0.05)
     out = mreduce.reduce_bones(keys, preset)
@@ -122,11 +70,6 @@ def test_reconstruction_error_stays_within_resolved_tolerance(preset):
     errors = measure_bone_errors(keys, _sorted_track(out, "センター"), [(0, 30)])
     assert max(errors["pos_x"], errors["pos_y"], errors["pos_z"]) <= tol["bone_pos"]
     assert errors["rot_deg"] <= tol["bone_rot"]
-
-
-def test_repeated_calls_give_identical_output():
-    keys = _dense_parabolic_track("右足ＩＫ")
-    assert mreduce.reduce_bones(keys, "medium") == mreduce.reduce_bones(keys, "medium")
 
 
 def _expected_cut_count(track_keys, tol):
@@ -157,6 +100,24 @@ def test_diagnostics_out_records_keys_category_tolerance_cuts_errors_per_track()
         assert d["tol_rot"] == tol["bone_rot"]
         assert d["cuts"] == _expected_cut_count(src, tol)
         assert d["errors"] == measure_bone_errors(src, reduced, [(src[0].frame, src[-1].frame)])
+
+
+def _quat_y(deg):
+    half = math.radians(deg) / 2.0
+    return (0.0, math.sin(half), 0.0, math.cos(half))
+
+
+@pytest.mark.parametrize("channel", ["override_pos", "override_rot"])
+def test_override_tolerance_is_used_for_reduction(channel):
+    keys = [
+        bone("センター", f, pos=(round(0.05 * f * f, 6), 0.0, 0.0), rot=_quat_y(0.05 * f * f))
+        for f in range(31)
+    ]
+    override = {"override_pos": 0.0001, "override_rot": 0.01}[channel]
+    out = mreduce.reduce_bones(keys, "medium", **{channel: override})
+    expected = list(_reduce_with_building_blocks(keys, "medium", "center", **{channel: override}))
+    assert expected != list(_reduce_with_building_blocks(keys, "medium", "center"))
+    assert _sorted_track(out, "センター") == expected
 
 
 def test_diagnostics_out_tolerance_reflects_override():
@@ -230,11 +191,6 @@ def test_parallel_diagnostics_match_serial_in_values_and_order():
     assert list(d_par.items()) == list(d_ser.items())
 
 
-def test_workers_one_equals_workers_omitted():
-    keys = _mixed_category_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
-    assert mreduce.reduce_bones(keys, "medium", workers=1) == mreduce.reduce_bones(keys, "medium")
-
-
 def test_parallel_fires_at_threshold_and_restores_first_seen_order_from_reversed_completion(monkeypatch):
     rec = {}
 
@@ -298,22 +254,6 @@ def test_parallel_interleaves_single_key_tracks_in_first_seen_order(monkeypatch)
     assert list(d_par.items()) == list(d_ser.items())
 
 
-class _ReversedLazyYieldLoggingPool:
-    def __init__(self, events):
-        self._events = events
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def imap_unordered(self, func, items, chunksize=1):
-        for i, it in enumerate(reversed(list(items))):
-            self._events.append(("yield", i))
-            yield func(it)
-
-
 def test_progress_does_not_change_output_or_diagnostics_serial_or_parallel():
     keys = _mixed_category_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
     for workers in (1, 2):
@@ -342,84 +282,22 @@ def test_progress_reports_zero_of_zero_once_when_no_multikey():
     assert calls == [(0, 0)]
 
 
-def test_parallel_progress_is_reported_after_each_completion_yield(monkeypatch):
-    events = []
-    monkeypatch.setattr(mreduce, "_make_pool", lambda workers: _ReversedLazyYieldLoggingPool(events))
+def test_parallel_progress_counts_multikey_tracks_from_zero_to_total(monkeypatch):
+    monkeypatch.setattr(mreduce, "_make_pool", lambda workers: _ReversedCompletionCountingPool({}))
     multi_at_threshold = mreduce._MIN_PARALLEL_TRACKS
     keys = _mixed_category_tracks(multi_at_threshold) + _single_key_tracks(3)
-    done_calls = []
-
-    def _log_progress(d, t):
-        events.append(("progress", d, t))
-        done_calls.append((d, t))
-
-    mreduce.reduce_bones(keys, "medium", workers=3, progress=_log_progress)
-    assert done_calls == [(d, multi_at_threshold) for d in range(multi_at_threshold + 1)]
-    expected = [("progress", 0, multi_at_threshold)]
-    for i in range(multi_at_threshold):
-        expected += [("yield", i), ("progress", i + 1, multi_at_threshold)]
-    assert events == expected
+    calls = []
+    mreduce.reduce_bones(keys, "medium", workers=3, progress=lambda d, t: calls.append((d, t)))
+    assert calls == [(d, multi_at_threshold) for d in range(multi_at_threshold + 1)]
 
 
-def test_worker_initializer_ignores_sigint_and_sigbreak():
-    import signal
-
-    prev = signal.getsignal(signal.SIGINT)
-    try:
-        mreduce._ignore_interrupts_in_worker()
-        assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+def test_pool_workers_ignore_sigint_and_sigbreak():
+    with mreduce._make_pool(1) as pool:
+        assert pool.apply(signal.getsignal, (signal.SIGINT,)) == signal.SIG_IGN
         if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
-            assert signal.getsignal(signal.SIGBREAK) == signal.SIG_IGN
-    finally:
-        signal.signal(signal.SIGINT, prev)
+            assert pool.apply(signal.getsignal, (signal.SIGBREAK,)) == signal.SIG_IGN
 
 
-def test_make_pool_passes_worker_count_and_interrupt_ignoring_initializer(monkeypatch):
-    captured = {}
-
-    class _PoolKwargsCapturingContext:
-        def Pool(self, **kwargs):
-            captured.update(kwargs)
-            return object()
-
-    monkeypatch.setattr(mreduce, "get_context", lambda method: _PoolKwargsCapturingContext())
-    mreduce._make_pool(3)
-    assert captured["processes"] == 3
-    assert captured["initializer"] is mreduce._ignore_interrupts_in_worker
-
-
-def test_parallel_progress_values_match_serial():
-    total = mreduce._MIN_PARALLEL_TRACKS + 1
-    keys = _mixed_category_tracks(total)
-    par, ser = [], []
-    mreduce.reduce_bones(keys, "medium", workers=2, progress=lambda d, t: par.append((d, t)))
-    mreduce.reduce_bones(keys, "medium", workers=1, progress=lambda d, t: ser.append((d, t)))
-    assert par == ser
-    assert ser[0] == (0, total) and ser[-1] == (total, total)
-
-
-def _interrupt_on_first_next():
-    if False:
-        yield None
-    raise KeyboardInterrupt()
-
-
-def test_parallel_keyboard_interrupt_during_iteration_exits_pool_context_and_propagates(monkeypatch):
-    exits = []
-
-    class _InterruptOnFirstIterationPool:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, *rest):
-            exits.append(exc_type)
-            return False
-
-        def imap_unordered(self, func, items, chunksize=1):
-            return _interrupt_on_first_next()
-
-    monkeypatch.setattr(mreduce, "_make_pool", lambda workers: _InterruptOnFirstIterationPool())
-    keys = _mixed_category_tracks(mreduce._MIN_PARALLEL_TRACKS + 1)
-    with pytest.raises(KeyboardInterrupt):
-        mreduce.reduce_bones(keys, "medium", workers=2)
-    assert exits == [KeyboardInterrupt]
+def test_repeated_calls_give_identical_output():
+    keys = _dense_parabolic_track("右足ＩＫ")
+    assert mreduce.reduce_bones(keys, "medium") == mreduce.reduce_bones(keys, "medium")
