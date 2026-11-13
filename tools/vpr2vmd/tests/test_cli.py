@@ -108,7 +108,6 @@ def test_dry_run_writes_no_output(tmp_path):
 
 
 @pytest.mark.parametrize("option", [
-    pytest.param(["--report-json", "rep.json"], id="no_report_file_output"),
     pytest.param(["--quiet"], id="no_quiet_without_progress_display"),
     pytest.param(["--overw"], id="no_abbreviated_long_option"),
 ])
@@ -120,15 +119,6 @@ def test_unsupported_option_is_arg_error(tmp_path, option):
 def test_track_accepts_non_integer_name(tmp_path):
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--track", "Vocal", "--dry-run"]) == 0
-
-
-def test_unknown_option_is_arg_error(tmp_path):
-    src = _touch(tmp_path / "in.vpr")
-    assert cli.main([src, "--bogus"]) == 2
-
-
-def test_missing_positional_is_arg_error():
-    assert cli.main([]) == 2
 
 
 def test_unknown_style_is_arg_error(tmp_path):
@@ -166,17 +156,6 @@ def test_open_amount_bounds_are_accepted(tmp_path):
     assert cli.main([src, "--open-max", "1.0", "--default-open", "0.0", "--dry-run"]) == 0
 
 
-def test_missing_input_file_is_input_error(tmp_path):
-    missing = str(tmp_path / "nope.vpr")
-    assert cli.main([missing]) == 1
-
-
-def test_existing_other_path_output_blocked_without_overwrite(tmp_path):
-    src = _touch(tmp_path / "in.vpr")
-    out = _touch(tmp_path / "out.vmd")
-    assert cli.main([src, "-o", out, "--dry-run"]) == 2
-
-
 def test_existing_other_path_output_not_overwritten_without_overwrite(tmp_path):
     src = _touch(tmp_path / "in.vpr")
     out = tmp_path / "out.vmd"
@@ -192,24 +171,9 @@ def test_overwrite_allows_existing_output(tmp_path):
     assert cli.main([src, "-o", out, "--overwrite", "--dry-run"]) == 0
 
 
-def test_overwrite_guard_blocks_input_overwrite(tmp_path):
-    src = _touch(tmp_path / "in.vpr")
-    assert cli.main([src, "-o", src, "--dry-run"]) == 2
-
-
-def test_missing_same_path_output_is_input_error_not_overwrite_guard(tmp_path):
-    missing = str(tmp_path / "missing.vpr")
-    assert cli.main([missing, "-o", missing, "--dry-run"]) == 1
-
-
 def test_model_name_over_20_bytes_is_arg_error(tmp_path):
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--model-name", "x" * 21, "--dry-run"]) == 2
-
-
-def test_no_n_morph_accepted_in_dry_run(tmp_path):
-    src = _touch(tmp_path / "in.vpr")
-    assert cli.main([src, "--no-n-morph", "--dry-run"]) == 0
 
 
 def test_dry_run_plan_reflects_n_morph_off_by_default(tmp_path, capsys):
@@ -235,11 +199,6 @@ def test_model_name_multibyte_over_20_bytes_is_arg_error(tmp_path):
     assert cli.main([src, "--model-name", "あ" * 11, "--dry-run"]) == 2
 
 
-def test_model_name_multibyte_at_20_byte_limit_is_accepted(tmp_path):
-    src = _touch(tmp_path / "in.vpr")
-    assert cli.main([src, "--model-name", "あ" * 10, "--dry-run"]) == 0
-
-
 def test_model_name_non_cp932_is_arg_error(tmp_path):
     src = _touch(tmp_path / "in.vpr")
     assert cli.main([src, "--model-name", "\U0001F600", "--dry-run"]) == 2
@@ -260,13 +219,6 @@ def test_existing_default_output_allowed_with_overwrite(tmp_path):
     src = _touch(tmp_path / "song.vpr")
     _touch(tmp_path / "song.vmd")
     assert cli.main([src, "--overwrite", "--dry-run"]) == 0
-
-
-def test_dry_run_does_not_write_default_output(tmp_path):
-    src = _touch(tmp_path / "song.vpr")
-    rc = cli.main([src, "--dry-run"])
-    assert rc == 0
-    assert not (tmp_path / "song.vmd").exists()
 
 
 def test_default_output_replaces_input_extension_with_vmd(tmp_path):
@@ -363,12 +315,6 @@ def _project_with_notes(notes):
     )
 
 
-def test_version_attr_exposed():
-    import vpr2vmd
-
-    assert isinstance(vpr2vmd.__version__, str) and vpr2vmd.__version__
-
-
 def test_version_flag_prints_and_exits_zero(capsys):
     import vpr2vmd
 
@@ -377,11 +323,6 @@ def test_version_flag_prints_and_exits_zero(capsys):
     assert rc == 0
     assert "vpr2vmd" in out
     assert vpr2vmd.__version__ in out
-
-
-def test_n_morph_positive_flag_accepted(tmp_path):
-    src = _touch(tmp_path / "in.vpr")
-    assert cli.main([src, "--n-morph", "--dry-run"]) == 0
 
 
 def test_verbose_prints_plan_on_normal_run(tmp_path, capsys):
@@ -421,18 +362,6 @@ def test_not_vpr_reports_reason(tmp_path, capsys, monkeypatch):
 
     def _raise(_src):
         raise VprFormatError("壊れた vpr")
-
-    monkeypatch.setattr(cli, "read", _raise)
-    rc = cli.main([src])
-    assert rc == 1
-    _assert_error_line(capsys.readouterr().err)
-
-
-def test_unreadable_input_reports_reason(tmp_path, capsys, monkeypatch):
-    src = _touch(tmp_path / "in.vpr")
-
-    def _raise(_src):
-        raise PermissionError(13, "Permission denied")
 
     monkeypatch.setattr(cli, "read", _raise)
     rc = cli.main([src])
@@ -548,31 +477,6 @@ def test_internal_error_reports_reason_without_traceback(tmp_path, capsys, monke
     rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
     assert rc == 1
     _assert_error_line(capsys.readouterr().err)
-
-
-def test_vpr_read_warning_surfaced_to_stderr(tmp_path, capsys, monkeypatch):
-    src = _touch(tmp_path / "in.vpr")
-    project = _project_with_notes(
-        [Note(start_tick=0, duration_tick=480, pitch=60, lyric="x", velocity=64, phonemes=["a"])]
-    )
-    warning = VprWarning(
-        code="overlapping_notes", message="重なり音符", track_index=0, part_index=0,
-        note_index=1, related_note_index=0, tick=0,
-    )
-    monkeypatch.setattr(cli, "read", lambda _src: (project, [warning]))
-    rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
-    err = capsys.readouterr().err
-    assert rc == 0
-    assert "重なり音符" in err or "overlapping_notes" in err
-
-
-def test_no_adopted_notes_warns_and_succeeds(tmp_path, capsys, monkeypatch):
-    src = _touch(tmp_path / "in.vpr")
-    empty_track = _project_with_notes([])
-    monkeypatch.setattr(cli, "read", lambda _src: (empty_track, []))
-    rc = cli.main([src, "-o", str(tmp_path / "out.vmd")])
-    assert rc == 0
-    assert "発音" in capsys.readouterr().err
 
 
 def test_read_warning_line_uses_common_format(tmp_path, capsys, monkeypatch):

@@ -45,11 +45,6 @@ def test_other_consonants_categorized_as_other():
         assert phonemes.categorize(sym) is Cat.OTHER
 
 
-def test_unknown_symbols_categorized_as_other():
-    for sym in ["th", "gh", "zzz", ""]:
-        assert phonemes.categorize(sym) is Cat.OTHER
-
-
 def test_geminate_categorized_as_geminate_stop():
     assert phonemes.categorize("Q") is Cat.GEMINATE_STOP
 

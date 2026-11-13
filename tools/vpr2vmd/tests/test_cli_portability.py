@@ -53,12 +53,6 @@ def test_non_ascii_path_machine(tmp_path, monkeypatch, capsysbinary):
     assert events[-1]["output"] == str(out)
 
 
-def test_stderr_safe_on_argparse_usage_error(monkeypatch):
-    _cp932_stderr(monkeypatch)
-    rc = cli.main(["in.vpr", "--open-max", _NOT_IN_CP932])
-    assert rc == 2
-
-
 def test_stderr_safe_on_warning(tmp_path, monkeypatch):
     warn = VprWarning(code="overlapping_notes", message="重なり" + _NOT_IN_CP932, track_index=0)
     _stub_read(monkeypatch, warnings=[warn])

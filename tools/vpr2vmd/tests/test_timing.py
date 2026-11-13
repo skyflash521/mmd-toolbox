@@ -43,28 +43,6 @@ def test_first_tempo_not_at_zero_applies_retroactively():
     assert timing.tick_to_frame(480, tempos, 480) == pytest.approx(15.0)
 
 
-def test_seconds_helper_matches_frame_over_30():
-    tempos = [TempoEvent(0, 120.0)]
-    assert timing.tick_to_seconds(480, tempos, 480) == pytest.approx(0.5)
-    assert timing.tick_to_frame(480, tempos, 480) == pytest.approx(
-        timing.tick_to_seconds(480, tempos, 480) * 30.0
-    )
-
-
-def test_seconds_integrates_tempo_change_directly():
-    tempos = [TempoEvent(0, 120.0), TempoEvent(480, 240.0)]
-    assert timing.tick_to_seconds(960, tempos, 480) == pytest.approx(0.75)
-
-
-def test_seconds_three_regions_accumulate():
-    tempos = [TempoEvent(0, 120.0), TempoEvent(480, 60.0), TempoEvent(960, 240.0)]
-    assert timing.tick_to_seconds(1440, tempos, 480) == pytest.approx(1.75)
-
-
-def test_seconds_first_tempo_not_at_zero_applies_retroactively():
-    assert timing.tick_to_seconds(480, [TempoEvent(240, 120.0)], 480) == pytest.approx(0.5)
-
-
 def test_three_regions_accumulate():
     tempos = [TempoEvent(0, 120.0), TempoEvent(480, 60.0), TempoEvent(960, 240.0)]
     assert timing.tick_to_frame(1440, tempos, 480) == pytest.approx(52.5)

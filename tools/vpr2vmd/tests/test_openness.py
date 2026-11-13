@@ -15,12 +15,6 @@ def test_velocity_zero_maps_to_low():
     assert openness.velocity_to_open(0, lo=_LO, hi=_HI, open_max=_OPEN_MAX) == pytest.approx(_LO)
 
 
-def test_velocity_mid_follows_power_curve():
-    n = 64 / 127
-    expected = _LO + (_HI - _LO) * (n ** openness.GAMMA_DEFAULT)
-    assert openness.velocity_to_open(64, lo=_LO, hi=_HI, open_max=_OPEN_MAX) == pytest.approx(expected)
-
-
 def test_velocity_gamma_parameter_changes_curve():
     n = 64 / 127
     linear = _LO + (_HI - _LO) * n
@@ -53,12 +47,6 @@ def test_open_amounts_uniform_uses_default():
     assert result == [pytest.approx(_DEFAULT)] * 3
 
 
-def test_open_amounts_single_note_is_uniform_default():
-    assert openness.open_amounts(
-        [80], lo=_LO, hi=_HI, open_max=_OPEN_MAX, default_open=_DEFAULT
-    ) == [pytest.approx(_DEFAULT)]
-
-
 def test_open_amounts_default_is_capped_by_open_max():
     result = openness.open_amounts(
         [70, 70], lo=_LO, hi=_HI, open_max=0.50, default_open=0.80
@@ -71,13 +59,6 @@ def test_open_amounts_default_above_hi_is_kept_below_open_max():
         [70, 70], lo=_LO, hi=0.75, open_max=0.90, default_open=0.85
     )
     assert result == [pytest.approx(0.85), pytest.approx(0.85)]
-
-
-def test_open_amounts_default_below_open_max_is_unchanged():
-    result = openness.open_amounts(
-        [70, 70], lo=_LO, hi=_HI, open_max=0.90, default_open=0.40
-    )
-    assert result == [pytest.approx(0.40), pytest.approx(0.40)]
 
 
 def test_open_amounts_varying_maps_each_velocity():

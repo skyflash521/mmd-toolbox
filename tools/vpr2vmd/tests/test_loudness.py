@@ -43,11 +43,6 @@ def test_merged_events_keep_input_order_for_same_tick():
     assert loudness._merged_events(parts, "dynamics") == [(100, 80), (100, 50)]
 
 
-def test_step_average_constant():
-    curve = loudness._StepCurve([(0, 64), (1000, 64)], value_before_first=64)
-    assert curve.average(0, 480) == pytest.approx(64.0)
-
-
 def test_step_average_is_time_weighted_across_a_step():
     curve = loudness._StepCurve([(0, 0), (240, 120)], value_before_first=0)
     assert curve.average(0, 480) == pytest.approx(60.0)

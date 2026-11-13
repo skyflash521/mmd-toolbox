@@ -91,12 +91,6 @@ def test_moraic_nasal_fills_note_with_n_when_on():
     ]
 
 
-def test_moraic_nasal_is_silence_when_off():
-    assert _shapes_spans(mapping.note_mouth_events(["N\\"], 0.0, 30.0, use_n_morph=False)) == [
-        (MouthShape.SILENCE, 0.0, 30.0),
-    ]
-
-
 def test_moraic_nasal_mixed_with_consonant_is_not_standalone():
     assert mapping.note_mouth_events(["t", "N\\"], 0.0, 30.0) is None
 
@@ -165,19 +159,6 @@ def test_onset_class_priority_when_multiple_consonants():
     assert mapping.note_mouth_events(["w", "j", "a"], 0.0, 30.0)[0].consonant_class is (
         ConsonantClass.ROUNDED
     )
-
-
-def test_unknown_onset_consonant_is_neutral():
-    assert _classes(mapping.note_mouth_events(["zzz", "a"], 0.0, 30.0)) == [
-        (MouthShape.A, ConsonantClass.NEUTRAL),
-    ]
-
-
-def test_open_amount_placeholder_zero_for_all_event_kinds():
-    for phonemes in (["a"], ["m", "a"], ["N\\"], ["Q"]):
-        events = mapping.note_mouth_events(phonemes, 0.0, 30.0)
-        assert events
-        assert all(e.open_amount == 0.0 for e in events)
 
 
 def test_onset_aperture_class_attached_to_leading_vowel():

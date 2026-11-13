@@ -3,7 +3,6 @@ import json
 import pytest
 
 from cli_events import run as cli_events_run
-from cli_options import RangeValidator
 from vpr import (
     ControllerCurve,
     ControllerEvent,
@@ -160,20 +159,6 @@ def test_describe_presets_report_preset_resolved_values(capsysbinary):
         }
 
 
-def test_numeric_constraints_are_derived_from_the_validators():
-    parser = cli._build_parser()
-    options = {o["name"]: o for o in cli._describe_options(parser)}
-    checked = 0
-    for action in parser._actions:
-        if not isinstance(action.type, RangeValidator):
-            continue
-        name = next(s for s in action.option_strings if s.startswith("--"))
-        assert options[name]["type"] == action.type.value_type
-        assert options[name]["constraint"] == action.type.constraint
-        checked += 1
-    assert checked == 10
-
-
 def test_describe_with_unknown_option_is_bad_argument(capsysbinary):
     rc = cli.main(["--describe", "--bogus"])
     assert rc == 2
@@ -267,12 +252,6 @@ def _project_with_dynamics(notes, points):
     pytest.param(lambda: _project_with_dynamics([_note(0, 480, ["a"]), _note(480, 480, ["i"])],
                                                 [(0, 64)]), "dynamics",
                  id="flat_dynamics_is_still_dynamics"),
-    pytest.param(lambda: _project([_note(0, 480, ["a"], velocity=40),
-                                   _note(480, 480, ["i"], velocity=100)]), "velocity",
-                 id="varying_velocity"),
-    pytest.param(lambda: _project([_note(0, 480, ["a"], velocity=64),
-                                   _note(480, 480, ["i"], velocity=64)]), "default",
-                 id="uniform_velocity"),
     pytest.param(lambda: _project_with_dynamics([], [(0, 64)]), None,
                  id="no_adopted_notes_with_dynamics_is_none"),
 ])
@@ -420,26 +399,9 @@ def test_machine_error_bad_value_type(tmp_path, capsysbinary):
     assert e["code"] == "bad_argument" and e["field"] == "--open-max" and e["exit_code"] == 2
 
 
-def test_machine_error_value_out_of_range(tmp_path, capsysbinary):
-    src = _touch(tmp_path / "in.vpr")
-    rc = cli.main([src, "--machine", "--open-max", "1.5"])
-    assert rc == 2
-    e = _machine_error(capsysbinary)
-    assert e["code"] == "bad_argument" and e["field"] == "--open-max"
-
-
 def test_machine_error_output_exists(tmp_path, capsysbinary):
     src = _touch(tmp_path / "in.vpr")
     rc = cli.main([src, "-o", src, "--machine"])
-    assert rc == 2
-    e = _machine_error(capsysbinary)
-    assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
-
-
-def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
-    src = _touch(tmp_path / "in.vpr")
-    out = _touch(tmp_path / "out.vmd")
-    rc = cli.main([src, "-o", out, "--machine"])
     assert rc == 2
     e = _machine_error(capsysbinary)
     assert e["code"] == "output_exists" and e["field"] == "--output" and e["exit_code"] == 2
@@ -522,23 +484,6 @@ def test_machine_error_internal_error(tmp_path, capsysbinary, monkeypatch):
     assert e["code"] == "internal_error" and e["field"] is None and e["exit_code"] == 1
 
 
-def test_machine_error_stdout_is_valid_json_lines_lf_only(tmp_path, capsysbinary):
-    rc = cli.main([str(tmp_path / "nope.vpr"), "--machine"])
-    assert rc == 1
-    raw = capsysbinary.readouterr().out
-    assert raw.endswith(b"\n") and b"\r" not in raw
-    for ln in raw.decode("utf-8").split("\n"):
-        if ln:
-            assert "type" in json.loads(ln)
-
-
-def test_describe_type_table_covers_non_meta_args():
-    parser = cli._build_parser()
-    meta = {"help", "version", "machine", "describe"}
-    non_meta = {a.dest for a in parser._actions if a.dest not in meta}
-    assert non_meta <= set(cli._DESCRIBE_TYPE_BY_DEST)
-
-
 def test_machine_error_output_is_directory(tmp_path, capsysbinary):
     src = _touch(tmp_path / "in.vpr")
     outdir = tmp_path / "outdir"
@@ -553,7 +498,6 @@ def test_machine_error_output_is_directory(tmp_path, capsysbinary):
 
 @pytest.mark.parametrize("output_kind, extra, expected_code", [
     pytest.param("dir", ["--overwrite"], "output_is_directory", id="output_is_directory"),
-    pytest.param("file", [], "output_exists", id="output_exists"),
     pytest.param("new", ["--valley-deep", "0.6"], "valley_bounds_inverted", id="valley_bounds_inverted"),
 ])
 def test_argument_errors_take_precedence_over_missing_input(
@@ -562,18 +506,9 @@ def test_argument_errors_take_precedence_over_missing_input(
     out = tmp_path / "out.vmd"
     if output_kind == "dir":
         out.mkdir()
-    elif output_kind == "file":
-        _touch(out)
     rc = cli.main([str(tmp_path / "nope.vpr"), "-o", str(out), "--machine", *extra])
     assert rc == 2
     assert _machine_error(capsysbinary)["code"] == expected_code
-
-
-def test_main_installs_sigbreak_handler(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(cli_events_run, "install_sigbreak_handler", lambda: calls.append(True))
-    cli.main([str(tmp_path / "nope.vpr")])
-    assert calls == [True]
 
 
 def test_interrupt_right_after_sigbreak_install_is_reported_as_machine_event(

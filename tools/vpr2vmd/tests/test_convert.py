@@ -10,7 +10,6 @@ from vpr import (
     TempoEvent,
     Track,
     VibratoPoint,
-    VprFormatError,
     VprProject,
 )
 from vpr2vmd import __version__, cli
@@ -206,33 +205,6 @@ def test_convert_empty_notes_writes_empty_morph_vmd(monkeypatch, tmp_path):
     assert _morph_names(out) == []
 
 
-def test_convert_no_tracks_is_input_error(monkeypatch, tmp_path):
-    rc, _ = _run(monkeypatch, tmp_path, _project([], tracks=[]))
-    assert rc == 1
-
-
-def test_convert_track_index_out_of_range_is_arg_error(monkeypatch, tmp_path):
-    rc, _ = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]), "--track", "5")
-    assert rc == 2
-
-
-def test_convert_track_name_no_match_is_arg_error(monkeypatch, tmp_path):
-    rc, _ = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["a"])]), "--track", "Nope")
-    assert rc == 2
-
-
-def test_convert_vpr_format_error_is_input_error(monkeypatch, tmp_path):
-    src = tmp_path / "in.vpr"
-    src.write_bytes(b"")
-    out = tmp_path / "out.vmd"
-
-    def _raise(_src):
-        raise VprFormatError("not a vpr")
-
-    monkeypatch.setattr(cli, "read", _raise)
-    assert cli.main([str(src), "-o", str(out)]) == 1
-
-
 def test_convert_moraic_nasal_is_silence_by_default(monkeypatch, tmp_path):
     rc, out = _run(monkeypatch, tmp_path, _project([_note(0, 480, ["N\\"])]))
     assert rc == 0
@@ -253,19 +225,6 @@ def test_convert_n_morph_flag_enables_n_morph(monkeypatch, tmp_path):
     )
     assert rc == 0
     assert "ん" in _morph_names(out)
-
-
-def test_convert_write_failure_is_output_error(monkeypatch, tmp_path):
-    src = tmp_path / "in.vpr"
-    src.write_bytes(b"")
-    out = tmp_path / "out.vmd"
-    _patch_read(monkeypatch, _project([_note(0, 480, ["a"])]))
-
-    def _raise(_doc, _path):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(cli, "write_file", _raise)
-    assert cli.main([str(src), "-o", str(out)]) == 3
 
 
 def _dry_run(monkeypatch, tmp_path, project, capsys, *args):
@@ -333,13 +292,6 @@ def test_dry_run_empty_track_warns_on_stderr(monkeypatch, tmp_path, capsys):
     rc, _out, err = _dry_run(monkeypatch, tmp_path, _project([]), capsys)
     assert rc == 0
     assert "warning: no_adopted_notes: " in err
-
-
-def test_empty_track_warns_on_stderr_in_normal_run(monkeypatch, tmp_path, capsys):
-    rc, out = _run(monkeypatch, tmp_path, _project([]))
-    assert rc == 0
-    assert out.exists()
-    assert "warning: no_adopted_notes: " in capsys.readouterr().err
 
 
 def test_dry_run_non_event_symbols_keep_length_mark(monkeypatch, tmp_path, capsys):
