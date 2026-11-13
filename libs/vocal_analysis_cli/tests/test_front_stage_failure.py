@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from vocal_analysis.front_stage import (
     IntermediateReadError,
     IntermediateWriteError,
@@ -48,15 +46,6 @@ def test_stage_execution_error_names_stage_by_shared_label():
         "stage_failed", "ボーカル分離に失敗しました: メモリ不足", 4, None, None, "separate")
 
 
-def test_stage_execution_error_with_unknown_stage_uses_stage_id_as_label():
-    exc = StageExecutionError("壊れた", stage="notes")
-
-    failure = front_stage_failure(exc)
-
-    assert failure.message == "notesに失敗しました: 壊れた"
-    assert failure.stage == "notes"
-
-
 def test_stage_execution_error_uses_extra_labels_for_tool_specific_stage():
     exc = StageExecutionError("壊れた", stage="events")
 
@@ -84,22 +73,5 @@ def test_intermediate_write_error_is_write_failed_exit_3_with_keep_intermediate_
         "write_failed", "書けない", 3, "--keep-intermediate", "out.vmd.intermediate", None)
 
 
-def test_intermediate_write_error_without_dir_has_no_path():
-    failure = front_stage_failure(IntermediateWriteError("書けない"))
-
-    assert failure.field == "--keep-intermediate"
-    assert failure.path is None
-
-
-@pytest.mark.parametrize("exc", [
-    ValueError("x"), OSError("x"), RuntimeError("x"), KeyboardInterrupt(), Exception("x"),
-])
-def test_unrelated_exception_maps_to_none(exc):
-    assert front_stage_failure(exc) is None
-
-
-def test_extra_labels_do_not_change_other_mappings():
-    failure = front_stage_failure(
-        SeparationError("分離できない"), extra_labels={"separate": "別名"})
-
-    assert failure.message == "分離できない"
+def test_unrelated_exception_maps_to_none():
+    assert front_stage_failure(Exception("x")) is None

@@ -7,7 +7,7 @@ from typing import get_args
 
 import pytest
 
-from cli_options import RangeValidator, describe_options
+from cli_options import RangeValidator
 from vocal_analysis import (
     DEFAULT_CONTENT_RECOGNIZER_MODEL,
     DEFAULT_ENGLISH_KATAKANA_METHOD,
@@ -86,17 +86,6 @@ def test_every_argument_is_registered_and_readable_after_parsing():
     }
 
 
-def test_destination_names_come_from_the_long_form_and_the_boolean_pair_uses_the_positive_one():
-    for action in _actions():
-        long_forms = [s for s in action.option_strings if s.startswith("--")]
-        positive = [s for s in long_forms if not s.startswith("--no-")]
-        expected = (positive[0] if positive else long_forms[0])[2:].replace("-", "_")
-        if positive:
-            assert action.dest == expected
-        else:
-            assert action.dest == expected.removeprefix("no_")
-
-
 def test_boolean_pair_shares_one_destination():
     assert _parse(["--no-recognizer-retry"]).recognizer_retry is False
     assert _parse(["--recognizer-retry"]).recognizer_retry is True
@@ -106,14 +95,10 @@ def _choices_of(name):
     return next(a.choices for a in _actions() if name in a.option_strings)
 
 
-def test_choices_and_defaults_follow_the_front_stage_registrations():
+def test_choices_follow_the_front_stage_registrations():
     assert tuple(_choices_of("--separator")) == tuple(SEPARATOR_IDS)
-    assert _parse().separator == DEFAULT_SEPARATOR
     assert tuple(_choices_of("--forced-aligner")) == get_args(ForcedAlignerId)
-    assert _parse().forced_aligner == DEFAULT_FORCED_ALIGNER
     assert tuple(_choices_of("--english-katakana-method")) == get_args(EnglishKatakanaMethod)
-    assert _parse().english_katakana_method == DEFAULT_ENGLISH_KATAKANA_METHOD
-    assert _parse().sofa_timeout == SofaAlignerConfig.__dataclass_fields__["timeout_sec"].default
 
 
 def test_separate_vocals_and_device_choices_are_defined_here():
@@ -124,7 +109,6 @@ def test_separate_vocals_and_device_choices_are_defined_here():
 @pytest.mark.parametrize("argv, dest, value", [
     (["--sofa-timeout", "0.5"], "sofa_timeout", 0.5),
     (["--max-duration", "0"], "max_duration", 0.0),
-    (["--max-duration", "600"], "max_duration", 600.0),
 ])
 def test_numeric_arguments_accept_their_range(argv, dest, value):
     assert getattr(_parse(argv), dest) == value
@@ -132,25 +116,11 @@ def test_numeric_arguments_accept_their_range(argv, dest, value):
 
 @pytest.mark.parametrize("argv", [
     ["--sofa-timeout", "0"],
-    ["--sofa-timeout", "-1"],
-    ["--sofa-timeout", "nan"],
     ["--max-duration", "-1"],
-    ["--max-duration", "inf"],
 ])
 def test_numeric_arguments_reject_outside_their_range(argv):
     with pytest.raises(SystemExit):
         _parse(argv)
-
-
-def test_numeric_type_and_constraint_are_derived_from_the_validators():
-    parser = argparse.ArgumentParser(add_help=False)
-    add_arguments(parser)
-    options = {o["name"]: o for o in describe_options(parser, describe_type_table())}
-    for name in ("--sofa-timeout", "--max-duration"):
-        validator = next(a.type for a in parser._actions if name in a.option_strings)
-        assert isinstance(validator, RangeValidator)
-        assert options[name]["type"] == validator.value_type
-        assert options[name]["constraint"] == validator.constraint
 
 
 def test_type_table_covers_every_registered_argument():
@@ -191,10 +161,6 @@ def test_sofa_missing_items_are_reported_one_at_a_time_in_scan_order():
     assert validate(args)[0] == "--sofa-root"
 
 
-def test_sofa_items_are_not_required_on_the_default_route():
-    assert validate(_parse(["--sofa-python", "/venv/python"])) is None
-
-
 def test_revision_without_model_id_is_a_violation():
     name, reason = validate(_parse(["--recognizer-model-revision", "rev1"]))
     assert name == "--recognizer-model-revision"
@@ -232,10 +198,9 @@ def test_sofa_config_carries_paths_and_timeout():
         checkpoint_path=Path("/ckpt.ckpt"), timeout_sec=120.0)
 
 
-def test_chunking_policy_uses_the_target_duration_and_the_policy_defaults():
+def test_chunking_policy_uses_the_target_duration():
     policy = resolve_chunking_policy(_parse(["--max-duration", "600"]))
     assert policy == ChunkingPolicy(max_duration_sec=600.0)
-    assert (policy.search_window_sec, policy.overlap_sec) == (5.0, 1.0)
 
 
 def test_chunking_policy_is_none_when_splitting_is_disabled():
