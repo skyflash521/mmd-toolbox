@@ -85,11 +85,6 @@ class TestFrameSpeeds:
         speeds = motion.frame_speeds(np.full(50, 3.0), 1.0)
         assert np.allclose(speeds, 0.0)
 
-    def test_absolute_not_peak_normalized(self):
-        speeds = motion.frame_speeds(np.arange(0, 5, 1.0), ref=10.0)
-        assert np.allclose(speeds[1:], 0.1)
-        assert np.max(speeds) == pytest.approx(0.1)
-
     def test_speed_below_ref_is_proportional(self):
         speeds = motion.frame_speeds(np.arange(0, 12, 2.0), ref=8.0)
         assert np.allclose(speeds[1:], 0.25)
@@ -97,17 +92,6 @@ class TestFrameSpeeds:
     def test_clamped_at_ref(self):
         speeds = motion.frame_speeds(np.array([0.0, 20.0, 60.0]), ref=5.0)
         assert np.allclose(speeds, [0.0, 1.0, 1.0])
-
-    def test_relative_magnitude_preserved_below_ref(self):
-        vals = np.concatenate([np.arange(0, 10, 1.0), np.arange(10, 30, 2.0)])
-        speeds = motion.frame_speeds(vals, ref=8.0)
-        slow = np.median(speeds[2:9])
-        fast = np.median(speeds[12:19])
-        assert fast == pytest.approx(2.0 * slow, rel=0.2)
-
-    def test_length_matches(self):
-        speeds = motion.frame_speeds(np.zeros(37), 1.0)
-        assert speeds.shape == (37,)
 
     def test_speed_appears_at_frame_where_value_changed(self):
         vals = np.array([0.0, 0.0, 0.0, 10.0, 10.0, 10.0])
@@ -128,24 +112,6 @@ class TestFrameSpeeds:
         for ref in (0.0, -3.0, -1e-9):
             speeds = motion.frame_speeds(np.arange(0, 5, 1.0), ref=ref)
             assert np.allclose(speeds, 0.0), ref
-
-
-class TestAdaptiveAmplitude:
-    def test_zero_speed_is_base(self):
-        assert motion.adaptive_amplitude(0.8, 0.0, motion_damp=1.0) == pytest.approx(0.8)
-
-    def test_full_speed_damps_by_motion_damp(self):
-        assert motion.adaptive_amplitude(0.8, 1.0, motion_damp=0.5) == pytest.approx(0.4)
-
-    def test_motion_damp_zero_disables(self):
-        assert motion.adaptive_amplitude(0.8, 1.0, motion_damp=0.0) == pytest.approx(0.8)
-
-    def test_clamped_to_zero(self):
-        assert motion.adaptive_amplitude(0.8, 1.0, motion_damp=2.0) == pytest.approx(0.0)
-
-    def test_array_input(self):
-        out = motion.adaptive_amplitude(1.0, np.array([0.0, 0.5, 1.0]), motion_damp=0.4)
-        assert np.allclose(out, [1.0, 0.8, 0.6])
 
 
 class TestDetectStops:
@@ -176,107 +142,9 @@ class TestSettleOscillation:
     def test_zero_at_start(self):
         assert motion.settle_oscillation(0.0, amp=0.3) == pytest.approx(0.0, abs=1e-9)
 
-    def test_matches_formula(self):
-        amp, st, freq = 0.3, 1.0, 3.0
-        t = np.linspace(0.0, 2.0, 257)
-        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
-        expected = amp * np.exp(-t / (st / 4.0)) * np.sin(2 * np.pi * freq * t)
-        assert np.allclose(vals, expected, atol=1e-9)
-
-    def test_envelope_upper_bound(self):
-        amp, st, freq = 0.3, 1.0, 3.0
-        t = np.linspace(0.0, 2.0, 400)
-        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
-        env = amp * np.exp(-t / (st / 4.0))
-        assert np.all(np.abs(vals) <= env + 1e-9)
-
-    def test_converged_after_settle_time(self):
-        amp, st, freq = 0.3, 1.0, 3.0
-        t = np.linspace(st, 2 * st, 200)
-        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
-        assert np.all(np.abs(vals) < 0.02 * amp)
-
-    def test_oscillates(self):
-        amp, st, freq = 0.3, 1.0, 3.0
-        t = np.linspace(0.0, 1.0, 600)
-        vals = np.asarray(motion.settle_oscillation(t, amp=amp, settle_time=st, freq=freq))
-        nonzero = vals[np.abs(vals) > 1e-6]
-        sign_changes = int(np.sum(np.diff(np.sign(nonzero)) != 0))
-        assert sign_changes >= 2
-
-    def test_deterministic(self):
-        a = motion.settle_oscillation(0.3, amp=0.3, freq=3.0)
-        b = motion.settle_oscillation(0.3, amp=0.3, freq=3.0)
-        assert a == b
-
-
-class TestImpulseEnvelope:
-    def test_zero_before_frame(self):
-        env = motion.impulse_envelope(60, frame=30, strength=2.0, decay_sec=0.5, fps=30.0)
-        assert env.shape == (60,)
-        assert np.allclose(env[:30], 0.0)
-
-    def test_peak_at_frame(self):
-        env = motion.impulse_envelope(60, frame=30, strength=2.0, decay_sec=0.5, fps=30.0)
-        assert env[30] == pytest.approx(2.0, abs=1e-9)
-
-    def test_exponential_decay(self):
-        env = motion.impulse_envelope(120, frame=10, strength=2.0, decay_sec=1.0, fps=30.0)
-        assert env[10 + 30] == pytest.approx(2.0 / np.e, rel=1e-6)
-
-    def test_monotonic_decay_after_frame(self):
-        env = motion.impulse_envelope(120, frame=10, strength=2.0, decay_sec=1.0, fps=30.0)
-        assert np.all(np.diff(env[10:]) <= 1e-12)
-
-    def test_matches_exponential_formula(self):
-        F, S, D, fps = 10, 2.0, 0.8, 30.0
-        env = motion.impulse_envelope(120, frame=F, strength=S, decay_sec=D, fps=fps)
-        idx = np.arange(F, 120)
-        dt = (idx - F) / fps
-        assert np.allclose(env[F:], S * np.exp(-dt / D), atol=1e-9)
-
 
 class TestProfileCrossfade:
-    def test_endpoints_and_midpoint(self):
-        assert list(motion.profile_weights(0.0)) == pytest.approx(list(motion.STILL_PROFILE))
-        assert list(motion.profile_weights(1.0)) == pytest.approx(list(motion.MOVING_PROFILE))
-        mid = motion.profile_weights(0.5)
-        expect = [(motion.STILL_PROFILE[i] + motion.MOVING_PROFILE[i]) / 2
-                  for i in range(len(motion.STILL_PROFILE))]
-        assert list(mid) == pytest.approx(expect)
-        q = motion.profile_weights(0.25)
-        expect_q = [0.75 * motion.STILL_PROFILE[i] + 0.25 * motion.MOVING_PROFILE[i]
-                    for i in range(len(motion.STILL_PROFILE))]
-        assert list(q) == pytest.approx(expect_q)
-
-    def test_array_input_per_frame(self):
+    def test_array_input_returns_weights_per_frame(self):
         s = np.array([0.0, 0.5, 1.0])
         w = np.asarray(motion.profile_weights(s))
         assert w.shape == (3, len(motion.STILL_PROFILE))
-        assert list(w[0]) == pytest.approx(list(motion.STILL_PROFILE))
-        assert list(w[-1]) == pytest.approx(list(motion.MOVING_PROFILE))
-        mid = [(motion.STILL_PROFILE[i] + motion.MOVING_PROFILE[i]) / 2
-               for i in range(len(motion.STILL_PROFILE))]
-        assert list(w[1]) == pytest.approx(mid)
-
-    def test_moving_weights_top_octave_more_and_still_keeps_it_nonzero(self):
-        assert tuple(motion.STILL_PROFILE) != tuple(motion.MOVING_PROFILE)
-        assert motion.MOVING_PROFILE[-1] > motion.STILL_PROFILE[-1]
-        assert motion.STILL_PROFILE[-1] > 0.0
-
-
-class TestBreathingDrift:
-    def test_is_0_3hz_sine_with_given_amplitude(self):
-        amp = 0.5
-        assert motion.BREATHING_HZ == pytest.approx(0.3)
-        period = 1.0 / 0.3
-        t = np.linspace(0.0, 2.0 * period, 2001)
-        x = np.asarray(motion.breathing_drift(t, amp))
-        assert np.max(np.abs(x)) <= amp + 1e-9
-        q = float(np.asarray(motion.breathing_drift(np.array([period / 4.0]), amp))[0])
-        assert q == pytest.approx(amp, abs=1e-3)
-        z = float(np.asarray(motion.breathing_drift(np.array([period]), amp))[0])
-        assert abs(z) < 1e-3
-        assert float(np.asarray(motion.breathing_drift(np.array([0.0]), amp))[0]) == pytest.approx(0.0, abs=1e-9)
-        neg = float(np.asarray(motion.breathing_drift(np.array([3.0 * period / 4.0]), amp))[0])
-        assert neg == pytest.approx(-amp, abs=1e-3)

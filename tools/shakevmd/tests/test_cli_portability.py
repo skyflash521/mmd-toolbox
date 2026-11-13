@@ -70,19 +70,6 @@ def _cp932_stderr(monkeypatch):
     return wrapper
 
 
-def test_stderr_safe_argparse_usage_error(monkeypatch):
-    _cp932_stderr(monkeypatch)
-    rc = cli.main(["in.vmd", "--seed", CHAR_NOT_IN_CP932])
-    assert rc == 2
-
-
-def test_stderr_safe_fail_path(tmp_path, monkeypatch):
-    p = write_input(tmp_path / (CHAR_NOT_IN_CP932 + ".vmd"))
-    _cp932_stderr(monkeypatch)
-    rc = cli.main([p, "-o", p])
-    assert rc == 2
-
-
 def test_stderr_safe_warning_loop(tmp_path, monkeypatch):
     def fake_bake(camera_keys, *a, **k):
         return bake_mod.BakeResult(

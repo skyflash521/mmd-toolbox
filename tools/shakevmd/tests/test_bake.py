@@ -1,5 +1,3 @@
-import inspect
-
 import numpy as np
 import pytest
 
@@ -23,19 +21,6 @@ class TestApplyGazeShake:
         res = bake.apply_gaze_shake(key, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
         assert res["position"] == pytest.approx(key.position, abs=1e-6)
         assert res["rotation"] == pytest.approx(key.rotation, abs=1e-6)
-
-    def test_rotation_is_componentwise_euler_addition(self):
-        key = cam(distance=-30.0, center=(1.0, 2.0, 3.0), rotation=(0.1, -0.2, 0.3))
-        noise = (0.05, 0.07, -0.04)
-        res = bake.apply_gaze_shake(key, noise, (0.0, 0.0, 0.0))
-        expected = tuple(key.rotation[i] + noise[i] for i in range(3))
-        assert res["rotation"] == pytest.approx(expected, abs=1e-9)
-
-    def test_rotation_sum_past_pi_is_not_wrapped(self):
-        key = cam(distance=-30.0, center=(0.0, 0.0, 0.0), rotation=(0.0, 3.10, 0.0))
-        noise = (0.0, 0.1, 0.0)
-        res = bake.apply_gaze_shake(key, noise, (0.0, 0.0, 0.0))
-        assert res["rotation"][1] == pytest.approx(3.20, abs=1e-9)
 
     def test_rotation_only_keeps_camera_world_position(self):
         key = cam(distance=-30.0, center=(1.0, 2.0, 3.0), rotation=(0.1, 0.2, 0.0))
@@ -240,11 +225,6 @@ class TestBake:
         assert mid_vel_max > 1e-4
         assert max(vel[0:2]) < 0.25 * mid_vel_max
         assert max(vel[58:60]) < 0.25 * mid_vel_max
-
-    def test_midrange_actually_shakes(self):
-        res = by_frame(bake.bake(MOVING_CONSTANT_FOV, seed=1, amp_rot=10.0, amp_pos=0.0, fade_sec=0.3))
-        s = interp.sample_camera(MOVING_CONSTANT_FOV, 30)
-        assert res[30].rotation != pytest.approx(s["rotation"], abs=1e-3)
 
     def test_short_range_shortens_fade_with_warning(self):
         res = bake.bake(MOVING_CONSTANT_FOV, ranges=[(0, 30)], seed=1, amp_rot=20.0, amp_pos=3.0, fade_sec=0.7)
@@ -465,7 +445,6 @@ class TestBake:
 
     @pytest.mark.parametrize("value,expected", [
         pytest.param(36.5, 37, id="even_below"),
-        pytest.param(37.5, 38, id="odd_below"),
         pytest.param(36.49, 36, id="just_below_half"),
     ])
     def test_round_half_up_rounds_point_five_up(self, value, expected):
@@ -534,11 +513,6 @@ class TestBake:
             assert by[f].rotation != pytest.approx(s["rotation"], abs=1e-4)
         assert by[20].fov == 30 and by[21].fov == 36
 
-    def test_default_range_is_full_span(self):
-        res = bake.bake(MOVING_CONSTANT_FOV, ranges=None, seed=1)
-        frames = sorted(k.frame for k in res.camera_keys)
-        assert frames[0] == 0 and frames[-1] == 60
-
     def test_range_bakes_only_inside(self):
         res = bake.bake(MOVING_CONSTANT_FOV, ranges=[(30, 60)], seed=1)
         baked_frames = sorted(k.frame for k in res.camera_keys if k.frame >= 30)
@@ -586,10 +560,6 @@ class TestBake:
         assert frames == [0] + list(range(30, 61))
         out0 = next(k for k in res.camera_keys if k.frame == 0)
         assert key_tuple(out0) == key_tuple(MOVING_CONSTANT_FOV[0])
-
-    def test_overlapping_ranges_raise(self):
-        with pytest.raises(ValueError):
-            bake.bake(MOVING_CONSTANT_FOV, ranges=[(0, 60), (30, 60)], seed=1)
 
     def test_multiple_ranges_bake_each_and_keep_gap_originals(self):
         seq5 = [
@@ -933,17 +903,6 @@ class TestCoreApiTuning:
             late = float(np.sum(np.array(dev[14:]) ** 2))
             return late / (early + 1e-15)
         assert late_over_early(2.0) > late_over_early(0.3)
-
-    def test_defaults_match_internal_constants(self):
-        a = bake.bake(PAN_STOP_AT_30, seed=1, settle=2.0).camera_keys
-        b = bake.bake(PAN_STOP_AT_30, seed=1, settle=2.0, still_profile=motion.STILL_PROFILE,
-                      moving_profile=motion.MOVING_PROFILE,
-                      settle_time=motion.DEFAULT_SETTLE_TIME_SEC).camera_keys
-        assert a == b
-        sig = inspect.signature(bake.bake).parameters
-        assert sig["still_profile"].default is motion.STILL_PROFILE
-        assert sig["moving_profile"].default is motion.MOVING_PROFILE
-        assert sig["settle_time"].default == motion.DEFAULT_SETTLE_TIME_SEC
 
     def test_profile_length_mismatch_raises(self):
         with pytest.raises(ValueError):

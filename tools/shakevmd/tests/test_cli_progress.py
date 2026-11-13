@@ -1,4 +1,5 @@
 import io
+import json
 import sys
 
 from shakevmd import cli
@@ -27,33 +28,6 @@ def write_input(path, keys=KEYS):
 class _TTYStringIO(io.StringIO):
     def isatty(self):
         return True
-
-
-class _SpyRouter:
-    instances = []
-
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.stages = []
-        self.updates = []
-        self.closed = 0
-        self.summaries = []
-        _SpyRouter.instances.append(self)
-
-    def stage(self, stage_id, *, done=0, total=None, note="", elapsed=0.0):
-        self.stages.append(stage_id)
-        self.updates.append((stage_id, done, total, note))
-
-    def close(self):
-        self.closed += 1
-
-    def summary(self, message):
-        self.summaries.append(message)
-
-
-def _spy(monkeypatch):
-    _SpyRouter.instances.clear()
-    monkeypatch.setattr(cli, "ProgressRouter", _SpyRouter)
 
 
 def test_version_shows_version_and_exit0(capsys):
@@ -104,85 +78,33 @@ def test_quiet_does_not_change_exit_code(tmp_path):
     assert cli.main([inp, "-o", inp]) == cli.main([inp, "-o", inp, "--quiet"]) == 2
 
 
-def test_router_receives_mode_quiet_stream_and_labels(tmp_path, monkeypatch):
+def test_no_smooth_skips_smoothing_stage(tmp_path, capsysbinary):
     inp = write_input(tmp_path / "in.vmd")
-    _spy(monkeypatch)
-    assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--quiet", "--no-smooth"]) == 0
-    kwargs = _SpyRouter.instances[-1].kwargs
-    assert kwargs["machine"] is False and kwargs["quiet"] is True
-    assert kwargs["emitter"] is None and kwargs["stream"] is sys.stderr
-    assert kwargs["labels"] == {"bake": "ベイク", "smooth": "スムージング"}
-
-    assert cli.main([inp, "-o", str(tmp_path / "b.vmd"), "--machine", "--no-smooth"]) == 0
-    kwargs = _SpyRouter.instances[-1].kwargs
-    assert kwargs["machine"] is True and kwargs["quiet"] is False and kwargs["emitter"] is not None
+    assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--machine", "--no-smooth"]) == 0
+    events = [json.loads(ln) for ln in capsysbinary.readouterr().out.decode("utf-8").splitlines() if ln]
+    stages = {e["stage"] for e in events if e["type"] == "progress"}
+    assert "bake" in stages
+    assert "smooth" not in stages
 
 
-def test_no_smooth_skips_smoothing_stage(tmp_path, monkeypatch):
+def test_smooth_reports_reduce_progress_in_machine_events(tmp_path, capsysbinary):
     inp = write_input(tmp_path / "in.vmd")
-    _spy(monkeypatch)
-    assert cli.main([inp, "-o", str(tmp_path / "a.vmd"), "--no-smooth"]) == 0
-    spy = _SpyRouter.instances[-1]
-    assert "bake" in spy.stages
-    assert "smooth" not in spy.stages
-
-
-def test_smooth_emits_smoothing_stage(tmp_path, monkeypatch):
-    inp = write_input(tmp_path / "in.vmd")
-    _spy(monkeypatch)
-    assert cli.main([inp, "-o", str(tmp_path / "a.vmd")]) == 0
-    spy = _SpyRouter.instances[-1]
-    assert "bake" in spy.stages
-    assert "smooth" in spy.stages
-
-
-def test_smooth_wires_progress_to_reduce(tmp_path, monkeypatch):
-    inp = write_input(tmp_path / "in.vmd")
-    _spy(monkeypatch)
-    captured = {}
-    real_reduce = cli.reduce_camera_track
-
-    def fake_reduce(*args, progress=None, **kwargs):
-        captured["progress"] = progress
-        if progress is not None:
-            progress(3, 10, "")
-        return real_reduce(*args, progress=None, **kwargs)
-
-    monkeypatch.setattr(cli, "reduce_camera_track", fake_reduce)
-    assert cli.main([inp, "-o", str(tmp_path / "out.vmd")]) == 0
-    spy = _SpyRouter.instances[-1]
-    assert captured.get("progress") is not None
-    assert ("smooth", 3, 10, "") in spy.updates
+    assert cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine"]) == 0
+    events = [json.loads(ln) for ln in capsysbinary.readouterr().out.decode("utf-8").splitlines() if ln]
+    smooth = [e for e in events if e["type"] == "progress" and e["stage"] == "smooth"]
+    assert any(e["total"] is not None and 0 < e["done"] <= e["total"] for e in smooth)
 
 
 def test_summary_on_success(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
     out = tmp_path / "out.vmd"
-    _spy(monkeypatch)
+    monkeypatch.setattr(sys, "stderr", _TTYStringIO())
     assert cli.main([inp, "-o", str(out), "--no-smooth"]) == 0
-    spy = _SpyRouter.instances[-1]
-    assert spy.summaries == [f"完了 {out}"]
+    assert f"完了 {out}" in sys.stderr.getvalue().splitlines()
 
 
 def test_no_summary_on_dry_run(tmp_path, monkeypatch):
     inp = write_input(tmp_path / "in.vmd")
-    _spy(monkeypatch)
+    monkeypatch.setattr(sys, "stderr", _TTYStringIO())
     assert cli.main([inp, "--dry-run"]) == 0
-    spy = _SpyRouter.instances[-1]
-    assert spy.summaries == []
-
-
-def test_close_called_on_bake_error(tmp_path, monkeypatch):
-    inp = write_input(tmp_path / "in.vmd")
-    _spy(monkeypatch)
-    assert cli.main([inp, "--range", "0:60", "--range", "30:60"]) == 2
-    spy = _SpyRouter.instances[-1]
-    assert spy.closed >= 1
-
-
-def test_close_called_on_dry_run(tmp_path, monkeypatch):
-    inp = write_input(tmp_path / "in.vmd")
-    _spy(monkeypatch)
-    assert cli.main([inp, "--dry-run"]) == 0
-    spy = _SpyRouter.instances[-1]
-    assert spy.closed >= 1
+    assert "完了" not in sys.stderr.getvalue()

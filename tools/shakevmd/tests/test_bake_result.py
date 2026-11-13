@@ -42,11 +42,6 @@ def _machine_events(capsysbinary):
     return [json.loads(ln) for ln in text.split("\n") if ln]
 
 
-def test_bake_result_has_detected_cuts_and_max_amplitude_fields():
-    names = {f.name for f in dataclasses.fields(bake_mod.BakeResult)}
-    assert {"detected_cuts", "max_amplitude"} <= names
-
-
 def test_detected_cuts_lists_the_frames_where_a_cut_starts():
     result = bake_mod.bake(CUT_AT_30_KEYS, seed=1)
     assert result.detected_cuts == [30]

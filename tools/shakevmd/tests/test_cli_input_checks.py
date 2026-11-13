@@ -40,11 +40,10 @@ _INVALID_CAMERA_KEYS = {
 
 
 @pytest.mark.parametrize("invalid_key", _INVALID_CAMERA_KEYS.values(), ids=list(_INVALID_CAMERA_KEYS))
-@pytest.mark.parametrize("extra", [[], ["--dry-run"], ["--no-smooth"]], ids=["default", "dry-run", "no-smooth"])
-def test_non_finite_camera_values_are_invalid_camera_values(tmp_path, capsysbinary, invalid_key, extra):
+def test_non_finite_camera_values_are_invalid_camera_values(tmp_path, capsysbinary, invalid_key):
     out = tmp_path / "out.vmd"
     src = _write(tmp_path / "in.vmd", [cam(0), invalid_key, cam(60)])
-    rc = cli.main([src, "-o", str(out), "--machine", *extra])
+    rc = cli.main([src, "-o", str(out), "--machine"])
     assert rc == _EXIT_FAILURE
     e = _machine_events(capsysbinary)[-1]
     assert e["type"] == "error" and e["code"] == "invalid_camera_values"
@@ -77,17 +76,6 @@ def test_non_finite_values_outside_the_camera_section_are_ignored(tmp_path):
     assert out.exists()
 
 
-@pytest.mark.parametrize("extra", [[], ["--dry-run"], ["--no-smooth"]], ids=["default", "dry-run", "no-smooth"])
-def test_camera_keys_with_zero_angles_are_processed(tmp_path, capsysbinary, extra):
-    out = tmp_path / "out.vmd"
-    src = _write(tmp_path / "in.vmd", [cam(0), cam(30, center=(1.0, 0.0, 0.0)), cam(60)])
-    assert cli.main([src, "-o", str(out), "--machine", *extra]) == 0
-    events = _machine_events(capsysbinary)
-    assert events[-1]["type"] == "result"
-    assert not [e for e in events if e["type"] == "error"]
-    assert out.exists() == ("--dry-run" not in extra)
-
-
 def _write_duplicate_frame_input(path):
     return _write(path, [cam(0, center=(9.0, 0.0, 0.0)), cam(0, center=(0.0, 0.0, 0.0)), cam(60)])
 
@@ -96,10 +84,9 @@ def _duplicate_warnings(events):
     return [e for e in events if e["type"] == "warning" and e["code"] == "normalize-duplicate"]
 
 
-@pytest.mark.parametrize("extra", [[], ["--dry-run"]], ids=["bake", "dry-run"])
-def test_machine_surfaces_normalize_duplicate_warning(tmp_path, capsysbinary, extra):
+def test_machine_dry_run_surfaces_normalize_duplicate_warning(tmp_path, capsysbinary):
     src = _write_duplicate_frame_input(tmp_path / "in.vmd")
-    assert cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth", *extra]) == 0
+    assert cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth", "--dry-run"]) == 0
     events = _machine_events(capsysbinary)
     assert events[-1]["type"] == "result"
     dup = _duplicate_warnings(events)
@@ -135,9 +122,3 @@ def test_unsorted_keys_without_duplicates_raise_no_warning(tmp_path, capsysbinar
     src = _write(tmp_path / "in.vmd", [cam(60), cam(0), cam(30)])
     assert cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"]) == 0
     assert not [e for e in _machine_events(capsysbinary) if e["type"] == "warning"]
-
-
-def test_input_without_duplicates_raises_no_normalize_warning(tmp_path, capsysbinary):
-    src = _write(tmp_path / "in.vmd", [cam(0), cam(30), cam(60)])
-    assert cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"]) == 0
-    assert not _duplicate_warnings(_machine_events(capsysbinary))

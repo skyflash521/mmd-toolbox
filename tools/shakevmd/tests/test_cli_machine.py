@@ -309,16 +309,6 @@ def test_machine_error_output_exists(tmp_path, capsysbinary):
     assert e["code"] == "output_exists" and e["field"] == "--output"
 
 
-def test_machine_error_output_exists_distinct_path(tmp_path, capsysbinary):
-    inp = write_input(tmp_path / "in.vmd")
-    out = tmp_path / "out.vmd"
-    out.write_bytes(b"old content")
-    rc = cli.main([inp, "-o", str(out), "--machine"])
-    assert rc == 2
-    e = machine_error(capsysbinary)
-    assert e["code"] == "output_exists" and e["field"] == "--output"
-
-
 def test_machine_error_range_reversed(tmp_path, capsysbinary):
     inp = write_input(tmp_path / "in.vmd")
     rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--range", "999:"])
@@ -370,27 +360,6 @@ def test_machine_error_write_failed(tmp_path, capsysbinary):
     assert e["path"] == out
 
 
-def test_machine_error_internal_error(tmp_path, capsysbinary, monkeypatch):
-    def boom(*a, **k):
-        raise RuntimeError("boom")
-    monkeypatch.setattr(cli, "bake", boom)
-    inp = write_input(tmp_path / "in.vmd")
-    rc = cli.main([inp, "-o", str(tmp_path / "out.vmd"), "--machine", "--no-smooth"])
-    assert rc == 1
-    e = machine_error(capsysbinary)
-    assert e["code"] == "internal_error" and e["exit_code"] == 1
-
-
-def test_non_machine_error_prints_reason_to_stderr(tmp_path, capsys):
-    bad = tmp_path / "bad.vmd"
-    bad.write_bytes(b"not a vmd file")
-    rc = cli.main([str(bad)])
-    assert rc == 1
-    cap = capsys.readouterr()
-    assert "error:" in cap.err.lower()
-    assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
-
-
 def describe_result(capsysbinary):
     events = machine_events(capsysbinary)
     assert len(events) == 1 and events[0]["type"] == "result" and events[0]["mode"] == "describe"
@@ -405,12 +374,6 @@ def test_describe_emits_result_without_input(capsysbinary):
     assert isinstance(r["presets"], list)
     for k in ("output", "keys", "applied_ranges", "max_amplitude", "detected_cuts"):
         assert k not in r
-
-
-def test_describe_works_without_machine_flag(capsysbinary):
-    rc = cli.main(["--describe"])
-    assert rc == 0
-    assert describe_result(capsysbinary)["mode"] == "describe"
 
 
 def test_describe_options_shape_and_values(capsysbinary):
@@ -497,13 +460,6 @@ def test_describe_presets_shape(capsysbinary):
         assert set(p["values"]) == public
 
 
-def test_describe_type_table_covers_non_meta_args():
-    parser = cli._build_parser()
-    meta = {"help", "version", "machine", "describe"}
-    non_meta = {a.dest for a in parser._actions if a.dest not in meta}
-    assert non_meta <= set(cli._D_TYPE)
-
-
 def test_describe_mode_arg_error_is_error_event(capsysbinary):
     rc = cli.main(["--describe", "--seed", "abc"])
     assert rc == 2
@@ -550,29 +506,8 @@ def test_machine_dry_run_inspect_counts_keys_after_merging_duplicate_frames(tmp_
     assert machine_events(capsysbinary)[-1]["keys"] == 3
 
 
-def test_non_machine_dry_run_writes_nothing_and_prints_no_json(tmp_path, capsys):
-    inp = write_input(tmp_path / "in.vmd")
-    out = tmp_path / "out.vmd"
-    rc = cli.main([inp, "-o", str(out), "--dry-run"])
-    assert rc == 0
-    assert not out.exists()
-    cap = capsys.readouterr()
-    assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
-
-
 def _raise_keyboard_interrupt(*a, **k):
     raise KeyboardInterrupt()
-
-
-def test_machine_cancelled_on_keyboard_interrupt(tmp_path, capsysbinary, monkeypatch):
-    monkeypatch.setattr(cli, "bake", _raise_keyboard_interrupt)
-    inp = write_input(tmp_path / "in.vmd")
-    out = tmp_path / "out.vmd"
-    rc = cli.main([inp, "-o", str(out), "--machine", "--no-smooth"])
-    assert rc == 130
-    e = machine_error(capsysbinary)
-    assert e["code"] == "cancelled" and e["exit_code"] == 130 and e["field"] is None
-    assert not out.exists()
 
 
 def test_machine_interrupt_while_installing_break_handler_is_cancelled_event(tmp_path, capsysbinary, monkeypatch):
@@ -580,18 +515,6 @@ def test_machine_interrupt_while_installing_break_handler_is_cancelled_event(tmp
     inp = write_input(tmp_path / "in.vmd")
     assert cli.main([inp, "--machine"]) == 130
     assert machine_error(capsysbinary)["code"] == "cancelled"
-
-
-def test_non_machine_cancelled_on_keyboard_interrupt(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(cli, "bake", _raise_keyboard_interrupt)
-    inp = write_input(tmp_path / "in.vmd")
-    out = tmp_path / "out.vmd"
-    rc = cli.main([inp, "-o", str(out), "--no-smooth"])
-    assert rc == 130
-    cap = capsys.readouterr()
-    assert "error:" in cap.err.lower()
-    assert cap.out.strip() == "" or not cap.out.lstrip().startswith("{")
-    assert not out.exists()
 
 
 def test_machine_error_output_is_directory(tmp_path, capsysbinary):

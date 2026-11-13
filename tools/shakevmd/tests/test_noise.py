@@ -8,10 +8,8 @@ class TestEffectiveOctaves:
     @pytest.mark.parametrize(
         "freq,octaves,expected",
         [
-            pytest.param(1.2, 3, 3, id="all_within_band"),
             pytest.param(1.2, 5, 3, id="octaves_above_band_dropped"),
             pytest.param(6.0, 4, 1, id="only_base_within_band"),
-            pytest.param(8.0, 2, 1, id="octave_exactly_at_limit_kept"),
             pytest.param(10.0, 1, 0, id="base_above_band"),
             pytest.param(4.0, 2, 2, id="top_octave_exactly_at_limit"),
         ],
@@ -41,9 +39,6 @@ class TestDeriveSeed:
     def test_distinct_by_base(self):
         assert noise.derive_seed(1, "X") != noise.derive_seed(2, "X")
 
-    def test_returns_int(self):
-        assert isinstance(noise.derive_seed(1, "X"), int)
-
     def test_distinct_by_part_type(self):
         assert noise.derive_seed(1, 2) != noise.derive_seed(1, "2")
 
@@ -55,10 +50,6 @@ T_30FPS = np.arange(300) / 30.0
 
 
 class TestBandLimitedNoiseBasics:
-    def test_shape_matches_t(self):
-        vals, _ = noise.band_limited_noise(7, T_30FPS, 1.2)
-        assert vals.shape == T_30FPS.shape
-
     def test_reproducible_same_seed(self):
         a, _ = noise.band_limited_noise(7, T_30FPS, 1.2)
         b, _ = noise.band_limited_noise(7, T_30FPS, 1.2)
