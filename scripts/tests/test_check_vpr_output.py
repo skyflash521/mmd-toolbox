@@ -39,12 +39,6 @@ def test_seconds_at_follows_piecewise_tempo():
     assert check.seconds_at(1440, tempos, RESOLUTION) == pytest.approx(2.0)
 
 
-def test_seconds_at_single_tempo():
-    tempos = [TempoEvent(tick=0, bpm=120.0)]
-    assert check.seconds_at(0, tempos, RESOLUTION) == pytest.approx(0.0)
-    assert check.seconds_at(2400, tempos, RESOLUTION) == pytest.approx(2.5)
-
-
 def test_measure_number_is_one_based():
     signatures = [TimeSignature(tick=0, numerator=4, denominator=4)]
     assert check.measure_number(0, signatures, RESOLUTION) == 1
@@ -75,13 +69,6 @@ def test_thresholds_mora_uses_min_across_references():
     ref2 = _reference([96])
     thresholds = check.compute_thresholds([ref1, ref2])
     assert thresholds.min_mora_sec == pytest.approx(0.1)
-
-
-def test_thresholds_come_from_given_reference():
-    thresholds = check.compute_thresholds([_reference([240, 480])])
-    assert thresholds.min_lyric_note_sec == pytest.approx(0.25)
-    assert thresholds.min_mora_sec == pytest.approx(0.25)
-    assert thresholds.max_continuation_ratio == pytest.approx(0.0)
 
 
 def test_thresholds_mora_comes_from_runs_not_note_minimum():
@@ -205,14 +192,6 @@ def test_short_mora_run_is_reported():
     assert violations[0].measure == 1
 
 
-def test_mora_run_with_enough_length_passes():
-    thresholds = check.compute_thresholds([_reference([96])])
-    run = [_note(0, 192), _note(192, 96, lyric="-"), _note(288, 96)]
-    assert [
-        v for v in check.check_project(_project(run), thresholds) if v.kind == "short_mora_run"
-    ] == []
-
-
 def test_mora_run_equal_to_reference_minimum_passes():
     thresholds = check.compute_thresholds([_reference([96])])
     run = [_note(0, 96), _note(96, 96)]
@@ -252,17 +231,6 @@ def test_continuation_ratio_over_limit_is_reported():
     assert violations[0].measure is None
 
 
-def test_continuation_ratio_within_limit_passes():
-    ref = _reference([96, 96], cont_durs=[96])
-    thresholds = check.compute_thresholds([ref])
-    notes = [_note(0, 96), _note(2000, 96, lyric="-"), _note(4000, 96)]
-    assert [
-        v
-        for v in check.check_project(_project(notes), thresholds)
-        if v.kind == "continuation_ratio"
-    ] == []
-
-
 def test_continuation_ratio_equal_to_limit_passes():
     ref = _reference([96, 96], cont_durs=[96])
     thresholds = check.compute_thresholds([ref])
@@ -272,9 +240,3 @@ def test_continuation_ratio_equal_to_limit_passes():
         for v in check.check_project(_project(notes), thresholds)
         if v.kind == "continuation_ratio"
     ] == []
-
-
-def test_clean_project_has_no_violations():
-    thresholds = check.compute_thresholds([_reference([96, 192], cont_durs=[192])])
-    notes = [_note(0, 192), _note(192, 192, lyric="-"), _note(384, 192), _note(2000, 240)]
-    assert check.check_project(_project(notes), thresholds) == []

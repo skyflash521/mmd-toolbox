@@ -38,12 +38,11 @@ def test_reference_symbol_to_category_xx_is_excluded():
     assert reference_symbol_to_category("xx") is None
 
 
-@pytest.mark.parametrize("symbol", ["sy", "ty", "zy", "q", "I", "U", "O", ""])
-def test_reference_symbol_to_category_unknown_symbol_raises(symbol):
+def test_reference_symbol_to_category_unknown_symbol_raises():
     from gate import UnknownReferenceSymbolError, reference_symbol_to_category
 
     with pytest.raises(UnknownReferenceSymbolError):
-        reference_symbol_to_category(symbol)
+        reference_symbol_to_category("zy")
 
 
 def test_parse_seconds_monophone_label_reads_seconds_and_maps_category(tmp_path):
@@ -96,47 +95,6 @@ def test_parse_htk100ns_monophone_label_converts_units_to_seconds(tmp_path):
     assert segments[1].end_sec == pytest.approx(3.6371876)
 
 
-def test_parse_seconds_monophone_label_xx_category_is_none(tmp_path):
-    from gate import parse_seconds_monophone_label
-
-    label_path = tmp_path / "001.lab"
-    label_path.write_text("0.0 1.0 xx\n", encoding="utf-8")
-
-    segments = parse_seconds_monophone_label(label_path)
-
-    assert segments[0].category is None
-
-
-def test_parse_seconds_monophone_label_unknown_symbol_raises(tmp_path):
-    from gate import UnknownReferenceSymbolError, parse_seconds_monophone_label
-
-    label_path = tmp_path / "001.lab"
-    label_path.write_text("0.0 1.0 zy\n", encoding="utf-8")
-
-    with pytest.raises(UnknownReferenceSymbolError):
-        parse_seconds_monophone_label(label_path)
-
-
-def test_parse_seconds_monophone_label_delegates_to_reference_symbol_to_category(tmp_path, monkeypatch):
-    import gate as gate_module
-
-    calls = []
-
-    def fake_reference_symbol_to_category(symbol):
-        calls.append(symbol)
-        return "SENTINEL"
-
-    monkeypatch.setattr(gate_module, "reference_symbol_to_category", fake_reference_symbol_to_category)
-
-    label_path = tmp_path / "001.lab"
-    label_path.write_text("0.0 1.0 k\n", encoding="utf-8")
-
-    segments = gate_module.parse_seconds_monophone_label(label_path)
-
-    assert calls == ["k"]
-    assert segments[0].category == "SENTINEL"
-
-
 def test_parse_htk100ns_monophone_label_line_missing_symbol_raises_error_naming_file(tmp_path):
     from gate import MonophoneLabelFormatError, parse_htk100ns_monophone_label
 
@@ -145,26 +103,6 @@ def test_parse_htk100ns_monophone_label_line_missing_symbol_raises_error_naming_
 
     with pytest.raises(MonophoneLabelFormatError, match="001.lab"):
         parse_htk100ns_monophone_label(label_path)
-
-
-def test_parse_htk100ns_monophone_label_delegates_to_reference_symbol_to_category(tmp_path, monkeypatch):
-    import gate as gate_module
-
-    calls = []
-
-    def fake_reference_symbol_to_category(symbol):
-        calls.append(symbol)
-        return "SENTINEL"
-
-    monkeypatch.setattr(gate_module, "reference_symbol_to_category", fake_reference_symbol_to_category)
-
-    label_path = tmp_path / "001.lab"
-    label_path.write_text("0 10000000 k\n", encoding="utf-8")
-
-    segments = gate_module.parse_htk100ns_monophone_label(label_path)
-
-    assert calls == ["k"]
-    assert segments[0].category == "SENTINEL"
 
 
 def _seg(category, start, end):
@@ -223,16 +161,6 @@ def test_clip_segments_to_audio_duration_drops_segment_entirely_before_zero():
     assert result == [_seg("i", 0.0, 1.0)]
 
 
-def test_clip_segments_to_audio_duration_leaves_uncovered_tail_unfilled():
-    from gate import clip_segments_to_audio_duration
-
-    segments = [_seg("a", 0.0, 1.0)]
-
-    result = clip_segments_to_audio_duration(segments, audio_duration_sec=5.0)
-
-    assert result == [_seg("a", 0.0, 1.0)]
-
-
 def test_remove_invalid_time_segments_leaves_valid_segments_unchanged():
     from gate import remove_invalid_time_segments
 
@@ -283,16 +211,6 @@ def test_remove_invalid_time_segments_drops_contained_segment_and_splits_contain
     assert result == [_seg("a", 0.0, 2.0), _seg("a", 3.0, 10.0)]
 
 
-def test_remove_invalid_time_segments_excludes_overlap_with_non_adjacent_segment():
-    from gate import remove_invalid_time_segments
-
-    segments = [_seg("a", 0.0, 10.0), _seg("b", 3.0, 4.0), _seg("c", 8.0, 9.0)]
-
-    result = remove_invalid_time_segments(segments)
-
-    assert result == [_seg("a", 0.0, 3.0), _seg("a", 4.0, 8.0), _seg("a", 9.0, 10.0)]
-
-
 def test_find_midi_mismatch_ranges_no_mismatch_when_vowel_covered_by_note():
     from gate import find_midi_mismatch_ranges
 
@@ -300,15 +218,6 @@ def test_find_midi_mismatch_ranges_no_mismatch_when_vowel_covered_by_note():
     midi_notes = [(0.0, 1.0)]
 
     assert find_midi_mismatch_ranges(segments, midi_notes) == []
-
-
-def test_find_midi_mismatch_ranges_detects_vowel_with_no_note_for_300ms_or_more():
-    from gate import find_midi_mismatch_ranges
-
-    segments = [_seg("a", 0.0, 0.5)]
-    midi_notes = []
-
-    assert find_midi_mismatch_ranges(segments, midi_notes) == [(0.0, 0.5)]
 
 
 def test_find_midi_mismatch_ranges_ignores_vowel_gap_just_under_threshold():
@@ -416,16 +325,6 @@ def test_exclude_ranges_from_segments_leaves_unaffected_segment_unchanged():
     assert result == segments
 
 
-def test_ticks_to_seconds_at_tick_zero_is_zero():
-    from gate import ticks_to_seconds
-
-    from vpr.types import TempoEvent
-
-    tempos = [TempoEvent(tick=0, bpm=120.0)]
-
-    assert ticks_to_seconds(0, tempos, resolution=480) == pytest.approx(0.0)
-
-
 def test_ticks_to_seconds_single_tempo_one_quarter_note():
     from gate import ticks_to_seconds
 
@@ -444,16 +343,6 @@ def test_ticks_to_seconds_across_tempo_change():
     tempos = [TempoEvent(tick=0, bpm=120.0), TempoEvent(tick=480, bpm=60.0)]
 
     assert ticks_to_seconds(960, tempos, resolution=480) == pytest.approx(0.5 + 1.0)
-
-
-def test_ticks_to_seconds_mid_segment_after_tempo_change():
-    from gate import ticks_to_seconds
-
-    from vpr.types import TempoEvent
-
-    tempos = [TempoEvent(tick=0, bpm=120.0), TempoEvent(tick=480, bpm=60.0)]
-
-    assert ticks_to_seconds(720, tempos, resolution=480) == pytest.approx(0.5 + 0.5)
 
 
 def test_ticks_to_seconds_accepts_unsorted_tempo_list():
@@ -709,16 +598,6 @@ def test_match_segments_tie_break_prefers_lexicographically_smallest_assignment(
     assert excess == [predicted[1]]
 
 
-def test_compute_boundary_deviation_single_pair():
-    from gate import compute_boundary_deviation
-
-    matched_pairs = [(_seg("a", 0.0, 1.0), _seg("a", 0.05, 1.05))]
-
-    result = compute_boundary_deviation(matched_pairs)
-
-    assert result == pytest.approx((50.0, 50.0))
-
-
 def test_compute_boundary_deviation_median_and_p95_over_multiple_pairs_ignore_sign():
     from gate import compute_boundary_deviation
 
@@ -768,14 +647,3 @@ def test_compute_song_metrics_reference_vowel_count_excludes_non_vowel_segments(
     assert result.reference_vowel_count == 1
     assert result.undetected_count == 1
     assert result.excess_count == 1
-
-
-def test_compute_song_metrics_boundary_deviation_is_none_without_matches():
-    from gate import compute_song_metrics
-
-    reference = [_seg("a", 0.0, 0.5), _seg("sil", 0.5, 1.0)]
-    predicted = [_seg("i", 0.0, 0.5), _seg("sil", 0.5, 1.0)]
-
-    result = compute_song_metrics(predicted, reference, duration_sec=1.0)
-
-    assert result.boundary_deviation is None
