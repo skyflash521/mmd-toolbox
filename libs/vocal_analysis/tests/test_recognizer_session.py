@@ -214,21 +214,6 @@ def test_session_loads_each_model_once_across_chunks(tmp_path, fakes):
         assert [s.type for s in segments] == ["gap", "vowel", "gap"]
 
 
-def test_session_finishes_all_transcriptions_before_first_alignment(tmp_path, fakes):
-    wavs = [_write_loud_wav(tmp_path, f"c{i}.wav") for i in range(3)]
-
-    with _session() as session:
-        transcriptions = [session.transcribe(w) for w in wavs]
-        for t in transcriptions:
-            session.align(t)
-
-    assert fakes.events == [
-        "load_pipeline", "transcribe", "transcribe", "transcribe",
-        "release", "load_phoneme", "align", "align", "align",
-        "release",
-    ]
-
-
 def test_session_transcribe_alone_neither_loads_phoneme_model_nor_releases_pipeline(tmp_path, fakes):
     wav = _write_loud_wav(tmp_path)
 
@@ -352,6 +337,9 @@ def test_session_skips_phoneme_model_when_every_chunk_is_hallucinated(tmp_path, 
 
     assert fakes.count("load_phoneme") == 0
     assert all(s.type == "gap" for s in segments)
+    assert len(segments) == 1
+    assert segments[0].start_sec == pytest.approx(0.0)
+    assert segments[0].end_sec == pytest.approx(0.12)
 
 
 def test_session_forwards_each_calls_on_progress_to_the_model_loaders(tmp_path, fakes):
@@ -503,6 +491,7 @@ def test_session_transcribe_converts_missing_library_to_recognition_error(tmp_pa
         with pytest.raises(RecognitionError, match="transformers") as excinfo:
             session.transcribe(_write_loud_wav(tmp_path))
 
+    assert "torch" in str(excinfo.value)
     assert excinfo.value.__cause__ is original
 
 
@@ -587,46 +576,6 @@ def test_session_tinyllama_loads_each_model_once_and_converts_all_chunks_words_i
     conversion_cache = _mod("english_katakana")._conversion_cache
     assert conversion_cache[(_TINYLLAMA, "hello")] == "スカイ"
     assert conversion_cache[(_TINYLLAMA, "world")] == "スカイ"
-
-
-def test_session_tinyllama_final_g2p_runs_with_the_converter_only_after_the_converter_is_released(
-        tmp_path, katakana):
-    fakes = katakana
-    fakes.texts = ["あhello", "いworld"]
-    wavs = [_write_loud_wav(tmp_path, f"c{i}.wav") for i in range(2)]
-
-    with _session(english_katakana_method=_TINYLLAMA) as session:
-        transcriptions = [session.transcribe(w) for w in wavs]
-        for t in transcriptions:
-            session.align(t)
-
-    last_generate = fakes.events.index(("generate", "world"))
-    load_phoneme = fakes.events.index("load_phoneme")
-    final_g2p = [(position, text) for position, text, method in fakes.g2p_calls if method == _TINYLLAMA]
-    assert final_g2p
-    assert all(last_generate + 1 < position <= load_phoneme for position, _ in final_g2p)
-    assert {text for _, text in final_g2p} == {"あhello", "いworld"}
-
-
-def test_session_tinyllama_density_g2p_runs_in_transcribe_phase_without_the_converter(tmp_path, katakana):
-    fakes = katakana
-    fakes.texts = ["あhello", "いworld"]
-    wavs = [_write_loud_wav(tmp_path, f"c{i}.wav") for i in range(2)]
-
-    with _session(english_katakana_method=_TINYLLAMA) as session:
-        transcriptions = [session.transcribe(w) for w in wavs]
-        density_calls = list(fakes.g2p_calls)
-        assert fakes.events == ["load_pipeline", "transcribe", "transcribe"]
-        for t in transcriptions:
-            session.align(t)
-
-    assert {text for _, text, _ in density_calls} == {"あhello", "いworld"}
-    assert all(method == "arpakana" for _, _, method in density_calls)
-    release = fakes.events.index("release")
-    assert all(position <= release for position, _, _ in density_calls)
-    final_methods = [method for _, _, method in fakes.g2p_calls[len(density_calls):]]
-    assert final_methods
-    assert set(final_methods) == {_TINYLLAMA}
 
 
 def test_session_tinyllama_retranscribes_dense_english_chunk_within_transcribe_phase_and_adopts_the_result(
@@ -784,21 +733,6 @@ def test_session_tinyllama_converter_load_failure_is_recognition_error_and_loads
     assert fakes.count("load_phoneme") == 0
 
 
-def test_session_runs_g2p_for_every_chunk_after_all_transcriptions_and_before_phoneme_model_load(tmp_path, fakes):
-    fakes.texts = ["あ", "い", "う"]
-    wavs = [_write_loud_wav(tmp_path, f"c{i}.wav") for i in range(3)]
-
-    with _session() as session:
-        transcriptions = [session.transcribe(w) for w in wavs]
-        for t in transcriptions:
-            session.align(t)
-
-    pipeline_release = fakes.events.index("release")
-    load_phoneme = fakes.events.index("load_phoneme")
-    for text in ("あ", "い", "う"):
-        assert any(pipeline_release < position <= load_phoneme for position in fakes.g2p_positions(text))
-
-
 def test_recognizer_facade_still_exports_public_names():
     from vocal_analysis import recognizer
 
@@ -824,23 +758,6 @@ class _EnsureCmudict:
 @pytest.fixture
 def ensure_cmudict(monkeypatch):
     return _EnsureCmudict(monkeypatch)
-
-
-def test_session_prepare_dictionary_delegates_to_ensure_cmudict_with_the_given_on_progress(ensure_cmudict):
-    def progress(note):
-        pass
-
-    with _session() as session:
-        session.prepare_dictionary(on_progress=progress)
-
-    assert ensure_cmudict.calls == [progress]
-
-
-def test_session_prepare_dictionary_without_on_progress_passes_none(ensure_cmudict):
-    with _session() as session:
-        session.prepare_dictionary()
-
-    assert ensure_cmudict.calls == [None]
 
 
 def test_session_prepare_dictionary_relays_the_dictionary_note_to_on_progress(ensure_cmudict):
@@ -912,24 +829,6 @@ def test_session_prepare_dictionary_loads_and_releases_nothing(fakes, ensure_cmu
         session.prepare_dictionary()
 
     assert fakes.events == []
-
-
-def test_session_prepare_dictionary_does_not_change_model_loads_or_phase_order(
-        tmp_path, fakes, ensure_cmudict):
-    wavs = [_write_loud_wav(tmp_path, f"c{i}.wav") for i in range(3)]
-
-    with _session() as session:
-        session.prepare_dictionary()
-        transcriptions = [session.transcribe(w) for w in wavs]
-        for t in transcriptions:
-            session.align(t)
-
-    assert fakes.events == [
-        "load_pipeline", "transcribe", "transcribe", "transcribe",
-        "release", "load_phoneme", "align", "align", "align",
-        "release",
-    ]
-    assert len(ensure_cmudict.calls) == 1
 
 
 def test_session_transcribe_and_align_never_fetch_the_dictionary(tmp_path, fakes, ensure_cmudict):

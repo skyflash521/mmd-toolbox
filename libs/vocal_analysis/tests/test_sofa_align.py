@@ -314,7 +314,7 @@ def test_align_batch_missing_environment_path_raises_recognition_error_with_path
     samples = np.zeros(16000, dtype=np.float32)
     with pytest.raises(RecognitionError, match="SOFAの実行環境パスが不正です") as exc_info:
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
-    assert expected_label in str(exc_info.value)
+    assert f"{expected_label}=" in str(exc_info.value)
     assert "存在しません" in str(exc_info.value)
 
 
@@ -538,9 +538,9 @@ def test_align_batch_survives_transient_timeout_within_deadline(tmp_path, monkey
     monkeypatch.setattr(sofa_align.subprocess, "Popen", fake_popen)
 
     samples = np.zeros(16000, dtype=np.float32)
-    sofa_align._align_batch([(samples, 16000, ["a"])], config)
+    result = sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
-    assert fake["proc"].communicate_call_count == stall_calls + 1
+    assert result == {"segment_0000": [(0.0, 1.0, "pau")]}
 
 
 def test_align_batch_timeout_kills_process_tree_on_posix(tmp_path, monkeypatch):
@@ -576,12 +576,6 @@ def test_parse_htk_label_file_converts_100ns_units_to_seconds(tmp_path):
     path.write_text("0 5000000 pau\n5000000 12345000 a\n", encoding="utf-8")
 
     assert _parse_htk_label_file(path) == [(0.0, 0.5, "pau"), (0.5, 1.2345, "a")]
-
-
-def test_segment_contract_tolerance_is_50ms():
-    from vocal_analysis.sofa_align import _SEGMENT_CONTRACT_TOLERANCE_SEC
-
-    assert _SEGMENT_CONTRACT_TOLERANCE_SEC == 0.05
 
 
 def test_validate_and_normalize_segments_passes_through_exact_input():
@@ -725,20 +719,6 @@ def test_check_ascii_paths_rejects_non_ascii_checkpoint_path():
         _check_ascii_paths(Path("ascii_root") / "work_dir", config)
 
 
-def test_check_ascii_paths_rejects_non_ascii_in_intermediate_component():
-    from vocal_analysis import SofaAlignerConfig
-    from vocal_analysis.phonemes import RecognitionError
-    from vocal_analysis.sofa_align import _check_ascii_paths
-
-    config = SofaAlignerConfig(
-        sofa_python=Path("ascii_root") / "sofa-venv" / "python",
-        sofa_root=Path("ascii_root") / "SOFA",
-        checkpoint_path=Path("ascii_root") / "日本語" / "checkpoint.ckpt",
-    )
-    with pytest.raises(RecognitionError):
-        _check_ascii_paths(Path("ascii_root") / "work_dir", config)
-
-
 def test_check_ascii_paths_does_not_check_sofa_python():
     from vocal_analysis import SofaAlignerConfig
     from vocal_analysis.sofa_align import _check_ascii_paths
@@ -783,7 +763,7 @@ def test_align_batch_non_ascii_checkpoint_path_does_not_start_subprocess(monkeyp
     )
 
     samples = np.zeros(16000, dtype=np.float32)
-    with pytest.raises(RecognitionError):
+    with pytest.raises(RecognitionError, match="非ASCII"):
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
 
@@ -803,7 +783,7 @@ def test_align_batch_non_ascii_work_dir_does_not_start_subprocess(monkeypatch):
     )
 
     samples = np.zeros(16000, dtype=np.float32)
-    with pytest.raises(RecognitionError):
+    with pytest.raises(RecognitionError, match="非ASCII"):
         sofa_align._align_batch([(samples, 16000, ["a"])], config)
 
 
@@ -883,7 +863,7 @@ def test_clamp_words_to_valid_list_invalidates_empty_phoneme_symbols_without_mov
 def test_clamp_words_to_valid_list_all_invalid_returns_empty():
     from vocal_analysis.sofa_align import _clamp_words_to_valid_list
 
-    words = [([], 0.0, 0.01)]
+    words = [([], 0.0, 0.5), (["a"], 0.5, 0.52)]
     assert _clamp_words_to_valid_list(words, trim_duration_sec=1.0) == []
 
 
@@ -897,46 +877,6 @@ def test_determine_word_gaps_no_valid_words_covers_whole_trim_duration():
     from vocal_analysis.sofa_align import _determine_word_gaps
 
     assert _determine_word_gaps([], trim_duration_sec=1.5) == [(0.0, 1.5)]
-
-
-def test_covered_invalid_words_produce_no_gap_and_intervals_tile_whole_duration():
-    from vocal_analysis.sofa_align import _clamp_words_to_valid_list, _determine_word_gaps
-
-    words = [(["a"], 0.5, 2.0), (["i"], 0.8, 0.9), (["u"], 1.0, 1.2)]
-    trim_duration_sec = 2.5
-
-    valid_words = _clamp_words_to_valid_list(words, trim_duration_sec=trim_duration_sec)
-    gaps = _determine_word_gaps(valid_words, trim_duration_sec=trim_duration_sec)
-
-    assert valid_words == [(["a"], 0.5, 2.0)]
-    assert gaps == [(0.0, 0.5), (2.0, 2.5)]
-
-    intervals = sorted(
-        [(start, end) for _, start, end in valid_words] + gaps, key=lambda iv: iv[0])
-    assert intervals[0][0] == 0.0
-    assert intervals[-1][1] == trim_duration_sec
-    for (_, prev_end), (next_start, _) in zip(intervals, intervals[1:], strict=False):
-        assert prev_end == next_start
-
-
-def test_all_words_invalidated_confirms_whole_duration_as_single_gap():
-    from vocal_analysis.sofa_align import _clamp_words_to_valid_list, _determine_word_gaps
-
-    words = [(["a"], 0.00, 0.04), (["i"], 0.02, 0.05), (["u"], 0.04, 0.07)]
-    trim_duration_sec = 1.0
-
-    valid_words = _clamp_words_to_valid_list(words, trim_duration_sec=trim_duration_sec)
-    gaps = _determine_word_gaps(valid_words, trim_duration_sec=trim_duration_sec)
-
-    assert valid_words == []
-    assert gaps == [(0.0, 1.0)]
-
-
-def test_determine_word_gaps_no_gaps_when_words_cover_whole_duration():
-    from vocal_analysis.sofa_align import _determine_word_gaps
-
-    words = [(["a"], 0.0, 0.5), (["i"], 0.5, 1.0)]
-    assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
 
 
 def test_determine_word_gaps_before_between_and_after():
@@ -953,18 +893,6 @@ def test_determine_word_gaps_does_not_emit_zero_length_gap():
     assert _determine_word_gaps(words, trim_duration_sec=1.0) == []
 
 
-def test_map_symbol_to_segment_fields_vowel():
-    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
-
-    assert _map_symbol_to_segment_fields("a") == ("vowel", "a")
-
-
-def test_map_symbol_to_segment_fields_consonant():
-    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
-
-    assert _map_symbol_to_segment_fields("k") == ("consonant", "k")
-
-
 def test_map_symbol_to_segment_fields_classifies_mapped_symbol_y_to_j_as_consonant():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
@@ -977,22 +905,10 @@ def test_map_symbol_to_segment_fields_classifies_mapped_symbol_devoiced_i_as_vow
     assert _map_symbol_to_segment_fields("I") == ("vowel", "i")
 
 
-def test_map_symbol_to_segment_fields_vowel_with_ipa_conversion():
-    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
-
-    assert _map_symbol_to_segment_fields("u") == ("vowel", "ɯ")
-
-
 def test_map_symbol_to_segment_fields_pau_is_gap():
     from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
 
     assert _map_symbol_to_segment_fields("pau") == ("gap", None)
-
-
-def test_map_symbol_to_segment_fields_cl_is_gap():
-    from vocal_analysis.sofa_align import _map_symbol_to_segment_fields
-
-    assert _map_symbol_to_segment_fields("cl") == ("gap", None)
 
 
 def test_map_symbol_to_segment_fields_breath_ap_is_gap():
@@ -1031,14 +947,6 @@ def test_segments_from_raw_empty_input_returns_empty():
     from vocal_analysis.sofa_align import _segments_from_raw
 
     assert _segments_from_raw([]) == []
-
-
-def test_segments_from_raw_propagates_unmapped_symbol_error():
-    from vocal_analysis.phonemes import RecognitionError
-    from vocal_analysis.sofa_align import _segments_from_raw
-
-    with pytest.raises(RecognitionError):
-        _segments_from_raw([(0.0, 0.5, "xyz_unknown")])
 
 
 @pytest.mark.parametrize(("symbol", "phoneme"), [

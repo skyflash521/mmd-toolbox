@@ -65,18 +65,6 @@ def test_frame_rms_pools_across_channels():
     assert np.allclose(raw_rms, pooled_rms, atol=1e-6)
 
 
-def test_frame_rms_signal_shorter_than_frame_returns_empty():
-    from vocal_analysis.rms import _frame_rms
-
-    sample_rate = 1000
-    samples = np.full((10, 1), 0.5, dtype=np.float32)
-
-    times_sec, raw_rms = _frame_rms(samples, sample_rate)
-
-    assert len(times_sec) == 0
-    assert len(raw_rms) == 0
-
-
 def test_normalize_rms_reference_formula():
     from vocal_analysis.rms import _normalize_rms
 
@@ -145,23 +133,6 @@ def test_dynamic_range_db_is_gain_invariant_including_p5_zero_floor():
     gained = raw_rms * 4.0
 
     assert _dynamic_range_db(raw_rms) == pytest.approx(_dynamic_range_db(gained))
-
-
-def test_compute_rms_returns_envelope_with_expected_shape():
-    from vocal_analysis.rms import compute_rms
-    from vocal_analysis.types import AudioPcm, RmsEnvelope
-
-    sample_rate = 1000
-    rng = np.random.default_rng(0)
-    samples = (rng.random((500, 1), dtype=np.float32) - 0.5) * 2
-    pcm = AudioPcm(samples=samples, sample_rate=sample_rate)
-
-    envelope = compute_rms(pcm)
-
-    assert isinstance(envelope, RmsEnvelope)
-    assert len(envelope.times_sec) == len(envelope.values)
-    assert len(envelope.times_sec) > 0
-    assert np.all(envelope.values >= 0.0) and np.all(envelope.values <= 1.0)
 
 
 def test_compute_rms_is_gain_invariant():

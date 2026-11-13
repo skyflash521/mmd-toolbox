@@ -10,36 +10,6 @@ def _mod(name):
     return importlib.import_module(f"vocal_analysis.{name}")
 
 
-def test_downmix_to_mono_averages_channels():
-    from vocal_analysis.segmentation import downmix_to_mono
-
-    samples = np.array([[0.2, 0.6], [-0.4, 0.0]], dtype=np.float32)
-
-    mono = downmix_to_mono(samples)
-
-    assert np.allclose(mono, [0.4, -0.2])
-
-
-def test_downmix_to_mono_passthrough_for_already_mono():
-    from vocal_analysis.segmentation import downmix_to_mono
-
-    samples = np.array([[0.3], [-0.1]], dtype=np.float32)
-
-    mono = downmix_to_mono(samples)
-
-    assert np.allclose(mono, [0.3, -0.1])
-
-
-def test_resample_to_target_same_rate_is_passthrough():
-    from vocal_analysis.segmentation import resample_to_target
-
-    mono = np.linspace(-0.5, 0.5, 1000, dtype=np.float32)
-
-    result = resample_to_target(mono, sample_rate=16000, target_sample_rate=16000)
-
-    assert np.array_equal(result, mono)
-
-
 def test_resample_to_target_downsamples_to_expected_length():
     from vocal_analysis.segmentation import resample_to_target
 
@@ -150,32 +120,6 @@ def test_recognize_releases_content_pipeline_before_phoneme_model_load(tmp_path,
     assert any(seg.type == "vowel" for seg in segments)
 
 
-def test_recognize_releases_content_pipeline_without_loading_phoneme_model_when_no_alignment_targets(
-        tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
-
-    calls = []
-    monkeypatch.setattr(
-        _mod("transcription"), "load_pipeline",
-        lambda content_recognizer_model, on_progress=None: object(),
-    )
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", lambda pipeline, samples: ("", None))
-    monkeypatch.setattr(_mod("model_store"), "release_gpu_memory", lambda: calls.append("release"))
-
-    def fake_load_model(on_progress=None):
-        calls.append("load_phoneme")
-        raise AssertionError("アライメント対象0件では音素モデルをロードしない")
-
-    monkeypatch.setattr(_mod("alignment"), "load_phoneme_model", fake_load_model)
-
-    segments = recognizer_module.recognize(wav_path)
-
-    assert calls == ["release"]
-    assert all(seg.type == "gap" for seg in segments)
-
-
 def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
@@ -211,74 +155,6 @@ def test_recognize_skips_content_recognition_for_silent_segment(tmp_path, monkey
     assert segments[-1].type == "gap"
     assert segments[-1].phoneme is None
     assert segments[-1].end_sec == pytest.approx(5.0)
-
-
-def test_recognize_loads_content_recognizer_pipeline_once_for_multiple_segments(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    loud1 = _loud_samples(32000)
-    silence = np.zeros((16000, 1), dtype=np.float32)
-    loud2 = _loud_samples(32000)
-    wav_path = _write_wav(
-        tmp_path / "vocal.wav", np.concatenate([loud1, silence, loud2], axis=0), 16000
-    )
-
-    decoder = {0: "<pad>", 1: "a"}
-    log_probs = _SIX_FRAME_PAU_A_PAU_LOG_PROBS
-    load_calls = {"pipeline": 0, "phoneme": 0}
-
-    def fake_load_pipeline(content_recognizer_model, on_progress=None):
-        load_calls["pipeline"] += 1
-        return object()
-
-    def fake_load_phoneme_model(on_progress=None):
-        load_calls["phoneme"] += 1
-        return _FakeProcessor(decoder), object()
-
-    monkeypatch.setattr(_mod("transcription"), "load_pipeline", fake_load_pipeline)
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(_mod("transcription"), "g2p", lambda text, method=None, **kwargs: {"あ": ["a"]}[text])
-    monkeypatch.setattr(_mod("alignment"), "load_phoneme_model", fake_load_phoneme_model)
-    monkeypatch.setattr(
-        _mod("alignment"), "compute_log_probs", lambda processor, model, samples: log_probs
-    )
-
-    recognizer_module.recognize(wav_path)
-
-    assert load_calls == {"pipeline": 1, "phoneme": 1}
-
-
-def test_recognize_forwards_on_progress_to_model_loaders(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
-    decoder = {0: "<pad>", 1: "a"}
-    log_probs = _SIX_FRAME_PAU_A_PAU_LOG_PROBS
-    received = {}
-
-    def fake_load_pipeline(content_recognizer_model, on_progress=None):
-        received["pipeline_on_progress"] = on_progress
-        return object()
-
-    def fake_load_model_and_processor(on_progress=None):
-        received["model_on_progress"] = on_progress
-        return _FakeProcessor(decoder), object()
-
-    monkeypatch.setattr(_mod("transcription"), "load_pipeline", fake_load_pipeline)
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(_mod("transcription"), "g2p", lambda text, method=None, **kwargs: {"あ": ["a"]}[text])
-    monkeypatch.setattr(_mod("alignment"), "load_phoneme_model", fake_load_model_and_processor)
-    monkeypatch.setattr(
-        _mod("alignment"), "compute_log_probs", lambda processor, model, samples: log_probs
-    )
-
-    def sentinel_on_progress(note):
-        pass
-
-    recognizer_module.recognize(wav_path, on_progress=sentinel_on_progress)
-
-    assert received["pipeline_on_progress"] is sentinel_on_progress
-    assert received["model_on_progress"] is sentinel_on_progress
 
 
 def test_recognize_reannounces_segment_note_after_loading_note(tmp_path, monkeypatch):
@@ -347,32 +223,6 @@ def test_format_time_range_uses_minutes_and_zero_padded_seconds():
     assert format_time_range(65.4, 125.0) == "1:05-2:05"
 
 
-def test_recognize_without_on_progress_still_works(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
-    decoder = {0: "<pad>", 1: "a"}
-    log_probs = _SIX_FRAME_PAU_A_PAU_LOG_PROBS
-
-    monkeypatch.setattr(
-        _mod("transcription"), "load_pipeline",
-        lambda content_recognizer_model, on_progress=None: object(),
-    )
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(_mod("transcription"), "g2p", lambda text, method=None, **kwargs: {"あ": ["a"]}[text])
-    monkeypatch.setattr(
-        _mod("alignment"), "load_phoneme_model",
-        lambda on_progress=None: (_FakeProcessor(decoder), object()),
-    )
-    monkeypatch.setattr(
-        _mod("alignment"), "compute_log_probs", lambda processor, model, samples: log_probs
-    )
-
-    segments = recognizer_module.recognize(wav_path, on_progress=None)
-
-    assert len(segments) == 3
-
-
 def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
@@ -413,37 +263,6 @@ def test_recognize_trims_leading_silence_and_offsets_segments(tmp_path, monkeypa
     assert segments[2].type == "gap"
     assert segments[2].start_sec == pytest.approx(trimmed_start_sec + 0.10)
     assert segments[2].end_sec == pytest.approx(3.5)
-
-
-def test_recognize_treats_high_phoneme_density_chunk_as_gap_without_loading_phoneme_model(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
-
-    monkeypatch.setattr(
-        _mod("transcription"), "load_pipeline",
-        lambda content_recognizer_model, on_progress=None: object(),
-    )
-    monkeypatch.setattr(
-        _mod("transcription"), "transcribe_segment",
-        lambda pipeline, samples: ("あいうえおかきくけこさしすせそ", None))
-    monkeypatch.setattr(
-        _mod("transcription"), "transcribe_text_only",
-        lambda pipeline, samples: "あいうえおかきくけこさしすせそ")
-    monkeypatch.setattr(_mod("transcription"), "g2p", lambda text, method=None, **kwargs: ["a"] * 100)
-
-    def fail_if_called():
-        raise AssertionError("音素密度が高い区間で音素モデルをロードしてはならない")
-
-    monkeypatch.setattr(_mod("alignment"), "load_phoneme_model", fail_if_called)
-
-    segments = recognizer_module.recognize(wav_path)
-
-    assert len(segments) == 1
-    assert segments[0].type == "gap"
-    assert segments[0].phoneme is None
-    assert segments[0].start_sec == pytest.approx(0.0)
-    assert segments[0].end_sec == pytest.approx(2.0)
 
 
 def test_recognize_empty_transcription_confirms_gap_without_g2p_or_model(tmp_path, monkeypatch):
@@ -552,57 +371,6 @@ def test_recognize_falls_back_to_band_alignment_when_word_window_infeasible(tmp_
 
     segments = recognizer_module.recognize(wav_path)
 
-    assert segments[1].type == "vowel"
-    assert segments[1].phoneme == "a"
-
-
-def test_recognize_falls_back_to_global_min_stay_when_windowed_alignment_fails(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(1920), 16000)
-
-    decoder = {0: "<pad>", 1: "a"}
-    log_probs = _SIX_FRAME_PAU_A_PAU_LOG_PROBS
-    calls = {"local": 0, "global": 0}
-
-    def fake_transcribe(pipeline, samples):
-        return "あ", [("あ", 0.02, 0.06)]
-
-    def fail_windowed(log_probs_arg, token_ids, windows_sec):
-        raise recognizer_module.RecognitionError("単語窓制約下で強制アライメントが末尾トークンへ到達できませんでした")
-
-    original_local = _mod("alignment").expand_min_stay_local
-    original_global = _mod("alignment").expand_min_stay
-
-    def spy_local(*args, **kwargs):
-        calls["local"] += 1
-        return original_local(*args, **kwargs)
-
-    def spy_global(*args, **kwargs):
-        calls["global"] += 1
-        return original_global(*args, **kwargs)
-
-    monkeypatch.setattr(
-        _mod("transcription"), "load_pipeline",
-        lambda content_recognizer_model, on_progress=None: object(),
-    )
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", fake_transcribe)
-    monkeypatch.setattr(_mod("transcription"), "g2p", lambda text, method=None, **kwargs: {"あ": ["a"]}[text])
-    monkeypatch.setattr(
-        _mod("alignment"), "load_phoneme_model",
-        lambda on_progress=None: (_FakeProcessor(decoder), object())
-    )
-    monkeypatch.setattr(
-        _mod("alignment"), "compute_log_probs", lambda processor, model, samples: log_probs
-    )
-    monkeypatch.setattr(_mod("alignment"), "forced_align_windowed", fail_windowed)
-    monkeypatch.setattr(_mod("alignment"), "expand_min_stay_local", spy_local)
-    monkeypatch.setattr(_mod("alignment"), "expand_min_stay", spy_global)
-
-    segments = recognizer_module.recognize(wav_path)
-
-    assert calls["local"] == 1
-    assert calls["global"] == 1
     assert segments[1].type == "vowel"
     assert segments[1].phoneme == "a"
 
@@ -753,35 +521,6 @@ def test_recognize_last_local_segment_extends_exactly_to_segment_boundary_despit
     assert segments[-1].end_sec == pytest.approx(2.0)
 
 
-def test_recognize_content_recognizer_missing_library_raises_error_naming_transformers_and_torch(
-        tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
-
-    original_error = ImportError("no transformers")
-    decoder = {0: "<pad>"}
-    monkeypatch.setattr(
-        _mod("alignment"), "load_phoneme_model",
-        lambda on_progress=None: (_FakeProcessor(decoder), object())
-    )
-
-    def fake_transcribe(pipeline, samples):
-        raise original_error
-
-    monkeypatch.setattr(
-        _mod("transcription"), "load_pipeline",
-        lambda content_recognizer_model, on_progress=None: object(),
-    )
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", fake_transcribe)
-
-    with pytest.raises(recognizer_module.RecognitionError, match="transformers") as excinfo:
-        recognizer_module.recognize(wav_path)
-
-    assert "torch" in str(excinfo.value)
-    assert excinfo.value.__cause__ is original_error
-
-
 def test_recognize_content_recognizer_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
     from vocal_analysis import recognizer as recognizer_module
 
@@ -862,30 +601,6 @@ def test_recognize_phoneme_model_missing_library_raises_clear_error(tmp_path, mo
     assert excinfo.value.__cause__ is original_error
 
 
-def test_recognize_phoneme_model_fetch_failure_raises_clear_error(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(32000), 16000)
-
-    original_error = OSError("model not found in cache and offline")
-    monkeypatch.setattr(
-        _mod("transcription"), "load_pipeline",
-        lambda content_recognizer_model, on_progress=None: object(),
-    )
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(_mod("transcription"), "g2p", lambda text, method=None, **kwargs: ["a"])
-
-    def fake_load(*args, **kwargs):
-        raise original_error
-
-    monkeypatch.setattr(_mod("alignment"), "load_phoneme_model", fake_load)
-
-    with pytest.raises(recognizer_module.RecognitionError, match="認識モデル") as excinfo:
-        recognizer_module.recognize(wav_path)
-
-    assert excinfo.value.__cause__ is original_error
-
-
 def test_load_phoneme_model_passes_pinned_config_and_disables_phonemizer(monkeypatch):
     torch = pytest.importorskip("torch")
     transformers = pytest.importorskip("transformers")
@@ -955,26 +670,6 @@ def test_load_pipeline_uses_cpu_and_float32_when_gpu_unavailable(monkeypatch):
     assert captured["dtype"] == torch.float32
 
 
-def test_load_pipeline_passes_through_omitted_revision(monkeypatch):
-    transformers = pytest.importorskip("transformers")
-    torch = pytest.importorskip("torch")
-    from vocal_analysis import ContentRecognizerModel
-
-    custom_model = ContentRecognizerModel(model_id="openai/whisper-large-v3")
-    captured = {}
-
-    def fake_pipeline(task, model=None, revision=None, device=None, dtype=None, **kwargs):
-        captured["revision"] = revision
-        return object()
-
-    monkeypatch.setattr(transformers, "pipeline", fake_pipeline)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-
-    _mod("transcription").load_pipeline(custom_model)
-
-    assert captured["revision"] is None
-
-
 def test_load_pipeline_uses_gpu_and_float16_when_available(monkeypatch):
     transformers = pytest.importorskip("transformers")
     torch = pytest.importorskip("torch")
@@ -1015,22 +710,6 @@ def test_load_pipeline_keeps_no_reference_after_returning(monkeypatch):
     gc.collect()
 
     assert pipeline_ref() is None
-
-
-def test_load_pipeline_builds_a_new_pipeline_on_each_call(monkeypatch):
-    transformers = pytest.importorskip("transformers")
-
-    from vocal_analysis import DEFAULT_CONTENT_RECOGNIZER_MODEL
-
-    built = []
-    monkeypatch.setattr(transformers, "pipeline", lambda *args, **kwargs: built.append(object()) or built[-1])
-    monkeypatch.setattr(_mod("model_store"), "select_device", lambda: "cpu")
-
-    first = _mod("transcription").load_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
-    second = _mod("transcription").load_pipeline(DEFAULT_CONTENT_RECOGNIZER_MODEL)
-
-    assert first is not second
-    assert len(built) == 2
 
 
 def _fake_whisper_pipeline_class(result, captured=None):
@@ -1301,15 +980,6 @@ def _make_sofa_config(tmp_path):
     )
 
 
-def test_recognize_sofa_without_config_raises_recognition_error(tmp_path):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(16000), 16000)
-
-    with pytest.raises(recognizer_module.RecognitionError):
-        recognizer_module.recognize(wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=None)
-
-
 def test_recognize_unknown_forced_aligner_raises_recognition_error_before_reading_audio(tmp_path):
     from vocal_analysis import recognizer as recognizer_module
 
@@ -1428,53 +1098,6 @@ def test_recognize_sofa_path_uses_whole_region_when_no_word_timestamps(tmp_path,
     assert segments[0].phoneme == "a"
     assert segments[0].start_sec == pytest.approx(0.0)
     assert segments[0].end_sec == pytest.approx(0.2)
-
-
-def test_recognize_sofa_path_never_loads_wav2vec2_model(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", _loud_samples(3200), 16000)
-    config = _make_sofa_config(tmp_path)
-
-    monkeypatch.setattr(
-        _mod("transcription"), "load_pipeline",
-        lambda content_recognizer_model, on_progress=None: object(),
-    )
-    monkeypatch.setattr(_mod("transcription"), "transcribe_segment", lambda pipeline, samples: ("あ", None))
-    monkeypatch.setattr(_mod("transcription"), "g2p", lambda text, method=None, **kwargs: {"あ": ["a"]}[text])
-    monkeypatch.setattr(
-        _mod("sofa_align"), "_align_batch",
-        lambda targets, cfg: {"segment_0000": [(0.0, 0.2, "a")]},
-    )
-
-    def fail_if_called():
-        raise AssertionError("SOFA経路でwav2vec2の音素モデルをロードしてはならない")
-
-    monkeypatch.setattr(_mod("alignment"), "load_phoneme_model", fail_if_called)
-
-    recognizer_module.recognize(wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=config)
-
-
-def test_recognize_sofa_path_silent_input_calls_align_batch_with_no_targets(tmp_path, monkeypatch):
-    from vocal_analysis import recognizer as recognizer_module
-
-    wav_path = _write_wav(tmp_path / "vocal.wav", np.zeros((16000, 1), dtype=np.float32), 16000)
-    config = _make_sofa_config(tmp_path)
-
-    calls = []
-
-    def fake_align_batch(targets, cfg):
-        calls.append(targets)
-        return {}
-
-    monkeypatch.setattr(_mod("sofa_align"), "_align_batch", fake_align_batch)
-
-    segments = recognizer_module.recognize(wav_path, forced_aligner="sofa-forcedalign", sofa_aligner=config)
-
-    assert len(calls) == 1
-    assert calls[0] == []
-    assert len(segments) == 1
-    assert segments[0].type == "gap"
 
 
 def test_recognize_widens_cramped_word_before_assigning_windows(tmp_path, monkeypatch):

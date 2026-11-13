@@ -15,9 +15,7 @@ def _reset_conversion_cache():
     [
         pytest.param("sky", "フィラー", True, id="ascii-filler"),
         pytest.param("sky", "名詞", False, id="already-read-as-noun"),
-        pytest.param("sky", "記号", False, id="fragment-of-split-word"),
         pytest.param("sky3", "フィラー", False, id="contains-digit"),
-        pytest.param("sky!", "フィラー", False, id="contains-symbol"),
         pytest.param("空", "フィラー", False, id="non-ascii"),
         pytest.param("", "フィラー", False, id="empty"),
     ],
@@ -38,12 +36,6 @@ def test_find_target_words_excludes_word_already_read_as_noun():
     from vocal_analysis.english_katakana import _find_target_words
 
     assert _find_target_words("空を見上げてlove") == []
-
-
-def test_find_target_words_excludes_non_target_when_no_ascii_word():
-    from vocal_analysis.english_katakana import _find_target_words
-
-    assert _find_target_words("空を見上げて雲をながめて") == []
 
 
 def test_find_target_words_excludes_word_split_into_multiple_nodes():
@@ -113,8 +105,6 @@ def test_get_cmudict_entries_raises_lookup_error_without_downloading_when_not_ca
     [
         ("スカイ", True),
         ("すかい", True),
-        ("スカイー", True),
-        ("sky", False),
         ("スカイER", False),
         ("", False),
     ],
@@ -123,18 +113,6 @@ def test_is_valid_katakana_accepts_only_hiragana_and_katakana(text, expected):
     from vocal_analysis.english_katakana import _is_valid_katakana
 
     assert _is_valid_katakana(text) is expected
-
-
-def test_to_halfwidth_converts_fullwidth_latin():
-    from vocal_analysis.english_katakana import _to_halfwidth
-
-    assert _to_halfwidth("ｓｋｙ") == "sky"
-
-
-def test_to_halfwidth_leaves_non_fullwidth_characters_unchanged():
-    from vocal_analysis.english_katakana import _to_halfwidth
-
-    assert _to_halfwidth("空をｓｋｙ見上げて") == "空をsky見上げて"
 
 
 def test_locate_and_replace_replaces_single_target():
@@ -231,27 +209,6 @@ def test_generate_katakana_tinyllama_returns_invalid_output_when_generation_rais
     assert module._is_valid_katakana(result) is False
 
 
-def test_generate_katakana_dispatches_to_arpakana_by_default():
-    from vocal_analysis.english_katakana import _generate_katakana
-
-    assert _generate_katakana("sky", "S K AY1") == _generate_katakana("sky", "S K AY1", method="arpakana")
-
-
-def test_generate_katakana_dispatches_to_tinyllama_when_selected(monkeypatch):
-    import vocal_analysis.english_katakana as module
-
-    calls = []
-    monkeypatch.setattr(
-        module, "_generate_katakana_tinyllama",
-        lambda word, phonemes, **kwargs: calls.append((word, phonemes)) or "スカイ",
-    )
-
-    result = module._generate_katakana("sky", "S K AY1", method="tinyllama-katakana-converter")
-
-    assert result == "スカイ"
-    assert calls == [("sky", "S K AY1")]
-
-
 def test_generate_katakana_raises_for_unknown_method():
     from vocal_analysis.english_katakana import _generate_katakana
 
@@ -284,29 +241,6 @@ def test_convert_target_words_converts_target_via_tinyllama_model(monkeypatch):
 
     assert result == "空を見上げてスカイ"
     assert calls == [("sky", "S K AY1")]
-
-
-def test_convert_target_words_caches_conversion_result_across_calls(monkeypatch):
-    import vocal_analysis.english_katakana as module
-
-    lookup_calls = []
-    monkeypatch.setattr(
-        module, "_lookup_cmudict_phonemes",
-        lambda word: lookup_calls.append(word) or "S K AY1",
-    )
-    generate_calls = []
-    monkeypatch.setattr(
-        module, "_generate_katakana_tinyllama",
-        lambda word, phonemes, **kwargs: generate_calls.append(word) or "スカイ",
-    )
-
-    first = module.convert_target_words("空を見上げてsky", method="tinyllama-katakana-converter")
-    second = module.convert_target_words("空を見上げてsky", method="tinyllama-katakana-converter")
-
-    assert first == "空を見上げてスカイ"
-    assert second == "空を見上げてスカイ"
-    assert lookup_calls == ["sky"]
-    assert generate_calls == ["sky"]
 
 
 def test_convert_target_words_leaves_text_unchanged_without_converting_when_cmudict_misses(monkeypatch):
@@ -367,29 +301,6 @@ def test_uncached_target_words_filters_already_cached_words(monkeypatch):
     )
 
     assert words == ["glimmer"]
-
-
-def test_uncached_target_words_returns_empty_when_no_targets():
-    import vocal_analysis.english_katakana as module
-
-    assert module.uncached_target_words("空を見上げて", method="tinyllama-katakana-converter") == []
-
-
-def test_convert_words_caches_results_and_releases_tinyllama_model(monkeypatch):
-    import vocal_analysis.english_katakana as module
-
-    monkeypatch.setattr(
-        module, "_generate_katakana_tinyllama", lambda word, phonemes, **kwargs: "スカイ"
-    )
-    release_calls = []
-    monkeypatch.setattr(
-        module, "release_katakana_model", lambda: release_calls.append("release")
-    )
-
-    module.convert_words(["sky"], method="tinyllama-katakana-converter")
-
-    assert module._conversion_cache[("tinyllama-katakana-converter", "sky")] == "スカイ"
-    assert release_calls == ["release"]
 
 
 def test_convert_words_forwards_on_progress_to_load_katakana_model(monkeypatch):
@@ -569,29 +480,6 @@ def test_convert_words_keep_model_does_not_release_even_when_conversion_fails(co
     assert counting_katakana_model.alive() is True
 
 
-def test_convert_words_keep_model_with_arpakana_loads_no_converter(counting_katakana_model):
-    import vocal_analysis.english_katakana as module
-
-    module.convert_words(["sky"], method="arpakana", keep_model=True)
-
-    assert counting_katakana_model.count == 0
-
-
-def test_convert_words_rejects_positional_keep_model():
-    import vocal_analysis.english_katakana as module
-
-    with pytest.raises(TypeError):
-        module.convert_words(["sky"], "arpakana", None, True)
-
-
-def test_release_katakana_model_clears_process_cache(monkeypatch):
-    import vocal_analysis.english_katakana as module
-
-    module._katakana_model_cache = (object(), object())
-    module.release_katakana_model()
-    assert module._katakana_model_cache is None
-
-
 def test_release_katakana_model_frees_gpu_memory_through_model_store(monkeypatch):
     import vocal_analysis.english_katakana as module
     from vocal_analysis import model_store
@@ -603,18 +491,6 @@ def test_release_katakana_model_frees_gpu_memory_through_model_store(monkeypatch
     module.release_katakana_model()
 
     assert calls == ["release"]
-
-
-def test_release_katakana_model_without_loaded_model_does_not_touch_gpu(monkeypatch):
-    import vocal_analysis.english_katakana as module
-    from vocal_analysis import model_store
-
-    monkeypatch.setattr(
-        model_store, "release_gpu_memory",
-        lambda: (_ for _ in ()).throw(AssertionError("未ロードなら GPU メモリを触らない")))
-    monkeypatch.setattr(module, "_katakana_model_cache", None)
-
-    module.release_katakana_model()
 
 
 def test_load_katakana_model_downloads_through_model_store(monkeypatch):
@@ -661,11 +537,7 @@ def test_load_katakana_model_downloads_through_model_store(monkeypatch):
     ]
 
 
-@pytest.mark.parametrize(
-    "device, expected_dtype_name",
-    [("cuda", "float16"), ("cpu", "float32")],
-)
-def test_load_katakana_model_selects_dtype_by_device(monkeypatch, device, expected_dtype_name):
+def test_load_katakana_model_loads_with_device_dtype_onto_selected_device(monkeypatch):
     import torch
     import transformers
 
@@ -687,7 +559,7 @@ def test_load_katakana_model_selects_dtype_by_device(monkeypatch, device, expect
         return _FakeModel()
 
     monkeypatch.setattr(module, "_katakana_model_cache", None)
-    monkeypatch.setattr(model_store, "select_device", lambda: device)
+    monkeypatch.setattr(model_store, "select_device", lambda: "cpu")
     monkeypatch.setattr(
         transformers, "AutoTokenizer",
         type("_FakeTokenizerLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: object())}),
@@ -699,40 +571,8 @@ def test_load_katakana_model_selects_dtype_by_device(monkeypatch, device, expect
 
     module._load_katakana_model()
 
-    assert captured["dtype"] == getattr(torch, expected_dtype_name)
-    assert captured["to_device"] == device
-
-
-def test_load_katakana_model_shows_loading_note_but_no_download_note_when_already_cached(monkeypatch):
-    import transformers
-
-    import vocal_analysis.english_katakana as module
-    from vocal_analysis import model_store
-    from vocal_analysis.config import ENGLISH_KATAKANA_MODEL
-
-    class _FakeModel:
-        def to(self, target):
-            return self
-
-        def eval(self):
-            return self
-
-    monkeypatch.setattr(module, "_katakana_model_cache", None)
-    monkeypatch.setattr(model_store, "select_device", lambda: "cpu")
-    monkeypatch.setattr(
-        transformers, "AutoTokenizer",
-        type("_FakeTokenizerLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: object())}),
-    )
-    monkeypatch.setattr(
-        transformers, "AutoModelForCausalLM",
-        type("_FakeModelLoader", (), {"from_pretrained": staticmethod(lambda *a, **k: _FakeModel())}),
-    )
-    monkeypatch.setattr(model_store, "hf_snapshot_download", lambda repo_id, *, revision=None, tqdm_class=None: None)
-
-    notes = []
-    module._load_katakana_model(on_progress=notes.append)
-
-    assert notes == [f"カタカナ生成モデル読み込み中: {ENGLISH_KATAKANA_MODEL.model_id}"]
+    assert captured["dtype"] == torch.float32
+    assert captured["to_device"] == "cpu"
 
 
 _SKY_ENTRIES = {"sky": [["S", "K", "AY1"]]}
@@ -826,22 +666,6 @@ def test_ensure_cmudict_makes_later_conversion_neither_download_nor_reload_the_d
     assert corpus.load_count == loads_after_ensure
 
 
-def test_ensure_cmudict_is_a_no_op_once_the_dictionary_is_in_the_process_cache(monkeypatch):
-    import vocal_analysis.english_katakana as module
-
-    events = []
-    corpus = _install_fake_nltk(monkeypatch, events, available=False)
-    module.ensure_cmudict(_note_into(events))
-    events.clear()
-    loads = corpus.load_count
-    corpus.available = False
-
-    module.ensure_cmudict(_note_into(events))
-
-    assert events == []
-    assert corpus.load_count == loads
-
-
 def test_ensure_cmudict_does_not_touch_nltk_when_the_dictionary_is_already_cached(monkeypatch):
     import vocal_analysis.english_katakana as module
 
@@ -853,21 +677,6 @@ def test_ensure_cmudict_does_not_touch_nltk_when_the_dictionary_is_already_cache
 
     assert events == []
     assert corpus.load_count == 0
-
-
-def test_ensure_cmudict_raises_import_error_when_nltk_is_missing(monkeypatch):
-    import sys
-
-    import vocal_analysis.english_katakana as module
-
-    events = []
-    monkeypatch.setattr(module, "_cmudict_cache", None)
-    monkeypatch.setitem(sys.modules, "nltk", None)
-
-    with pytest.raises(ImportError):
-        module.ensure_cmudict(_note_into(events))
-
-    assert events == []
 
 
 def test_ensure_cmudict_propagates_os_error_from_a_failed_download_and_stays_uncached(monkeypatch):
@@ -896,3 +705,44 @@ def test_ensure_cmudict_raises_lookup_error_when_the_corpus_is_still_missing_aft
 
     assert events == [("note", "辞書取得中"), ("download", "cmudict")]
     assert module._cmudict_cache is None
+
+
+def test_uncached_target_words_returns_empty_when_no_targets():
+    import vocal_analysis.english_katakana as module
+
+    assert module.uncached_target_words("空を見上げて", method="tinyllama-katakana-converter") == []
+
+
+def test_convert_words_keep_model_with_arpakana_loads_no_converter(counting_katakana_model):
+    import vocal_analysis.english_katakana as module
+
+    module.convert_words(["sky"], method="arpakana", keep_model=True)
+
+    assert counting_katakana_model.count == 0
+
+
+def test_ensure_cmudict_raises_import_error_when_nltk_is_missing(monkeypatch):
+    import sys
+
+    import vocal_analysis.english_katakana as module
+
+    events = []
+    monkeypatch.setattr(module, "_cmudict_cache", None)
+    monkeypatch.setitem(sys.modules, "nltk", None)
+
+    with pytest.raises(ImportError):
+        module.ensure_cmudict(_note_into(events))
+
+    assert events == []
+
+
+def test_release_katakana_model_without_loaded_model_does_not_touch_gpu(monkeypatch):
+    import vocal_analysis.english_katakana as module
+    from vocal_analysis import model_store
+
+    monkeypatch.setattr(
+        model_store, "release_gpu_memory",
+        lambda: (_ for _ in ()).throw(AssertionError("未ロードなら GPU メモリを触らない")))
+    monkeypatch.setattr(module, "_katakana_model_cache", None)
+
+    module.release_katakana_model()

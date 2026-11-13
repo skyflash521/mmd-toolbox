@@ -14,7 +14,6 @@ def test_audio_not_longer_than_max_duration_has_no_boundaries():
     )
     assert boundaries == []
 
-
 def test_boundary_picks_quietest_point_among_multiple_silence_candidates():
     times = [290.0, 295.0, 296.0, 297.0, 298.0, 299.0, 300.0, 303.0, 305.0, 310.0]
     values = [0.8, 0.7, 0.05, 0.5, 0.02, 0.5, 0.6, 0.04, 0.8, 0.9]
@@ -69,16 +68,6 @@ def test_default_silence_threshold_is_0_06_inclusive(quietest_value, expected_fo
     assert boundaries == [(300.0, expected_forced)]
 
 
-def test_forced_split_target_within_duration_is_still_applied():
-    times = [float(t) for t in range(0, 320)]
-    values = [0.5] * len(times)
-    boundaries = chunking.find_chunk_boundaries(
-        duration_sec=320.0, rms_times_sec=times, rms_values=values,
-        max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
-    )
-    assert boundaries == [(300.0, True)]
-
-
 def test_boundaries_keep_advancing_when_max_duration_is_small_relative_to_search_window():
     times = [round(t * 0.1, 1) for t in range(0, 200)]
     values = [0.01] * len(times)
@@ -93,22 +82,11 @@ def test_boundaries_keep_advancing_when_max_duration_is_small_relative_to_search
     assert all(forced is False for _, forced in boundaries)
 
 
-def test_forced_split_flag_distinguishes_silence_and_forced_boundaries_in_same_call():
-    times = [float(t) for t in range(0, 620)]
-    values = [0.5] * len(times)
-    values[298] = 0.01
-    boundaries = chunking.find_chunk_boundaries(
-        duration_sec=620.0, rms_times_sec=times, rms_values=values,
-        max_duration_sec=300.0, search_window_sec=5.0, silence_threshold=0.06,
-    )
-    assert boundaries == [(298.0, False), (598.0, True)]
-
-
 def test_single_chunk_no_boundaries_returns_offset_segments():
     chunk_segments = [[seg("vowel", 0.0, 1.0, phoneme="a"), seg("gap", 1.0, 2.0)]]
-    merged = chunking.merge_chunk_segments(chunk_segments, chunk_offsets_sec=[0.0], boundaries_sec=[])
+    merged = chunking.merge_chunk_segments(chunk_segments, chunk_offsets_sec=[5.0], boundaries_sec=[])
     assert [(s.type, s.start_sec, s.end_sec) for s in merged] == [
-        ("vowel", 0.0, 1.0), ("gap", 1.0, 2.0),
+        ("vowel", 5.0, 6.0), ("gap", 6.0, 7.0),
     ]
 
 

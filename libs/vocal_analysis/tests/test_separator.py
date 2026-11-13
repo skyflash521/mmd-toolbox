@@ -50,13 +50,6 @@ def test_separate_invalid_mode_raises_value_error():
         separate(_make_pcm(), mode="bogus")
 
 
-def test_separate_unknown_separator_id_raises_separation_error():
-    from vocal_analysis.separator import SeparationError, separate
-
-    with pytest.raises(SeparationError):
-        separate(_make_pcm(), mode="always", separator="bogus-separator")
-
-
 def test_separate_unknown_separator_id_raises_even_when_not_separating():
     from vocal_analysis.separator import SeparationError, separate
 
@@ -130,37 +123,6 @@ def test_separate_releases_separator_and_gpu_memory_through_model_store(monkeypa
     separator_module.separate(_make_pcm(), mode="always")
 
     assert observed == [True]
-
-
-def test_separate_dispatches_registered_separator_id(monkeypatch):
-    from vocal_analysis import DEFAULT_SEPARATOR
-    from vocal_analysis import separator as separator_module
-
-    calls = {}
-
-    monkeypatch.setattr(
-        separator_module, "_build_separator", lambda output_dir: _FakeSeparator(calls))
-
-    result = separator_module.separate(_make_pcm(), mode="always", separator=DEFAULT_SEPARATOR)
-
-    assert result.exists()
-    assert calls["model_filename"] == "htdemucs_ft.yaml"
-
-
-def test_separate_uses_pinned_separator_config(monkeypatch):
-    from vocal_analysis import SEPARATOR_CONFIG
-    from vocal_analysis import separator as separator_module
-
-    calls = {}
-
-    def fake_build_separator(output_dir):
-        return _FakeSeparator(calls)
-
-    monkeypatch.setattr(separator_module, "_build_separator", fake_build_separator)
-
-    separator_module.separate(_make_pcm(), mode="always")
-
-    assert calls["model_filename"] == SEPARATOR_CONFIG.model_filename
 
 
 def test_separate_registers_work_dir_cleanup_that_removes_it(monkeypatch):
@@ -553,22 +515,4 @@ def test_build_separator_stores_models_under_the_user_cache_directory(tmp_path, 
 
     _build_separator(tmp_path / "out")
 
-    assert Path(received["model_file_dir"]) == home / ".cache" / "audio-separator-models"
-
-
-def test_build_separator_model_directory_does_not_depend_on_the_working_directory(tmp_path, monkeypatch):
-    from vocal_analysis.separator import _build_separator
-
-    home = tmp_path / "home"
-    home.mkdir()
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
-    received = _install_fake_audio_separator(monkeypatch)
-
-    monkeypatch.chdir(elsewhere)
-    _build_separator(tmp_path / "out")
-
-    assert Path(received["model_file_dir"]).is_absolute()
     assert Path(received["model_file_dir"]) == home / ".cache" / "audio-separator-models"

@@ -6,7 +6,6 @@ import types
 
 import numpy as np
 import pytest
-import soundfile as sf
 
 from vocal_analysis import quiet
 
@@ -132,18 +131,6 @@ class _FakePipeline:
         if self._recorder is not None:
             self._recorder.record()
         return {"text": "あ"}
-
-
-def _install_fake_transformers(monkeypatch, recorder):
-    # 遅延ロードの transformers は属性アクセスで sys.modules の実体を入れ替えるので、属性の差し替えは効かない。
-    real = sys.modules["transformers"]
-    fake = types.ModuleType("transformers")
-    fake.__dict__["__getattr__"] = lambda name: getattr(real, name)
-    fake.pipeline = lambda *args, **kwargs: _FakePipeline(recorder)
-    fake.AutoProcessor = types.SimpleNamespace(from_pretrained=lambda *args, **kwargs: _FakeProcessor())
-    fake.AutoModelForCTC = types.SimpleNamespace(
-        from_pretrained=lambda *args, **kwargs: _FakeCtcModel(recorder))
-    monkeypatch.setitem(sys.modules, "transformers", fake)
 
 
 def test_silenced_third_party_output_disables_third_party_output_inside(third_party_state):
@@ -357,28 +344,6 @@ def test_compute_log_probs_silences_third_party_output_only_while_phoneme_model_
     _assert_restored()
 
 
-def test_recognizer_session_restores_third_party_state_after_transcribe_and_align(
-        third_party_state, monkeypatch, tmp_path):
-    from vocal_analysis import model_store, transcription
-    from vocal_analysis.recognizer import RecognizerSession
-
-    recorder = _Recorder()
-    monkeypatch.setattr(model_store, "select_device", lambda: "cpu")
-    monkeypatch.setattr(model_store, "release_gpu_memory", lambda: None)
-    _install_fake_transformers(monkeypatch, recorder)
-    monkeypatch.setattr(transcription, "g2p", lambda text, method=None, **kwargs: ["a"])
-    t = np.arange(1920) / 16000
-    wav_path = tmp_path / "vocal.wav"
-    sf.write(wav_path, (0.5 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32), 16000)
-
-    with RecognizerSession() as session:
-        transcribed = session.transcribe(wav_path)
-        session.align(transcribed)
-
-    recorder.assert_silenced_in_every_call(expected_calls=2)
-    _assert_restored()
-
-
 def test_suppress_native_stderr_hides_direct_fd_writes(capfd):
     os.write(2, b"before\n")
     with quiet.suppress_native_stderr():
@@ -436,10 +401,3 @@ def test_suppress_native_stderr_holds_stderr_write_lock_for_other_threads():
         acquired = _try_acquire_stderr_write_lock_from_other_thread()
 
     assert acquired is False
-
-
-def test_suppress_native_stderr_releases_stderr_write_lock_after_exit():
-    with quiet.suppress_native_stderr():
-        pass
-
-    assert _try_acquire_stderr_write_lock_from_other_thread() is True

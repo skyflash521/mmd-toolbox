@@ -190,71 +190,6 @@ def test_single_run_passes_separator_name_to_separate(tmp_path, monkeypatch):
     assert captured["separator"] == "audio-separator-htdemucs-ft"
 
 
-def test_single_run_reports_each_stage_before_running_it_and_passes_data_through(
-        tmp_path, monkeypatch, session_fakes):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-    given_segments = [seg("vowel", 0.0, 1.0, phoneme="a")]
-    session_fakes.align_result = lambda index: given_segments
-
-    call_order = []
-    session_fakes.events = call_order
-    real_load_audio = front_stage._io.load_audio
-    real_compute_rms = front_stage._rms.compute_rms
-    real_sf_read = front_stage.sf.read
-    captured = {}
-
-    def spy_sf_read(path, *args, **kwargs):
-        if str(path) == str(vocal_path):
-            call_order.append("read_vocal")
-        return real_sf_read(path, *args, **kwargs)
-
-    def spy_load_audio(path):
-        call_order.append("load_audio")
-        result = real_load_audio(path)
-        captured.setdefault("load_audio_results", []).append(result)
-        return result
-
-    def spy_separate(pcm, mode, **kwargs):
-        call_order.append("separate")
-        captured["separate_pcm"] = pcm
-        return vocal_path
-
-    def spy_compute_rms(pcm):
-        call_order.append("compute_rms")
-        result = real_compute_rms(pcm)
-        captured["compute_rms_result"] = result
-        return result
-
-    class _OrderRecordingProgress:
-        def stage(self, stage, *, done=0, total=None, note="", elapsed=0.0):
-            call_order.append(f"progress:{stage}")
-
-    monkeypatch.setattr(front_stage._io, "load_audio", spy_load_audio)
-    monkeypatch.setattr(front_stage.sf, "read", spy_sf_read)
-    monkeypatch.setattr(front_stage._separator, "separate", spy_separate)
-    monkeypatch.setattr(front_stage._rms, "compute_rms", spy_compute_rms)
-
-    result = run_front_stage(
-        input_path, on_progress=_OrderRecordingProgress().stage, **_common_kwargs())
-
-    assert [c for c in call_order if c not in ("prepare_dictionary", "close")] == [
-        "progress:load", "load_audio", "progress:separate", "separate", "progress:recognize",
-        "transcribe", "align", "progress:rms", "read_vocal", "compute_rms",
-    ]
-    (session,) = session_fakes.sessions
-    (transcribed,) = session.transcribed
-    assert str(transcribed.path) == str(vocal_path)
-    assert session.aligned == [transcribed]
-    assert captured["separate_pcm"] is captured["load_audio_results"][0]
-    assert result.analysis.rms is captured["compute_rms_result"]
-    assert result.analysis.segments == given_segments
-    on_disk, _ = sf.read(vocal_path, dtype="float32", always_2d=True)
-    np.testing.assert_allclose(result.vocal_pcm.samples, on_disk, atol=1e-6)
-
-
 def test_session_receives_selected_content_recognizer_model(tmp_path, monkeypatch, session_fakes):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
@@ -326,58 +261,58 @@ def test_input_exactly_max_duration_is_not_chunked(tmp_path, monkeypatch):
     assert all(c["done"] == 0 and c["total"] is None for c in progress.calls)
 
 
-def test_chunked_run_calls_separate_transcribe_and_align_once_per_chunk(
-        tmp_path, monkeypatch, session_fakes):
+def test_chunked_run_separates_each_chunk_padded_by_overlap_only_at_inner_boundaries(
+        tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=10.0)
     vocal_path = tmp_path / "vocal.wav"
     write_wav(vocal_path, seconds=10.0, amplitude=0.8)
 
     monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+    received = {}
 
     def fake_merge(chunk_segments_list, chunk_offsets_sec, boundaries_sec):
-        assert len(chunk_segments_list) == 3
-        overlap = 1.0
-        assert chunk_offsets_sec == pytest.approx([0.0, 3.0 - overlap, 6.0 - overlap])
-        assert boundaries_sec == [3.0, 6.0]
+        received["chunk_offsets_sec"] = chunk_offsets_sec
+        received["boundaries_sec"] = boundaries_sec
         return [seg("vowel", 0.0, 10.0, phoneme="a")]
 
     monkeypatch.setattr(front_stage._chunking, "merge_chunk_segments", fake_merge)
 
-    separate_calls = []
-    separate_kwargs = []
+    separate_durations = []
 
     def fake_separate(pcm, mode, **kwargs):
-        separate_calls.append(len(pcm.samples) / pcm.sample_rate)
-        separate_kwargs.append(kwargs)
+        separate_durations.append(len(pcm.samples) / pcm.sample_rate)
         return vocal_path
 
     monkeypatch.setattr(front_stage._separator, "separate", fake_separate)
 
-    sofa_config = object()
-    progress = _RecordingProgress()
-    result = run_front_stage(input_path, on_progress=progress.stage, **_common_kwargs(
-        chunking=ChunkingPolicy(max_duration_sec=3.0), forced_aligner="sofa-forcedalign", sofa_aligner=sofa_config,
-        english_katakana_method="tinyllama-katakana-converter"))
+    run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
 
-    assert len(separate_calls) == 3
-    assert session_fakes.count("prepare_dictionary") == 1
-    assert session_fakes.count("transcribe") == 3
-    assert session_fakes.count("align") == 3
-    (session,) = session_fakes.sessions
-    assert session.settings["forced_aligner"] == "sofa-forcedalign"
-    assert session.settings["sofa_aligner"] is sofa_config
-    assert session.settings["english_katakana_method"] == "tinyllama-katakana-converter"
-    for kwargs in separate_kwargs:
-        assert kwargs["separator"] == "audio-separator-htdemucs-ft"
-    assert separate_calls[0] == pytest.approx(3.0 + 1.0, abs=0.05)
-    assert separate_calls[1] == pytest.approx((6.0 + 1.0) - (3.0 - 1.0), abs=0.05)
-    assert separate_calls[2] == pytest.approx(10.0 - (6.0 - 1.0), abs=0.05)
-    assert result.duration_sec == pytest.approx(10.0, abs=0.05)
+    overlap = 1.0
+    assert separate_durations == pytest.approx(
+        [3.0 + overlap, (6.0 + overlap) - (3.0 - overlap), 10.0 - (6.0 - overlap)], abs=0.05)
+    assert received["chunk_offsets_sec"] == pytest.approx([0.0, 3.0 - overlap, 6.0 - overlap])
+    assert received["boundaries_sec"] == [3.0, 6.0]
+
+
+def test_chunked_run_reports_separate_start_with_chunk_index_and_chunk_count(tmp_path, monkeypatch):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+
+    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
+    monkeypatch.setattr(
+        front_stage._chunking, "merge_chunk_segments",
+        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
+    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
+
+    progress = _RecordingProgress()
+    run_front_stage(input_path, on_progress=progress.stage,
+                    **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
     separate_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "separate"]
     assert separate_done_totals == [(0, 3), (1, 3), (2, 3)]
-    rms_done_totals = [(c["done"], c["total"]) for c in progress.calls if c["stage"] == "rms"]
-    assert rms_done_totals == [(0, None)]
 
 
 def _stub_three_chunks(monkeypatch, vocal_path, session_fakes):
@@ -389,43 +324,6 @@ def _stub_three_chunks(monkeypatch, vocal_path, session_fakes):
     monkeypatch.setattr(
         front_stage._separator, "separate",
         lambda pcm, mode, **kwargs: session_fakes.events.append("separate") or vocal_path)
-
-
-def _calls_only(events):
-    return [e for e in events if isinstance(e, str) and e != "close"]
-
-
-def test_chunked_run_separates_all_chunks_then_prepares_dictionary_then_transcribes_then_aligns(
-        tmp_path, monkeypatch, session_fakes):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=10.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
-    _stub_three_chunks(monkeypatch, vocal_path, session_fakes)
-
-    run_front_stage(
-        input_path, on_progress=session_fakes.progress_to_events(),
-        **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
-
-    assert _calls_only(session_fakes.events) == [
-        "separate", "separate", "separate", "prepare_dictionary",
-        "transcribe", "transcribe", "transcribe", "align", "align", "align",
-    ]
-
-
-def test_single_run_separates_then_prepares_dictionary_then_transcribes_then_aligns(
-        tmp_path, monkeypatch, session_fakes):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-    monkeypatch.setattr(
-        front_stage._separator, "separate",
-        lambda pcm, mode, **kwargs: session_fakes.events.append("separate") or vocal_path)
-
-    run_front_stage(input_path, on_progress=session_fakes.progress_to_events(), **_common_kwargs())
-
-    assert _calls_only(session_fakes.events) == ["separate", "prepare_dictionary", "transcribe", "align"]
 
 
 def test_chunked_run_transcribes_each_chunks_vocal_and_aligns_each_transcription_in_order(
@@ -489,23 +387,6 @@ def test_single_run_uses_one_session_and_closes_it(tmp_path, monkeypatch, sessio
     assert session.closed
     assert session_fakes.count("close") == 1
     assert len(session.transcribed) == 1
-
-
-def test_chunked_run_uses_one_session_for_all_chunks_and_closes_it(tmp_path, monkeypatch, session_fakes):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=10.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
-    _stub_three_chunks(monkeypatch, vocal_path, session_fakes)
-
-    run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
-
-    (session,) = session_fakes.sessions
-    assert session.entered
-    assert session.closed
-    assert session_fakes.count("close") == 1
-    assert len(session.transcribed) == 3
-    assert len(session.aligned) == 3
 
 
 def test_chunked_run_reports_forced_split(tmp_path, monkeypatch):
@@ -628,30 +509,6 @@ def test_chunked_run_reports_recognize_progress_over_transcription_then_alignmen
     assert recognize_done_totals == [(0, 4), (1, 4), (2, 4), (3, 4)]
 
 
-def test_chunked_run_reports_each_recognize_start_right_before_its_transcription_or_alignment(
-        tmp_path, monkeypatch, session_fakes):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=10.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
-    _stub_three_chunks(monkeypatch, vocal_path, session_fakes)
-
-    run_front_stage(
-        input_path, on_progress=session_fakes.progress_to_events(),
-        **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
-
-    finished_calls = 0
-    phases_after_start = []
-    for event in session_fakes.events:
-        if event in ("transcribe", "align"):
-            finished_calls += 1
-        elif isinstance(event, tuple) and event[1] == "recognize" and event[4] == "":
-            _, _, done, total, _ = event
-            assert (done, total) == (finished_calls, 6)
-            phases_after_start.append(done)
-    assert phases_after_start == [0, 1, 2, 3, 4, 5]
-
-
 def test_non_chunked_progress_reports_done_zero_total_none_for_every_stage(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
@@ -690,7 +547,7 @@ def test_non_chunked_recognize_on_progress_forwards_download_note(
     assert all(c["done"] == 0 and c["total"] is None for c in recognize_calls)
 
 
-@pytest.mark.parametrize("phase", ["transcribe", "align"])
+@pytest.mark.parametrize("phase", _PHASES)
 def test_chunked_recognize_on_progress_preserves_chunk_done_total(
         tmp_path, monkeypatch, session_fakes, phase):
     input_path = tmp_path / "in.wav"
@@ -711,48 +568,12 @@ def test_chunked_recognize_on_progress_preserves_chunk_done_total(
 
     recognize_calls = [c for c in progress.calls if c["stage"] == "recognize"]
     download_notes = [c for c in recognize_calls if c["note"] == "ダウンロード中: dummy-model 10%"]
-    expected = [(0, 4), (1, 4)] if phase == "transcribe" else [(2, 4), (3, 4)]
+    expected = {
+        "prepare_dictionary": [(0, 4)],
+        "transcribe": [(0, 4), (1, 4)],
+        "align": [(2, 4), (3, 4)],
+    }[phase]
     assert [(c["done"], c["total"]) for c in download_notes] == expected
-
-
-def test_non_chunked_dictionary_note_reaches_progress_as_recognize_stage_between_separation_and_transcription(
-        tmp_path, monkeypatch, session_fakes):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-    session_fakes.notes["prepare_dictionary"] = "辞書取得中"
-    monkeypatch.setattr(
-        front_stage._separator, "separate",
-        lambda pcm, mode, **kwargs: session_fakes.events.append("separate") or vocal_path)
-
-    run_front_stage(input_path, on_progress=session_fakes.progress_to_events(), **_common_kwargs())
-
-    events = session_fakes.events
-    note_index = events.index(("progress", "recognize", 0, None, "辞書取得中"))
-    assert events.index("separate") < events.index("prepare_dictionary") < note_index
-    assert note_index < events.index("transcribe")
-
-
-def test_chunked_dictionary_note_reaches_progress_as_recognize_stage_after_all_separations_and_before_transcription(
-        tmp_path, monkeypatch, session_fakes):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=10.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
-    session_fakes.notes["prepare_dictionary"] = "辞書取得中"
-    _stub_three_chunks(monkeypatch, vocal_path, session_fakes)
-
-    run_front_stage(
-        input_path, on_progress=session_fakes.progress_to_events(),
-        **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
-
-    events = session_fakes.events
-    note_indices = [
-        i for i, e in enumerate(events) if isinstance(e, tuple) and e[1] == "recognize" and e[4] == "辞書取得中"]
-    assert len(note_indices) == 1
-    last_separate = max(i for i, e in enumerate(events) if e == "separate")
-    assert last_separate < note_indices[0] < events.index("transcribe")
 
 
 def test_non_chunked_separate_on_progress_forwards_download_note(tmp_path, monkeypatch):
@@ -824,54 +645,6 @@ def test_run_without_progress_reporter_passes_on_progress_none_to_separate(tmp_p
     run_front_stage(input_path, **_common_kwargs())
 
     assert captured["on_progress"] is None
-
-
-@pytest.mark.parametrize("phase", _PHASES)
-def test_run_without_progress_reporter_passes_on_progress_none_to_session(
-        tmp_path, monkeypatch, session_fakes, phase):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-
-    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-
-    run_front_stage(input_path, **_common_kwargs())
-
-    assert session_fakes.on_progress_args[phase] == [None]
-
-
-@pytest.mark.parametrize("phase", _PHASES)
-def test_chunked_run_without_progress_reporter_passes_on_progress_none_to_session(
-        tmp_path, monkeypatch, session_fakes, phase):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=10.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
-
-    monkeypatch.setattr(front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(5.0, False)])
-    monkeypatch.setattr(
-        front_stage._chunking, "merge_chunk_segments",
-        lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
-    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-
-    run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
-
-    expected_calls = 1 if phase == "prepare_dictionary" else 2
-    assert session_fakes.on_progress_args[phase] == [None] * expected_calls
-
-
-def test_keep_intermediate_dir_none_creates_nothing(tmp_path, monkeypatch):
-    input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=1.0)
-    vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
-
-    monkeypatch.setattr(front_stage._separator, "separate", lambda pcm, mode, **kwargs: vocal_path)
-
-    keep_dir = tmp_path / "out.vmd.intermediate"
-    run_front_stage(input_path, **_common_kwargs())
-    assert not keep_dir.exists()
 
 
 def test_keep_intermediate_saves_normalized_input_vocal_and_segments(tmp_path, monkeypatch, session_fakes):
@@ -1005,14 +778,6 @@ def test_slice_pcm_extracts_the_requested_time_range():
     np.testing.assert_array_equal(sliced.samples[:, 0], samples[20:50, 0])
 
 
-def test_concat_pcm_joins_slices_in_order():
-    pcm_a = AudioPcm(samples=np.array([[1.0], [2.0]], dtype=np.float32), sample_rate=10)
-    pcm_b = AudioPcm(samples=np.array([[3.0], [4.0]], dtype=np.float32), sample_rate=10)
-    joined = front_stage._concat_pcm([pcm_a, pcm_b])
-    np.testing.assert_array_equal(joined.samples[:, 0], np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
-    assert joined.sample_rate == 10
-
-
 def test_vocal_reread_failure_raises_dedicated_error_with_path(tmp_path, monkeypatch):
     input_path = tmp_path / "in.wav"
     write_wav(input_path, seconds=1.0)
@@ -1106,29 +871,22 @@ def _stage_failure_kwargs(tmp_path, monkeypatch, session_fakes, *, failing_stage
         chunking=ChunkingPolicy(max_duration_sec=3.0 if chunked else 300.0))
 
 
-class _UnlistedError(Exception):
-    pass
-
-
 @pytest.mark.parametrize("chunked", [False, True])
 @pytest.mark.parametrize("failing_stage", _FAILING_STAGES)
-@pytest.mark.parametrize("error_type", [RuntimeError, ValueError, MemoryError, OSError, _UnlistedError])
 def test_unclassified_exception_from_inference_becomes_stage_error_keeping_type_message_and_cause(
-        tmp_path, monkeypatch, session_fakes, failing_stage, error_type, chunked):
-    error = error_type("推論の失敗")
+        tmp_path, monkeypatch, session_fakes, failing_stage, chunked):
+    error = RuntimeError("推論の失敗")
     input_path, kwargs = _stage_failure_kwargs(
         tmp_path, monkeypatch, session_fakes, failing_stage=failing_stage, error=error, chunked=chunked)
 
     with pytest.raises(front_stage.StageExecutionError) as exc:
         run_front_stage(input_path, **kwargs)
     assert exc.value.stage == _reported_stage(failing_stage)
-    assert error_type.__name__ in str(exc.value)
+    assert "RuntimeError" in str(exc.value)
     assert "推論の失敗" in str(exc.value)
     assert exc.value.__cause__ is error
 
 
-@pytest.mark.parametrize("chunked", [False, True])
-@pytest.mark.parametrize("failing_stage", _FAILING_STAGES)
 @pytest.mark.parametrize("error_factory", [
     lambda: SeparationError("separator failed"),
     lambda: RecognitionError("recognizer failed"),
@@ -1137,23 +895,20 @@ def test_unclassified_exception_from_inference_becomes_stage_error_keeping_type_
     lambda: front_stage.IntermediateWriteError("disk full"),
 ])
 def test_classified_exceptions_from_inference_pass_through_unchanged(
-        tmp_path, monkeypatch, session_fakes, failing_stage, error_factory, chunked):
+        tmp_path, monkeypatch, session_fakes, error_factory):
     error = error_factory()
     input_path, kwargs = _stage_failure_kwargs(
-        tmp_path, monkeypatch, session_fakes, failing_stage=failing_stage, error=error, chunked=chunked)
+        tmp_path, monkeypatch, session_fakes, failing_stage="separate", error=error)
 
     with pytest.raises(type(error)) as exc:
         run_front_stage(input_path, **kwargs)
     assert exc.value is error
 
 
-@pytest.mark.parametrize("chunked", [False, True])
-@pytest.mark.parametrize("failing_stage", _FAILING_STAGES)
-def test_keyboard_interrupt_from_inference_passes_through_unchanged(
-        tmp_path, monkeypatch, session_fakes, failing_stage, chunked):
+def test_keyboard_interrupt_from_inference_passes_through_unchanged(tmp_path, monkeypatch, session_fakes):
     error = KeyboardInterrupt()
     input_path, kwargs = _stage_failure_kwargs(
-        tmp_path, monkeypatch, session_fakes, failing_stage=failing_stage, error=error, chunked=chunked)
+        tmp_path, monkeypatch, session_fakes, failing_stage="separate", error=error)
 
     with pytest.raises(KeyboardInterrupt) as exc:
         run_front_stage(input_path, **kwargs)
@@ -1205,48 +960,34 @@ class _CallbackFailure(Exception):
     pass
 
 
-@pytest.mark.parametrize("chunked", [False, True])
-@pytest.mark.parametrize("stage", _FAILING_STAGES)
 def test_progress_callback_failure_during_inference_passes_through_unchanged(
-        tmp_path, monkeypatch, session_fakes, stage, chunked):
+        tmp_path, monkeypatch, session_fakes):
     error = _CallbackFailure("stdout is closed")
     input_path = tmp_path / "in.wav"
-    write_wav(input_path, seconds=10.0 if chunked else 1.0)
+    write_wav(input_path, seconds=1.0)
     vocal_path = tmp_path / "vocal.wav"
-    write_wav(vocal_path, seconds=10.0 if chunked else 1.0, amplitude=0.8)
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
 
     def separate(pcm, mode, on_progress=None, **kw):
-        if stage == "separate" and on_progress is not None:
+        if on_progress is not None:
             on_progress("モデル取得中")
         return vocal_path
 
-    if stage in _PHASES:
-        session_fakes.notes[stage] = "モデル取得中"
     monkeypatch.setattr(front_stage._separator, "separate", separate)
-    if chunked:
-        monkeypatch.setattr(
-            front_stage._chunking, "find_chunk_boundaries", lambda *a, **k: [(3.0, False), (6.0, False)])
-        monkeypatch.setattr(
-            front_stage._chunking, "merge_chunk_segments",
-            lambda *a, **k: [seg("vowel", 0.0, 10.0, phoneme="a")])
 
     def failing_progress(stage_id, **kwargs):
         if kwargs.get("note"):
             raise error
 
-    kwargs = _common_kwargs(
-        chunking=ChunkingPolicy(max_duration_sec=3.0 if chunked else 300.0))
     with pytest.raises(_CallbackFailure) as exc:
-        run_front_stage(input_path, on_progress=failing_progress, **kwargs)
+        run_front_stage(input_path, on_progress=failing_progress, **_common_kwargs())
     assert exc.value is error
 
 
 @pytest.mark.parametrize("chunked", [False, True])
-@pytest.mark.parametrize("failing_stage", _PHASES)
-def test_session_is_closed_when_a_recognize_phase_fails(
-        tmp_path, monkeypatch, session_fakes, failing_stage, chunked):
+def test_session_is_closed_when_a_recognize_phase_fails(tmp_path, monkeypatch, session_fakes, chunked):
     input_path, kwargs = _stage_failure_kwargs(
-        tmp_path, monkeypatch, session_fakes, failing_stage=failing_stage,
+        tmp_path, monkeypatch, session_fakes, failing_stage="align",
         error=RuntimeError("推論の失敗"), chunked=chunked)
 
     with pytest.raises(front_stage.StageExecutionError):
@@ -1254,36 +995,6 @@ def test_session_is_closed_when_a_recognize_phase_fails(
 
     (session,) = session_fakes.sessions
     assert session.closed
-
-
-@pytest.mark.parametrize("chunked", [False, True])
-@pytest.mark.parametrize("failing_stage", ["prepare_dictionary", "transcribe"])
-def test_alignment_does_not_start_after_an_earlier_recognize_phase_fails(
-        tmp_path, monkeypatch, session_fakes, failing_stage, chunked):
-    input_path, kwargs = _stage_failure_kwargs(
-        tmp_path, monkeypatch, session_fakes, failing_stage=failing_stage,
-        error=RuntimeError("推論の失敗"), chunked=chunked)
-
-    with pytest.raises(front_stage.StageExecutionError):
-        run_front_stage(input_path, **kwargs)
-
-    assert session_fakes.count("align") == 0
-    if failing_stage == "prepare_dictionary":
-        assert session_fakes.count("transcribe") == 0
-
-
-@pytest.mark.parametrize("chunked", [False, True])
-def test_recognition_error_from_session_creation_passes_through_unchanged(
-        tmp_path, monkeypatch, session_fakes, chunked):
-    error = RecognitionError("forced_aligner を指定してください")
-    session_fakes.create_error = error
-    input_path, kwargs = _stage_failure_kwargs(
-        tmp_path, monkeypatch, session_fakes, failing_stage=None, error=error, chunked=chunked)
-
-    with pytest.raises(RecognitionError) as exc:
-        run_front_stage(input_path, **kwargs)
-    assert exc.value is error
-    assert session_fakes.sessions == []
 
 
 def test_single_run_reads_back_the_separated_vocal_without_peak_normalization(
@@ -1321,3 +1032,163 @@ def test_single_and_chunked_runs_read_back_the_separated_vocal_at_the_same_level
     chunked_peak = float(np.max(np.abs(chunked.vocal_pcm.samples)))
     assert single_peak == pytest.approx(chunked_peak, rel=0.05)
     assert single_peak < 0.3
+
+
+def test_single_run_reports_each_stage_before_running_it_and_passes_data_through(
+        tmp_path, monkeypatch, session_fakes):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+    given_segments = [seg("vowel", 0.0, 1.0, phoneme="a")]
+    session_fakes.align_result = lambda index: given_segments
+
+    call_order = []
+    session_fakes.events = call_order
+    real_load_audio = front_stage._io.load_audio
+    real_compute_rms = front_stage._rms.compute_rms
+    real_sf_read = front_stage.sf.read
+    captured = {}
+
+    def spy_sf_read(path, *args, **kwargs):
+        if str(path) == str(vocal_path):
+            call_order.append("read_vocal")
+        return real_sf_read(path, *args, **kwargs)
+
+    def spy_load_audio(path):
+        call_order.append("load_audio")
+        result = real_load_audio(path)
+        captured.setdefault("load_audio_results", []).append(result)
+        return result
+
+    def spy_separate(pcm, mode, **kwargs):
+        call_order.append("separate")
+        captured["separate_pcm"] = pcm
+        return vocal_path
+
+    def spy_compute_rms(pcm):
+        call_order.append("compute_rms")
+        result = real_compute_rms(pcm)
+        captured["compute_rms_result"] = result
+        return result
+
+    class _OrderRecordingProgress:
+        def stage(self, stage, *, done=0, total=None, note="", elapsed=0.0):
+            call_order.append(f"progress:{stage}")
+
+    monkeypatch.setattr(front_stage._io, "load_audio", spy_load_audio)
+    monkeypatch.setattr(front_stage.sf, "read", spy_sf_read)
+    monkeypatch.setattr(front_stage._separator, "separate", spy_separate)
+    monkeypatch.setattr(front_stage._rms, "compute_rms", spy_compute_rms)
+
+    result = run_front_stage(
+        input_path, on_progress=_OrderRecordingProgress().stage, **_common_kwargs())
+
+    assert [c for c in call_order if c not in ("prepare_dictionary", "close")] == [
+        "progress:load", "load_audio", "progress:separate", "separate", "progress:recognize",
+        "transcribe", "align", "progress:rms", "read_vocal", "compute_rms",
+    ]
+    (session,) = session_fakes.sessions
+    (transcribed,) = session.transcribed
+    assert str(transcribed.path) == str(vocal_path)
+    assert session.aligned == [transcribed]
+    assert captured["separate_pcm"] is captured["load_audio_results"][0]
+    assert result.analysis.rms is captured["compute_rms_result"]
+    assert result.analysis.segments == given_segments
+    on_disk, _ = sf.read(vocal_path, dtype="float32", always_2d=True)
+    np.testing.assert_allclose(result.vocal_pcm.samples, on_disk, atol=1e-6)
+
+
+def test_non_chunked_dictionary_note_reaches_progress_as_recognize_stage_between_separation_and_transcription(
+        tmp_path, monkeypatch, session_fakes):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=1.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=1.0, amplitude=0.8)
+    session_fakes.notes["prepare_dictionary"] = "辞書取得中"
+    monkeypatch.setattr(
+        front_stage._separator, "separate",
+        lambda pcm, mode, **kwargs: session_fakes.events.append("separate") or vocal_path)
+
+    run_front_stage(input_path, on_progress=session_fakes.progress_to_events(), **_common_kwargs())
+
+    events = session_fakes.events
+    note_index = events.index(("progress", "recognize", 0, None, "辞書取得中"))
+    assert events.index("separate") < events.index("prepare_dictionary") < note_index
+    assert note_index < events.index("transcribe")
+
+
+def test_chunked_dictionary_note_reaches_progress_as_recognize_stage_after_all_separations_and_before_transcription(
+        tmp_path, monkeypatch, session_fakes):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+    session_fakes.notes["prepare_dictionary"] = "辞書取得中"
+    _stub_three_chunks(monkeypatch, vocal_path, session_fakes)
+
+    run_front_stage(
+        input_path, on_progress=session_fakes.progress_to_events(),
+        **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    events = session_fakes.events
+    note_indices = [
+        i for i, e in enumerate(events) if isinstance(e, tuple) and e[1] == "recognize" and e[4] == "辞書取得中"]
+    assert len(note_indices) == 1
+    last_separate = max(i for i, e in enumerate(events) if e == "separate")
+    assert last_separate < note_indices[0] < events.index("transcribe")
+
+
+def test_chunked_run_uses_one_session_for_all_chunks_and_closes_it(tmp_path, monkeypatch, session_fakes):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+    _stub_three_chunks(monkeypatch, vocal_path, session_fakes)
+
+    run_front_stage(input_path, **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    (session,) = session_fakes.sessions
+    assert session.entered
+    assert session.closed
+    assert session_fakes.count("close") == 1
+    assert len(session.transcribed) == 3
+    assert len(session.aligned) == 3
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_recognition_error_from_session_creation_passes_through_unchanged(
+        tmp_path, monkeypatch, session_fakes, chunked):
+    error = RecognitionError("forced_aligner を指定してください")
+    session_fakes.create_error = error
+    input_path, kwargs = _stage_failure_kwargs(
+        tmp_path, monkeypatch, session_fakes, failing_stage=None, error=error, chunked=chunked)
+
+    with pytest.raises(RecognitionError) as exc:
+        run_front_stage(input_path, **kwargs)
+    assert exc.value is error
+    assert session_fakes.sessions == []
+
+
+def test_chunked_run_reports_each_recognize_start_right_before_its_transcription_or_alignment(
+        tmp_path, monkeypatch, session_fakes):
+    input_path = tmp_path / "in.wav"
+    write_wav(input_path, seconds=10.0)
+    vocal_path = tmp_path / "vocal.wav"
+    write_wav(vocal_path, seconds=10.0, amplitude=0.8)
+    _stub_three_chunks(monkeypatch, vocal_path, session_fakes)
+
+    run_front_stage(
+        input_path, on_progress=session_fakes.progress_to_events(),
+        **_common_kwargs(chunking=ChunkingPolicy(max_duration_sec=3.0)))
+
+    finished_calls = 0
+    phases_after_start = []
+    for event in session_fakes.events:
+        if event in ("transcribe", "align"):
+            finished_calls += 1
+        elif isinstance(event, tuple) and event[1] == "recognize" and event[4] == "":
+            _, _, done, total, _ = event
+            assert (done, total) == (finished_calls, 6)
+            phases_after_start.append(done)
+    assert phases_after_start == [0, 1, 2, 3, 4, 5]

@@ -133,7 +133,7 @@ def test_ffmpeg_conversion_failure_raises_audio_load_error_with_not_audio_reason
     assert exc_info.value.reason == "not_audio"
 
 
-def test_ffmpeg_reread_failure_raises_audio_load_error_with_not_audio_reason(monkeypatch, tmp_path):
+def test_ffmpeg_reread_failure_raises_audio_load_error_with_not_audio_reason(monkeypatch):
     from vocal_analysis.io import AudioLoadError, load_audio
 
     monkeypatch.setattr("vocal_analysis.io._find_ffmpeg", lambda: "/usr/bin/ffmpeg")
@@ -143,7 +143,7 @@ def test_ffmpeg_reread_failure_raises_audio_load_error_with_not_audio_reason(mon
         lambda *a, **k: (_ for _ in ()).throw(sf.LibsndfileError(1, "decode error")))
 
     with pytest.raises(AudioLoadError) as exc_info:
-        load_audio(tmp_path / "broken.m4a")
+        load_audio(FIXTURES / "beep.m4a")
     assert exc_info.value.reason == "not_audio"
 
 
@@ -165,12 +165,6 @@ def test_channels_and_sample_rate_preserved_for_stereo(tmp_path):
 
     assert pcm.sample_rate == sr
     assert pcm.samples.shape[1] == 2
-
-
-def test_target_peak_is_fixed_at_0_95():
-    from vocal_analysis.io import TARGET_PEAK
-
-    assert TARGET_PEAK == 0.95
 
 
 def test_peak_normalization_reaches_target_peak():

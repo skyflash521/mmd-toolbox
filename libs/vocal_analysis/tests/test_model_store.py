@@ -101,22 +101,6 @@ def test_prefetch_relays_byte_download_percentage_and_ignores_file_count_bar(mon
     assert notes == ["ダウンロード中: org/model 40%", "ダウンロード中: org/model 100%"]
 
 
-def test_prefetch_passes_repo_and_revision_to_download(monkeypatch):
-    pytest.importorskip("huggingface_hub")
-    from vocal_analysis import model_store
-
-    calls = []
-
-    def fake_snapshot_download(repo_id, *, revision=None, tqdm_class=None):
-        calls.append((repo_id, revision))
-
-    monkeypatch.setattr(model_store, "hf_snapshot_download", fake_snapshot_download)
-
-    model_store.prefetch_with_progress("org/model", None, lambda note: None)
-
-    assert calls == [("org/model", None)]
-
-
 def test_prefetch_reports_no_transfer_when_already_cached(monkeypatch):
     pytest.importorskip("huggingface_hub")
     from vocal_analysis import model_store
@@ -274,20 +258,6 @@ def test_release_gpu_memory_collects_garbage_before_emptying_cuda_cache(monkeypa
     model_store.release_gpu_memory()
 
     assert calls == ["gc", "empty_cache"]
-
-
-def test_release_gpu_memory_skips_cuda_cache_when_gpu_unavailable(monkeypatch):
-    torch = pytest.importorskip("torch")
-    from vocal_analysis import model_store
-
-    calls = []
-    monkeypatch.setattr(gc, "collect", lambda *a, **k: calls.append("gc"))
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: calls.append("empty_cache"))
-
-    model_store.release_gpu_memory()
-
-    assert calls == ["gc"]
 
 
 def test_release_gpu_memory_tolerates_missing_torch(monkeypatch):

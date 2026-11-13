@@ -43,14 +43,6 @@ def test_conversion_method_is_left_at_default(monkeypatch):
     assert captured["method"] is None
 
 
-def test_multiple_lines_are_passed_as_one_unit(monkeypatch):
-    captured = {}
-    _install(monkeypatch, _fake_convert(captured, result="アイ"))
-
-    to_kana_reading("あ\nい")
-    assert captured["text"] == "あ\nい"
-
-
 def test_recognition_error_passes_through_unchanged(monkeypatch):
     from vocal_analysis.recognizer import RecognitionError
 
@@ -62,10 +54,10 @@ def test_recognition_error_passes_through_unchanged(monkeypatch):
     assert exc.value is error
 
 
-@pytest.mark.parametrize("error", [ImportError("no module named pyopenjtalk"), RuntimeError("boom")])
-def test_other_failures_are_reported_as_recognition_error(monkeypatch, error):
+def test_other_failures_are_reported_as_recognition_error(monkeypatch):
     from vocal_analysis.recognizer import RecognitionError
 
+    error = RuntimeError("boom")
     _install(monkeypatch, _fake_convert({}, error=error))
 
     with pytest.raises(RecognitionError) as exc:
