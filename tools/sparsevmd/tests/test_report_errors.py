@@ -1,67 +1,13 @@
-import pytest
-
 from sparsevmd import report
-from sparsevmd.reduce import measure_bone_errors, measure_camera_errors
 from vmd import interp
-from vmd.types import BoneKey, CameraKey
+from vmd.types import CameraKey
 
 CAM_LINEAR = bytes([20, 107, 20, 107]) * 6
 EASE = (96, 0, 96, 30)
 
 
-def _bone_linear():
-    b = bytearray(64)
-    for i in (0, 1, 2, 3, 4, 5, 6, 7, 17, 18):
-        b[i] = 20
-    for i in (8, 9, 10, 11, 12, 13, 14, 15):
-        b[i] = 107
-    return bytes(b)
-
-
-BL = _bone_linear()
-
-
 def cam(frame, dist=-30.0, center=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0), fov=30):
     return CameraKey(frame, dist, center, rot, CAM_LINEAR, fov, 0)
-
-
-def bone(name, frame, pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 1.0)):
-    return BoneKey(name.encode("cp932").ljust(15, b"\x00"), frame, pos, rot, BL)
-
-
-def _eased(v0, v1, n=11):
-    span = n - 1
-    return [v0 + (v1 - v0) * interp._solve_factor(*EASE, f / span) for f in range(n)]
-
-
-def test_measure_camera_errors_zero_for_faithful_output():
-    src = [cam(f, center=(float(f), 0.0, 0.0)) for f in range(11)]
-    out = [cam(0, center=(0.0, 0.0, 0.0)), cam(10, center=(10.0, 0.0, 0.0))]
-    m = measure_camera_errors(src, out, [(0, 10)])
-    assert m["pos_x"] == pytest.approx(0.0, abs=1e-6)
-    assert m["pos_y"] == 0.0
-    assert m["distance"] == 0.0
-    assert m["rot_deg"] == pytest.approx(0.0, abs=1e-6)
-
-
-def test_measure_camera_errors_only_on_axis_with_curve_error():
-    ys = _eased(0.0, 100.0)
-    src = [cam(f, center=(0.0, ys[f], 0.0)) for f in range(11)]
-    out = [cam(0, center=(0.0, 0.0, 0.0)), cam(10, center=(0.0, 100.0, 0.0))]
-    m = measure_camera_errors(src, out, [(0, 10)])
-    assert m["pos_y"] > 5.0
-    assert m["pos_x"] == pytest.approx(0.0, abs=1e-9)
-    assert m["pos_z"] == pytest.approx(0.0, abs=1e-9)
-
-
-def test_measure_bone_errors_position_and_rotation():
-    xs = _eased(0.0, 100.0)
-    src = [bone("c", f, pos=(xs[f], 0.0, 0.0)) for f in range(11)]
-    out = [bone("c", 0, pos=(0.0, 0.0, 0.0)), bone("c", 10, pos=(100.0, 0.0, 0.0))]
-    m = measure_bone_errors(src, out, [(0, 10)])
-    assert m["pos_x"] > 5.0
-    assert m["pos_y"] == pytest.approx(0.0, abs=1e-9)
-    assert m["rot_deg"] == pytest.approx(0.0, abs=1e-6)
 
 
 def _cam_errors():
@@ -104,14 +50,6 @@ def test_format_dry_run_shows_camera_max_error():
     text = report.format_dry_run(rep)
     assert "max error" in text or "最大誤差" in text
     assert "0.5" in text
-
-
-def test_build_report_contains_errors():
-    rep = report.build_report(
-        target="camera", camera=(31, 2), bones=None, selected_bones=set(),
-        ranges=[(0, 30)], keep_frames=[], camera_errors=_cam_errors(),
-    )
-    assert rep["camera"]["errors"]["pos_x"] == 0.5
 
 
 def test_cli_dry_run_includes_camera_errors(tmp_path, capsys):

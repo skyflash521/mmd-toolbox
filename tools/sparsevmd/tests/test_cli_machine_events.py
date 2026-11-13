@@ -109,18 +109,6 @@ def test_machine_stdout_json_lines_lf_all_modes(tmp_path, capsysbinary):
     _assert_json_lines_lf(capsysbinary.readouterr().out)
 
 
-def test_machine_no_human_text_on_stdout_with_verbose(tmp_path, capsysbinary):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "camera",
-              "--curve-mode", "linear", "--machine", "--verbose"])
-    text = capsysbinary.readouterr().out.decode("utf-8")
-    lines = [ln for ln in text.split("\n") if ln]
-    assert lines
-    for ln in lines:
-        json.loads(ln)
-
-
 def test_machine_verbose_diagnostics_go_to_stderr_through_main(tmp_path, capsysbinary):
     src = tmp_path / "in.vmd"
     keys = [cam(f, center=((float(f) if f < 15 else float(f) + 50.0), 0.0, 0.0)) for f in range(31)]

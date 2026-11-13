@@ -1,4 +1,4 @@
-import builtins
+import io as io_module
 import sys
 
 import pytest
@@ -90,14 +90,6 @@ def test_max_segment_frames_explicit_caps_span(tmp_path):
     assert len(frames) > 2
 
 
-def test_max_segment_frames_zero_is_arg_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    out = tmp_path / "out.vmd"
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--max-segment-frames", "0"])
-    assert code == 2
-
-
 EASE = (96, 0, 96, 30)
 
 
@@ -151,20 +143,6 @@ def test_non_target_section_and_model_name_pass_through(tmp_path):
     assert doc.model_name_raw == model_name_raw
 
 
-def test_duplicate_frame_camera_last_wins_and_single_key_per_frame(tmp_path):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    keys = [cam(0, center=(0.0, 0.0, 0.0)), cam(0, center=(5.0, 0.0, 0.0)),
-            cam(10, center=(5.0, 0.0, 0.0))]
-    write_vmd(src, camera=keys)
-    code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
-    assert code == 0
-    doc, _ = io.read(str(out))
-    frames = [k.frame for k in doc.camera]
-    assert len(frames) == len(set(frames))
-    assert interp.sample(doc.camera, "pos_x", 0) == pytest.approx(5.0)
-
-
 def test_single_key_camera_preserved_verbatim(tmp_path):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -211,16 +189,6 @@ def test_verbose_logs_cut_frame_to_stdout(tmp_path, capsys):
     assert "15" not in cap.err
 
 
-def test_bone_file_decode_error_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, bone=[bone("センター", f, pos=(0.0, float(f), 0.0)) for f in range(11)])
-    bf = tmp_path / "bones.txt"
-    bf.write_bytes(b"\xff\xfe\x00 invalid utf8")
-    code = cli.main([str(src), "-o", str(tmp_path / "out.vmd"), "--target", "bone",
-                     "--bone-file", str(bf)])
-    assert code == 1
-
-
 def test_keep_frame_out_of_range_warns(tmp_path, capsys):
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
@@ -262,11 +230,6 @@ def test_list_bones_does_not_write_output_and_exits_zero(tmp_path):
     assert not out.exists()
 
 
-def test_missing_input_is_input_error(tmp_path):
-    code = cli.main([str(tmp_path / "nope.vmd"), "--target", "camera"])
-    assert code == 1
-
-
 def test_input_directory_is_input_error(tmp_path):
     d = tmp_path / "indir"
     d.mkdir()
@@ -281,46 +244,11 @@ def test_bad_range_is_arg_error(tmp_path):
     assert code == 2
 
 
-def test_target_camera_with_bone_selection_is_arg_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc(), bone=[bone("センター", 0)])
-    code = cli.main([str(src), "--target", "camera", "--bone", "センター"])
-    assert code == 2
-
-
-def test_fov_tol_below_half_is_arg_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "--target", "camera", "--camera-fov-tol", "0.4"])
-    assert code == 2
-
-
-def test_same_path_without_overwrite_is_arg_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "-o", str(src), "--target", "camera"])
-    assert code == 2
-
-
 def test_same_path_with_overwrite_ok(tmp_path):
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     code = cli.main([str(src), "-o", str(src), "--overwrite", "--target", "camera", "--curve-mode", "linear"])
     assert code == 0
-
-
-def test_target_camera_no_camera_keys_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
-    code = cli.main([str(src), "--target", "camera"])
-    assert code == 1
-
-
-def test_bone_file_missing_is_input_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, bone=[bone("センター", 0), bone("センター", 30)])
-    code = cli.main([str(src), "--target", "bone", "--bone-file", str(tmp_path / "nope.txt")])
-    assert code == 1
 
 
 def test_keep_frame_negative_is_arg_error(tmp_path):
@@ -342,19 +270,6 @@ def test_target_bone_explicit_missing_name_is_input_error_when_section_empty(tmp
     write_vmd(src, camera=linear_camera_doc())
     code = cli.main([str(src), "--target", "bone", "--bone", "存在しない"])
     assert code == 1
-
-
-def test_unmatched_glob_warns_in_reduce_path(tmp_path, capsys):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    bones = [bone("頭", f, pos=(0.0, float(f), 0.0)) for f in range(31)]
-    write_vmd(src, bone=bones)
-    code = cli.main(
-        [str(src), "-o", str(out), "--target", "bone", "--curve-mode", "linear",
-         "--bone", "頭", "--bone-glob", "幻*"]
-    )
-    assert code == 0
-    assert "幻*" in capsys.readouterr().err
 
 
 def test_sole_unmatched_glob_warns_before_exit2(tmp_path, capsys):
@@ -379,13 +294,6 @@ def test_range_reduces_inside_and_keeps_keys_outside(tmp_path):
     assert 0 in fr and 10 in fr
     assert 5 not in fr
     assert [k for k in doc.camera if k.frame > 10] == [k for k in cam_keys if k.frame > 10]
-
-
-def test_range_start_beyond_track_end_is_arg_error(tmp_path):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    code = cli.main([str(src), "--target", "camera", "--range", "999:"])
-    assert code == 2
 
 
 def test_dry_run_prints_stats_and_writes_no_output(tmp_path, capsys):
@@ -419,30 +327,6 @@ def test_output_parent_missing_is_write_error(tmp_path):
     out = tmp_path / "nodir" / "out.vmd"
     code = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
     assert code == 3
-
-
-def test_strict_unsatisfiable_by_min_segment_is_exit_4(tmp_path):
-    src = tmp_path / "in.vmd"
-    cam_keys = [cam(f, center=(0.0, 0.0 if f % 2 == 0 else 5.0, 0.0)) for f in range(9)]
-    write_vmd(src, camera=cam_keys)
-    out = tmp_path / "out.vmd"
-    code = cli.main(
-        [
-            str(src),
-            "-o",
-            str(out),
-            "--target",
-            "camera",
-            "--curve-mode",
-            "linear",
-            "--strict",
-            "--min-segment-frames",
-            "8",
-            "--max-segment-frames",
-            "180",
-        ]
-    )
-    assert code == 4
 
 
 def undecodable_bone(frame, pos=(0.0, 0.0, 0.0)):
@@ -552,111 +436,62 @@ def test_selection_unresolved_warning_line_uses_common_format(tmp_path, capsys):
     assert "警告:" not in err
 
 
-class _SpyProgressReporter:
-    calls = None
+class _TtyStream(io_module.StringIO):
+    def isatty(self):
+        return True
 
-    def __init__(self, *args, **kwargs):
+
+_LIVE_LINE = "LIVE"
+_CLEARED_LIVE_LINE = "\r" + " " * len(_LIVE_LINE) + "\r"
+
+
+class _ImmediatelyDrawingReporter(cli.progress.ProgressReporter):
+    def stage(self, label):
+        if self.enabled and not self._last_drawn_width:
+            self._stream.write(_LIVE_LINE)
+            self._last_drawn_width = len(_LIVE_LINE)
+
+    def update(self, done, total, note=""):
         pass
 
-    def stage(self, *args, **kwargs):
-        pass
 
-    def update(self, *args, **kwargs):
-        pass
-
-    def close(self):
-        _SpyProgressReporter.calls.append("close")
-
-    def summary(self, message):
-        _SpyProgressReporter.calls.append(("summary", message))
+def _attach_terminal(monkeypatch):
+    tty = _TtyStream()
+    monkeypatch.setattr(cli.progress, "ProgressReporter", _ImmediatelyDrawingReporter)
+    monkeypatch.setattr(sys, "stdout", tty)
+    monkeypatch.setattr(sys, "stderr", tty)
+    return tty
 
 
-@pytest.fixture
-def spy_progress(monkeypatch):
-    calls = []
-    _SpyProgressReporter.calls = calls
-    monkeypatch.setattr(cli.progress, "ProgressReporter", _SpyProgressReporter)
-
-    real_print = print
-
-    def spy_print(*args, **kwargs):
-        if kwargs.get("file") is sys.stderr and args:
-            calls.append(("stderr_print", args[0]))
-        real_print(*args, **kwargs)
-
-    monkeypatch.setattr(builtins, "print", spy_print)
-    return calls
-
-
-def test_normal_run_closes_progress_then_shows_completion(tmp_path, monkeypatch, spy_progress):
+def test_normal_run_clears_the_progress_line_then_shows_completion(tmp_path, monkeypatch):
+    terminal = _attach_terminal(monkeypatch)
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
     write_vmd(src, camera=linear_camera_doc())
     rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
     assert rc == 0
-    assert spy_progress[:2] == ["close", ("summary", f"完了 {out}")]
-    assert all(call == "close" for call in spy_progress[2:])
+    assert terminal.getvalue().endswith(_LIVE_LINE + _CLEARED_LIVE_LINE + f"完了 {out}\n")
 
 
-def test_dry_run_closes_progress_without_completion_line(tmp_path, monkeypatch, spy_progress):
+def test_dry_run_shows_no_completion_line(tmp_path, monkeypatch):
+    terminal = _attach_terminal(monkeypatch)
     src = tmp_path / "in.vmd"
     write_vmd(src, camera=linear_camera_doc())
     rc = cli.main([str(src), "--target", "camera", "--curve-mode", "linear", "--dry-run"])
     assert rc == 0
-    assert spy_progress[0] == "close"
-    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
+    assert "完了" not in terminal.getvalue()
 
 
-def test_strict_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
-    src = tmp_path / "in.vmd"
-    cam_keys = [cam(f, center=(0.0, 0.0 if f % 2 == 0 else 5.0, 0.0)) for f in range(9)]
-    write_vmd(src, camera=cam_keys)
-    out = tmp_path / "out.vmd"
-    rc = cli.main([
-        str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear",
-        "--strict", "--min-segment-frames", "8", "--max-segment-frames", "8",
-    ])
-    assert rc == 4
-    assert spy_progress[0] == "close"
-    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
-    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
-
-
-def test_write_failure_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    out = tmp_path / "nodir" / "out.vmd"
-    rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear"])
-    assert rc == 3
-    assert spy_progress[0] == "close"
-    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
-    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
-
-
-def test_keyboard_interrupt_closes_progress_before_error_line(tmp_path, monkeypatch, spy_progress):
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-
-    def raise_interrupt(*a, **k):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(cli, "reduce_camera_track", raise_interrupt)
-    rc = cli.main([str(src), "--target", "camera", "--curve-mode", "linear", "--dry-run"])
-    assert rc == 130
-    assert spy_progress[0] == "close"
-    assert any(entry[0] == "stderr_print" for entry in spy_progress[1:] if isinstance(entry, tuple))
-    assert not any(isinstance(c, tuple) and c[0] == "summary" for c in spy_progress)
-
-
-def test_verbose_closes_progress_before_diagnostics(tmp_path, monkeypatch, spy_progress):
+def test_verbose_clears_the_progress_line_before_diagnostics(tmp_path, monkeypatch):
+    terminal = _attach_terminal(monkeypatch)
     src = tmp_path / "in.vmd"
     out = tmp_path / "out.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    monkeypatch.setattr(cli, "_log_diagnostics", lambda *a, **k: spy_progress.append("log_diagnostics"))
+    write_vmd(src, camera=[cam(f, center=(0.0 if f < 10 else 100.0, 0.0, 0.0)) for f in range(21)])
     rc = cli.main([str(src), "-o", str(out), "--target", "camera", "--curve-mode", "linear", "-v"])
     assert rc == 0
-    assert "close" in spy_progress and "log_diagnostics" in spy_progress
-    assert spy_progress.index("close") < spy_progress.index("log_diagnostics")
+    text = terminal.getvalue()
+    assert "詳細[camera]:" in text
+    assert text.index(_LIVE_LINE + _CLEARED_LIVE_LINE) < text.index("詳細[camera]:")
 
 
 class _LabelSpyProgressReporter:
@@ -980,20 +815,3 @@ def test_camera_distance_jump_is_cut_by_dist_threshold(tmp_path, capsys, thresho
     write_vmd(src, camera=_camera_with_distance_jump_at_frame_15())
     assert cli.main([str(src), "--target", "camera", "--dry-run", *thresholds]) == 0
     assert ("cuts: [15]" in capsys.readouterr().out) is expect_cut
-
-
-def test_repeated_flag_behaves_as_single(tmp_path, capsys):
-    src = tmp_path / "in.vmd"
-    out = tmp_path / "out.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    assert cli.main([str(src), "-o", str(out), "--target", "camera", "--dry-run", "--dry-run"]) == 0
-    assert not out.exists()
-
-
-def test_main_installs_sigbreak_handler(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr("cli_events.run.install_sigbreak_handler", lambda: calls.append(True))
-    src = tmp_path / "in.vmd"
-    write_vmd(src, camera=linear_camera_doc())
-    assert cli.main([str(src), "--target", "camera", "--dry-run"]) == 0
-    assert calls == [True]

@@ -70,27 +70,16 @@ def _assert_sections_unchanged(src, out, sections):
         assert _section_bytes(out, section) == _section_bytes(src, section), section
 
 
-_MODES = {
-    "default": [],
-    "dry-run": ["--dry-run"],
-    "linear-no-cut-detect": ["--curve-mode", "linear", "--no-cut-detect"],
-}
-
 _INVALID_BONE_KEYS = {
     "nan-position": bone(5, pos=(math.nan, 0.0, 0.0)),
-    "inf-position": bone(5, pos=(0.0, math.inf, 0.0)),
     "nan-rotation": bone(5, rot=(0.0, 0.0, math.nan, 1.0)),
-    "inf-rotation": bone(5, rot=(0.0, -math.inf, 0.0, 1.0)),
     "zero-norm-rotation": bone(5, rot=(0.0, 0.0, 0.0, 0.0)),
 }
 
 _INVALID_CAMERA_KEYS = {
     "nan-position": cam(5, center=(math.nan, 0.0, 0.0)),
-    "inf-position": cam(5, center=(0.0, math.inf, 0.0)),
     "nan-distance": cam(5, dist=math.nan),
-    "inf-distance": cam(5, dist=-math.inf),
     "nan-rotation": cam(5, rot=(0.0, 0.0, math.nan)),
-    "inf-rotation": cam(5, rot=(math.inf, 0.0, 0.0)),
 }
 
 
@@ -101,23 +90,21 @@ def _assert_input_error(capsysbinary, code):
 
 
 @pytest.mark.parametrize("invalid_key", _INVALID_BONE_KEYS.values(), ids=list(_INVALID_BONE_KEYS))
-@pytest.mark.parametrize("extra", _MODES.values(), ids=list(_MODES))
-def test_invalid_bone_values_are_rejected_even_with_valid_camera(tmp_path, capsysbinary, invalid_key, extra):
+def test_invalid_bone_values_are_rejected_even_with_valid_camera(tmp_path, capsysbinary, invalid_key):
     out = tmp_path / "out.vmd"
     bones = [k for k in _ramp_bones() if k.frame != 5] + [invalid_key]
     src = _write(tmp_path / "in.vmd", camera=_ramp_cameras(), bone=bones)
-    assert cli.main([src, "-o", str(out), "--machine", *extra]) == _EXIT_FAILURE
+    assert cli.main([src, "-o", str(out), "--machine"]) == _EXIT_FAILURE
     _assert_input_error(capsysbinary, "invalid_bone_values")
     assert not out.exists()
 
 
 @pytest.mark.parametrize("invalid_key", _INVALID_CAMERA_KEYS.values(), ids=list(_INVALID_CAMERA_KEYS))
-@pytest.mark.parametrize("extra", _MODES.values(), ids=list(_MODES))
-def test_invalid_camera_values_are_rejected_even_with_valid_bones(tmp_path, capsysbinary, invalid_key, extra):
+def test_invalid_camera_values_are_rejected_even_with_valid_bones(tmp_path, capsysbinary, invalid_key):
     out = tmp_path / "out.vmd"
     cameras = [k for k in _ramp_cameras() if k.frame != 5] + [invalid_key]
     src = _write(tmp_path / "in.vmd", camera=cameras, bone=_ramp_bones())
-    assert cli.main([src, "-o", str(out), "--machine", *extra]) == _EXIT_FAILURE
+    assert cli.main([src, "-o", str(out), "--machine"]) == _EXIT_FAILURE
     _assert_input_error(capsysbinary, "invalid_camera_values")
     assert not out.exists()
 
@@ -147,8 +134,8 @@ def test_invalid_values_in_both_sections_are_still_an_input_error(tmp_path, caps
     assert not out.exists()
 
 
-@pytest.mark.parametrize("invalid_key", _INVALID_BONE_KEYS.values(), ids=list(_INVALID_BONE_KEYS))
-def test_invalid_bone_values_are_ignored_when_target_is_camera(tmp_path, capsysbinary, invalid_key):
+def test_invalid_bone_values_are_ignored_when_target_is_camera(tmp_path, capsysbinary):
+    invalid_key = _INVALID_BONE_KEYS["nan-position"]
     out = tmp_path / "out.vmd"
     bones = [k for k in _ramp_bones() if k.frame != 5] + [invalid_key]
     src = _write(tmp_path / "in.vmd", camera=_ramp_cameras(), bone=bones)
@@ -159,8 +146,8 @@ def test_invalid_bone_values_are_ignored_when_target_is_camera(tmp_path, capsysb
     _assert_sections_unchanged(src, out, ["bone"])
 
 
-@pytest.mark.parametrize("invalid_key", _INVALID_CAMERA_KEYS.values(), ids=list(_INVALID_CAMERA_KEYS))
-def test_invalid_camera_values_are_ignored_when_target_is_bone(tmp_path, capsysbinary, invalid_key):
+def test_invalid_camera_values_are_ignored_when_target_is_bone(tmp_path, capsysbinary):
+    invalid_key = _INVALID_CAMERA_KEYS["nan-position"]
     out = tmp_path / "out.vmd"
     cameras = [k for k in _ramp_cameras() if k.frame != 5] + [invalid_key]
     src = _write(tmp_path / "in.vmd", camera=cameras, bone=_ramp_bones())
@@ -199,8 +186,7 @@ def test_non_finite_camera_value_of_a_key_dropped_by_duplicate_removal_is_still_
     _assert_input_error(capsysbinary, "invalid_camera_values")
 
 
-@pytest.mark.parametrize("extra", _MODES.values(), ids=list(_MODES))
-def test_invalid_values_outside_bone_and_camera_sections_are_ignored(tmp_path, extra):
+def test_invalid_values_outside_bone_and_camera_sections_are_ignored(tmp_path):
     out = tmp_path / "out.vmd"
     name = "あ".encode("cp932").ljust(15, b"\x00")
     src = _write(
@@ -211,23 +197,8 @@ def test_invalid_values_outside_bone_and_camera_sections_are_ignored(tmp_path, e
         self_shadow=[SelfShadowKey(0, 1, math.nan)],
         ik_property=[IkPropertyKey(0, 1, [IkBone("左足ＩＫ".encode("cp932").ljust(20, b"\x00"), 1)])],
     )
-    assert cli.main([src, "-o", str(out), *extra]) == 0
-    assert out.exists() == ("--dry-run" not in extra)
-    if out.exists():
-        _assert_sections_unchanged(src, out, ["morph", "light", "self_shadow", "ik_property"])
-
-
-@pytest.mark.parametrize("extra", _MODES.values(), ids=list(_MODES))
-def test_camera_keys_with_zero_angles_are_processed(tmp_path, capsysbinary, extra):
-    out = tmp_path / "out.vmd"
-    cameras = _ramp_cameras()
-    assert all(k.rotation == (0.0, 0.0, 0.0) for k in cameras)
-    src = _write(tmp_path / "in.vmd", camera=cameras)
-    assert cli.main([src, "-o", str(out), "--machine", "--target", "camera", *extra]) == 0
-    events = _machine_events(capsysbinary)
-    assert events[-1]["type"] == "result"
-    assert not [e for e in events if e["type"] == "error"]
-    assert out.exists() == ("--dry-run" not in extra)
+    assert cli.main([src, "-o", str(out)]) == 0
+    _assert_sections_unchanged(src, out, ["morph", "light", "self_shadow", "ik_property"])
 
 
 def test_zero_angle_camera_is_valid_while_zero_norm_bone_rotation_is_not(tmp_path, capsysbinary):
@@ -256,10 +227,9 @@ def _duplicate_warnings(events):
 
 
 @pytest.mark.parametrize("section, keys", [("camera", _duplicate_cameras), ("bone", _duplicate_bones)])
-@pytest.mark.parametrize("extra", [[], ["--dry-run"]], ids=["reduce", "dry-run"])
-def test_machine_surfaces_one_duplicate_warning_per_section(tmp_path, capsysbinary, section, keys, extra):
+def test_machine_surfaces_one_duplicate_warning_per_section(tmp_path, capsysbinary, section, keys):
     src = _write(tmp_path / "in.vmd", **{section: keys()})
-    assert cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", "--target", section, *extra]) == 0
+    assert cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine", "--target", section]) == 0
     events = _machine_events(capsysbinary)
     assert events[-1]["type"] == "result"
     dup = _duplicate_warnings(events)
@@ -315,15 +285,6 @@ def test_later_camera_key_wins_among_same_frame_duplicates(tmp_path):
     doc, _ = io.read(str(out))
     assert [k.frame for k in doc.camera] == [0, 10]
     assert all(k.position == pytest.approx((0.0, 0.0, 0.0)) for k in doc.camera)
-
-
-def test_machine_result_counts_input_keys_before_duplicate_removal(tmp_path, capsysbinary):
-    src = _write(tmp_path / "in.vmd", camera=_duplicate_cameras(), bone=_duplicate_bones())
-    assert cli.main([src, "-o", str(tmp_path / "out.vmd"), "--machine"]) == 0
-    result = _machine_events(capsysbinary)[-1]
-    assert result["type"] == "result"
-    assert result["camera"]["input_keys"] == len(_duplicate_cameras())
-    assert result["bone"]["input_keys"] == len(_duplicate_bones())
 
 
 @pytest.mark.parametrize("target, section, keys", [

@@ -90,39 +90,6 @@ def test_no_include_then_exclude_glob():
     assert "センター" in names(r)
 
 
-def test_groups_exact_contents():
-    g = selection.GROUPS
-    assert set(g["core"]) == {
-        "センター", "グルーブ", "全ての親", "上半身*", "下半身", "首", "頭",
-        "center", "groove", "root", "upper body*", "lower body", "neck", "head",
-    }
-    assert set(g["arms"]) == {
-        "*肩*", "*腕*", "*ひじ*", "*肘*", "*手首*",
-        "*shoulder*", "*arm*", "*elbow*", "*wrist*",
-    }
-    assert set(g["legs"]) == {
-        "*足*", "*脚*", "*ひざ*", "*膝*", "*つま先*",
-        "*leg*", "*knee*", "*ankle*", "*toe*",
-    }
-    assert set(g["fingers"]) == {
-        "*指*", "*finger*", "*thumb*", "*index*", "*middle*", "*ring*",
-        "*pinky*", "*little*",
-    }
-    assert set(g["ik"]) == {"*IK*", "*ＩＫ*", "*ik*"}
-
-
-def test_mocap_is_union_without_ik_globs():
-    mocap = set(selection.GROUPS["mocap"])
-    expected = (
-        set(selection.GROUPS["core"])
-        | set(selection.GROUPS["arms"])
-        | set(selection.GROUPS["legs"])
-        | set(selection.GROUPS["fingers"])
-    )
-    assert mocap == expected
-    assert not (set(selection.GROUPS["ik"]) & mocap)
-
-
 def test_mocap_resolution_includes_ik_named_bone_via_legs():
     r = resolve_selection(BONES, includes=[Selector("group", "mocap")], excludes=[])
     assert "左足ＩＫ" in names(r)

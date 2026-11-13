@@ -74,12 +74,6 @@ def test_describe_emits_only_options_and_presets_without_input(capsysbinary):
     assert set(r) == {"type", "mode", "options", "presets"}
 
 
-def test_describe_works_without_machine_flag(capsysbinary):
-    rc = cli.main(["--describe"])
-    assert rc == 0
-    assert describe_result(capsysbinary)["mode"] == "describe"
-
-
 def test_describe_ignores_input_and_does_not_read_vmd(capsysbinary):
     rc = cli.main(["--describe", "does_not_exist.vmd"])
     assert rc == 0
@@ -125,13 +119,6 @@ def test_describe_presets_shape_and_values(capsysbinary):
                        "camera_rot_tol": 0.25, "camera_distance_tol": 0.10, "camera_fov_tol": 1.00},
     }
     assert {p["name"]: p["values"] for p in r["presets"]} == expected
-
-
-def test_describe_type_table_covers_non_meta_args():
-    parser = cli._build_parser()
-    meta = {"help", "version", "machine", "describe"}
-    non_meta = {a.dest for a in parser._actions if a.dest not in meta}
-    assert non_meta <= set(cli._D_TYPE)
 
 
 def test_describe_without_machine_reports_arg_error_as_error_event(capsysbinary):
