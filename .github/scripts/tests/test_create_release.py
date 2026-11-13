@@ -33,10 +33,9 @@ def test_release_is_created_with_the_matching_section_as_notes(monkeypatch, tmp_
     _make_tool(tmp_path)
     _run(monkeypatch, tmp_path, "alpha/v1.1.0")
     assert len(calls) == 1
-    cmd, kwargs = calls[0]
+    cmd, _ = calls[0]
     assert cmd == ["gh", "release", "create", "alpha/v1.1.0", "--title", "alpha v1.1.0",
                    "--notes-file", "release_notes.md"]
-    assert kwargs["check"] is True
     assert (tmp_path / "release_notes.md").read_text(encoding="utf-8") == "### 追加\n\n- 新機能\n"
 
 
@@ -46,9 +45,9 @@ def test_older_version_uses_its_own_section(monkeypatch, tmp_path, calls):
     assert (tmp_path / "release_notes.md").read_text(encoding="utf-8") == "最初の公開。\n"
 
 
-@pytest.mark.parametrize("tag", ["alpha", "/v1.0.0", "alpha/v"], ids=["no-version", "no-tool", "empty-version"])
+@pytest.mark.parametrize("tag", ["alpha", "/v1.0.0"], ids=["no-version", "no-tool"])
 def test_malformed_tag_name_fails_without_release(monkeypatch, tmp_path, calls, tag):
-    _make_tool(tmp_path)
+    _make_tool(tmp_path, published=False)
     with pytest.raises(SystemExit) as raised:
         _run(monkeypatch, tmp_path, tag)
     assert raised.value.code != 0

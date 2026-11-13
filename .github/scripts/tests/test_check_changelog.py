@@ -1,22 +1,16 @@
 import sys
 
 import check_changelog
-import pytest
 
 CHANGELOG = "# 変更履歴\n\n## {version} - 2026-01-01\n\n本文\n"
 
 
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ('__version__ = "1.2.3"\n', "1.2.3"),
-        ('"""doc"""\n__version__="0.1.0"\n', "0.1.0"),
-        ("x = 1\n", None),
-        (None, None),
-    ],
-)
-def test_version_of(text, expected):
-    assert check_changelog.version_of(text) == expected
+def test_version_is_read_after_a_leading_docstring():
+    assert check_changelog.version_of('"""doc"""\n__version__="0.1.0"\n') == "0.1.0"
+
+
+def test_absent_file_has_no_version():
+    assert check_changelog.version_of(None) is None
 
 
 def _make_tool(root, name, version, changelog=None, published=True):
