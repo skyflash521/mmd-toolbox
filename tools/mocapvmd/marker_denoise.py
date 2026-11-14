@@ -1,24 +1,25 @@
-"""マーカー軌跡のロバスト平滑化。
-
-カット境界で区間分割し、区間ごとに Hampel型外れ値置換でスパイクを抑え、
-Savitzky-Golay で低域化し、ブレンド率での合成と最大変位クランプで部位別に平滑化する。
-非外れ値は保持されるため定数・線形運動は鈍らない。前後の最大変位を診断に残す。
-"""
-
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import numpy as np
 from scipy.signal import savgol_filter
 
+Vec3 = tuple[float, float, float]
+
+_HAMPEL_K = 3.0
+_MAD_TO_SIGMA = 1.4826
+
 
 @dataclass
 class SmoothParams:
-    window: int  # 平滑窓(奇数)
-    strength: float  # 元値とのブレンド率 (0,1]
-    max_disp: float  # 1フレームあたりの最大変位(MMD単位)
+    """window は平滑窓の長さで奇数。strength は元値とのブレンド率で (0, 1]。max_disp は1フレームあたりの
+    最大変位(MMD 単位)。"""
+
+    window: int
+    strength: float
+    max_disp: float
 
 
-# 部位別既定値。実データで調整する前提で弱めに置く。
 DEFAULT_PRESET = {
     "center": SmoothParams(7, 0.35, 0.15),
     "torso": SmoothParams(5, 0.30, 0.20),
@@ -32,16 +33,17 @@ DEFAULT_PRESET = {
 
 @dataclass
 class SmoothResult:
-    markers: dict[str, list[tuple[float, float, float]]]
-    displacement: dict[str, float]  # マーカー毎の最大変位(診断)
+    """displacement はマーカーごとの、平滑化の前後で位置が動いた量の全フレームでの最大値。"""
+
+    markers: dict[str, list[Vec3]]
+    displacement: dict[str, float]
 
 
 def _odd_at_most(n: int) -> int:
     return n if n % 2 == 1 else n - 1
 
 
-def _segment_bounds(n: int, cuts):
-    """[0, n) を cuts(フレーム)で分割した (start, end) 区間列。"""
+def _half_open_segments_split_at_cuts(n: int, cuts):
     pts = sorted({c for c in cuts if 0 < c < n})
     bounds = []
     start = 0
@@ -52,8 +54,7 @@ def _segment_bounds(n: int, cuts):
     return bounds
 
 
-def _hampel(arr, window, k=3.0):
-    """Hampel型外れ値置換。非外れ値は不変、外れ値のみ窓中央値へ置換する。"""
+def _hampel_replace_outliers_with_median(arr, window, k=_HAMPEL_K):
     n = len(arr)
     out = arr.copy()
     half = window // 2
@@ -61,33 +62,31 @@ def _hampel(arr, window, k=3.0):
         win = arr[max(0, i - half) : min(n, i + half + 1)]
         med = np.median(win)
         mad = np.median(np.abs(win - med))
-        thresh = k * 1.4826 * mad  # MAD=0 のとき閾値0(窓内一定)
+        thresh = k * _MAD_TO_SIGMA * mad
         if abs(arr[i] - med) > thresh and arr[i] != med:
             out[i] = med
     return out
 
 
-def _smooth_axis(seg, params):
-    """1区間1軸を Hampel→Savitzky-Golay→ブレンド率での合成をした値を返す(クランプ前)。"""
+def _smooth_axis_before_clamp(seg, params):
     n = len(seg)
     window = _odd_at_most(min(params.window, n))
     if window < 3:
-        return seg.copy()  # 短すぎる区間は素通し
-    cleaned = _hampel(seg, window)
+        return seg.copy()
+    cleaned = _hampel_replace_outliers_with_median(seg, window)
     low = savgol_filter(cleaned, window_length=window, polyorder=2)
     return seg + params.strength * (low - seg)
 
 
-def _smooth_marker(series, params, cuts):
-    """マーカー1本(フレーム毎3要素)を平滑化し、(平滑化系列, 最大変位)を返す。"""
+def _smooth_marker(series, params, cuts) -> tuple[list[Vec3], float]:
     n = len(series)
     if n == 0:
         return [], 0.0
-    arr = np.array(series, dtype=float)  # (n, 3)
+    arr = np.array(series, dtype=float)
     blended = arr.copy()
-    for start, end in _segment_bounds(n, cuts):
+    for start, end in _half_open_segments_split_at_cuts(n, cuts):
         for ax in range(3):
-            blended[start:end, ax] = _smooth_axis(arr[start:end, ax], params)
+            blended[start:end, ax] = _smooth_axis_before_clamp(arr[start:end, ax], params)
 
     out = arr.copy()
     max_disp = 0.0
@@ -103,18 +102,18 @@ def _smooth_marker(series, params, cuts):
     return smoothed, max_disp
 
 
-def smooth(markers, categories, *, preset=None, cuts=()) -> SmoothResult:
-    """マーカー軌跡を部位別プリセットで平滑化する。
-
-    markers: マーカー名 -> フレーム毎 (x, y, z)。
-    categories: マーカー名 -> 部位カテゴリ(プリセットのキー)。
-    cuts: 区間分割するフレーム境界。
-    """
+def smooth(
+    markers: dict[str, list[Vec3]],
+    categories: dict[str, str],
+    *,
+    preset: dict[str, SmoothParams] | None = None,
+    cuts: Iterable[int] = (),
+) -> SmoothResult:
     if preset is None:
         preset = DEFAULT_PRESET
     out_markers = {}
-    displacement = {}
+    max_displacement = {}
     for name, series in markers.items():
         params = preset[categories[name]]
-        out_markers[name], displacement[name] = _smooth_marker(series, params, cuts)
-    return SmoothResult(markers=out_markers, displacement=displacement)
+        out_markers[name], max_displacement[name] = _smooth_marker(series, params, cuts)
+    return SmoothResult(markers=out_markers, displacement=max_displacement)

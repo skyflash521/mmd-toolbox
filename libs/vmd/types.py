@@ -1,24 +1,32 @@
-"""VMDデータモデル。
-
-数値・生バイトはファイル格納値をそのまま保持する。意味的解釈
-(距離の負値、セルフ影distanceのエンコード等)はここでは行わない。
-"""
-
 from dataclasses import dataclass, field
 
-# magicフィールド(30バイト)の先頭25バイト
 MAGIC_V2_PREFIX = b"Vocaloid Motion Data 0002"
 MAGIC_V1_PREFIX = b"Vocaloid Motion Data file"
 
 
 class VmdFormatError(Exception):
-    """ファイル構造の異常。"""
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        section: str | None = None,
+        key_index: int | None = None,
+    ):
+        super().__init__(message)
+        self.section = section
+        self.key_index = key_index
+
+
+class VmdValueError(Exception):
+    def __init__(self, message: str, *, section: str, index: int, field: str):
+        super().__init__(message)
+        self.section = section
+        self.index = index
+        self.field = field
 
 
 @dataclass
 class VmdWarning:
-    """続行可能な事象の構造化報告。"""
-
     code: str
     message: str
     section: str | None = None
@@ -27,28 +35,25 @@ class VmdWarning:
 
 
 def _decode_name(raw: bytes) -> str:
-    """null終端までをcp932でデコードする(不能バイトは置換文字)。"""
     return raw.split(b"\x00", 1)[0].decode("cp932", errors="replace")
 
 
 @dataclass
 class BoneKey:
-    name_raw: bytes  # 15バイト固定。null終端後の残バイトを含む
+    """name_raw は15バイト、interpolation は64バイト固定。rotation はクォータニオンで成分順は (x, y, z, w)。"""
+
+    name_raw: bytes
     frame: int
     position: tuple[float, float, float]
-    rotation: tuple[float, float, float, float]  # クォータニオン x,y,z,w
-    interpolation: bytes  # 64バイト生
+    rotation: tuple[float, float, float, float]
+    interpolation: bytes
 
     @property
     def name(self) -> str:
         return _decode_name(self.name_raw)
 
     def control_points(self) -> dict[str, tuple[int, int, int, int]]:
-        """チャンネル 'X'/'Y'/'Z'/'R' → (x1, y1, x2, y2)。
-
-        Byte[2], Byte[3](Z_x1, R_x1の位置)は物理演算フラグで上書きされる
-        ことがあるため、シフトコピー側(Byte[17], Byte[18])から復元する。
-        """
+        """チャンネル "X"・"Y"・"Z"・"R" ごとの (x1, y1, x2, y2) を返す。"""
         b = self.interpolation
         return {
             "X": (b[0], b[4], b[8], b[12]),
@@ -60,7 +65,9 @@ class BoneKey:
 
 @dataclass
 class MorphKey:
-    name_raw: bytes  # 15バイト固定
+    """name_raw は15バイト固定。"""
+
+    name_raw: bytes
     frame: int
     weight: float
 
@@ -71,13 +78,18 @@ class MorphKey:
 
 @dataclass
 class CameraKey:
+    """position はカメラ中心(カメラ本体の位置ではない)、rotation の単位はラジアン。
+
+    interpolation は24バイト固定。perspective は 0 が透視投影 ON、1 が OFF。
+    """
+
     frame: int
     distance: float
-    position: tuple[float, float, float]  # カメラ中心
-    rotation: tuple[float, float, float]  # 角度(ラジアン)
-    interpolation: bytes  # 24バイト生
+    position: tuple[float, float, float]
+    rotation: tuple[float, float, float]
+    interpolation: bytes
     fov: int
-    perspective: int  # 0=ON, 1=OFF
+    perspective: int
 
 
 @dataclass
@@ -89,14 +101,18 @@ class LightKey:
 
 @dataclass
 class SelfShadowKey:
+    """distance はファイル格納値のまま(距離へ換算しない)。"""
+
     frame: int
     mode: int
-    distance: float  # 格納値そのまま
+    distance: float
 
 
 @dataclass
 class IkBone:
-    name_raw: bytes  # 20バイト固定
+    """name_raw は20バイト固定。"""
+
+    name_raw: bytes
     enable: int
 
     @property
@@ -113,18 +129,46 @@ class IkPropertyKey:
 
 @dataclass
 class VmdDocument:
-    magic_raw: bytes = MAGIC_V2_PREFIX + b"\x00" * 5  # 30バイト固定
-    model_name_raw: bytes = b"\x00" * 20  # 20バイト固定(v2)
+    """magic_raw は30バイト、model_name_raw は20バイト固定。"""
+
+    magic_raw: bytes = MAGIC_V2_PREFIX + b"\x00" * 5
+    model_name_raw: bytes = b"\x00" * 20
     bone: list[BoneKey] = field(default_factory=list)
     morph: list[MorphKey] = field(default_factory=list)
     camera: list[CameraKey] = field(default_factory=list)
     light: list[LightKey] = field(default_factory=list)
     self_shadow: list[SelfShadowKey] = field(default_factory=list)
     ik_property: list[IkPropertyKey] = field(default_factory=list)
-    # 旧版VMDで省略された後方セクションの記録
     has_self_shadow_section: bool = True
     has_ik_section: bool = True
+    trailing_raw: bytes = b""
 
     @property
     def model_name(self) -> str:
         return _decode_name(self.model_name_raw)
+
+
+def camera_interp_bytes(cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
+    """各引数は補間曲線の制御点 (x1, y1, x2, y2)。cp_x・cp_y・cp_z は位置の各軸、cp_r は回転、cp_l は距離、
+    cp_v は視野角。"""
+    out = bytearray()
+    for x1, y1, x2, y2 in (cp_x, cp_y, cp_z, cp_r, cp_l, cp_v):
+        out += bytes([x1, x2, y1, y2])
+    return bytes(out)
+
+
+def bone_interp_bytes(x_cp, y_cp, z_cp, r_cp):
+    """各引数は補間曲線の制御点 (x1, y1, x2, y2)。x_cp・y_cp・z_cp は位置の各軸、r_cp は回転。"""
+    first = [cp[i] for i in range(4) for cp in (x_cp, y_cp, z_cp, r_cp)]
+    b = bytearray(64)
+    b[0:16] = bytes(first)
+    b[16:31] = bytes(first[1:16])
+    b[32:46] = bytes(first[2:16])
+    b[48:61] = bytes(first[3:16])
+    # 詰めパッドの値は MMD の版によって異なる。
+    return bytes(b)
+
+
+_LINEAR_CP = (20, 20, 107, 107)
+CAMERA_LINEAR_INTERP = camera_interp_bytes(*([_LINEAR_CP] * 6))
+BONE_LINEAR_INTERP = bone_interp_bytes(_LINEAR_CP, _LINEAR_CP, _LINEAR_CP, _LINEAR_CP)

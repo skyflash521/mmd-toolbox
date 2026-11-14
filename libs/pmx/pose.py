@@ -1,52 +1,25 @@
-"""FK評価。
-
-VMDボーンキーを指定フレームでサンプルしてローカル姿勢を作り、PMXボーン
-階層に沿って前方運動学でワールド姿勢を評価する。IK・付与親・物理演算は
-扱わない近似FK。
-"""
-
 import math
 from dataclasses import dataclass
 
 import numpy as np
-
-from vmd.interp import sample
 
 _IDENTITY_QUAT = (0.0, 0.0, 0.0, 1.0)
 
 
 @dataclass
 class LocalBonePose:
-    position: tuple[float, float, float]  # VMDローカル移動量
-    rotation: tuple[float, float, float, float]  # VMDローカル回転 (x,y,z,w)
+    """rotation はクォータニオンで、成分順は (x, y, z, w)。"""
+
+    position: tuple[float, float, float]
+    rotation: tuple[float, float, float, float]
 
 
 @dataclass
 class WorldBonePose:
+    """rotation はクォータニオンで、成分順は (x, y, z, w)。"""
+
     position: tuple[float, float, float]
-    rotation: tuple[float, float, float, float]  # (x,y,z,w)
-
-
-def sample_local_poses(model, bone_tracks, frame):
-    """フレーム frame の各ボーンのローカル姿勢を返す(model.bones 順)。
-
-    キーの無いボーンは位置 (0,0,0)・単位クォータニオン。
-    """
-    poses = []
-    for bone in model.bones:
-        keys = bone_tracks.get(bone.name)
-        if keys:
-            position = (
-                sample(keys, "pos_x", frame),
-                sample(keys, "pos_y", frame),
-                sample(keys, "pos_z", frame),
-            )
-            rotation = tuple(sample(keys, "rot", frame))
-        else:
-            position = (0.0, 0.0, 0.0)
-            rotation = _IDENTITY_QUAT
-        poses.append(LocalBonePose(position=position, rotation=rotation))
-    return tuple(poses)
+    rotation: tuple[float, float, float, float]
 
 
 def _quat_to_matrix(q) -> np.ndarray:
@@ -65,7 +38,6 @@ def _quat_to_matrix(q) -> np.ndarray:
 
 
 def _matrix_to_quat(m) -> tuple[float, float, float, float]:
-    """回転行列からクォータニオン (x,y,z,w)(Shepperd法)。"""
     trace = m[0, 0] + m[1, 1] + m[2, 2]
     if trace > 0.0:
         s = math.sqrt(trace + 1.0) * 2
@@ -95,26 +67,18 @@ def _matrix_to_quat(m) -> tuple[float, float, float, float]:
 
 
 def evaluate_fk(model, local_poses):
-    """ローカル姿勢列から各ボーンのワールド姿勢を評価する。
-
-    world = parent_world * translate(base_offset + 移動量) * rotate(回転量)
-    親なしボーンはモデル原点を親とする。親が子より後ろのindexでも解決できる
-    ようワールド行列をメモ化再帰で求める。
-    """
+    """local_poses と戻り値はどちらも model.bones と同じ並び。"""
     bones = model.bones
     world_mats: list[np.ndarray | None] = [None] * len(bones)
 
-    def world_of(i: int) -> np.ndarray:
-        cached = world_mats[i]
-        if cached is not None:
-            return cached
+    def compute(i: int) -> None:
         bone = bones[i]
         lp = local_poses[i]
         if bone.parent is None:
             parent_mat = np.eye(4)
             parent_pos = (0.0, 0.0, 0.0)
         else:
-            parent_mat = world_of(bone.parent)
+            parent_mat = world_mats[bone.parent]
             parent_pos = bones[bone.parent].position
         base_offset = (
             bone.position[0] - parent_pos[0],
@@ -133,9 +97,17 @@ def evaluate_fk(model, local_poses):
         local_mat = np.eye(4)
         local_mat[:3, :3] = _quat_to_matrix(rotation)
         local_mat[:3, 3] = translation
-        world_mat = parent_mat @ local_mat
-        world_mats[i] = world_mat
-        return world_mat
+        world_mats[i] = parent_mat @ local_mat
+
+    def world_of(i: int) -> np.ndarray:
+        pending = []
+        j: int | None = i
+        while j is not None and world_mats[j] is None:
+            pending.append(j)
+            j = bones[j].parent
+        for k in reversed(pending):
+            compute(k)
+        return world_mats[i]
 
     results = []
     for i in range(len(bones)):
@@ -151,11 +123,3 @@ def evaluate_fk(model, local_poses):
             )
         )
     return tuple(results)
-
-
-def evaluate_fk_range(model, bone_tracks, frames):
-    """frames の各フレームについて FK 評価結果を順に返す。"""
-    return [
-        evaluate_fk(model, sample_local_poses(model, bone_tracks, f))
-        for f in frames
-    ]

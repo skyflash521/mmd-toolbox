@@ -9,8 +9,10 @@ from .types import (
     SelfShadowKey,
     VmdDocument,
     VmdFormatError,
+    VmdValueError,
     VmdWarning,
 )
+from .validate import validate_values
 
 __all__ = [
     "BoneKey",
@@ -22,10 +24,12 @@ __all__ = [
     "SelfShadowKey",
     "VmdDocument",
     "VmdFormatError",
+    "VmdValueError",
     "VmdWarning",
     "ensure_frame0_neutral_keys",
     "normalize",
     "read",
+    "validate_values",
     "write",
     "write_file",
 ]

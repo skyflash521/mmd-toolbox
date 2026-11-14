@@ -1,10 +1,3 @@
-"""資源逼迫の観測と判定の単体テスト。
-
-GPU超過の算術判定・スワップ検出のノイズ床と帰属条件・1実行1回・観測不能時の縮退と、
-進捗ラッパーの委譲(段の切り替わり時だけ判定)を、観測関数を注入した決定論的単体テストで
-検証する。実GPU・実psutilは使わない。
-"""
-
 import pytest
 
 from cli_resource_watch import ProgressWithResourceCheck, ResourceWatch
@@ -22,8 +15,7 @@ class _Emit:
         self.calls.append((code, fields))
 
 
-def _seq_probe(values):
-    """呼び出しごとに values の要素を順に返す probe(尽きたら最後の値を返し続ける)。"""
+def _probe_repeating_last(values):
     state = {"i": 0}
 
     def probe():
@@ -35,8 +27,7 @@ def _seq_probe(values):
 
 
 def _mib_probe(values):
-    """MiB単位で書いたタプル列をバイト値の probe にする(probe 契約はバイト値)。"""
-    return _seq_probe([
+    return _probe_repeating_last([
         v if v is None else tuple(x * _MIB for x in v) for v in values
     ])
 
@@ -46,10 +37,7 @@ def _ram_quiet():
 
 
 def _gpu_unavailable():
-    return _seq_probe([None])
-
-
-# --- GPU超過 -------------------------------------------------------------------
+    return _probe_repeating_last([None])
 
 
 def test_gpu_oversubscription_fires_once_with_observed_fields():
@@ -57,17 +45,16 @@ def test_gpu_oversubscription_fires_once_with_observed_fields():
     gpu = _mib_probe([(4000, 8192, 0), (4000, 8192, 5600), (4000, 8192, 6000)])
     watch = ResourceWatch(emit, gpu_probe=gpu, ram_probe=_ram_quiet())
 
-    watch.check("load")       # 基準取得(開始時空き 4000MiB)
-    watch.check("separate")   # 予約量の最大 5600 > 4000 → 警告
-    watch.check("recognize")  # 2度目は出さない
+    watch.check("load")
+    watch.check("separate")
+    watch.check("recognize")
 
     assert emit.calls == [("gpu_memory_oversubscribed",
                            {"stage": "separate", "reserved_mib": 5600,
                             "free_at_start_mib": 4000, "total_mib": 8192})]
 
 
-def test_first_call_only_records_the_baseline():
-    # 最初の呼び出しの観測値が既に超過条件を満たしていても報告しない(そこが基準時点になる)。
+def test_first_call_only_records_the_baseline_even_when_conditions_hold():
     emit = _Emit()
     gpu = _mib_probe([(4000, 8192, 5600), (4000, 8192, 5600)])
     ram = _mib_probe([
@@ -91,49 +78,43 @@ def test_gpu_no_warning_when_reserved_fits_free_at_start():
     assert emit.calls == []
 
 
-def test_gpu_oversubscription_below_one_mib_still_fires():
-    """1MiB未満の超過も取りこぼさない(判定は切り捨て前のバイト値で行う)。"""
+def test_gpu_oversubscription_by_one_byte_fires_though_mib_fields_are_equal():
     emit = _Emit()
     free_at_start = 4000 * _MIB
-    gpu = _seq_probe([(free_at_start, 8192 * _MIB, 0),
-                      (free_at_start, 8192 * _MIB, free_at_start + 1)])
+    gpu = _probe_repeating_last([(free_at_start, 8192 * _MIB, 0),
+                                 (free_at_start, 8192 * _MIB, free_at_start + 1)])
     watch = ResourceWatch(emit, gpu_probe=gpu, ram_probe=_ram_quiet())
     watch.check("load")
     watch.check("separate")
     assert [c[0] for c in emit.calls] == ["gpu_memory_oversubscribed"]
     fields = emit.calls[0][1]
-    # 表示は切り捨てMiBなので両者は同値になるが、判定はバイト値なので警告は成立する。
     assert fields["reserved_mib"] == fields["free_at_start_mib"] == 4000
 
 
-def test_gpu_probe_none_disables_gpu_side_silently():
+def test_gpu_probe_none_disables_gpu_side():
     emit = _Emit()
+    gpu = _mib_probe([None, (4000, 8192, 0), (4000, 8192, 5600)])
+    watch = ResourceWatch(emit, gpu_probe=gpu, ram_probe=_ram_quiet())
+    for stage in ("load", "separate", "recognize"):
+        watch.check(stage)
+    assert emit.calls == []
+
+
+def test_gpu_probe_exception_disables_gpu_side_silently():
+    emit = _Emit()
+    later = _mib_probe([(4000, 8192, 0), (4000, 8192, 5600)])
     calls = {"n": 0}
 
     def gpu():
         calls["n"] += 1
-        return None
+        if calls["n"] == 1:
+            raise RuntimeError("CUDA driver error")
+        return later()
 
     watch = ResourceWatch(emit, gpu_probe=gpu, ram_probe=_ram_quiet())
     for stage in ("load", "separate", "recognize"):
         watch.check(stage)
     assert emit.calls == []
-    assert calls["n"] == 1  # 無効化後は probe 自体を呼ばない
-
-
-def test_gpu_probe_exception_disables_gpu_side_silently():
-    emit = _Emit()
-
-    def gpu():
-        raise RuntimeError("CUDA driver error")
-
-    watch = ResourceWatch(emit, gpu_probe=gpu, ram_probe=_ram_quiet())
-    for stage in ("load", "separate"):
-        watch.check(stage)  # 例外を外へ漏らさない
-    assert emit.calls == []
-
-
-# --- スワップ検出 --------------------------------------------------------------
 
 
 def test_swap_detection_fires_once_with_observed_fields():
@@ -167,12 +148,11 @@ def test_swap_increase_below_floor_does_not_fire():
     assert emit.calls == []
 
 
-def test_swap_without_own_process_growth_does_not_fire():
-    """他プロセス起因のスワップ(自プロセスの使用量が増えていない)では警告しない(帰属条件)。"""
+def test_process_growth_below_floor_does_not_fire():
     emit = _Emit()
     ram = _mib_probe([
         (1000, 500, 65457),
-        (1000 + SWAP_INCREASE_FLOOR_MIB * 10, 500, 65457),
+        (1000 + SWAP_INCREASE_FLOOR_MIB, 500 + PROCESS_GROWTH_FLOOR_MIB - 1, 65457),
     ])
     watch = ResourceWatch(emit, gpu_probe=_gpu_unavailable(), ram_probe=ram)
     watch.check("load")
@@ -193,11 +173,7 @@ def test_ram_probe_exception_disables_ram_side_and_keeps_gpu_side():
     assert [c[0] for c in emit.calls] == ["gpu_memory_oversubscribed"]
 
 
-# --- 警告の送出失敗 ------------------------------------------------------------
-
-
 def test_emit_exception_propagates_to_the_caller():
-    """警告の出し先が壊れている事実は観測の失敗と別物なので、握り潰さず呼び出し元へ通す。"""
     error = RuntimeError("閉じたストリームへの書き込み")
 
     def emit(code, fields):
@@ -212,12 +188,12 @@ def test_emit_exception_propagates_to_the_caller():
 
 
 def test_emit_exception_does_not_disable_the_other_side():
-    """送出の失敗は観測の失敗ではないので、その側の観測を無効化しない。"""
     calls = []
 
     def emit(code, fields):
         calls.append(code)
-        raise RuntimeError("閉じたストリームへの書き込み")
+        if len(calls) == 1:
+            raise RuntimeError("閉じたストリームへの書き込み")
 
     gpu = _mib_probe([(4000, 8192, 0), (4000, 8192, 5600)])
     ram = _mib_probe([
@@ -229,9 +205,8 @@ def test_emit_exception_does_not_disable_the_other_side():
     with pytest.raises(RuntimeError):
         watch.check("separate")
     assert calls == ["gpu_memory_oversubscribed"]
-
-
-# --- 進捗との接続 --------------------------------------------------------------
+    watch.check("recognize")
+    assert calls == ["gpu_memory_oversubscribed", "swap_detected"]
 
 
 class _FakeReporter:
@@ -267,7 +242,7 @@ def test_wrapper_checks_only_on_stage_change_and_delegates():
     progress.close()
     progress.summary("完了")
 
-    assert watch.checked == ["recognize", "rms"]  # 同一段内の進行更新では判定しない
+    assert watch.checked == ["recognize", "rms"]
     assert reporter.calls[0] == ("stage", "recognize",
                                  {"done": 0, "total": None, "note": "", "elapsed": 0.0})
     assert reporter.calls[1][2]["note"] == "ダウンロード中"
@@ -277,7 +252,6 @@ def test_wrapper_checks_only_on_stage_change_and_delegates():
 
 
 def test_wrapper_runs_check_before_reporter_stage():
-    """警告発行(ライブ行の消去を伴う)が新しい段の表示より先に行われる順序の検証。"""
     order = []
 
     class _Reporter:
@@ -294,11 +268,44 @@ def test_wrapper_runs_check_before_reporter_stage():
 
 
 def test_default_probes_are_used_when_not_injected(monkeypatch):
-    """観測関数を指定しないときはモジュールの既定の観測が使われる。"""
     emit = _Emit()
-    monkeypatch.setattr(watch_module, "_default_gpu_probe", _seq_probe([None]))
-    monkeypatch.setattr(watch_module, "_default_ram_probe", _seq_probe([(0, 0, 0)]))
+    monkeypatch.setattr(watch_module, "_default_gpu_probe",
+                        _mib_probe([(4000, 8192, 0), (4000, 8192, 5600)]))
+    monkeypatch.setattr(watch_module, "_default_ram_probe", _mib_probe([
+        (1000, 500, 65457),
+        (1000 + SWAP_INCREASE_FLOOR_MIB, 500 + PROCESS_GROWTH_FLOOR_MIB, 65457),
+    ]))
     watch = ResourceWatch(emit)
     watch.check("load")
     watch.check("separate")
-    assert emit.calls == []
+    assert [c[0] for c in emit.calls] == ["gpu_memory_oversubscribed", "swap_detected"]
+
+
+def test_default_gpu_probe_is_none_when_cuda_is_unavailable(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert watch_module._default_gpu_probe() is None
+
+
+def test_default_ram_probe_sums_rss_over_process_tree_skipping_vanished(monkeypatch):
+    psutil = pytest.importorskip("psutil")
+
+    class _Proc:
+        def __init__(self, rss, children=()):
+            self._rss = rss
+            self._children = list(children)
+
+        def memory_info(self):
+            if self._rss is None:
+                raise psutil.NoSuchProcess(0)
+            return type("MemInfo", (), {"rss": self._rss})()
+
+        def children(self, recursive):
+            assert recursive
+            return self._children
+
+    root = _Proc(100, children=[_Proc(20), _Proc(None), _Proc(3)])
+    monkeypatch.setattr(psutil, "Process", lambda: root)
+    monkeypatch.setattr(psutil, "swap_memory", lambda: type("Swap", (), {"used": 7})())
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: type("Vm", (), {"total": 900})())
+    assert watch_module._default_ram_probe() == (7, 123, 900)

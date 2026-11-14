@@ -1,8 +1,4 @@
-"""tools/<ツール>/CHANGELOG.md の共通パーサ。
-
-PR 時の検査(check_changelog.py)とタグ push 時の Release 作成(create_release.py)が同じ
-解析を使うことで、検査に通った CHANGELOG からは必ず Release 本文を抽出できることを保証する。
-"""
+"""CI の CHANGELOG 検査と Release 作成が共有する CHANGELOG パーサ。"""
 import re
 from pathlib import Path
 
@@ -12,7 +8,7 @@ _CATEGORY_RE = re.compile(r"^### (破壊的変更|追加|変更|修正)$")
 
 
 class FormatError(ValueError):
-    """CHANGELOG が規約の形式に適合しない。"""
+    pass
 
 
 def parse_sections(path: Path) -> dict[str, str]:

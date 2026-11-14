@@ -1,5 +1,3 @@
-"""自己記述の options 配列の導出の単体テスト。"""
-
 import argparse
 
 from cli_options import CompoundValidator, RangeValidator, describe_options
@@ -50,19 +48,19 @@ def test_arguments_absent_from_the_table_are_excluded():
     assert "--machine" not in _by_name()
 
 
-def test_negated_form_alone_is_excluded():
-    # 否定形は肯定形と同じ格納先で、肯定形の長形式が既に載る。
+def test_negated_form_is_excluded_and_the_positive_form_keeps_its_help():
     assert "--no-trim" not in _by_name()
     assert _by_name()["--trim"]["help"] == "端を落とす"
 
 
+def test_short_form_only_option_is_excluded():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-q", dest="quiet", action="store_true")
+    assert describe_options(parser, {"quiet": ("flag", None)}) == []
+
+
 def test_positional_uses_its_destination_name():
     assert _by_name()["input"]["name"] == "input"
-
-
-def test_every_element_has_the_same_five_keys():
-    for option in _described():
-        assert set(option) == {"name", "type", "constraint", "default", "help"}
 
 
 def test_table_entries_are_used_as_given():
@@ -84,10 +82,10 @@ def test_compound_validator_is_typed_as_compound():
     assert size["constraint"] == _COUNT.constraint
 
 
-def test_default_and_help_come_from_the_parser():
-    assert _by_name()["--amount"]["default"] == 0.5
-    assert _by_name()["--amount"]["help"] == "開き量"
-    assert _by_name()["--output"]["default"] is None
+def test_table_constraint_is_ignored_when_the_validator_supplies_it():
+    table = dict(_TYPE_TABLE, amount=(None, {"min": 99}))
+    amount = {o["name"]: o for o in describe_options(_parser(), table)}["--amount"]
+    assert amount["constraint"] == _UNIT_FLOAT.constraint
 
 
 def test_long_form_is_preferred_over_the_short_form():

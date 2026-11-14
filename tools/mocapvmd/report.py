@@ -1,125 +1,73 @@
-"""dry-run 用の処理計画・診断レポート。
-
-ボーン一覧・分類結果・キー数・フレーム範囲・足IK/つま先IK候補と、各トラックの最大フレーム間
-速度・最大回転角速度・スパイク候補数・保護フレーム数をまとめる。速度はトラックを時系列順に並べ、
-連続キーの差をキー間フレーム差で1フレームあたりへ正規化した最大値とする。回転角は quaternion の
-角度距離で測り、符号反転(q と -q は同一姿勢)を見かけの大角速度にしない。スパイク候補・保護
-フレームは種別窓での検出(denoise)に基づく。
-"""
-
 import math
 
-from mocapvmd import classify, denoise, footik, presets
+from mocapvmd import classify
+from vmd import quat
 
 
-def _quat_angle_deg(q1, q0):
-    """2つの quaternion 間の角度距離(度)。符号反転は同一姿勢として 0 に近づく。"""
-    dot = abs(sum(a * b for a, b in zip(q1, q0, strict=True)))
-    dot = min(1.0, dot)
-    return math.degrees(2.0 * math.acos(dot))
-
-
-def _track_diagnostics(keys):
-    """時系列順のキー列から (最大速度, 最大角速度) を 1フレームあたりで返す。"""
+def _max_speed_and_angular_speed_deg_per_frame(keys) -> tuple[float, float]:
     max_speed = 0.0
     max_ang = 0.0
     for a, b in zip(keys, keys[1:], strict=False):
         gap = b.frame - a.frame
         if gap <= 0:
-            continue  # 同一フレームの重複キーはゼロ除算を避けて飛ばす
+            continue
         max_speed = max(max_speed, math.dist(a.position, b.position) / gap)
-        max_ang = max(max_ang, _quat_angle_deg(a.rotation, b.rotation) / gap)
+        max_ang = max(max_ang, quat.angle_deg(a.rotation, b.rotation) / gap)
     return max_speed, max_ang
 
 
-def _spike_protected_counts(keys, clean_strength, category):
-    """トラックのスパイク候補フレーム数と保護フレーム数を返す。
-
-    種別の窓で検出し、スパイク候補は位置・回転候補フレームの和集合、保護フレームは境界(カット両側・
-    範囲端)と位置・回転アクセントの和集合のフレーム数。キー1個以下、または値が検証を通らないトラックは
-    (0, 0) を返す。
-    """
-    if len(keys) < 2:
-        return 0, 0
-    params = presets.resolve_cleaning(clean_strength, category)
-    try:
-        det = denoise.detect_noise_events(
-            [k.position for k in keys],
-            [k.rotation for k in keys],
-            pos_window=params["pos_window"],
-            rot_window=params["rot_window"],
-        )
-    except ValueError:
-        return 0, 0
-    spike_frames = {f for f, _ in det.pos_candidates} | set(det.rot_candidates)
-    protected = set(det.boundaries) | {f for f, _ in det.pos_accent} | set(det.rot_accent)
-    return len(spike_frames), len(protected)
+def _rotation_change_deg(q_before, q_after) -> float:
+    return quat.angle_deg(q_after, q_before)
 
 
-def _stabilization(bone_keys, clean_strength, denoise_on, suppression):
-    """foot_ik/toe_ik トラックを接地安定化し、name -> TrackStabilization を返す。
-
-    パイプライン(一般ノイズ軽減→足IK安定化)と同じ順序で診断を出すため、denoise_on のときは
-    クリーニング(apply_denoise)後の位置で安定化する。clean_strength はクリーニングに、横滑り抑制 S は
-    接地検出・ロックに使う。値が検証を通らない・キー1個以下のトラックは対象外とする。
-    """
-    order = []
-    groups = {}
-    for k in bone_keys:
-        if k.name not in groups:
-            groups[k.name] = []
-            order.append(k.name)
-        groups[k.name].append(k)
-
-    tracks = {}
-    for name in order:
-        ks = sorted(groups[name], key=lambda k: k.frame)
-        category = classify.classify(name)
-        if category not in ("foot_ik", "toe_ik") or len(ks) < 2:
+def _position_and_rotation_changes(keys, cleaned_keys) -> tuple[list[float], list[float]]:
+    cleaned_by_frame = {k.frame: k for k in cleaned_keys}
+    pos_changes = []
+    rot_changes_deg = []
+    for k in keys:
+        c = cleaned_by_frame.get(k.frame)
+        if c is None:
             continue
-        positions = [k.position for k in ks]
-        rotations = [k.rotation for k in ks]
-        try:
-            denoise.validate_bone_values(positions, rotations)
-        except ValueError:
-            continue
-        if denoise_on:
-            params = presets.resolve_cleaning(clean_strength, category)
-            positions, _ = denoise.apply_denoise(
-                positions, rotations,
-                pos_window=params["pos_window"], rot_window=params["rot_window"],
-                pos_strength=params["pos_strength"], rot_strength=params["rot_strength"],
-            )
-        tracks[name] = (category, [k.frame for k in ks], positions)
-    if not tracks:
-        return {}
-    return footik.stabilize_foot_ik(tracks, suppression)
+        pos_changes.append(math.dist(k.position, c.position))
+        rot_changes_deg.append(_rotation_change_deg(k.rotation, c.rotation))
+    return pos_changes, rot_changes_deg
+
+
+def _max_and_mean(values) -> tuple[float, float]:
+    if not values:
+        return 0.0, 0.0
+    return max(values), sum(values) / len(values)
+
+
+def _category_summaries(per_category) -> list[dict]:
+    summaries = []
+    for category, acc in per_category.items():
+        summary = {"category": category, "bones": acc["bones"]}
+        if acc["has_noise"]:
+            summary["protected_frames"] = acc["protected_frames"]
+        if acc["has_change"]:
+            summary["max_pos_change"], summary["mean_pos_change"] = _max_and_mean(acc["pos_changes"])
+            summary["max_rot_change_deg"], summary["mean_rot_change_deg"] = _max_and_mean(acc["rot_changes_deg"])
+        if acc["lock_ratios"]:
+            summary["lock_applied_ratio"] = sum(acc["lock_ratios"]) / len(acc["lock_ratios"])
+        summaries.append(summary)
+    return summaries
 
 
 def _reduction_rate(input_count, output_count):
-    """キー削減率 = 1 - 出力/入力。入力0は0(ゼロ除算しない)。"""
     if input_count <= 0:
         return 0.0
     return 1.0 - output_count / input_count
 
 
 def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, foot_ik_stabilize=True,
-                 reduction=None, suppression=1.0, pose_denoise=None):
-    """ボーンキー列(VmdDocument.bone、順不同でよい)から診断レポート dict を組み立てる。
-
-    名前ごとにトラック化して初出順に並べ、各トラックを時系列順に整列してから診断する。preset は疎化の
-    許容誤差プリセット名(表示用)、clean_strength はクリーニング強度の倍率。各ボーンには、
-    clean_strength で解決したクリーニングパラメータ(presets.resolve_cleaning の戻り)を付けてチューニングを
-    確認できるようにする。
-
-    reduction(reduce.reduce_bones の diagnostics_out。トラック名 -> {input_keys, output_keys,
-    tol_pos, tol_rot, cuts, errors})を渡すと、トップレベルに reduce フラグ(疎化したか= reduction を
-    渡したか)を、該当ボーンに reduction セクション(出力キー数・削減率(入出力から派生)・適用許容・
-    検出カット数・最大再生誤差)を付ける。疎化の実行は呼び出し側(CLI)が行い、本関数は表示のみ。
-
-    pose_denoise(pose_denoise.apply_pose_denoise の diagnostics_out)を渡すと、トップレベルに
-    pose_denoise セクションをそのまま載せる。表現空間ノイズ除去の実行は呼び出し側(CLI)が行う。
-    """
+                 reduction: dict[str, dict] | None = None, suppression=1.0,
+                 pose_denoise: dict | None = None, cleaned_bone_keys=None,
+                 noise_diagnostics: dict[str, dict] | None = None,
+                 stabilization_diagnostics: dict[str, dict] | None = None):
+    """cleaned_bone_keys はノイズ軽減と足IK接地安定化を終えた、キーフレーム圧縮前のボーンキー。渡すと、
+    bone_keys からの変更量をボーンごとと種別ごとに集計する。noise_diagnostics はボーン方式のノイズ軽減が
+    返したボーンごとの診断、stabilization_diagnostics は足IK接地安定化が返したボーンごとの診断。"""
     order = []
     groups = {}
     for k in bone_keys:
@@ -127,8 +75,12 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
             groups[k.name] = []
             order.append(k.name)
         groups[k.name].append(k)
-
-    stab = _stabilization(bone_keys, clean_strength, denoise, suppression) if foot_ik_stabilize else {}
+    cleaned_groups = {}
+    for k in cleaned_bone_keys or ():
+        cleaned_groups.setdefault(k.name, []).append(k)
+    per_category = {}
+    has_noise = noise_diagnostics is not None
+    stab = stabilization_diagnostics or {}
 
     bones = []
     foot_ik = []
@@ -138,8 +90,7 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
         keys = sorted(groups[name], key=lambda k: k.frame)
         all_frames.extend(k.frame for k in keys)
         category = classify.classify(name)
-        max_speed, max_ang = _track_diagnostics(keys)
-        spike_candidates, protected_frames = _spike_protected_counts(keys, clean_strength, category)
+        max_speed, max_ang = _max_speed_and_angular_speed_deg_per_frame(keys)
         entry = {
             "name": name,
             "category": category,
@@ -148,21 +99,29 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
             "frame_last": keys[-1].frame,
             "max_speed": max_speed,
             "max_ang_speed_deg": max_ang,
-            "spike_candidates": spike_candidates,
-            "protected_frames": protected_frames,
-            "cleaning": presets.resolve_cleaning(clean_strength, category),
         }
+        noise = (noise_diagnostics or {}).get(name)
+        if noise is not None:
+            entry.update(noise)
+        acc = per_category.setdefault(category, {
+            "bones": 0, "protected_frames": 0, "has_noise": has_noise, "has_change": cleaned_bone_keys is not None,
+            "pos_changes": [], "rot_changes_deg": [], "lock_ratios": [],
+        })
+        acc["bones"] += 1
+        if noise is not None:
+            acc["protected_frames"] += noise["protected_frames"]
+        if cleaned_bone_keys is not None:
+            pos_changes, rot_changes_deg = _position_and_rotation_changes(keys, cleaned_groups.get(name, []))
+            max_pos, mean_pos = _max_and_mean(pos_changes)
+            max_rot, mean_rot = _max_and_mean(rot_changes_deg)
+            entry["clean_change"] = {
+                "max_pos": max_pos, "mean_pos": mean_pos, "max_rot_deg": max_rot, "mean_rot_deg": mean_rot,
+            }
+            acc["pos_changes"].extend(pos_changes)
+            acc["rot_changes_deg"].extend(rot_changes_deg)
         if name in stab:
-            ts = stab[name]
-            entry["grounding_candidates"] = len(ts.grounding.candidate_frames)
-            # 接地区間は0始まり相対サンプルインデックス。整列済みキー列で絶対VMDフレーム番号へ戻す。
-            entry["grounding_segments"] = [
-                [keys[s.start].frame, keys[s.end].frame] for s in ts.grounding.segments
-            ]
-            entry["max_change"] = ts.max_change
-            entry["mean_change"] = ts.mean_change
-            entry["lock_applied_ratio"] = ts.lock_applied_ratio
-            entry["clamp_warnings"] = len(ts.warnings)
+            entry.update(stab[name])
+            acc["lock_ratios"].append(stab[name]["lock_applied_ratio"])
         if reduction is not None and name in reduction:
             r = reduction[name]
             entry["reduction"] = {
@@ -181,27 +140,28 @@ def build_report(bone_keys, preset="medium", clean_strength=1.0, denoise=True, f
 
     result = {
         "preset": preset,
-        "clean_strength": clean_strength,
         "denoise": denoise,
         "foot_ik_stabilize": foot_ik_stabilize,
         "foot_slide_suppression": suppression,
         "reduce": reduction is not None,
         "range": [min(all_frames), max(all_frames)] if all_frames else [],
         "bones": bones,
+        "categories": _category_summaries(per_category),
         "foot_ik_candidates": foot_ik,
         "toe_ik_candidates": toe_ik,
     }
+    if has_noise:
+        result["clean_strength"] = clean_strength
     if pose_denoise:
         result["pose_denoise"] = pose_denoise
     return result
 
 
 def format_dry_run(report):
-    """dry-run のテキスト要約を返す。適用プリセットと、各ボーンの診断値・解決済み
-    クリーニングパラメータ・IK候補を表示する。"""
-    lines = [
-        f"preset: {report['preset']}",
-        f"clean_strength: {report.get('clean_strength')}",
+    lines = [f"preset: {report['preset']}"]
+    if "clean_strength" in report:
+        lines.append(f"clean_strength: {report['clean_strength']}")
+    lines += [
         f"denoise: {'on' if report['denoise'] else 'off'}",
         f"foot_ik_stabilize: {'on' if report.get('foot_ik_stabilize') else 'off'}",
         f"foot_slide_suppression: {report.get('foot_slide_suppression')}",
@@ -209,15 +169,18 @@ def format_dry_run(report):
         f"range: {report['range']}",
     ]
     for b in report["bones"]:
-        c = b["cleaning"]
         line = (
             f"{b['name']} [{b['category']}] keys={b['input_keys']} "
             f"frames=[{b['frame_first']},{b['frame_last']}] "
-            f"max_speed={b['max_speed']:.4g} max_rot={b['max_ang_speed_deg']:.4g}deg "
-            f"spikes={b['spike_candidates']} protected={b['protected_frames']} "
-            f"clean_pos={c['pos_strength']:.4g} clean_rot={c['rot_strength']:.4g} "
-            f"win=[{c['pos_window']},{c['rot_window']}]"
+            f"max_speed={b['max_speed']:.4g} max_rot={b['max_ang_speed_deg']:.4g}deg"
         )
+        if "cleaning" in b:
+            c = b["cleaning"]
+            line += (
+                f" spikes={b['spike_candidates']} protected={b['protected_frames']} "
+                f"clean_pos={c['pos_strength']:.4g} clean_rot={c['rot_strength']:.4g} "
+                f"win=[{c['pos_window']},{c['rot_window']}]"
+            )
         if "grounding_segments" in b:
             line += (
                 f" ground_seg={len(b['grounding_segments'])}"
@@ -234,6 +197,18 @@ def format_dry_run(report):
                 f" cuts={r['cuts']} tol=[{r['tol_pos']:.4g},{r['tol_rot']:.4g}]"
                 f" err_pos={err_pos:.4g} err_rot={e['rot_deg']:.4g}deg"
             )
+        lines.append(line)
+    for c in report["categories"]:
+        line = f"種別 {c['category']}: bones={c['bones']}"
+        if "protected_frames" in c:
+            line += f" protected={c['protected_frames']}"
+        if "max_pos_change" in c:
+            line += (
+                f" max_pos={c['max_pos_change']:.4g} mean_pos={c['mean_pos_change']:.4g}"
+                f" max_rot={c['max_rot_change_deg']:.4g}deg mean_rot={c['mean_rot_change_deg']:.4g}deg"
+            )
+        if "lock_applied_ratio" in c:
+            line += f" lock_rate={c['lock_applied_ratio']:.2f}"
         lines.append(line)
     lines.append(f"足IK候補: {report['foot_ik_candidates']}")
     lines.append(f"つま先IK候補: {report['toe_ik_candidates']}")

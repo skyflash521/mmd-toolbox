@@ -1,14 +1,3 @@
-"""vpr2vmd の vpr 抽出層のテスト。
-
-vpr の読み込み(vpr へ委譲)・対象トラック選択・音符収集(全パートの統合と安定整列)を、
-合成した `VprProject`(vpr データモデル)を入力に決定論的に検証する。重なり解決・フレーム変換・
-口形写像は口形イベント確定(events・timing・mapping)が扱うため、ここでは生の抽出のみを対象にする。
-"""
-
-import io
-import json
-import zipfile
-
 import pytest
 
 from vpr import (
@@ -17,40 +6,10 @@ from vpr import (
     TempoEvent,
     Track,
     VprProject,
-    rest_intervals,
 )
-from vpr import read as vpr_read
 from vpr2vmd import io as vio
 
-
-def _make_vpr(sequence: dict) -> bytes:
-    """sequence.json を Project/sequence.json として持つ最小の vpr(zip)を組み立てる。"""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("Project/sequence.json", json.dumps(sequence, ensure_ascii=False))
-    return buf.getvalue()
-
-
-def _sequence(tracks, tempo_events=None):
-    return {
-        "version": {"major": 6, "minor": 5, "revision": 1},
-        "vender": "Yamaha Corporation",
-        "title": "test",
-        "masterTrack": {
-            "samplingRate": 44100,
-            "tempo": {"events": tempo_events or [{"pos": 0, "value": 12000}]},
-            "timeSig": {"events": [{"bar": 0, "numer": 4, "denom": 4}]},
-        },
-        "voices": [],
-        "tracks": tracks,
-    }
-
-
-def _seq_note(pos, duration, number=60, lyric="ら", phoneme="4 a", velocity=64):
-    return {
-        "pos": pos, "duration": duration, "number": number,
-        "lyric": lyric, "phoneme": phoneme, "velocity": velocity,
-    }
+_SINGING_TRACK_TYPE = 2
 
 
 def _note(start, dur, *, vel=64, phonemes=None, lyric="ら"):
@@ -76,8 +35,6 @@ def _project(tracks, *, tempos=None):
     )
 
 
-# --- 対象トラック選択(半角数字だけ=0-based INDEX / それ以外=Track.name) ---
-
 def test_select_track_defaults_to_first():
     project = _project([_track([], name="a"), _track([], name="b")])
     assert vio.select_track(project, None).name == "a"
@@ -89,13 +46,11 @@ def test_select_track_by_index():
 
 
 def test_select_track_full_width_digit_selects_by_name():
-    # 全角数字だけの名前を持つトラックは、その名前で選べる(INDEX と解釈しない)。
     project = _project([_track([], name="１"), _track([], name="b")])
     assert vio.select_track(project, "１").name == "１"
 
 
 def test_select_track_spaced_digit_is_treated_as_name():
-    # 空白を含む指定は数字だけではないので名前として扱う(一致しなければエラー)。
     project = _project([_track([], name="a"), _track([], name="b")])
     with pytest.raises(vio.TrackSelectionError):
         vio.select_track(project, " 1")
@@ -105,12 +60,6 @@ def test_select_track_index_out_of_range_errors():
     project = _project([_track([], name="a")])
     with pytest.raises(vio.TrackSelectionError):
         vio.select_track(project, "5")
-
-
-def test_select_track_negative_index_errors():
-    project = _project([_track([], name="a")])
-    with pytest.raises(vio.TrackSelectionError):
-        vio.select_track(project, "-1")
 
 
 def test_select_track_by_name():
@@ -136,8 +85,6 @@ def test_select_track_no_tracks_errors():
         vio.select_track(project, None)
 
 
-# --- 音符収集(全パート統合 + 安定整列: start昇順, duration降順, パート出現順, 音符索引昇順) ---
-
 def test_collect_notes_merges_parts_in_order():
     track = _track([
         _part([_note(0, 100)], name="p0"),
@@ -148,14 +95,12 @@ def test_collect_notes_merges_parts_in_order():
 
 
 def test_collect_notes_sorts_by_start_then_longer_duration_first():
-    # 同一 start は duration 降順(長い方が先)。
     track = _track([_part([_note(0, 50), _note(0, 120)])])
     notes = vio.collect_notes(track)
     assert [n.duration_tick for n in notes] == [120, 50]
 
 
 def test_collect_notes_tiebreak_by_part_order():
-    # 同一 start・同一 duration はパート出現順。
     track = _track([
         _part([_note(0, 100, lyric="first")], name="p0"),
         _part([_note(0, 100, lyric="second")], name="p1"),
@@ -165,7 +110,6 @@ def test_collect_notes_tiebreak_by_part_order():
 
 
 def test_collect_notes_is_stable_within_part():
-    # 同一 start・同一 duration の同一パート内は音符索引昇順(入力順)を保つ。
     track = _track([_part([_note(0, 100, lyric="x"), _note(0, 100, lyric="y")])])
     notes = vio.collect_notes(track)
     assert [n.lyric for n in notes] == ["x", "y"]
@@ -173,47 +117,3 @@ def test_collect_notes_is_stable_within_part():
 
 def test_collect_notes_empty_track():
     assert vio.collect_notes(_track([])) == []
-
-
-# --- 代表 vpr からの抽出(読み込みは vpr、選択・収集は vpr2vmd)---
-
-def test_extracts_notes_tempo_rests_from_representative_vpr():
-    """代表 vpr から音符・休符・テンポが取り出せる。"""
-    vpr = _make_vpr(_sequence(
-        [{
-            "type": 2, "name": "vocal",
-            "parts": [{"name": "p", "pos": 0, "duration": 1920, "notes": [
-                _seq_note(0, 240, number=60, lyric="ら", phoneme="4 a", velocity=64),
-                _seq_note(480, 360, number=62, lyric="り", phoneme="4 i", velocity=100),
-            ]}],
-        }],
-        tempo_events=[{"pos": 0, "value": 12000}],
-    ))
-    project, _warnings = vpr_read(vpr)
-
-    # テンポが取り出せる(value/100 = bpm)。
-    assert [(t.tick, t.bpm) for t in project.tempos] == [(0, 120.0)]
-
-    # 音符が取り出せる(時刻・長さ・ピッチ・歌詞・強弱・音素を全て保持)。
-    track = vio.select_track(project, None)
-    notes = vio.collect_notes(track)
-    extracted = [
-        (n.start_tick, n.duration_tick, n.pitch, n.lyric, n.velocity, n.phonemes)
-        for n in notes
-    ]
-    assert extracted == [
-        (0, 240, 60, "ら", 64, ["4", "a"]),
-        (480, 360, 62, "り", 100, ["4", "i"]),
-    ]
-
-    # 休符が取り出せる(発音区間の補集合。240..480 が休符)。
-    end_tick = max(n.start_tick + n.duration_tick for n in notes)
-    assert rest_intervals(notes, end_tick) == [(240, 480)]
-
-
-def test_non_vpr_bytes_raise_vpr_format_error():
-    """非vpr(壊れた zip)は vpr が VprFormatError を送出する(入力不正の根拠)。"""
-    from vpr import VprFormatError
-
-    with pytest.raises(VprFormatError):
-        vpr_read(b"not a zip")

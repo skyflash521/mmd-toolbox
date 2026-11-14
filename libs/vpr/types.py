@@ -1,20 +1,8 @@
-"""vpr データモデル。
-
-VOCALOID プロジェクト(vpr)の音楽情報を、特定の CLI に依らない正規化モデルとして公開する。
-時刻は vpr ネイティブの tick(整数)で保持し、音符の時刻はプロジェクト絶対 tick で正規化する。
-秒・フレーム・拍への変換は持たない(呼び出し側の責務)。休符は専用型を持たず、同一トラック内の
-発音区間の和集合の補集合として導出する。
-"""
-
 from dataclasses import dataclass, field
 
 
 class VprFormatError(Exception):
-    """vpr の構造異常。
-
-    原因特定のため path(ZIP エントリ名または JSON パス)・key(欠落/型不一致の対象キー)・
-    value(問題になった実値)を持つ。
-    """
+    """path は ZIP エントリ名または JSON パス(例 tracks[2].parts[0].notes[4].pos)。"""
 
     def __init__(self, message: str, *, path=None, key=None, value=None) -> None:
         super().__init__(message)
@@ -26,35 +14,63 @@ class VprFormatError(Exception):
 
 @dataclass
 class VprWarning:
-    """続行可能な事象の構造化報告。
-
-    ロケータ(添字・tick)は公開データモデルの階層に対応する。VMD 固有の section/frame は持たない。
-    """
+    """tick はプロジェクト絶対 tick(パート相対ではない)。"""
 
     code: str
     message: str
-    track_index: int | None = None  # VprProject.tracks の添字
-    part_index: int | None = None  # Track.parts の添字
-    note_index: int | None = None  # Part.notes の添字
-    related_note_index: int | None = None  # 2音符の関係(重なり等)で相手側 Part.notes の添字
-    tick: int | None = None  # 対象位置のプロジェクト絶対 tick
+    track_index: int | None = None
+    part_index: int | None = None
+    note_index: int | None = None
+    related_note_index: int | None = None
+    tick: int | None = None
+
+
+@dataclass
+class VibratoPoint:
+    """pos はプロジェクト絶対 tick(ビブラート区間始端からの相対位置ではない)。"""
+
+    pos: int
+    value: int
+
+
+@dataclass
+class NoteVibrato:
+    """duration は区間長で、単位は tick。"""
+
+    type: int
+    duration: int
+    depths: list[VibratoPoint] = field(default_factory=list)
+    rates: list[VibratoPoint] = field(default_factory=list)
+
+
+@dataclass
+class NoteAiExpression:
+    vibrato_leading_depth: float
+    vibrato_following_depth: float
 
 
 @dataclass
 class Note:
-    """音符。start_tick はプロジェクト絶対 tick、duration_tick は tick 長。"""
+    """start_tick はプロジェクト絶対 tick(パート相対ではない)。pitch は MIDI ノート番号。
+
+    source_index は読み時の生配列上の位置で、比較に使わない。読んだ音符でなければ None。
+    """
 
     start_tick: int
     duration_tick: int
-    pitch: int  # MIDI ノート番号
-    lyric: str  # 表示歌詞
-    velocity: int  # 0〜127 の生値
-    phonemes: list[str] = field(default_factory=list)  # 音符内の音素列(空可)
+    pitch: int
+    lyric: str
+    velocity: int
+    phonemes: list[str] = field(default_factory=list)
+    is_protected: bool = field(default=False, kw_only=True)
+    vibrato: NoteVibrato | None = None
+    ai_expression: NoteAiExpression | None = None
+    source_index: int | None = field(default=None, compare=False, kw_only=True)
 
 
 @dataclass
 class ControllerEvent:
-    """連続コントローラ曲線の1点。tick はプロジェクト絶対 tick、value はファイル格納の生値。"""
+    """tick はプロジェクト絶対 tick(パート相対ではない)。"""
 
     tick: int
     value: int
@@ -62,31 +78,30 @@ class ControllerEvent:
 
 @dataclass
 class ControllerCurve:
-    """パート単位の連続コントローラ曲線(声量 dynamics・表情 s5Expression・音色 等)。
-
-    vpr の各パートが持つ連続パラメータ自動化を生値のまま保持する。どれが声量かの選別・値域の正規化・
-    開き量への写像は呼び出し側(各CLI)の責務で、vpr は形式の事実(名前と (tick, 生値) 列)だけ
-    公開する。
-    """
-
-    name: str  # vpr の controller 名(例 "dynamics"・"s5Expression")
-    events: list[ControllerEvent] = field(default_factory=list)  # tick の昇順
+    name: str
+    events: list[ControllerEvent] = field(default_factory=list)
 
 
 @dataclass
 class Part:
-    """歌唱区間。start_tick はパートの開始位置(プロジェクト絶対 tick)。"""
-
     name: str
     start_tick: int
-    notes: list[Note] = field(default_factory=list)  # start_tick の昇順
-    controllers: list[ControllerCurve] = field(default_factory=list)  # 連続コントローラ曲線
+    duration_tick: int = 0
+    voice: "VoiceBank | None" = None
+    notes: list[Note] = field(default_factory=list)
+    controllers: list[ControllerCurve] = field(default_factory=list)
 
 
 @dataclass
 class Track:
     name: str
     parts: list[Part] = field(default_factory=list)
+
+
+@dataclass
+class VoiceBank:
+    comp_id: str
+    name: str
 
 
 @dataclass
@@ -104,9 +119,12 @@ class TimeSignature:
 
 @dataclass
 class VprProject:
-    resolution: int  # tick/四分音符
+    """resolution の単位は tick/四分音符。entries は Project/sequence.json を含めない。"""
+
+    resolution: int
     tempos: list[TempoEvent] = field(default_factory=list)
     time_signatures: list[TimeSignature] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
-    # 未解釈データのロスレス保持。read は sequence.json 全体を保持し、手組み時は None。
+    title: str = ""
     raw_sequence: dict | None = None
+    entries: dict[str, bytes] | None = None

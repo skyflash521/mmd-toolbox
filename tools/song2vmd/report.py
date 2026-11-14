@@ -1,10 +1,3 @@
-"""song2vmd レポート/診断の構造化。
-
---dry-run の人間向けレポートと --machine の result イベント(mode:"run"/"inspect")を、共通の
-診断データ(Diagnostics)から組み立てる。音声処理・外部呼び出しは行わず、既に確定した口形イベント列
-(MouthEvent)・音素セグメント列(Segment)・EventDiagnostics を集計・整形するだけの純粋ロジック。
-"""
-
 from dataclasses import dataclass
 
 from lipsync import MouthShape
@@ -12,8 +5,6 @@ from lipsync import MouthShape
 _MORA_SHAPES = frozenset({MouthShape.A, MouthShape.I, MouthShape.U, MouthShape.E, MouthShape.O, MouthShape.N})
 _CLOSED_SHAPES = frozenset({MouthShape.BILABIAL, MouthShape.SILENCE})
 
-# result(mode:"run")のキー集合。mode:"inspect" はこれに
-# input_kind/sample_rate/channels を加える(result_inspect_fields)。
 _RUN_FIELD_ORDER = (
     "output", "keys", "backends", "style", "separated", "phonemes", "morae", "merged_morae",
     "weak_vowels", "coverage", "closed_ranges", "max_opening", "duration_sec",
@@ -22,8 +13,6 @@ _RUN_FIELD_ORDER = (
 
 @dataclass(frozen=True)
 class MoraReport:
-    """モーラ1件の診断(モーラごとの口形・保持値・保持長)。人間向けレポート専用。"""
-
     shape: str
     open_amount: float
     hold_frames: float
@@ -31,12 +20,6 @@ class MoraReport:
 
 @dataclass(frozen=True)
 class Diagnostics:
-    """人間向けレポートと機械モードの result に使う統計をまとめた診断データ。
-
-    low_dynamics・forced_split は機械モードのresultペイロードには含まれない。呼び出し側が
-    warningイベント(code="low_dynamics_suppressed"/"forced_split")を出すかどうかの判定に使う。
-    """
-
     backends: dict
     style: str
     separated: bool
@@ -49,15 +32,12 @@ class Diagnostics:
     max_opening: float
     duration_sec: float
     keys: int
-    mora_details: tuple
+    mora_details: tuple[MoraReport, ...]
     low_dynamics: bool
     forced_split: bool
 
 
 def _group_mora_events(mouth_events, mora_event_group_sizes):
-    """mouth_events のうち母音的口形(vowel/n)の連続MouthEventを、mora_event_group_sizes の列
-    (events.confirm_mouth_events の3件目の戻り値)に従って、実際のモーラ単位へグループ化する。
-    分割されないモーラは要素数1のグループになる。"""
     groups = []
     sizes = iter(mora_event_group_sizes)
     i, n = 0, len(mouth_events)
@@ -73,7 +53,7 @@ def _group_mora_events(mouth_events, mora_event_group_sizes):
 
 def build_diagnostics(*, segments, mouth_events, event_diagnostics, mora_event_group_sizes, backends,
                        style, separated, duration_sec, keys, forced_split) -> Diagnostics:
-    """音素セグメント列・口形イベント列・EventDiagnosticsからDiagnosticsを組み立てる。"""
+    """mora_event_group_sizes は mouth_events の母音的口形のうち、連続して1モーラを成す件数の列。"""
     phonemes = sum(1 for s in segments if s.type in ("vowel", "consonant"))
     gap_duration = sum(s.end_sec - s.start_sec for s in segments if s.type == "gap")
     coverage = 1.0 - gap_duration / duration_sec if duration_sec > 0 else 0.0
@@ -99,7 +79,6 @@ def build_diagnostics(*, segments, mouth_events, event_diagnostics, mora_event_g
 
 
 def render_report_text(diag: Diagnostics, params: dict) -> str:
-    """--dry-run の人間向けレポートを整形する。"""
     lines = [
         f"separator: {diag.backends.get('separator')}",
         f"recognizer: {diag.backends.get('recognizer')}",
@@ -128,7 +107,6 @@ def render_report_text(diag: Diagnostics, params: dict) -> str:
 
 
 def result_run_fields(diag: Diagnostics, output) -> dict:
-    """--machine の result(mode:"run")フィールドを組み立てる。"""
     values = {
         "output": output, "keys": diag.keys, "backends": dict(diag.backends), "style": diag.style,
         "separated": diag.separated, "phonemes": diag.phonemes, "morae": diag.morae,
@@ -141,7 +119,6 @@ def result_run_fields(diag: Diagnostics, output) -> dict:
 
 
 def result_inspect_fields(diag: Diagnostics, *, input_kind, sample_rate, channels) -> dict:
-    """--machine --dry-run の result(mode:"inspect")フィールドを組み立てる。"""
     fields = result_run_fields(diag, output=None)
     fields.update(input_kind=input_kind, sample_rate=sample_rate, channels=channels)
     return fields

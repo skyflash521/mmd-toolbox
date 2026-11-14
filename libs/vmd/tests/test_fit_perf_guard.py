@@ -1,12 +1,3 @@
-"""疎化フィットの性能ガード。
-
-性能チューニングの実装はミスるとフィットが収束せず止まりうる。本テストは代表的な bezier 疎化
-ワークロード(曲線的＋微小ゆらぎの密ボーン動作=多数の小区間フィットを踏む)をサブプロセスで
-実行し、明示の上限時間で確実に停止させることで、ハング・破滅的な性能回帰を「失敗」として
-検出する(遅い/止まるフィット1つで pytest スイート全体を巻き込まない)。`signal.SIGALRM` は
-Windows に無いので使わず、子プロセスごと確実に殺せるサブプロセス＋タイムアウトで止める。
-"""
-
 import os
 import subprocess
 import sys
@@ -14,13 +5,10 @@ from pathlib import Path
 
 import pytest
 
-# libs/vmd/tests/<this> から見たリポジトリルート。サブプロセスには PYTHONPATH に libs/ を渡し、
-# editable install や site-packages の古いコピーでなく、このツリーのソース vmd を import させる。
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _LIBS_DIR = _REPO_ROOT / "libs"
 
-# 代表ワークロード。外部ファイルを要求せずテスト内で組み立てる。出力が空でないことも確認。
-_DRIVER = r"""
+_BEZIER_REDUCE_DRIVER = r"""
 import math
 from vmd import reduce
 from vmd.types import BoneKey
@@ -45,28 +33,28 @@ out = reduce.reduce_bone_track(
 assert out, "reduce produced no keys"
 """
 
-# 通常 ~2 秒。上限はハング・破滅的回帰(十数倍以上)だけを捕らえる余裕値で、通常の機械差では
-# 発火しない(タイトな性能閾値ではなく、止まらないことの保証)。
 _TIMEOUT_SEC = 30
 
 
-def test_bezier_reduce_does_not_hang():
+def _env_importing_this_tree_libs_first() -> dict:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         [str(_LIBS_DIR), env["PYTHONPATH"]] if env.get("PYTHONPATH") else [str(_LIBS_DIR)]
     )
+    return env
+
+
+def test_bezier_reduce_does_not_hang():
     try:
+        # signal.SIGALRM は Windows に無い。
         proc = subprocess.run(
-            [sys.executable, "-c", _DRIVER],
+            [sys.executable, "-c", _BEZIER_REDUCE_DRIVER],
             cwd=_REPO_ROOT,
-            env=env,
+            env=_env_importing_this_tree_libs_first(),
             timeout=_TIMEOUT_SEC,
             capture_output=True,
             text=True,
         )
     except subprocess.TimeoutExpired:
-        pytest.fail(
-            f"bezier 疎化が {_TIMEOUT_SEC}s 以内に完了しなかった(ハング/破滅的な性能回帰の疑い)。"
-            " 曲線評価のベクトル化など棄却済み最適化を踏んでいないか確認。"
-        )
+        pytest.fail(f"bezier 疎化が {_TIMEOUT_SEC}s 以内に完了しなかった")
     assert proc.returncode == 0, f"サブプロセスが異常終了: {proc.stderr}"

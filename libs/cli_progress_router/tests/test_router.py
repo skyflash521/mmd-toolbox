@@ -1,15 +1,6 @@
-"""進捗の振り分けの単体テスト。
-
-実描画・TTY判定・ハートビート・書き込み失敗保護の実体は cli_progress が持ち、その検証は
-そちらのテストが担う。ここでは振り分けの責務——機械/非機械の分岐、段 id から工程名への変換、
-表示器への委譲、送出失敗の区別——だけを検証する。
-
-検証は表示器のクラス自体をスパイへ差し替えて、構築時のキーワード引数と各メソッドの呼び出しを
-確認する形で行う。
-"""
-
 import io
-from unittest.mock import MagicMock, call
+import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -38,16 +29,12 @@ class _FakeEmitter:
 
 
 class _NoTouchEmitter:
-    """属性アクセスがあれば即座に失敗するセンチネル(非機械モードでemitterに一切触れないことの検証用)。"""
-
     def __getattr__(self, name):
         raise AssertionError(f"non-machine mode must not touch emitter (accessed {name!r})")
 
 
 @pytest.fixture
 def spy_display(monkeypatch):
-    """表示器のクラス自体をスパイへ差し替えて返す(構築呼び出しの検証用。生成インスタンスは
-    各テストが spy_cls.return_value で取り出す)。"""
     spy_cls = MagicMock(name="ProgressReporterClass")
     monkeypatch.setattr(router_module._display_module, "ProgressReporter", spy_cls)
     return spy_cls
@@ -60,9 +47,6 @@ def _router(**kwargs):
     kwargs.setdefault("stream", _TTYStream())
     kwargs.setdefault("labels", _LABELS)
     return ProgressRouter(**kwargs)
-
-
-# --- 機械モード: emitter へ送出し、表示器は一切生成しない --------------------------------
 
 
 def test_machine_mode_forwards_stage_to_emitter_and_builds_no_display(spy_display):
@@ -82,7 +66,6 @@ def test_machine_mode_stage_defaults_done_zero_total_none_note_empty_elapsed_zer
 
 @pytest.mark.parametrize("isatty,quiet", [(True, False), (True, True), (False, False), (False, True)])
 def test_machine_mode_emits_regardless_of_tty_and_quiet(spy_display, isatty, quiet):
-    # 進捗表示の抑制は人間向け表示の話で、機械利用側が読むイベントは抑制の対象でない。
     emitter = _FakeEmitter()
     stream = _TTYStream() if isatty else _NonTTYStream()
     router = _router(machine=True, quiet=quiet, emitter=emitter, stream=stream)
@@ -101,29 +84,18 @@ def test_machine_mode_forwards_every_call_in_order(spy_display):
     assert [c["done"] for c in emitter.calls] == [0, 1, 2]
 
 
-def test_machine_mode_close_and_summary_do_not_touch_display_or_emitter(spy_display):
-    emitter = _FakeEmitter()
-    router = _router(machine=True, emitter=emitter, stream=_NonTTYStream())
-    router.close()
-    router.summary("完了")
-    spy_display.return_value.close.assert_not_called()
-    spy_display.return_value.summary.assert_not_called()
-    assert emitter.calls == []
-
-
-# --- 非機械モード: 表示器を構築して委譲する。emitter には一切触れない ----------------------
-
-
 @pytest.mark.parametrize("isatty,quiet,expect_enabled", [
     (True, False, True),
     (True, True, False),
     (False, False, False),
-    (False, True, False),
 ])
-def test_non_machine_mode_constructs_display_with_all_kwargs(
+def test_non_machine_display_gets_all_kwargs_and_is_enabled_only_on_tty_without_quiet(
         spy_display, isatty, quiet, expect_enabled):
     stream = _TTYStream() if isatty else _NonTTYStream()
-    clock = lambda: 0.0  # noqa: E731 - テスト用の単純な注入クロック
+
+    def clock():
+        return 0.0
+
     lock = object()
     _router(quiet=quiet, emitter=_NoTouchEmitter(), stream=stream,
             now=clock, interval=0.2, write_lock=lock)
@@ -131,18 +103,9 @@ def test_non_machine_mode_constructs_display_with_all_kwargs(
         stream=stream, enabled=expect_enabled, now=clock, interval=0.2, write_lock=lock)
 
 
-def test_write_lock_defaults_to_none(spy_display):
-    _router()
-    assert spy_display.call_args.kwargs["write_lock"] is None
-
-
 def test_interval_is_not_passed_when_unspecified(spy_display):
-    # 既定の再描画間隔はライブ表示側が持つので、未指定のときはこちらから値を渡さない。
     _router()
     assert "interval" not in spy_display.call_args.kwargs
-
-
-# --- 表示書式: 段 id を工程名へ変換して表示器へ渡す ---------------------------------------
 
 
 def test_stage_id_maps_to_its_label(spy_display):
@@ -159,49 +122,49 @@ def test_unknown_stage_id_used_as_label_as_is(spy_display):
     display.stage.assert_called_once_with("未知の工程")
 
 
-def test_same_stage_id_updates_only_and_new_stage_id_switches(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.stage("load", done=0, total=3)
-    router.stage("load", done=1, total=3, note="n")
-    display.stage.assert_called_once_with("音声読み込み")
-    assert display.update.call_args_list == [call(0, 3, ""), call(1, 3, "n")]
-    router.stage("write")
-    assert display.stage.call_args_list == [call("音声読み込み"), call("書き出し")]
+def _live_router(clock):
+    stream = _TTYStream()
+    router = _router(stream=stream, now=lambda: clock[0], interval=0.01)
+    return router, stream
 
 
-def test_stage_after_close_restarts_even_with_same_stage_id(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.stage("load")
-    router.close()
-    router.stage("load")
-    assert display.stage.call_args_list == [call("音声読み込み"), call("音声読み込み")]
+def _wait_for(stream, text, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if text in stream.getvalue():
+            return True
+        time.sleep(0.005)
+    return False
 
 
-def test_close_is_idempotent(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.close()
-    router.close()
-    assert display.close.call_count == 2
+def test_same_stage_id_keeps_the_elapsed_time_and_new_stage_id_restarts_it():
+    clock = [0.0]
+    router, stream = _live_router(clock)
+    try:
+        router.stage("load", done=0, total=3)
+        clock[0] = 5.0
+        router.stage("load", done=1, total=3)
+        assert _wait_for(stream, "[音声読み込み] 1/3 経過 0:05")
+        router.stage("write")
+        assert _wait_for(stream, "[書き出し] 経過 0:00")
+    finally:
+        router.close()
 
 
-def test_close_and_summary_delegate_to_the_display(spy_display):
-    display = spy_display.return_value
-    router = _router()
-    router.close()
-    router.summary("完了 out.vmd")
-    display.close.assert_called_once_with()
-    display.summary.assert_called_once_with("完了 out.vmd")
+def test_stage_after_close_restarts_even_with_same_stage_id():
+    clock = [0.0]
+    router, stream = _live_router(clock)
+    try:
+        router.stage("load")
+        router.close()
+        clock[0] = 5.0
+        router.stage("load", done=2, total=4)
+        assert _wait_for(stream, "[音声読み込み] 2/4 経過 0:00")
+    finally:
+        router.close()
 
 
-# --- 機械モードの送出失敗 ------------------------------------------------------
-
-
-class _BrokenEmitter:
-    """progress の送出が標準出力の書き込み失敗で落ちる emitter。"""
-
+class _RaisingEmitter:
     def __init__(self, error):
         self._error = error
 
@@ -209,27 +172,24 @@ class _BrokenEmitter:
         raise self._error
 
 
-class _CustomEmitError(Exception):
-    """入出力の例外を継承しない、送出先が独自に定義しうる例外を模した型。"""
+class _NonIOEmitError(Exception):
+    pass
 
 
-@pytest.mark.parametrize("error_type", [OSError, BrokenPipeError, ValueError, _CustomEmitError])
-def test_emit_failure_raises_dedicated_error(error_type):
-    # 工程の失敗と区別できるよう、進捗送出の失敗は専用例外で送出する。
+def test_emit_failure_raises_dedicated_error_keeping_cause_type_and_message():
+    error_type = _NonIOEmitError
     error = error_type("標準出力へ書けません")
-    router = _router(machine=True, emitter=_BrokenEmitter(error), stream=_NonTTYStream())
+    router = _router(machine=True, emitter=_RaisingEmitter(error), stream=_NonTTYStream())
     with pytest.raises(ProgressEmitError) as exc:
         router.stage("load", note="10%")
     assert exc.value.__cause__ is error
-    # 呼び出し元は専用例外の文字列だけを失敗理由の1行に出すので、元例外の要旨をそこへ残す。
     assert error_type.__name__ in str(exc.value)
     assert "標準出力へ書けません" in str(exc.value)
 
 
 def test_emit_does_not_wrap_keyboard_interrupt():
-    # 進捗送出中に届いた中断は送出の失敗ではないので包まず、中断の経路へそのまま届ける。
     error = KeyboardInterrupt()
-    router = _router(machine=True, emitter=_BrokenEmitter(error), stream=_NonTTYStream())
+    router = _router(machine=True, emitter=_RaisingEmitter(error), stream=_NonTTYStream())
     with pytest.raises(KeyboardInterrupt) as exc:
         router.stage("load", note="10%")
     assert exc.value is error

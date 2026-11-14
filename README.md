@@ -6,10 +6,10 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 
 | ツール | 概要 | バージョン | 詳しい使い方 |
 |---|---|---|---|
-| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.2 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
-| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.3 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
-| `song2vmd` | 日本語の歌の音声ファイルから、リップモーション VMD を自動生成する | 0.0.1 | [tools/song2vmd/README.md](tools/song2vmd/README.md) |
-| `vpr2vmd` | VOCALOID のプロジェクトファイル(vpr)から、リップモーション VMD を生成する | 0.0.1 | [tools/vpr2vmd/README.md](tools/vpr2vmd/README.md) |
+| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.3 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
+| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.4 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
+| `song2vmd` | 日本語の歌の音声ファイルから、リップモーション VMD を自動生成する | 0.0.2 | [tools/song2vmd/README.md](tools/song2vmd/README.md) |
+| `vpr2vmd` | VOCALOID のプロジェクトファイル(vpr)から、リップモーション VMD を生成する | 0.0.2 | [tools/vpr2vmd/README.md](tools/vpr2vmd/README.md) |
 
 ## 使い方
 
@@ -74,7 +74,7 @@ pip install .
 
 ### 5. ツールを実行する
 
-ツールは、仮想環境(.venv)を有効にしたウィンドウで実行する。[手順4](#4-仮想環境を作成する)をした直後の同じウィンドウなら、すでに有効なのでそのまま実行できる。
+ツールは、仮想環境(.venv)を有効にしたウィンドウで実行する。[手順4](#4-仮想環境を作成する)をした直後の同じウィンドウなら、そのまま実行できる。
 
 ウィンドウを開き直したときは、[手順3](#3-readmemd-が入っているフォルダへ移動する)と同じようにフォルダへ移動してから仮想環境を有効にする。Windows では PowerShell で次を実行する。
 
@@ -107,7 +107,7 @@ mocapvmd <入力ファイル名>.vmd
 
 最適化した新しい VMD が、入力した VMD と同じフォルダに `<入力ファイル名>_mocap.vmd` という名前で作られる。
 
-このツールは処理が重いので、時間がかかる場合はプリセットに `faster` を指定する。
+時間がかかる場合はプリセットに `faster` を指定する。
 キーが大きく減るぶん、細かい動きが省かれて元の動きとの差が大きくなる。PC の性能や VMD の長さによっては、`faster` でも時間がかかる。
 
 ```sh
@@ -150,8 +150,8 @@ shakevmd <入力ファイル名>.vmd
 
 - 揺らせるのはカメラ。ボーンやモーフの動きに揺れを足すツールではない。
 - VMD にカメラ以外のデータが入っていても、加工するのはカメラキーだけ。
-- 視野角が変化する区間には手ぶれを焼き込まず、元のカメラキーを残す。視野角は整数でしか保存できず、キーを増やすとズームがカクつくため。
-- 手ぶれを足すのは、カメラの動きを作り終えた最後にする。先に焼き込むとキーが増えて、あとからの手直しが難しくなる。
+- 視野角が2フレーム以上かけて変化する区間には手ぶれを焼き込まず、元のカメラキーを残す。視野角は整数でしか保存できない。
+- 手ぶれを足すのは、カメラの動きを作り終えた最後にする。
 - 長い VMD では、処理に時間がかかることがある。
 
 詳しい使い方とオプションは [tools/shakevmd/README.md](tools/shakevmd/README.md)
@@ -162,16 +162,17 @@ shakevmd <入力ファイル名>.vmd
 
 追加のインストール:
 
-1. NVIDIA GPU を搭載している場合は [PyTorch 公式サイト](https://pytorch.org/get-started/locally/) の `Compute Platform` で CUDA のバージョンを選び、次のコマンドの `--index-url` をそれに合わせて実行する(次は CUDA 12.6 の場合)。
-
-   ```sh
-   pip install torch --index-url https://download.pytorch.org/whl/cu126 --force-reinstall --no-deps
-   ```
-
-2. 次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを追加する)。
+1. 次を実行する(song2vmd が使う音声認識・ボーカル分離のライブラリを追加する)。
 
    ```sh
    pip install ".[vocal-analysis]"
+   ```
+
+2. NVIDIA GPU を搭載している場合は、続けて CUDA 版の `torch` を入れる。この extra が入れる `torch` が CPU 専用版のとき(Windows など)は、GPU を使わない。
+   [PyTorch 公式サイト](https://pytorch.org/get-started/locally/) の `Compute Platform` で CUDA のバージョンを選び、次のコマンドの `--index-url` をそれに合わせて実行する(次は CUDA 12.6 の場合)。
+
+   ```sh
+   pip install torch --index-url https://download.pytorch.org/whl/cu126 --force-reinstall --no-deps
    ```
 
 使い方:
@@ -196,7 +197,7 @@ song2vmd <入力ファイル名>.wav
 - 生成するのはあ・い・う・え・お・(ん)の標準口モーフのみ。「ん」はオプション。
 - 感情・表情モーフ(まばたき・眉など)の生成、日本語以外の言語、歌詞テキスト指定による高精度化には対応しない。
 - 対応する音声ファイル形式は WAV・FLAC・OGG・mp3。ffmpeg がインストール済みの環境であれば、mp4/aac など追加の形式にも対応する。
-- 初回実行時だけ、内容認識・音素アライメント・ボーカル分離の学習済みモデルをインターネットから自動取得する(既定構成の合計は約7.7GB)。取得後はキャッシュされるため2回目以降のダウンロードは発生しない。
+- 初回実行時だけ、内容認識・音素アライメント・ボーカル分離の学習済みモデルをインターネットから自動取得する(既定構成の合計は約7.7GB)。取得後はキャッシュされ、2回目以降のダウンロードは発生しない。
 - GPU(CUDA)は CUDA 版の `torch` を入れてあれば自動的に使う。VRAM が不足すると大幅に遅くなり、警告が表示される。その場合は `--device cpu` を指定すると改善することがある。
 - PC の性能(GPU の有無・CPU 性能など)によっては、処理に時間がかかることがある。
 
@@ -236,38 +237,37 @@ vpr2vmd <入力ファイル名>.vpr
 | パス | 内容 |
 |---|---|
 | [pyproject.toml](pyproject.toml) | 公開コマンド、依存関係、テスト対象の設定 |
-| `docs/specs/` | ツールに依存しない仕様・参照資料 |
-| `docs/conventions/` | 層タクソノミー・バージョン付けなどツール横断の規約 |
+| [docs/specs/](docs/specs/) | ツールに依存しない仕様・参照資料 |
+| [docs/conventions/](docs/conventions/) | 層タクソノミー・バージョン付けなどツール横断の規約 |
 | `scripts/` | CI と開発者の双方から実行するリポジトリ保守スクリプト |
-| `libs/cli_events/` | 機械モードのイベント送出の共有ドメインライブラリ |
-| `libs/cli_options/` | 引数検証と自己記述の制約公開を同一定義から導く共有ドメインライブラリ |
-| `libs/cli_progress/` | 進捗ライブ表示の共有ドメインライブラリ |
-| `libs/cli_progress_router/` | 進捗をイベント送出とライブ表示へ振り分ける共有ドメインライブラリ |
-| `libs/cli_resource_watch/` | 資源逼迫・実行構成の観測と判定の共有ドメインライブラリ |
-| `libs/lipsync/` | リップモーション生成の共有ドメインライブラリ |
-| `libs/pmx/` | PMX 読み取り・ボーン階層・FK 評価のライブラリ |
-| `libs/vmd/` | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
-| `libs/vocal_analysis/` | 音声解析の共有ドメインライブラリ |
-| `libs/vocal_analysis_cli/` | 音声前段の共通CLI引数の定義・検証・設定解決の共有ドメインライブラリ |
-| `libs/vpr/` | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
+| [libs/cli_events/](libs/cli_events/cli_events.md) | 機械モードのイベント送出の共有ドメインライブラリ |
+| [libs/cli_options/](libs/cli_options/cli_options.md) | 引数検証と自己記述の制約公開を同一定義から導く共有ドメインライブラリ |
+| [libs/cli_progress/](libs/cli_progress/cli_progress.md) | 進捗ライブ表示の共有ドメインライブラリ |
+| [libs/cli_progress_router/](libs/cli_progress_router/cli_progress_router.md) | 進捗をイベント送出とライブ表示へ振り分ける共有ドメインライブラリ |
+| [libs/cli_resource_watch/](libs/cli_resource_watch/cli_resource_watch.md) | 資源逼迫・実行構成の観測と判定の共有ドメインライブラリ |
+| [libs/lipsync/](libs/lipsync/lipsync.md) | リップモーション生成の共有ドメインライブラリ |
+| [libs/pmx/](libs/pmx/pmx.md) | PMX 読み取り・ボーン階層・FK 評価のライブラリ |
+| [libs/vmd/](libs/vmd/vmd.md) | VMD 入出力・補間・カメラ座標変換・キーフレーム疎化のライブラリ |
+| [libs/vocal_analysis/](libs/vocal_analysis/vocal_analysis.md) | 音声解析の共有ドメインライブラリ |
+| [libs/vocal_analysis_cli/](libs/vocal_analysis_cli/vocal_analysis_cli.md) | 音声前段の共通CLI引数の定義・検証・設定解決の共有ドメインライブラリ |
+| [libs/vpr/](libs/vpr/vpr.md) | VOCALOID プロジェクトファイル(vpr)の読み書き・休符導出のライブラリ |
 | `tools/<ツール>/` | CLI ツール層。各ツールはコマンド本体・仕様書・テストを直下に置く(利用者向けに公開するツールは README も)。公開コマンドの一覧は [pyproject.toml](pyproject.toml)、おもなツールの使い方は冒頭の [ツール](#ツール) 一覧 |
 
 ### 開発環境
 
-本体ライブラリと CLI のビルド・テストに必要な最小構成。実行時依存は `numpy` と `scipy`(`scipy` は補間曲線フィットで使用。shakevmd の既定のスムージングと sparsevmd が利用する)。いずれも pip が各 OS 向けホイールを導入する。
+本体ライブラリと CLI のビルド・テストに必要な最小構成。実行時依存は `numpy` と `scipy`(`scipy` は補間曲線フィット・音声前段のリサンプリング・mocapvmd のノイズ軽減で使用)。いずれも pip が各 OS 向けホイールを導入する。
 
 | ツール | 用途 | 備考 |
 |---|---|---|
-| Python 3.12 以上 | 実装・テスト実行 | Windows は既定の `python` が 3.12 未満のことがあるため `py -3` を使う |
+| Python 3.12 以上 | 実装・テスト実行 | Windows は `py -3` を使う |
 | Git | バージョン管理 | Windows は Git for Windows(Git Bash 同梱)を推奨 |
 | GitHub CLI(`gh`) | リリース作業(PR 作成・マージ・Release 確認)の実行 | 任意。ツールをリリースするときだけ必要。初回に `gh auth login` で認証する |
-| lychee | ドキュメントのリンク検査 | pip では入らないため各自で導入する。設定は [lychee.toml](lychee.toml) |
+| lychee | ドキュメントのリンク検査 | 各自で導入する。設定は [lychee.toml](lychee.toml) |
 | ruff | Python コードの静的検査 | 開発依存として導入される。設定は [pyproject.toml](pyproject.toml) |
 
-`numpy`・`scipy`(実行時依存)と `pytest`・`ruff`(開発依存)は `pip install -e ".[dev,vocal-analysis]"` で導入される。
-`song2vmd`(音声認識・ボーカル分離を使う)のテスト実行には、追加で `vocal-analysis` extra
-(`torch`・`transformers`・`pyopenjtalk-plus`等)が要る。開発環境構築では両方合わせて
-`pip install -e ".[dev,vocal-analysis]"` を使う。
+`song2vmd`(音声認識・ボーカル分離を使う)のテスト実行には、開発依存(`pytest`・`ruff`・`rumdl`)に加えて
+`vocal-analysis` extra(`torch`・`transformers`・`pyopenjtalk-plus`等)が要る。どちらも[環境構築](#環境構築)の
+手順で実行時依存とあわせて導入される。
 
 ### 環境構築
 
@@ -292,18 +292,26 @@ pip install -e ".[dev,vocal-analysis]"
 
 cmd の場合、有効化のみ `.\.venv\Scripts\activate.bat` に読み替える。
 
+続けて、リポジトリルートで次を一度実行して commit-msg フックを有効にする。
+このフックは、シェル構文(ヒアドキュメント・コマンド置換)が漏れたコミットメッセージを拒否する。
+
+```sh
+git config core.hooksPath .githooks
+```
+
 ### AI 支援開発ワークフロー(任意)
 
-本リポジトリの開発プロセス(TDD・Codex によるレビューループ・コミット委譲)は Claude Code と Codex を併用する(`.claude/` 配下のスキル・フック)。これらを使う場合は以下も導入する。
+本リポジトリの開発プロセス(TDD・Codex によるレビューループ・コミット委譲)は Claude Code と Codex を併用する。スキル・エージェント・フックは harness リポジトリのプラグイン(guard・flow)が提供する。これらを使う場合は以下も導入する。
 
 | ツール | インストール | 用途 |
 |---|---|---|
 | Node.js 20 以上(LTS 推奨) | 公式インストーラ / nvm | Codex companion(レビューループ)の実行 |
 | Claude Code | `npm install -g @anthropic-ai/claude-code` | AI 開発ハーネス(スキル・フック・レビュー) |
-| Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**既定モデルに追従するため最新バージョンを推奨**(古いとモデル非対応で API エラーになる) |
-| Codex プラグイン | Claude Code 内で `/plugin marketplace add openai/codex-plugin-cc` の後 `/plugin install codex@openai-codex` | Claude Code から Codex を呼ぶ連携(`codex-review-loop` スキルが使用) |
+| Codex CLI | `npm install -g @openai/codex` | コードレビューの実行体。**最新バージョンを推奨**(古いとモデル非対応で API エラーになる) |
+| Codex プラグイン | Claude Code 内で `/plugin marketplace add openai/codex-plugin-cc` の後 `/plugin install codex@openai-codex` | Claude Code から Codex を呼ぶ連携(`flow:codex-review-loop` スキルが使用) |
+| harness プラグイン(guard・flow) | [harness リポジトリ](https://github.com/skyflash521/harness)の README の導入手順に従う | 本リポジトリの開発プロセスを構成するスキル・エージェント・フック |
 
-**Windows 追加要件**: Claude Code は Bash ツール・フック・[watchdog.sh](.claude/skills/codex-watchdog/watchdog.sh) の実行に **Git Bash** を使う(Git for Windows 同梱)。Git Bash が無いと Codex レビューループやフックが動作しないため、Windows では Git Bash の導入が必須。
+**Windows 追加要件**: Claude Code は Bash ツール・フック・flow プラグイン同梱の watchdog スクリプトの実行に **Git Bash** を使う(Git for Windows 同梱)。Windows では Git Bash の導入が必須。
 
 ### 検証の実行
 
@@ -317,7 +325,8 @@ pytest tools/shakevmd
 ruff check tools/shakevmd
 ```
 
-テストは外部サービス・ネットワーク・MMD本体を必要としない。
+テストは外部サービス・MMD本体を必要としない。CMUdict(nltk の `cmudict` コーパス)が未導入の環境では、
+英単語のカタカナ化を確かめる一部のテストが CMUdict をダウンロードし、そのときだけネットワーク接続が要る。
 
 Windows でシンボリックリンク作成権限(開発者モードまたは管理者)が無い場合、上書きガードの symlink テストは自動的に skip される(失敗にはならない)。
 

@@ -1,0 +1,4 @@
+RESOLUTION = 480  # tick/四分音符。
+SEQUENCE_PATH = "Project/sequence.json"
+SINGING_TRACK_TYPE = 2
+DEFAULT_TIME_SIGNATURE = (4, 4)

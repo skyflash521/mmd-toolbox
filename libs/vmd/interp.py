@@ -1,16 +1,10 @@
-"""補間曲線評価・サンプリング。
-
-入力キー列はフレーム昇順前提(正規化済みであること)。
-"""
-
-import math
+from bisect import bisect_right
 
 import numpy as np
 
+from .quat import slerp
 from .types import CameraKey
 
-# カメラ補間ブロック(24バイト)内の各チャンネルのオフセット。
-# 各チャンネルは ax, bx, ay, by の順で4バイト(始点X, 終点X, 始点Y, 終点Y)。
 CAMERA_CHANNEL_OFFSET = {
     "pos_x": 0,
     "pos_y": 4,
@@ -24,29 +18,20 @@ _POS_INDEX = {"pos_x": 0, "pos_y": 1, "pos_z": 2}
 _BONE_CHANNEL = {"pos_x": "X", "pos_y": "Y", "pos_z": "Z", "rot": "R"}
 
 
-# ---------------------------------------------------------------------------
-# ベジェ評価
-# ---------------------------------------------------------------------------
-
-
 def _bezier(s: float, c1: float, c2: float) -> float:
-    """端点 0,1 固定の3次ベジェの1成分。c1,c2 は [0,1] 正規化済み制御点。"""
     u = 1.0 - s
     return 3 * u * u * s * c1 + 3 * u * s * s * c2 + s * s * s
 
 
 def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
-    """制御点 (x1,y1),(x2,y2)(0..127)・正規化時間 x∈[0,1] → 補間係数 y∈[0,1]。
+    return bezier_y_at(x1 / 127.0, y1 / 127.0, x2 / 127.0, y2 / 127.0, x)
 
-    X(s)=x をニュートン法で解き、非収束時は二分法にフォールバックする。
-    Xは単調増加前提(MMDの補間曲線は時間方向に単調)。
-    """
+
+def bezier_y_at(px1: float, py1: float, px2: float, py2: float, x: float) -> float:
     if x <= 0.0:
         return 0.0
     if x >= 1.0:
         return 1.0
-
-    px1, py1, px2, py2 = x1 / 127.0, y1 / 127.0, x2 / 127.0, y2 / 127.0
 
     def fx(s: float) -> float:
         return _bezier(s, px1, px2)
@@ -55,7 +40,7 @@ def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
         u = 1.0 - s
         return 3.0 * (px1 * u * u + 2.0 * (px2 - px1) * u * s + (1.0 - px2) * s * s)
 
-    s = x  # 初期値
+    s = x
     converged = False
     for _ in range(20):
         err = fx(s) - x
@@ -82,36 +67,7 @@ def _solve_factor(x1: int, y1: int, x2: int, y2: int, x: float) -> float:
     return _bezier(s, py1, py2)
 
 
-def _slerp(q0, q1, t: float):
-    """クォータニオン (x,y,z,w) の球面線形補間。"""
-    a = [float(c) for c in q0]
-    b = [float(c) for c in q1]
-    na = math.sqrt(sum(c * c for c in a))
-    nb = math.sqrt(sum(c * c for c in b))
-    a = [c / na for c in a]
-    b = [c / nb for c in b]
-    d = sum(x * y for x, y in zip(a, b, strict=True))
-    if d < 0.0:
-        b = [-c for c in b]
-        d = -d
-    if d > 0.9995:
-        r = [x + t * (y - x) for x, y in zip(a, b, strict=True)]
-        n = math.sqrt(sum(c * c for c in r))
-        return tuple(c / n for c in r)
-    th0 = math.acos(d)
-    th = th0 * t
-    s0 = math.sin(th0 - th) / math.sin(th0)
-    s1 = math.sin(th) / math.sin(th0)
-    return tuple(s0 * x + s1 * y for x, y in zip(a, b, strict=True))
-
-
-# ---------------------------------------------------------------------------
-# チャンネル別の制御点・値
-# ---------------------------------------------------------------------------
-
-
 def _control_points(arriving_key, channel: str, is_camera: bool):
-    """区間の到達側(後側)キーから制御点 (x1,y1,x2,y2) を取り出す。"""
     if is_camera:
         off = CAMERA_CHANNEL_OFFSET[channel]
         ax, bx, ay, by = arriving_key.interpolation[off : off + 4]
@@ -120,7 +76,6 @@ def _control_points(arriving_key, channel: str, is_camera: bool):
 
 
 def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
-    """補間係数 y で区間 [k0, k1] のチャンネル値を算出する。"""
     if channel in _POS_INDEX:
         i = _POS_INDEX[channel]
         return k0.position[i] + (k1.position[i] - k0.position[i]) * y
@@ -130,34 +85,30 @@ def _interp_value(k0, k1, channel: str, is_camera: bool, y: float):
         return float(k0.fov) + (float(k1.fov) - float(k0.fov)) * y
     if channel == "rot":
         if is_camera:
-            # オイラー各軸を共通の補間曲線で独立に線形補間(クォータニオン化しない)
+            # MMD はカメラの角度をクォータニオンにせず、各軸を同じ補間係数で線形補間する。
             return tuple(
                 k0.rotation[i] + (k1.rotation[i] - k0.rotation[i]) * y for i in range(3)
             )
-        return _slerp(k0.rotation, k1.rotation, y)
+        return slerp(k0.rotation, k1.rotation, y)
     raise ValueError(f"未知のチャンネル: {channel}")
 
 
 def _find_segment(keys, frame: int) -> int:
-    """keys[i].frame <= frame < keys[i+1].frame となる i を返す。"""
-    for i in range(len(keys) - 1):
-        if keys[i].frame <= frame < keys[i + 1].frame:
-            return i
+    i = bisect_right(keys, frame, key=lambda k: k.frame) - 1
+    if 0 <= i < len(keys) - 1:
+        return i
     return len(keys) - 2
 
 
-# ---------------------------------------------------------------------------
-# 公開API
-# ---------------------------------------------------------------------------
-
-
 def sample(keys, channel: str, frame: int):
-    """1チャンネルを1フレームで評価する。"""
+    """keys はフレーム昇順であること。
+
+    channel "rot" は、カメラなら角度3成分(ラジアン)、ボーンなら正規化したクォータニオンを返す。
+    """
     if not keys:
         raise ValueError("キー列が空")
     is_camera = isinstance(keys[0], CameraKey)
 
-    # 範囲外・単一キーは端キーの値で一定(境界規約)
     if frame <= keys[0].frame or len(keys) == 1:
         k = keys[0]
         return _interp_value(k, k, channel, is_camera, 0.0)
@@ -175,19 +126,150 @@ def sample(keys, channel: str, frame: int):
     return _interp_value(k0, k1, channel, is_camera, y)
 
 
-def sample_range(keys, channel: str, frame_start: int, frame_end: int):
-    """[frame_start, frame_end] を1フレーム間隔(両端含む)で評価する。
+def _segment_values(k0, k1, channel: str, is_camera: bool, ys):
+    if channel in _POS_INDEX:
+        i = _POS_INDEX[channel]
+        v0, v1 = k0.position[i], k1.position[i]
+        return [v0 + (v1 - v0) * y for y in ys]
+    if channel == "distance":
+        v0, v1 = k0.distance, k1.distance
+        return [v0 + (v1 - v0) * y for y in ys]
+    if channel == "fov":
+        v0, v1 = float(k0.fov), float(k1.fov)
+        return [v0 + (v1 - v0) * y for y in ys]
+    if channel == "rot":
+        r0, r1 = k0.rotation, k1.rotation
+        if is_camera:
+            return [tuple(r0[i] + (r1[i] - r0[i]) * y for i in range(3)) for y in ys]
+        return [slerp(r0, r1, y) for y in ys]
+    raise ValueError(f"未知のチャンネル: {channel}")
 
-    スカラーチャンネルは numpy 配列、回転チャンネルは値のリストを返す。
+
+def sample_range(keys, channel: str, frame_start: int, frame_end: int):
+    """keys はフレーム昇順であること。
+
+    両端を含む。channel "rot" は値のリスト、それ以外は numpy 配列を返す。
     """
-    vals = [sample(keys, channel, f) for f in range(frame_start, frame_end + 1)]
+    if frame_end < frame_start:
+        return np.array([], dtype=float)
+    if not keys:
+        raise ValueError("キー列が空")
+    is_camera = isinstance(keys[0], CameraKey)
+    first_f = keys[0].frame
+    last_f = keys[-1].frame
+
+    vals = []
+    f = frame_start
+    if f <= first_f or len(keys) == 1:
+        upto = frame_end if len(keys) == 1 else min(first_f, frame_end)
+        k = keys[0]
+        vals.extend(_interp_value(k, k, channel, is_camera, 0.0) for _ in range(f, upto + 1))
+        f = upto + 1
+    while f <= frame_end and f < last_f:
+        i = _find_segment(keys, f)
+        k0, k1 = keys[i], keys[i + 1]
+        fb = min(k1.frame - 1, frame_end)
+        span = k1.frame - k0.frame
+        cp = _control_points(k1, channel, is_camera)
+        ys = [_solve_factor(*cp, (g - k0.frame) / span) for g in range(f, fb + 1)]
+        vals.extend(_segment_values(k0, k1, channel, is_camera, ys))
+        f = fb + 1
+    if f <= frame_end:
+        k = keys[-1]
+        vals.extend(_interp_value(k, k, channel, is_camera, 0.0) for _ in range(f, frame_end + 1))
     if vals and isinstance(vals[0], tuple):
         return vals
     return np.array(vals, dtype=float)
 
 
+def _bake_segment(k0, k1, fa, fb, frame_start, positions, rotations):
+    span = k1.frame - k0.frame
+    count = fb - fa + 1
+    cps = k1.control_points()
+    xs = [(f - k0.frame) / span for f in range(fa, fb + 1)]
+    factor_cache = {}
+
+    def _factors(cp):
+        ys = factor_cache.get(cp)
+        if ys is None:
+            x1, y1, x2, y2 = cp
+            if x1 == y1 and x2 == y2:
+                ys = xs
+            else:
+                ys = [_solve_factor(x1, y1, x2, y2, x) for x in xs]
+            factor_cache[cp] = ys
+        return ys
+
+    axes = []
+    for i, ch in enumerate(("X", "Y", "Z")):
+        v0, v1 = k0.position[i], k1.position[i]
+        if v0 == v1:
+            axes.append([v0] * count)
+        else:
+            ys = _factors(cps[ch])
+            axes.append([v0 + (v1 - v0) * y for y in ys])
+    if k0.rotation == k1.rotation:
+        rot = slerp(k0.rotation, k0.rotation, 0.0)
+        rots = [rot] * count
+    else:
+        rots = [slerp(k0.rotation, k1.rotation, y) for y in _factors(cps["R"])]
+
+    base = fa - frame_start
+    for j in range(count):
+        positions[base + j] = (axes[0][j], axes[1][j], axes[2][j])
+        rotations[base + j] = rots[j]
+
+
+def bake_bone_track(keys, frame_start: int, frame_end: int):
+    """keys はフレーム昇順であること。
+
+    [frame_start, frame_end] の各フレームの位置 (x, y, z) のリストと、正規化したクォータニオンの
+    リストを組で返す。
+    """
+    if not keys:
+        raise ValueError("キー列が空")
+    total = frame_end - frame_start + 1
+    if total <= 0:
+        return [], []
+    positions = [None] * total
+    rotations = [None] * total
+
+    def _fill(i0, i1, key):
+        pos = key.position
+        rot = slerp(key.rotation, key.rotation, 0.0)
+        for i in range(i0, i1):
+            positions[i] = pos
+            rotations[i] = rot
+
+    if len(keys) == 1:
+        _fill(0, total, keys[0])
+        return positions, rotations
+
+    first_f = keys[0].frame
+    last_f = keys[-1].frame
+    f = frame_start
+
+    if f <= first_f:
+        upto = min(first_f, frame_end)
+        _fill(0, upto - frame_start + 1, keys[0])
+        f = upto + 1
+
+    seg = 0
+    while f <= frame_end and f < last_f:
+        while keys[seg + 1].frame <= f:
+            seg += 1
+        k0, k1 = keys[seg], keys[seg + 1]
+        fb = min(k1.frame - 1, frame_end)
+        _bake_segment(k0, k1, f, fb, frame_start, positions, rotations)
+        f = fb + 1
+
+    if f <= frame_end:
+        _fill(f - frame_start, total, keys[-1])
+    return positions, rotations
+
+
 def sample_camera(keys, frame: int) -> dict:
-    """カメラ全チャンネルを1フレームで評価する。"""
+    """keys はフレーム昇順であること。"""
     return {
         "distance": sample(keys, "distance", frame),
         "position": (

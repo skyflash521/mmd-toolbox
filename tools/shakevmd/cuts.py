@@ -1,17 +1,3 @@
-"""カット検出・セグメント分割。
-
-カット = 「フレームFから新しいショットが始まる」境界。セグメント境界は F-1 と F の
-間に置く。bake/noise/motion はここが返すセグメント列を入力として受け取り、
-カットの波及(位相独立・速度解析の分割・settle抑制・フェード不要)を構造で保証する。
-
-検出はフレーム差1の隣接カメラキー間で行う:
-  - カメラ中心位置のジャンプ、または
-  - カメラワールド位置のジャンプ(距離のみ急変するズームカット検出のため)が
-    pos_threshold(MMD距離単位)を超える、または
-  - 角度ジャンプが rot_threshold(度)を超える
-手動指定(add/remove)は自動検出に優先する(コアAPI)。
-"""
-
 import math
 from dataclasses import dataclass
 
@@ -22,16 +8,13 @@ from vmd import camera
 
 @dataclass(frozen=True)
 class Segment:
-    """ベイク範囲を分割した1セグメント [start, end](両端含む、フレーム番号)。"""
+    """end もセグメントに含む。"""
 
     start: int
     end: int
 
 
 def _geodesic_deg(pose0, pose1) -> float:
-    """2つのカメラ姿勢の間の測地角(度)。to_world の前方/上から直交基底を作り、
-    trace(R0^T R1) = 1 + 2cosθ の関係から角度を求める。"""
-
     def basis(p):
         f = np.asarray(p.forward, dtype=float)
         u = np.asarray(p.up, dtype=float)
@@ -46,14 +29,7 @@ def _geodesic_deg(pose0, pose1) -> float:
 
 
 def detect_cuts(keys, pos_threshold: float, rot_threshold: float) -> list[int]:
-    """フレーム差1の隣接カメラキー間でカットを検出し、カットフレーム(後側)を昇順で返す。
-
-    keys はフレーム昇順前提(読み込み時に正規化済み)。
-    各隣接ペア (k0, k1) で k1.frame - k0.frame == 1 のとき:
-      max(カメラ中心位置ジャンプ, カメラワールド位置ジャンプ) > pos_threshold、または
-      角度ジャンプ(度) > rot_threshold なら k1.frame をカットとする(いずれも厳密超過)。
-    位置はユークリッド距離、角度は姿勢間の測地角。
-    """
+    """keys はフレーム昇順で重複が無いこと。pos_threshold は MMD の距離単位、rot_threshold は度。"""
     poses = [camera.to_world(k) for k in keys]
     result: list[int] = []
     for i in range(len(keys) - 1):
@@ -71,23 +47,12 @@ def detect_cuts(keys, pos_threshold: float, rot_threshold: float) -> list[int]:
 def resolve_cuts(
     detected: list[int], add: list[int] | None = None, remove: list[int] | None = None
 ) -> list[int]:
-    """自動検出に手動指定を反映する(手動優先)。add は強制追加、remove は打ち消し。
-
-    同一フレームが add と remove 双方にある場合は remove を優先する。
-    戻り値は昇順・重複なしのカットフレーム列。
-    """
     frames = set(detected) | set(add or [])
     frames -= set(remove or [])
     return sorted(frames)
 
 
 def segment_bounds(frame_start: int, frame_end: int, cuts: list[int]) -> list[Segment]:
-    """[frame_start, frame_end] をカットで分割したセグメント列を返す。
-
-    カットフレーム F は境界を F-1 と F の間に置く(F は次セグメントの先頭)。
-    範囲内(frame_start < F <= frame_end)のカットのみ作用する。
-    カットがなければ単一セグメント。
-    """
     points = sorted({c for c in cuts if frame_start < c <= frame_end})
     segments: list[Segment] = []
     prev = frame_start

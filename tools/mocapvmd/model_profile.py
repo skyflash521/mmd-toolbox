@@ -1,12 +1,5 @@
-"""mocap用モデルプロファイルの解決。
-
-共通 PmxModel を、mocapの標準ボーンロール・マーカー/派生特徴へ対応付ける。
-PMX指定時はそのモデルから標準ロールを名前で解決し、未指定時は既定モデル
-プロファイルを使う。必須標準ロールが欠けると MocapModelProfileError、PMX形式
-不正は共通側の PmxFormatError を透過する。
-"""
-
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pmx.io import read_pmx
 from pmx.types import PmxModel
@@ -18,7 +11,6 @@ from .default_profile import (
     build_default_model,
 )
 
-# 標準ロール名 -> 標準MMDボーン名。PMX指定時のロール解決に使う。
 STANDARD_BONE_NAMES = {
     "center": "センター",
     "groove": "グルーブ",
@@ -45,13 +37,15 @@ STANDARD_BONE_NAMES = {
 
 
 class MocapModelProfileError(Exception):
-    """mocapモデルプロファイルの解決失敗(必須標準ロール不足など)。"""
+    pass
 
 
 @dataclass
 class MarkerBinding:
+    """bone は MocapModelProfile.model.bones の添字。"""
+
     marker: str
-    bone: int  # required_bones が指すボーンindex
+    bone: int
     offset: tuple[float, float, float]
     category: str
     weight: float
@@ -59,25 +53,28 @@ class MarkerBinding:
 
 @dataclass
 class FeatureBinding:
+    """特徴量は、ロール a のボーン位置からロール b のボーン位置を引いたベクトル(a − b)。"""
+
     feature: str
-    kind: str  # 現状は "vector"(2ロール間のベクトル a-b)
-    a: str  # 始点ロール
-    b: str  # 終点ロール
+    kind: Literal["vector"]
+    a: str
+    b: str
     weight: float
 
 
 @dataclass
 class MocapModelProfile:
+    """required_bones は標準ロール名から model.bones の添字への対応。"""
+
     model: PmxModel
-    required_bones: dict[str, int]  # 標準ロール名 -> ボーンindex
+    required_bones: dict[str, int]
     marker_bindings: dict[str, MarkerBinding]
     feature_bindings: dict[str, FeatureBinding]
-    source: str  # "pmx" | "default"
+    source: Literal["pmx", "default"]
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
 def validate_required_roles(profile: MocapModelProfile) -> None:
-    """必須標準ロールが揃っているか検証する。不足は MocapModelProfileError。"""
     missing = set(STANDARD_BONE_NAMES) - set(profile.required_bones)
     if missing:
         raise MocapModelProfileError(
@@ -98,35 +95,35 @@ def _resolve_roles_from_model(model: PmxModel) -> dict[str, int]:
 
 
 def load_mocap_profile(pmx_path: str | None) -> MocapModelProfile:
-    """PMXパス指定時はそのモデル、未指定時は既定モデルプロファイルを解決する。"""
+    """必須標準ボーンの欠落は MocapModelProfileError、PMX 形式の不正は PmxFormatError を送出する。"""
     if pmx_path is None:
         model = build_default_model()
         required_bones = dict(ROLE_TO_INDEX)
         source = "default"
     else:
-        model = read_pmx(pmx_path)  # PmxFormatError は透過
+        model = read_pmx(pmx_path)
         required_bones = _resolve_roles_from_model(model)
         source = "pmx"
 
     marker_bindings = {
         marker: MarkerBinding(
             marker=marker,
-            bone=required_bones[role],
+            bone=required_bones[spec.role],
             offset=(0.0, 0.0, 0.0),
-            category=category,
-            weight=weight,
+            category=spec.category,
+            weight=spec.fit_weight,
         )
-        for marker, (role, category, weight) in MARKER_BINDINGS.items()
+        for marker, spec in MARKER_BINDINGS.items()
     }
     feature_bindings = {
         feature: FeatureBinding(
             feature=feature,
             kind="vector",
-            a=a_role,
-            b=b_role,
-            weight=weight,
+            a=spec.head_role,
+            b=spec.tail_role,
+            weight=spec.weight,
         )
-        for feature, (a_role, b_role, weight) in FEATURE_BINDINGS.items()
+        for feature, spec in FEATURE_BINDINGS.items()
     }
 
     profile = MocapModelProfile(

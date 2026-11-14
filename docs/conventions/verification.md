@@ -1,7 +1,6 @@
 # 検証手順
 
-変更を確定させる前に通す検証の正本。検査の一覧と合格条件を定めるのはこの文書だけで、他の文書は
-それらを再掲せずここを参照する。
+変更を確定させる前に通す検査の一覧と合格条件の正本。
 
 ## 1. 実行する検査
 
@@ -11,23 +10,31 @@
 |---|---|---|
 | 静的検査 | `ruff check` | リポジトリ内の Python 全体(gitignore 済みのパスは ruff が自動で外す) |
 | 記法検査 | `rumdl check` | Markdown の一般的な記法(見出し・リスト・コードブロックまわりの体裁)。gitignore 済みのパスは rumdl が自動で外す |
-| 節参照検査 | `python scripts/check_section_references.py` | 平文の節参照・裸のファイル参照が残っていないこと([cross-references.md](cross-references.md) の記法) |
-| リンク検査 | `lychee --config lychee.toml . .claude` | Markdown のリンク先の実在 |
+| 節参照検査 | `python scripts/check_section_references.py` | 平文の節参照・裸のファイル参照が残っていないこと |
+| リンク検査 | `lychee --config lychee.toml . .claude` | Markdown のリンク先の実在(リポジトリ内のリンクだけで、外部 URL は検査しない) |
 | テスト | `pytest` | [pyproject.toml](../../pyproject.toml) の `testpaths` が指す全パッケージ・全ツール |
 
 `pytest`・`ruff check`・`rumdl check` はディレクトリを渡すと対象を絞れる。作業中の確認には絞って
 よいが、合格判定は絞らずに行う。
 
-## 2. 導入
+## 2. 実素材を使う人手検査
 
-`pytest`・`ruff`・`rumdl` は開発依存として入る。導入手順は
-[README.md の開発環境](../../README.md#開発環境) を参照。`lychee` は pip では入らないため各自で
-導入する。
+実際の歌唱素材(楽曲音源と、人が作った正解 vpr)を使う検査。素材はリポジトリに含まれない。CI では
+走らせず、実素材を扱う変更を確定させる前に人が実行する。
 
-`rumdl` が外す規則とその理由は [pyproject.toml](../../pyproject.toml) の `[tool.rumdl]` に置く。
+| 検査 | コマンド | 合格条件 |
+|---|---|---|
+| 出力 vpr の機械検査 | `python scripts/check_vpr_output.py <生成した vpr> <正解 vpr> [<正解 vpr> ...]` | 違反 0 件(何も出力せず終了コード 0) |
 
-## 3. CI との関係
+## 3. 導入
 
-[test.yml](../../.github/workflows/test.yml) が pull request でこの5つを走らせる(テストは Python 3.12 と
-3.14 の両方)。ジョブはテスト・静的検査・記法検査・リンク検査の4つで、節参照検査はリンク検査のジョブに
-同居する。検査を増減させたときは、この文書とワークフローの両方を合わせる。
+`pytest`・`ruff`・`rumdl` は開発依存として入る。`lychee` は pip では入らず、各自で導入する。
+
+## 4. CI との関係
+
+[test.yml](../../.github/workflows/test.yml) が pull request で走らせる検査は [§1](#1-実行する検査) と一致させる。
+
+加えて [changelog.yml](../../.github/workflows/changelog.yml) が pull request で CHANGELOG の形式と、
+main 向けの場合はリリース対象ツールのバージョン節の有無を検査する
+(`python3 .github/scripts/check_changelog.py --base main`)。
+これは CI 専用で、[§1](#1-実行する検査) には含めない。
