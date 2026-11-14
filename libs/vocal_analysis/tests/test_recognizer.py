@@ -992,7 +992,7 @@ def test_g2p_applies_english_katakana_fallback_before_pyopenjtalk(monkeypatch):
     assert result == ["s", "u", "k", "a", "i"]
 
 
-def test_g2p_method_reaches_real_convert_target_words_dispatch(monkeypatch):
+def test_g2p_method_reaches_real_convert_target_words_dispatch(monkeypatch, real_cmudict):
     import vocal_analysis.english_katakana as katakana_module
     import vocal_analysis.transcription as transcription_module
 
@@ -1064,7 +1064,7 @@ def _slice_by_segment_lengths(sequence, fragment_lens, target_lens):
         pytest.param("skyとsky", [(0, 3), (4, 7)], id="two-targets"),
     ],
 )
-def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text, target_spans):
+def test_g2p_full_reanalysis_preserves_phonemes_outside_target(monkeypatch, text, target_spans, real_cmudict):
     import pyopenjtalk
 
     import vocal_analysis.english_katakana as katakana_module

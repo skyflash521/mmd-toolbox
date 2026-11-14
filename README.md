@@ -325,7 +325,8 @@ pytest tools/shakevmd
 ruff check tools/shakevmd
 ```
 
-テストは外部サービス・ネットワーク・MMD本体を必要としない。
+テストは外部サービス・MMD本体を必要としない。CMUdict(nltk の `cmudict` コーパス)が未導入の環境では、
+英単語のカタカナ化を確かめる一部のテストが CMUdict をダウンロードし、そのときだけネットワーク接続が要る。
 
 Windows でシンボリックリンク作成権限(開発者モードまたは管理者)が無い場合、上書きガードの symlink テストは自動的に skip される(失敗にはならない)。
 

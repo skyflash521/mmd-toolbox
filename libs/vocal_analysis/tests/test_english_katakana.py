@@ -50,19 +50,19 @@ def test_find_target_words_returns_each_occurrence_in_order():
     assert _find_target_words("skyとsky") == ["sky", "sky"]
 
 
-def test_lookup_cmudict_phonemes_known_word():
+def test_lookup_cmudict_phonemes_known_word(real_cmudict):
     from vocal_analysis.english_katakana import _lookup_cmudict_phonemes
 
     assert _lookup_cmudict_phonemes("sky") == "S K AY1"
 
 
-def test_lookup_cmudict_phonemes_is_case_insensitive():
+def test_lookup_cmudict_phonemes_is_case_insensitive(real_cmudict):
     from vocal_analysis.english_katakana import _lookup_cmudict_phonemes
 
     assert _lookup_cmudict_phonemes("Sky") == "S K AY1"
 
 
-def test_lookup_cmudict_phonemes_unknown_word_returns_none():
+def test_lookup_cmudict_phonemes_unknown_word_returns_none(real_cmudict):
     from vocal_analysis.english_katakana import _lookup_cmudict_phonemes
 
     assert _lookup_cmudict_phonemes("tiktok") is None
@@ -222,13 +222,13 @@ def test_convert_target_words_no_target_returns_text_unchanged():
     assert convert_target_words("空を見上げて雲をながめて") == "空を見上げて雲をながめて"
 
 
-def test_convert_target_words_uses_arpakana_by_default():
+def test_convert_target_words_uses_arpakana_by_default(real_cmudict):
     from vocal_analysis.english_katakana import convert_target_words
 
     assert convert_target_words("空を見上げてsky") == "空を見上げてスカイ"
 
 
-def test_convert_target_words_converts_target_via_tinyllama_model(monkeypatch):
+def test_convert_target_words_converts_target_via_tinyllama_model(monkeypatch, real_cmudict):
     import vocal_analysis.english_katakana as module
 
     calls = []
@@ -259,7 +259,7 @@ def test_convert_target_words_leaves_text_unchanged_without_converting_when_cmud
     assert calls == []
 
 
-def test_convert_target_words_leaves_text_unchanged_when_output_is_not_kana(monkeypatch):
+def test_convert_target_words_leaves_text_unchanged_when_output_is_not_kana(monkeypatch, real_cmudict):
     import vocal_analysis.english_katakana as module
 
     calls = []
@@ -274,7 +274,7 @@ def test_convert_target_words_leaves_text_unchanged_when_output_is_not_kana(monk
     assert calls == ["sky"]
 
 
-def test_convert_target_words_caches_separately_per_method(monkeypatch):
+def test_convert_target_words_caches_separately_per_method(monkeypatch, real_cmudict):
     import vocal_analysis.english_katakana as module
 
     tinyllama_calls = []
@@ -303,7 +303,7 @@ def test_uncached_target_words_filters_already_cached_words(monkeypatch):
     assert words == ["glimmer"]
 
 
-def test_convert_words_forwards_on_progress_to_load_katakana_model(monkeypatch):
+def test_convert_words_forwards_on_progress_to_load_katakana_model(monkeypatch, real_cmudict):
     import vocal_analysis.english_katakana as module
 
     module._conversion_cache.clear()
@@ -322,7 +322,7 @@ def test_convert_words_forwards_on_progress_to_load_katakana_model(monkeypatch):
     assert captured["on_progress"] is sentinel
 
 
-def test_convert_words_releases_tinyllama_model_even_when_conversion_fails(monkeypatch):
+def test_convert_words_releases_tinyllama_model_even_when_conversion_fails(monkeypatch, real_cmudict):
     import vocal_analysis.english_katakana as module
 
     def raising_generate(word, phonemes, **kwargs):
@@ -339,7 +339,7 @@ def test_convert_words_releases_tinyllama_model_even_when_conversion_fails(monke
     assert release_calls == ["release"]
 
 
-def test_convert_words_arpakana_does_not_release_model(monkeypatch):
+def test_convert_words_arpakana_does_not_release_model(monkeypatch, real_cmudict):
     import vocal_analysis.english_katakana as module
 
     release_calls = []
