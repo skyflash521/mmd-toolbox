@@ -35,24 +35,21 @@ def add_arguments(parser):
     parser.add_argument("--separate-vocals", dest="separate_vocals", choices=SEPARATE_VOCALS_MODES,
                         default="always", help="ボーカル分離の実施方針(always/never)")
     parser.add_argument("--separator", choices=SEPARATOR_IDS, default=DEFAULT_SEPARATOR,
-                        help="S1ボーカル分離バックエンドの選択(vocal_analysisの登録アダプタ安定id)")
+                        help="ボーカル分離の方式")
     parser.add_argument("--recognizer-model-id", dest="recognizer_model_id", default=None,
-                        help=f"S2内容認識モデルの指定。未指定時は vocal_analysis の既定モデル"
-                             f"(model_id={DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id!r}・"
-                             f"model_revision={DEFAULT_CONTENT_RECOGNIZER_MODEL.model_revision!r}固定)を使う")
+                        help=f"内容認識モデルの指定。未指定時は {DEFAULT_CONTENT_RECOGNIZER_MODEL.model_id} を使う")
     parser.add_argument("--recognizer-model-revision", dest="recognizer_model_revision", default=None,
-                        help="--recognizer-model-id のリビジョン指定(組で使う。--recognizer-model-id "
-                             "指定時にこれを省略すると最新リビジョンを使う。--recognizer-model-id 自体を"
-                             "省略した場合は本オプションは無視されず引数エラーになる)")
+                        help="--recognizer-model-id と組で使うリビジョンの指定。--recognizer-model-id を指定して"
+                             "これを省略すると、そのモデルの最新リビジョンを使う。"
+                             "--recognizer-model-id を付けずに指定すると引数エラーになる")
     parser.add_argument("--recognizer-retry", dest="recognizer_retry", action="store_true", default=True,
-                        help="S2内容認識のトリガ式リトライ(エコー幻覚・反復幻覚。主モデル自身をプロンプト無しで"
-                             "再認識する)を有効にする(既定on)。--no-recognizer-retryの対の明示形")
+                        help="内容認識の結果にエコー幻覚・反復幻覚が出たら認識し直す(既定)")
     parser.add_argument("--no-recognizer-retry", dest="recognizer_retry", action="store_false",
-                        help="S2内容認識のリトライを無効にする。--recognizer-retryの対")
+                        help="内容認識の結果にエコー幻覚・反復幻覚が出ても認識し直さない")
     parser.add_argument("--forced-aligner", dest="forced_aligner", choices=FORCED_ALIGNER_IDS,
                         default=DEFAULT_FORCED_ALIGNER,
-                        help="S2強制アライメント段のバックエンド選択(vocal_analysisの登録アダプタ安定id)。"
-                             "sofa-forcedalign選択時は--sofa-python/--sofa-root/--sofa-checkpointが必須")
+                        help="強制アライメントの方式。sofa-forcedalign を選ぶときは "
+                             "--sofa-python・--sofa-root・--sofa-checkpoint が必須")
     parser.add_argument("--sofa-python", dest="sofa_python", default=None,
                         help="SOFA専用venvのPython実行ファイルパス(--forced-aligner sofa-forcedalign時に必須)")
     parser.add_argument("--sofa-root", dest="sofa_root", default=None,
@@ -65,14 +62,13 @@ def add_arguments(parser):
     parser.add_argument("--english-katakana-method", dest="english_katakana_method",
                         choices=ENGLISH_KATAKANA_METHODS,
                         default=DEFAULT_ENGLISH_KATAKANA_METHOD,
-                        help="英語カタカナ化フォールバックの変換方式選択(既定arpakana。"
-                             "tinyllama-katakana-converterは生成モデルを使う選択式オプション)")
+                        help="読みを得られない英単語をカタカナにする方式(既定 arpakana。"
+                             "tinyllama-katakana-converter は生成モデルを使う)")
     parser.add_argument("--device", choices=DEVICE_MODES, default="auto",
-                        help="実行デバイスの選択。auto=環境から自動選択(GPU(CUDA)が利用可能ならGPU)、"
-                             "cpu=GPUを使わずCPUで実行する(音声前段の全モデル・SOFAサブプロセスを含む。"
-                             "VRAM不足環境の回避手段)")
+                        help="実行デバイス。auto は GPU(CUDA)が使えれば GPU を使う。cpu は GPU を使わない"
+                             "(SOFA を含む全モデル。VRAM が足りないときの回避手段)")
     parser.add_argument("--max-duration", dest="max_duration", type=_nonneg_float, default=300.0,
-                        help="長尺の自動分割境界(秒。0で無効)")
+                        help="長い曲を自動で分割する長さ(秒。0 で分割しない)")
 
 
 def describe_type_table():

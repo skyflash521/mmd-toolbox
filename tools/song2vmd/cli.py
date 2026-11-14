@@ -79,9 +79,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="歌い方スタイルプリセット(開き量レンジ・タイミングを切り替える)")
     _va_cli.add_arguments(p)
     p.add_argument("--n-morph", dest="n_morph", action="store_true", default=False,
-                   help="撥音に「ん」モーフを使う(既定off)。--no-n-morphの対の明示形")
+                   help="撥音に「ん」モーフを使う(既定は使わない)")
     p.add_argument("--no-n-morph", dest="n_morph", action="store_false",
-                   help="撥音に「ん」モーフを使わず無音(閉口)に倒す(既定)。--n-morphの対")
+                   help="撥音に「ん」モーフを使わず、口を閉じる(既定)")
     p.add_argument("--vowel-gain", dest="vowel_gain", type=_vowel_gain, default=(1.0, 1.0, 1.0, 1.0, 1.0),
                    help="母音別(あ/い/う/え/お)の開き量微調整倍率(a:i:u:e:o)。"
                         "プリセットの母音別倍率へ要素ごとに乗算する")
