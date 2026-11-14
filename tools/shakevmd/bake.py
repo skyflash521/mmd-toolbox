@@ -152,7 +152,7 @@ def _breathing_offsets(seed, si, t, speeds, amp_pos):
             ph_seed = noise.derive_seed(seed, si, "breath", axis)
             phase_sec = (ph_seed % _PHASE_RESOLUTION) / float(_PHASE_RESOLUTION) / motion.BREATHING_HZ
             breath[:, axis] = (1.0 - speeds) * motion.breathing_drift(
-                t + phase_sec, breath_amp
+                t + phase_sec, breath_amp, motion.BREATHING_HZ
             )
     return breath
 

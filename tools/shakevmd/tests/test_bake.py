@@ -720,6 +720,23 @@ class TestProfileCrossfadeAndBreathing:
         for ax in range(3):
             assert self._octave_band_ratio(rst, src_s, ax, end, "rot") > 0.1, f"tremor rot{ax}"
 
+    def test_breathing_frequency_follows_module_constant(self, monkeypatch):
+        end = 300
+        src = [kf(0, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN),
+               kf(end, center=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0), interp_block=self._LIN)]
+        common = dict(seed=1, amp_rot=0.0, amp_pos=1.0, settle=0.0, fade_sec=0.1)
+
+        def breath_sign_changes(hz):
+            monkeypatch.setattr(motion, "BREATHING_HZ", hz)
+            monkeypatch.setattr(motion, "BREATHING_AMP_FACTOR", 0.0)
+            base = by_frame(bake.bake(src, **common))
+            monkeypatch.setattr(motion, "BREATHING_AMP_FACTOR", 0.5)
+            with_breath = by_frame(bake.bake(src, **common))
+            breath = np.array([with_breath[f].position[0] - base[f].position[0] for f in range(end + 1)])
+            return int(np.count_nonzero(np.diff(np.sign(breath))))
+
+        assert breath_sign_changes(1.5) > 3 * breath_sign_changes(0.3)
+
     def test_breathing_scales_with_inverse_speed_in_single_segment(self):
         END = 119
         L, REF = self._LIN, 2.0
