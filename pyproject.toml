@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmd-toolbox"
-version = "2026.8.8"
+version = "2026.11.14"
 description = "MikuMikuDance 向けユーティリティツール群"
 readme = "README.md"
 license = "MIT"

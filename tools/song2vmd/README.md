@@ -38,13 +38,14 @@ pip install torch --index-url https://download.pytorch.org/whl/cu126 --force-rei
 | `openai/whisper-medium` | 内容認識(既定モデル) | 約6.12GB |
 | `facebook/wav2vec2-lv-60-espeak-cv-ft` | 音素モデル(強制アライメント) | 約1.26GB |
 | Demucs `htdemucs_ft` | ボーカル分離 | 約337MB |
-| CMUdict | 英語カタカナ化(既定 `arpakana`) | 約3.8MB |
+| CMUdict | 英語カタカナ化(曲・方式に依らず取得する) | 約3.8MB |
 | 合計 | | 約7.72GB |
 
 `--recognizer-model-id` で既定と異なるモデルを指定した場合や `--english-katakana-method
 tinyllama-katakana-converter` を指定した場合は、指定したモデルの容量ぶんが初回実行時に別途追加で
 かかる。取得後は保存され、2回目以降の実行では再ダウンロードしない。
-内容認識モデル・音素モデルの取得中は、進捗が画面(標準エラー出力)に表示される。
+内容認識モデル・音素モデルの取得中は、進捗が画面(標準エラー出力)に表示される。CMUdict は音素認識の前に
+取得し、取得中は「辞書取得中」と表示する。取得できない場合は終了コード4で止まる。
 
 例(既定の `openai/whisper-medium` の代わりに別モデルを使う場合):
 
@@ -138,28 +139,28 @@ song2vmd <入力ファイル名>.wav -o <出力ファイル名>.vmd --style powe
 | `--silence-threshold ON:OFF` | `0.06:0.10` | 無音(閉口)判定のヒステリシス開始・終了しきい値。 |
 | `--n-morph`, `--no-n-morph` | `--no-n-morph` | 「ん」モーフを使うかどうか。既定は閉口。「ん」モーフを使いたいモデルでは `--n-morph` を指定する。 |
 
-### 音声前段(バックエンド選択)
+### 音声の解析
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
 | `--separate-vocals MODE` | `always` | ボーカル分離の実施方針。`always`(常に分離する) / `never`(分離しない) から選ぶ。分離自体を行わない場合は `never` を指定する。 |
-| `--separator NAME` | `audio-separator-htdemucs-ft` | ボーカル分離バックエンドの選択。 |
+| `--separator NAME` | `audio-separator-htdemucs-ft` | ボーカル分離の方式。 |
 | `--recognizer-model-id ID` | (未指定) | 内容認識モデルの指定。未指定時は既定モデル(`openai/whisper-medium`)を使う。 |
 | `--recognizer-model-revision REV` | (未指定) | `--recognizer-model-id` と組で使うリビジョン指定。`--recognizer-model-id` を指定してこちらを省略すると、そのモデルの最新リビジョンを使う。 |
-| `--recognizer-retry`, `--no-recognizer-retry` | `--recognizer-retry` | 内容認識のトリガ式リトライ(エコー幻覚・反復幻覚対策)の有効・無効。 |
-| `--forced-aligner NAME` | `wav2vec2-ctc-forcedalign` | 強制アライメント段のバックエンド選択。既定のままなら以下の `--sofa-*` は不要。 |
+| `--recognizer-retry`, `--no-recognizer-retry` | `--recognizer-retry` | 内容認識の結果にエコー幻覚・反復幻覚が出たときに認識し直すかどうか。 |
+| `--forced-aligner NAME` | `wav2vec2-ctc-forcedalign` | 強制アライメントの方式。既定のままなら以下の `--sofa-*` は不要。 |
 | `--sofa-python PATH` | なし | SOFA 専用venvのPython実行ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。 |
 | `--sofa-root PATH` | なし | SOFA リポジトリのルートパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。 |
 | `--sofa-checkpoint PATH` | なし | SOFA チェックポイント(`.ckpt`)ファイルパス。`--forced-aligner sofa-forcedalign` 選択時のみ必須。 |
 | `--sofa-timeout SEC` | `300` | SOFA サブプロセス1回あたりのタイムアウト秒数。 |
-| `--english-katakana-method NAME` | `arpakana` | 英語カタカナ化フォールバックの変換方式。`arpakana`(GPU不要)または `tinyllama-katakana-converter`(生成モデル使用)。 |
+| `--english-katakana-method NAME` | `arpakana` | 読みを得られない英単語をカタカナにする方式。`arpakana`(GPU不要)または `tinyllama-katakana-converter`(生成モデル使用)。 |
 
 ### 実行環境と長尺分割
 
 | オプション | 既定値 | 説明 |
 |---|---|---|
 | `--device MODE` | `auto` | 実行デバイスの選択。`auto` は GPU(CUDA)が利用可能なら GPU を使う。`cpu` は GPU を使わない(VRAM 不足環境の回避手段)。 |
-| `--max-duration SEC` | `300` | 長尺の自動分割境界。`0` で無効。 |
+| `--max-duration SEC` | `300` | 長い曲を自動で分割する長さ。`0` で分割しない。 |
 
 ### 診断と出力確認
 

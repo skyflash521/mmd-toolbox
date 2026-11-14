@@ -6,10 +6,10 @@ MikuMikuDance (MMD) 向けのユーティリティツール群。
 
 | ツール | 概要 | バージョン | 詳しい使い方 |
 |---|---|---|---|
-| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.2 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
-| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.3 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
-| `song2vmd` | 日本語の歌の音声ファイルから、リップモーション VMD を自動生成する | 0.0.1 | [tools/song2vmd/README.md](tools/song2vmd/README.md) |
-| `vpr2vmd` | VOCALOID のプロジェクトファイル(vpr)から、リップモーション VMD を生成する | 0.0.1 | [tools/vpr2vmd/README.md](tools/vpr2vmd/README.md) |
+| `mocapvmd` | モーションキャプチャー由来のボーンモーション VMD を最適化する | 0.0.3 | [tools/mocapvmd/README.md](tools/mocapvmd/README.md) |
+| `shakevmd` | カメラモーション VMD ファイルに手ぶれ効果を追加する | 0.0.4 | [tools/shakevmd/README.md](tools/shakevmd/README.md) |
+| `song2vmd` | 日本語の歌の音声ファイルから、リップモーション VMD を自動生成する | 0.0.2 | [tools/song2vmd/README.md](tools/song2vmd/README.md) |
+| `vpr2vmd` | VOCALOID のプロジェクトファイル(vpr)から、リップモーション VMD を生成する | 0.0.2 | [tools/vpr2vmd/README.md](tools/vpr2vmd/README.md) |
 
 ## 使い方
 
@@ -150,7 +150,7 @@ shakevmd <入力ファイル名>.vmd
 
 - 揺らせるのはカメラ。ボーンやモーフの動きに揺れを足すツールではない。
 - VMD にカメラ以外のデータが入っていても、加工するのはカメラキーだけ。
-- 視野角が変化する区間には手ぶれを焼き込まず、元のカメラキーを残す。視野角は整数でしか保存できない。
+- 視野角が2フレーム以上かけて変化する区間には手ぶれを焼き込まず、元のカメラキーを残す。視野角は整数でしか保存できない。
 - 手ぶれを足すのは、カメラの動きを作り終えた最後にする。
 - 長い VMD では、処理に時間がかかることがある。
 
